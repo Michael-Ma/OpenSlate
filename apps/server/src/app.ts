@@ -48,6 +48,10 @@ import { isPublicWebRequest, type WebAssets } from "./web-assets.js";
 import { assertDemoProviderProfiles, InstalledProviderCatalog } from "./application/provider-catalog.js";
 import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
 import { RECOVERY_RELEASE_PATH, recoveryInspectionAllowed, registerRecoveryRoutes } from "./application/recovery-routes.js";
+import { EnvironmentMediaCredentials } from "./application/provider-credentials.js";
+import { GeminiMusicListener } from "./media/music-enrichment.js";
+import { registerMusicEnrichmentRoutes } from "./media/music-enrichment-routes.js";
+import { LocalMusicAnalyzer } from "./media/music-analyzer.js";
 
 interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: ProductionService; localToken?: string;
   /** true logs to stdout; a stream receives the same JSON lines (tests). */
@@ -66,7 +70,9 @@ interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: Produc
   narrationRoutes?: Parameters<typeof registerNarrationRoutes>[1];
   imageRoutes?: Parameters<typeof registerImageRoutes>[1];
   documentRoutes?: Parameters<typeof registerDocumentRoutes>[1];
-  mediaRoutes?: Parameters<typeof registerMediaRoutes>[1] }
+  mediaRoutes?: Parameters<typeof registerMediaRoutes>[1];
+  /** Gemini song analysis; the default reads OPENSLATE_GEMINI_API_KEY by name. null leaves the slot empty. */
+  musicListener?: GeminiMusicListener | null }
 const DEFAULT_ALLOWED_ORIGINS = ["http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:3001", "http://localhost:3001"];
 const string = { type: "string", minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[]) => ({ type: "object", additionalProperties: false, properties, required });
@@ -159,7 +165,11 @@ export function createApp(options: AppOptions = {}) {
   if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
   if (options.documentRoutes) registerDocumentRoutes(app, options.documentRoutes);
   registerProjectLibrary(app, service);
-  app.get("/api/providers", async () => providerCatalog().view());
+  const musicListener = options.musicListener === null ? undefined : options.musicListener ?? (options.service
+    ? new GeminiMusicListener({ production: options.service, ...(options.narrationRoutes?.narration ? { narration: options.narrationRoutes.narration } : {}), credentials: new EnvironmentMediaCredentials() })
+    : undefined);
+  if (musicListener) registerMusicEnrichmentRoutes(app, musicListener);
+  app.get("/api/providers", async () => ({ ...providerCatalog().view(), ...(musicListener ? { musicListener: musicListener.status() } : {}) }));
   app.get<{ Reply: InstallationStatus }>("/api/installation/status", async (_request, reply) => {
     const [codex, mediaTools] = await Promise.all([
       options.runtimeSettings?.codexStatus() ?? { found: false, version: null, pinnedVersion: CODEX_PROTOCOL_VERSION, signedIn: null },
@@ -391,6 +401,7 @@ export function createApp(options: AppOptions = {}) {
       ...(ports?.narrationSpeech ? { narrationSpeech: ports.narrationSpeech } : {}),
       ...(ports?.narration ? { mediaNarration: ports.narration } : {}),
       ...(exportLauncher ? { exports: exportLauncher } : {}),
+      ...(musicListener ? { musicAnalyzers: { local: new LocalMusicAnalyzer(service(), ports?.narration), enrichment: musicListener } } : {}),
     }).invoke(projectId, actor, callId, tool, request.body, { signal: abort.signal }); }
     finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
   });

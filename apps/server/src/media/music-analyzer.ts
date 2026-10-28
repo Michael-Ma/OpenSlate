@@ -4,6 +4,7 @@ import type { ProductionService } from "../application/service.js";
 import type { NarrationService } from "../narration/service.js";
 import type { NarrationAudio } from "../narration/types.js";
 import { storyboardAudioCuts } from "../narration/audio-placement.js";
+import type { MusicEnrichment } from "./music-enrichment.js";
 import { analyzeSongFile, FILM_FPS, fitShotsToSong, MAX_SHOT_FRAMES, MIN_SHOT_FRAMES, SONG_TIMING_VERSION, type FitShot, type SongTiming } from "./song-timing.js";
 
 /**
@@ -24,6 +25,11 @@ export interface MusicAnalysis {
   vocalRanges?: Array<{ startSeconds: number; endSeconds: number }>;
   /** Timed lyric lines; absent when the analyzer cannot transcribe. */
   lyrics?: Array<{ startSeconds: number; endSeconds: number; text: string }>;
+  /**
+   * The listening slot (Gemini): labelled, downbeat-snapped sections, vocal ranges, timed lyrics and moods when
+   * ready; otherwise why not (no key, needs the person's confirmation, running, failed). Never replaces timing.
+   */
+  enrichment?: MusicEnrichment;
 }
 export interface MusicSection {
   startSeconds: number;
@@ -106,20 +112,30 @@ export class LocalMusicAnalyzer implements MusicAnalyzer {
   }
 }
 
+/** A listener for the enrichment slot. It reports cached or pending listening and never spends on its own. */
+export interface MusicEnricher {
+  readonly id: string;
+  enrichment(projectId: string, audioId: string): MusicEnrichment;
+}
 /**
- * Analyzer slots. "local" always runs first so beats and length stay exact. "enrichment" is reserved for a later
- * analyzer (for example a GPT-6 Astra listener) that may add section labels, vocal ranges and lyrics; it may only
- * add those fields, never replace measured timing.
+ * Analyzer slots. "local" always runs first so beats and length stay exact. "enrichment" (the Gemini listener) may
+ * add section labels, vocal ranges, lyrics and moods; it never replaces measured timing. A plain MusicAnalyzer in
+ * the slot still merges labels onto the measured sections by position.
  */
-export interface MusicAnalyzers { local: MusicAnalyzer; enrichment?: MusicAnalyzer }
+export interface MusicAnalyzers { local: MusicAnalyzer; enrichment?: MusicAnalyzer | MusicEnricher }
+const UNCONFIGURED: MusicEnrichment = { state: "unavailable", code: "MUSIC_LISTENER_NOT_CONFIGURED", reason: "No song listener is configured on this server; only measured timing is available." };
 
 export async function analyzeMusic(store: ProductionService["store"], analyzers: MusicAnalyzers, projectId: string, audioId: string, signal?: AbortSignal): Promise<MusicAnalysis & { selectedAsSoundtrack: boolean; fit: ReturnType<typeof fitShotsToSong> }> {
   const audio = store.get<NarrationAudio>("narration_audio", audioId);
   invariant(audio?.projectId === projectId && audio.media.kind === "audio", "NOT_FOUND", "Choose a recording owned by this film");
   const project = store.getProject(projectId);
   const base = await analyzers.local.analyze({ project, audio, ...(signal ? { signal } : {}) });
-  let analysis = base;
-  if (analyzers.enrichment) {
+  let analysis: MusicAnalysis = { ...base, enrichment: UNCONFIGURED };
+  if (analyzers.enrichment && "enrichment" in analyzers.enrichment) {
+    const enrichment = analyzers.enrichment.enrichment(projectId, audioId);
+    analysis = { ...base, enrichment, ...(enrichment.state === "ready" ? { analyzer: `${base.analyzer}+${enrichment.analyzer}`,
+      vocalRanges: enrichment.vocalRanges, lyrics: enrichment.lyrics } : {}) };
+  } else if (analyzers.enrichment) {
     const extra = await analyzers.enrichment.analyze({ project, audio, ...(signal ? { signal } : {}) });
     analysis = { ...base, analyzer: `${base.analyzer}+${extra.analyzer}`,
       sections: base.sections.map((section, index) => ({ ...section, ...(extra.sections[index]?.label ? { label: extra.sections[index]!.label } : {}) })),
