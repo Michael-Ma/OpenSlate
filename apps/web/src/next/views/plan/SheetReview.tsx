@@ -54,7 +54,7 @@ export function SheetReview({ character, read, overview, guard, onClose }: { cha
       { expectedHeadVersion: read.headVersion, expectedEstimateMicros: read.sheetQuote.micros, ...(character.takes.length ? { regenerate: true } : {}) });
     if (receipt) { setDone(null); setSelectedId(null); }
   };
-  const useImage = async (asset: Pick<AssetItem, "artifact">) => {
+  const importPicture = async (asset: Pick<AssetItem, "artifact">) => {
     const receipt = await command<{ takeId: string }>(`cast:import:${character.id}:${asset.artifact.artifactId}`, sheetPath(character.id, "import"), { artifactId: asset.artifact.artifactId, sha256: asset.artifact.sha256 });
     if (receipt) { setUploading(false); setSelectedId(receipt.takeId); setDone(null); }
   };
@@ -64,7 +64,7 @@ export function SheetReview({ character, read, overview, guard, onClose }: { cha
       const uploader = mode === "fixture" ? fixtureUploader(store) : liveUploader(store);
       const path = `/images/uploads?expectedHeadVersion=${read.headVersion}&name=${encodeURIComponent(chosen.name.slice(0, 120))}`;
       const receipt = await uploader.send({ path, file: chosen, kind: "image", key: newKey(), durationSeconds: null, signal: new AbortController().signal }, { sending() {}, checking() {} }) as { artifact?: AssetItem["artifact"] };
-      if (receipt?.artifact) await useImage({ artifact: receipt.artifact });
+      if (receipt?.artifact) await importPicture({ artifact: receipt.artifact });
     } catch (error) {
       setUploadError(error instanceof ApiError ? error.code : "REQUEST_FAILED");
     } finally { setSending(false); }
@@ -157,7 +157,7 @@ export function SheetReview({ character, read, overview, guard, onClose }: { cha
                 <div className="sr-assets">
                   {uploads.data.assets.filter((asset) => asset.artifact.kind === "image").map((asset) => (
                     <button key={asset.artifact.artifactId} type="button" className="sr-asset" data-act="sheet-use-asset" data-artifact={asset.artifact.artifactId}
-                      disabled={off} title={guard ?? asset.label} aria-label={`${t("sheet.upload.use")}: ${asset.label}`} onClick={() => void useImage(asset)}>
+                      disabled={off} title={guard ?? asset.label} aria-label={`${t("sheet.upload.use")}: ${asset.label}`} onClick={() => void importPicture(asset)}>
                       <Picture artifact={asset.artifact} alt="" />
                     </button>
                   ))}

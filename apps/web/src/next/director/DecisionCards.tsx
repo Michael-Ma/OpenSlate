@@ -42,16 +42,16 @@ const busyNote = (pending: Record<string, boolean>) => Object.keys(pending).some
 export function ConfirmCard({ thread, card, opens }: { thread: ThreadNote; card: ConfirmCardView; opens: ReactNode }) {
   const { t, tm, locale } = useI18n();
   const server = useGuarded("server");
-  const run = useGuarded("run");
   const pending = useStudio((s) => s.pending);
   const choose = useChoose(thread);
-  const raw = useStudio((s) => s.snapshot?.notes?.find((n) => n.noteId === card.noteId));
+  const raw =useStudio((s) => s.snapshot?.notes?.find((n) => n.noteId === card.noteId));
   const takeChoice = raw?.choices[0]?.kind === "use_take" ? raw.choices[0] : null;
   const takes = useResource<ShotTakes>(takeChoice && card.state === "open" ? takesPath(takeChoice.shotId) : null);
   const chosenTake = takeChoice ? takes.data?.keyframes.find((k) => k.artifact.artifactId === takeChoice.artifactId)?.artifact ?? null : null;
   const open = card.state === "open";
-  // Continuing restarts paid work: it follows the paid-work guard; the rest are free edits.
-  const guard = card.kind === "resume" ? run : server;
+  // The paid-work guard is off while the film is stopped, which is exactly when Continue is needed: every card
+  // follows the server guard (offline, expired); the card itself says what continuing costs.
+  const guard = server;
   const off = busyNote(pending) || !!guard.disabled;
   const frames = card.frames.map((frame) => (frame.role === "chosen" ? { ...frame, artifact: chosenTake } : frame));
   return (
@@ -124,7 +124,7 @@ export function StyleCard({ thread, proposal, note }: { thread: ThreadNote; prop
                 <b>{option.label}</b>
                 <span className="so-tier">{tm(TIER_MSG[option.tier])}</span>
                 {proposal.currentStyleId === option.styleId ? <span className="so-tier current">{t("style.card.current")}</span> : null}
-                {picked ? <span className="status ok"><span aria-hidden="true">✓</span>{t("style.card.chosen", { style: option.label })}</span> : null}
+                {picked ? <span className="status ok"><span aria-hidden="true">✓</span>{t("style.card.current")}</span> : null}
               </div>
               <dl className="so-lines">
                 <dt>{t("style.card.fits")}</dt><dd>{option.fits}</dd>

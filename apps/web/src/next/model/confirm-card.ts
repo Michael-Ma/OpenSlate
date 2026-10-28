@@ -81,16 +81,18 @@ export function confirmCard(note: DirectorNote, overview: GenerationOverview, lo
       const shots = choice.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
       const labels = shots.map((shot) => shot.label);
       const missing = shots.length !== choice.shotIds.length;
+      // Once deleted, the shots have no labels left: the card says how many.
+      const named = labels.length > 0 && !missing;
       return {
         ...base, kind: "delete_shots",
-        title: msg("card.delete_shots.title", { count: choice.shotIds.length, shots: listLabels(labels, locale) }),
-        anchor: msg("note.anchor.shots", { shots: labels.join(", ") }),
+        title: named ? msg("card.delete_shots.title", { count: choice.shotIds.length, shots: listLabels(labels, locale) }) : msg("card.delete_shots.title_count", { count: choice.shotIds.length }),
+        anchor: named ? msg("note.anchor.shots", { shots: labels.join(", ") }) : msg("note.anchor.removed_shots", { count: choice.shotIds.length }),
         facts: deleteFacts(overview, shots),
         frames: shots.map((shot) => ({ label: shot.label, artifact: shot.keyframe.artifact ?? null, role: "gone" as const })),
         confirm: { index: 0, label: msg("card.delete_shots.confirm", { count: choice.shotIds.length }), destructive: true },
         keep: keepLabel("card.keep.shots"),
         unavailable: missing && note.state === "open" ? msg("card.unavailable.gone") : shots.some(working) ? msg("card.unavailable.working") : null,
-        settled: ended(msg("card.settled.deleted_shots", { shots: labels.join(", ") || "?" }), msg("card.settled.kept")),
+        settled: ended(named ? msg("card.settled.deleted_shots", { shots: listLabels(labels, locale) }) : msg("card.settled.deleted_count", { count: choice.shotIds.length }), msg("card.settled.kept")),
       };
     }
     case "confirm_delete_scene": {
@@ -101,15 +103,16 @@ export function confirmCard(note: DirectorNote, overview: GenerationOverview, lo
       if (later) facts.splice(1, 0, { tone: "change", text: msg("card.delete.renumbers_scenes") });
       return {
         ...base, kind: "delete_scene",
-        title: shots.length ? msg("card.delete_scene.title", { scene: scene?.ordinal ?? "?", title: scene?.title ?? "", count: shots.length })
-          : msg("card.delete_scene.title_empty", { scene: scene?.ordinal ?? "?", title: scene?.title ?? "" }),
-        anchor: msg("note.anchor.scene", { scene: scene?.ordinal ?? "?" }),
+        title: !scene ? msg("card.delete_scene.title_gone")
+          : shots.length ? msg("card.delete_scene.title", { scene: scene.ordinal, title: scene.title, count: shots.length })
+          : msg("card.delete_scene.title_empty", { scene: scene.ordinal, title: scene.title }),
+        anchor: scene ? msg("note.anchor.scene", { scene: scene.ordinal }) : msg("note.anchor.scene_removed"),
         facts,
         frames: shots.slice(0, 4).map((shot) => ({ label: shot.label, artifact: shot.keyframe.artifact ?? null, role: "gone" as const })),
         confirm: { index: 0, label: shots.length ? msg("card.delete_scene.confirm", { count: shots.length }) : msg("card.delete_scene.confirm_empty"), destructive: true },
         keep: keepLabel("card.keep.scene"),
         unavailable: !scene && note.state === "open" ? msg("card.unavailable.gone") : shots.some(working) ? msg("card.unavailable.working") : null,
-        settled: ended(msg("card.settled.deleted_scene", { scene: scene?.ordinal ?? "?" }), msg("card.settled.kept")),
+        settled: ended(scene ? msg("card.settled.deleted_scene", { scene: scene.ordinal }) : msg("card.settled.deleted_scene_gone"), msg("card.settled.kept")),
       };
     }
     case "use_take": {

@@ -19,3 +19,9 @@
 /* What Codex reported (R1): quoted, so it reads as the service's words, not the studio's advice. */
 .give-up .reason{border-left:2px solid var(--track);padding-left:8px;color:var(--text)}
 .give-up .gu-confirm{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--hairline);padding-top:8px}
+/* Needs attention › Film (R4): the item has no shot badge; once Render again is opened, its acknowledgement takes the
+   item's whole width under the words instead of a narrow column beside them. */
+.attn-pop .attn-item[data-group="film"]{grid-template-columns:minmax(0,1fr) auto}
+.attn-pop .attn-act.give-up[data-open]{grid-column:1/-1}
+.attn-pop .attn-act.give-up[data-open] .two{justify-content:flex-end}
+.attn-pop .attn-act.give-up[data-open] .two .pill{flex:none}

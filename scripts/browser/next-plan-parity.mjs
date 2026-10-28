@@ -147,7 +147,8 @@ export const scenarios = [
       const source = page.locator(`[data-act="drag-shot"][data-shot="${shot("3.1")}"]`);
       expect((await source.getAttribute("draggable")) === "true", "The thumbnail is not a drag handle");
       const target = page.locator(`.shot-row[data-shot="${shot("2.2")}"]`);
-      await target.scrollIntoViewIfNeeded();
+      // 2.2 at the top, so 3.1 is on screen below it (Plan's Look and Cast panels sit above the scenes).
+      await target.evaluate((element) => element.scrollIntoView({ block: "start" }));
       const from = await source.boundingBox();
       const to = await target.boundingBox();
       await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);

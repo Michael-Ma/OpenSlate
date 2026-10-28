@@ -21,6 +21,7 @@ export const notes = {
   "note.anchor.scene": { en: "Scene {scene}", zh: "第 {scene} 场" },
   "note.anchor.film": { en: "Whole film", zh: "整部影片" },
   "note.anchor.scene_removed": { en: "A removed scene", zh: "已删除的场次" },
+  "note.anchor.removed_shots": { en: "{count, plural, one {A removed shot} other {# removed shots}}", zh: "{count, plural, other {已删除的镜头}}" },
   "note.choice.regenerate": { en: "Regenerate {shots}", zh: "重新生成 {shots}" },
   "note.choice.regenerate_priced": { en: "Regenerate {shots} · about {price}", zh: "重新生成 {shots} · 约 {price}" },
   "note.choice.regenerate_unpriced": { en: "Regenerate {shots} · no price set", zh: "重新生成 {shots} · 未设置价格" },
