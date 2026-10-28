@@ -11,9 +11,11 @@ if (process.argv.includes("--version")) {
   process.stdout.write(`codex-cli ${scenario === "version" ? "0.0.1" : "0.153.4"}\n`);
   process.exit(0);
 }
-const config = {
-  mcp_servers: { inherited: { command: "/secret/native/tool", env: { TOKEN: "INHERITED_TOKEN_NEVER_COPY" } }, already_disabled: { enabled: false } },
-};
+// Deliberately follow CODEX_HOME, as native discovery and app-server do. The
+// synthetic personal home has servers; setup's private home has no such file.
+// Never inspect auth.json or a real native configuration.
+const serverFile = process.env.CODEX_HOME && join(process.env.CODEX_HOME, "fixture-mcp-servers.json");
+const config = { mcp_servers: serverFile && existsSync(serverFile) ? JSON.parse(readFileSync(serverFile, "utf8")) : {} };
 for (let i = 2; i < process.argv.length; i++) {
   if (process.argv[i] !== "-c") continue;
   const arg = process.argv[++i], separator = arg.indexOf("="), keys = arg.slice(0, separator).split(".");
@@ -28,7 +30,8 @@ function crc32(data) { let n=0xffffffff; for(const b of data) {n^=b;for(let i=0;
 function largePng() { const body=Buffer.concat([Buffer.from("tEXt"),Buffer.alloc(5*1024*1024,65)]),size=Buffer.alloc(4),crc=Buffer.alloc(4);size.writeUInt32BE(body.length-4);crc.writeUInt32BE(crc32(body));return Buffer.concat([png.subarray(0,png.length-12),size,body,crc,png.subarray(png.length-12)]); }
 const readHistory = () => JSON.parse(readFileSync(join(process.cwd(), "fixture-history.json"),"utf8"));
 const saveHistory = value => writeFileSync(join(process.cwd(), "fixture-history.json"), JSON.stringify(value));
-log({ kind: "launch", verifying, parentSecretAbsent: !process.env.SETUP_PARENT_SECRET,
+log({ kind: "launch", verifying, imageProcess, strictConfig: process.argv.includes("--strict-config"), mcpServers: Object.keys(config.mcp_servers),
+  parentSecretAbsent: !process.env.SETUP_PARENT_SECRET,
   apiEnvironmentAbsent: !process.env.OPENAI_API_KEY && !process.env.CODEX_API_KEY && !process.env.OPENAI_BASE_URL, home: process.env.HOME, codexHome: process.env.CODEX_HOME });
 const send = value => process.stdout.write(JSON.stringify(value) + "\n");
 const respond = (id, result) => send({ id, result });
@@ -111,8 +114,9 @@ lines.on("line", line => {
     const thread=readHistory(),threadId=thread.id,turnId="turn-1";
     let bytes=imageScenario==="large"?largePng():png;
     const item={type:"imageGeneration",id:"image-1",status:"completed",result:bytes.toString("base64"),revisedPrompt:"Fixture image"};
-    if(["path","symlink","outside"].includes(imageScenario)) {
-      const folder=join(process.env.CODEX_HOME,"generated_images",threadId);mkdirSync(folder,{recursive:true});
+    if(["path","symlink","outside","personal-path"].includes(imageScenario)) {
+      const outputHome=imageScenario==="personal-path"?process.env.IMAGE_FIXTURE_PERSONAL_HOME:process.env.CODEX_HOME;
+      const folder=join(outputHome,"generated_images",threadId);mkdirSync(folder,{recursive:true});
       const path=join(folder,"result.png"),outside=join(process.env.HOME,"not-generated.png");
       if(imageScenario==="symlink"){writeFileSync(outside,bytes);symlinkSync(outside,path);}else writeFileSync(path,bytes);
       item.result="";item.savedPath=imageScenario==="outside"?outside:path;

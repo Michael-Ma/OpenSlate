@@ -6,10 +6,11 @@ import { digest, type NativeDiagnostic } from "@openslate/core";
 import { CODEX_IMAGE_LIMITS, codexImageTurnText, describeCodexImageInput, inspectCodexImagePng,
   type CodexImageInput, type CodexImageOutcome, type CodexImagePrepared, type CodexImageTransport } from "@openslate/providers";
 import { setupLocalCodex } from "../runtime/setup.js";
+import { preparePrivateCodexHome, verifyPrivateCodexHome, type PrivateCodexHome } from "../runtime/private-home.js";
 import { CODEX_RUNTIME_LIMITS, CODEX_MAX_STARTUP_TIMEOUT_MS, normalizePermissionProfile, toml, type CodexConfigValue, type CodexDirectorOptions } from "../runtime/policy.js";
 import { classifyNativeDiagnostic } from "../runtime/native-diagnostic.js";
 import { object, requireRuntime, RuntimeFault } from "../runtime/validation.js";
-import { ImageRpc, type RpcMessage } from "./image-rpc.js";
+import { ImageRpc } from "./image-rpc.js";
 import { imageDirectory, imageFileSha, imageRead, imageStopped, imageWithin, imageWrite } from "./image-files.js";
 
 export interface CodexImageWorkerOptions {
@@ -23,8 +24,9 @@ export interface CodexImageWorkerOptions {
 }
 export interface CodexImageReadiness { status: "ready" | "blocked"; code: string | null; runtimeVersion: "0.153.4"; authMode: "chatgpt"; nativeDiagnostic?: NativeDiagnostic }
 type Ready = { options: CodexDirectorOptions; binary: string; runtimeDigest: string; root: string };
-type Configuration = { version: 1; config: Record<string, CodexConfigValue>; workspace: string; binary: string;
-  args: string[]; runtimeDigest: string; environmentDigest: string };
+type Configuration = { config: Record<string, CodexConfigValue>; workspace: string; binary: string;
+  args: string[]; runtimeDigest: string; environmentDigest: string } &
+  ({ version: 1 } | { version: 2; codexHome: string });
 type Held = { prepared: CodexImagePrepared; rpc: ImageRpc; config: Configuration; timer: NodeJS.Timeout };
 const READ = ["initialize", "thread/read"];
 const CHECK = ["initialize", "config/read", "account/read", "modelProvider/capabilities/read"];
@@ -126,18 +128,33 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     config["features.image_generation"] = true;
     config.forced_login_method = "chatgpt";
     config.permissions = { [PROFILE]: { filesystem: { ":root": "deny", ":minimal": "read", [workspace]: "write", [ready.binary]: "read" }, network: { enabled: false } } };
-    return { version: 1, config, workspace, binary: ready.binary, args: [...(this.#input.command.args ?? [])], runtimeDigest: ready.runtimeDigest,
-      environmentDigest: digest(this.#env) };
+    return { version: 2, config, workspace, binary: ready.binary, args: [...(this.#input.command.args ?? [])], runtimeDigest: ready.runtimeDigest,
+      codexHome: ready.options.privateCodexHome!.home, environmentDigest: digest(ready.options.env) };
   }
-  #launch(config: Configuration, methods: readonly string[], receive: (message: RpcMessage) => void = () => {}): ImageRpc {
+  async #environment(config: Configuration): Promise<Record<string, string>> {
+    // V1 receipts retain the exact pre-private-home environment identity. They are
+    // reachable only through read-only lookup, never a new thread or turn.
+    return config.version === 1 ? { ...this.#env } :
+      { ...this.#env, HOME: await realpath(this.#input.nativeHome), CODEX_HOME: config.codexHome };
+  }
+  async #launch(config: Configuration, methods: readonly string[], privateHome?: PrivateCodexHome): Promise<ImageRpc> {
+    requireRuntime(!this.#closed, "CODEX_IMAGE_CLOSED", "Image worker has closed");
+    const env = await this.#environment(config);
+    requireRuntime(digest(env) === config.environmentDigest, "CODEX_IMAGE_CONFIG_MISMATCH", "Image worker environment changed after setup");
+    if (config.version === 2) {
+      if (methods === READ) await verifyPrivateCodexHome(config.codexHome);
+      else {
+        requireRuntime(privateHome?.home === config.codexHome, "CODEX_IMAGE_CONFIG_MISMATCH", "Image worker home differs from setup");
+        await preparePrivateCodexHome(privateHome);
+      }
+    } else requireRuntime(methods === READ, "CODEX_IMAGE_CONFIG_MISMATCH", "Historical image configurations allow only read-only recovery");
     requireRuntime(!this.#closed, "CODEX_IMAGE_CLOSED", "Image worker has closed");
     const args = [...config.args, "app-server", "--strict-config", ...Object.entries(config.config).flatMap(([key, value]) => ["-c", `${key}=${toml(value)}`])];
     requireRuntime(Buffer.byteLength(args.join("\0")) <= 128 * 1024, "CODEX_IMAGE_CONFIG_LIMIT", "Image worker configuration exceeds its bound");
-    const rpc = new ImageRpc({ command: config.binary, args, cwd: config.workspace, env: { ...this.#env },
-      limits: { ...CODEX_RUNTIME_LIMITS, ...(this.#input.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.#input.startupTimeoutMs }), outputBytes: 192 * 1024 ** 2 }, secrets: Object.values(this.#env), allowedMethods: methods,
+    const rpc = new ImageRpc({ command: config.binary, args, cwd: config.workspace, env,
+      limits: { ...CODEX_RUNTIME_LIMITS, ...(this.#input.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.#input.startupTimeoutMs }), outputBytes: 192 * 1024 ** 2 }, secrets: Object.values(env), allowedMethods: methods,
       onMessage: message => {
         if (message.id !== undefined) { rpc.rejectServerRequest(message.id); rpc.fail(new RuntimeFault("CODEX_IMAGE_INTERACTIVE_DENIED", "Interactive image worker requests are unavailable")); }
-        else receive(message);
       } });
     this.#running.add(rpc); return rpc;
   }
@@ -167,7 +184,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     const signal = options.signal; let rpc: ImageRpc | undefined;
     try {
       const ready = await this.#setup(signal), config = this.#configuration(ready, ready.options.cwd);
-      rpc = this.#launch(config, CHECK); await this.#initialize(rpc, signal); await this.#check(rpc, config, signal);
+      rpc = await this.#launch(config, CHECK, ready.options.privateCodexHome); await this.#initialize(rpc, signal); await this.#check(rpc, config, signal);
       await this.#close(rpc); rpc = undefined; imageStopped(signal);
       return { status: "ready", code: null, runtimeVersion: "0.153.4", authMode: "chatgpt" };
     } catch (error) { return { status: "blocked", code: safeCode(error), runtimeVersion: "0.153.4", authMode: "chatgpt", nativeDiagnostic: classifyNativeDiagnostic(error) }; }
@@ -195,7 +212,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
       requireRuntime(digest(JSON.parse((await imageRead(configurations, path, 256 * 1024, signal)).toString("utf8"))) === configurationDigest,
         "CODEX_IMAGE_CONFIG_MISMATCH", "Saved image worker configuration changed");
-      rpc = this.#launch(config, ACTIVE); await this.#initialize(rpc, signal); await this.#check(rpc, config, signal);
+      rpc = await this.#launch(config, ACTIVE, ready.options.privateCodexHome); await this.#initialize(rpc, signal); await this.#check(rpc, config, signal);
       const response = object(await rpc.request("thread/start", { model: MODEL, modelProvider: "openai", cwd: workspace, approvalPolicy: "never", permissions: PROFILE,
         historyMode: "legacy", ephemeral: false, allowProviderModelFallback: false, baseInstructions }, signal));
       const threadId = object(response.thread).id;
@@ -221,16 +238,19 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     const root = await realpath(this.#input.directory), configurations = join(root, "configurations");
     const bytes = await imageRead(configurations, join(configurations, `${prepared.runtime.configurationDigest}.json`), 256 * 1024, signal);
     const config = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as Configuration;
-    requireRuntime(digest(config) === prepared.runtime.configurationDigest && config.version === 1 && config.environmentDigest === digest(this.#env) &&
+    requireRuntime(digest(config) === prepared.runtime.configurationDigest && (config.version === 1 ||
+      (config.version === 2 && config.codexHome === join(root, "runtime", "director-home"))) &&
+      config.environmentDigest === digest(await this.#environment(config)) &&
       config.runtimeDigest === prepared.runtime.runtimeDigest && config.binary === (await this.#command(signal)).file &&
       isDeepStrictEqual(config.args, [...(this.#input.command.args ?? [])]) && config.workspace === join(root, "workspaces", prepared.session.turnInputDigest) &&
       config.config.model === MODEL && config.config.model_provider === "openai" && config.config["features.image_generation"] === true && config.config.forced_login_method === "chatgpt",
     "CODEX_IMAGE_CONFIG_MISMATCH", "Saved image worker configuration differs from this installation");
     requireRuntime(await realpath(config.workspace) === config.workspace && await imageFileSha(config.binary, signal) === prepared.runtime.runtimeDigest,
       "CODEX_IMAGE_BINARY_CHANGED", "Native runtime identity changed since this image turn");
+    if (config.version === 2) await verifyPrivateCodexHome(config.codexHome);
     imageStopped(signal); return config;
   }
-  async #result(prepared: CodexImagePrepared, turn: Record<string, unknown>, images: readonly Record<string, unknown>[], workspace: string,
+  async #result(prepared: CodexImagePrepared, turn: Record<string, unknown>, images: readonly Record<string, unknown>[], config: Configuration,
     signal?: AbortSignal): Promise<CodexImageOutcome> {
     const threadId = prepared.session.threadId, turnId = turn.id;
     requireRuntime(validId(turnId), "CODEX_IMAGE_TURN_INVALID", "Image turn identity is invalid");
@@ -262,8 +282,8 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       const path = image.savedPath;
       // The native tool writes this specific output namespace by default. We read only the exact structured-item path,
       // never enumerate native homes, search for a newest file, or interpret assistant prose as a locator.
-      const nativeOutput = join(await realpath(this.#input.codexHome), "generated_images");
-      const root = imageWithin(workspace, path) ? workspace : nativeOutput;
+      const nativeOutput = join(config.version === 1 ? await realpath(this.#input.codexHome) : config.codexHome, "generated_images");
+      const root = imageWithin(config.workspace, path) ? config.workspace : nativeOutput;
       const directory = await lstat(root);
       requireRuntime(directory.isDirectory() && !directory.isSymbolicLink(), "CODEX_IMAGE_PATH_INVALID", "Native output namespace is not canonical");
       bytes = await imageRead(root, path, CODEX_IMAGE_LIMITS.outputBytes, signal);
@@ -280,7 +300,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       Array.isArray(thread.turns) && thread.turns.length <= 1, "CODEX_IMAGE_HISTORY_INVALID", "Saved native history is not the dedicated image thread");
     const turn = thread.turns.map(object).find(value => selectedTurn === undefined || value.id === selectedTurn);
     requireRuntime(turn && Array.isArray(turn.items) && turn.items.length <= 128, "CODEX_IMAGE_TURN_MISSING", "Exact original image turn is unavailable");
-    return this.#result(prepared, turn, turn.items.map(object).filter(value => value.type === "imageGeneration"), config.workspace, signal);
+    return this.#result(prepared, turn, turn.items.map(object).filter(value => value.type === "imageGeneration"), config, signal);
   }
   async start(suppliedPrepared: CodexImagePrepared, suppliedInput: CodexImageInput,
     suppliedOptions: { signal?: AbortSignal; observeTurn: (turnId: string) => Promise<void> }): Promise<CodexImageOutcome> {
@@ -351,14 +371,14 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
         else cancellation.signal.addEventListener("abort", () => reject(new RuntimeFault("CODEX_IMAGE_ABORTED", "Image observation stopped")), { once: true });
       })]);
       requireRuntime(finished, "CODEX_IMAGE_COMPLETION_MISSING", "Image turn completion was not observed");
-      outcome = await this.#result(prepared, finished, [...images.values()], held.config.workspace, signal);
+      outcome = await this.#result(prepared, finished, [...images.values()], held.config, signal);
     } catch (error) {
       outcome = unknown(safeCode(error));
       if (finished && !eventFault) {
         try {
           // Cancellation can fence image ingestion after a completion without undoing a native
           // terminal failure. The signal still prevents reading successful image bytes here.
-          const saved = await this.#result(prepared, finished, [...images.values()], held.config.workspace, signal);
+          const saved = await this.#result(prepared, finished, [...images.values()], held.config, signal);
           if (saved.kind === "failed") outcome = saved;
         } catch { /* Invalid or unavailable native output still needs read-only reconciliation. */ }
       }
@@ -372,7 +392,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
           try {
             // An interrupt acknowledgement alone does not prove the turn ended. A native terminal
             // completion or exact saved history settles a consumed failure; never resend the turn.
-            const saved = finished ? await this.#result(prepared, finished, [...images.values()], held.config.workspace) :
+            const saved = finished ? await this.#result(prepared, finished, [...images.values()], held.config) :
               acknowledged ? await this.#history(rpc, prepared, held.config, turnId) : undefined;
             if (saved?.kind === "failed") outcome = saved;
           } catch { /* Missing native evidence remains unknown for read-only reconciliation. */ }
@@ -391,7 +411,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       const prepared = preparedValue(suppliedPrepared); imageStopped(signal);
       requireRuntime(selectedTurn === undefined || validId(selectedTurn), "CODEX_IMAGE_TURN_INVALID", "Saved native turn identity is invalid");
       const config = await this.#load(prepared, signal);
-      rpc = this.#launch(config, READ); await this.#initialize(rpc, signal);
+      rpc = await this.#launch(config, READ); await this.#initialize(rpc, signal);
       rpc.finishStartup();
       outcome = await this.#history(rpc, prepared, config, selectedTurn, signal);
     } catch (error) { outcome = unknown(safeCode(error)); }

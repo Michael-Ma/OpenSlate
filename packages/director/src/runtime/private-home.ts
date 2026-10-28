@@ -15,6 +15,17 @@ const validPath = (value: unknown): value is string => typeof value === "string"
 const forbidden = new Set(["agents.md", "agents.override.md", "instructions.md", "config.toml", "managed_config.toml",
   "prompts", "rules", "skills", "plugins"]);
 
+/** Read-only history must remain available after sign-out, without repairing a sign-in link. */
+export async function verifyPrivateCodexHome(home: string): Promise<void> {
+  requireRuntime(validPath(home) && home !== dirname(home), "SETUP_PATH_OVERLAP", "The Director home must be an explicit private directory");
+  requireRuntime(await realpath(dirname(home)) === dirname(home), "SETUP_DIRECTORY_CHANGED", "An application directory changed after setup");
+  const directory = await lstat(home);
+  requireRuntime(directory.isDirectory() && !directory.isSymbolicLink() && await realpath(home) === home,
+    "SETUP_DIRECTORY_CHANGED", "The Director home changed after setup");
+  requireRuntime(!(await readdir(home)).some(name => forbidden.has(name.toLowerCase())),
+    "SETUP_INSTRUCTIONS_UNEXPECTED", "The private Director home contains unexpected instruction or settings files");
+}
+
 /** Recheck before every launch: a setup result does not authorize later filesystem aliases. */
 export async function preparePrivateCodexHome(value: PrivateCodexHome): Promise<void> {
   requireRuntime(validPath(value?.home) && validPath(value?.authSource) && basename(value.authSource) === "auth.json" &&
@@ -30,11 +41,7 @@ export async function preparePrivateCodexHome(value: PrivateCodexHome): Promise<
   requireRuntime(await realpath(parent) === parent && await realpath(selectedHome) === selectedHome,
     "SETUP_DIRECTORY_CHANGED", "A selected application or authentication directory changed after setup");
   await mkdir(value.home, { recursive: true, mode: 0o700 });
-  const directory = await lstat(value.home);
-  requireRuntime(directory.isDirectory() && !directory.isSymbolicLink() && await realpath(value.home) === value.home,
-    "SETUP_DIRECTORY_CHANGED", "The Director home changed after setup");
-  requireRuntime(!(await readdir(value.home)).some(name => forbidden.has(name.toLowerCase())),
-    "SETUP_INSTRUCTIONS_UNEXPECTED", "The private Director home contains unexpected instruction or settings files");
+  await verifyPrivateCodexHome(value.home);
   const link = join(value.home, "auth.json");
   try {
     const existing = await lstat(link);
