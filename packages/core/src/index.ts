@@ -19,3 +19,4 @@ export * from './planning/scene-composition.js';
 export * from "./proposal-preview.js";
 export * from "./characters.js";
 export * from "./film-kind.js";
+export * from "./aspect.js";

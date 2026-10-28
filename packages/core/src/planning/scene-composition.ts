@@ -1,6 +1,7 @@
 import { parse } from "@babel/parser";
 import { Worker } from "node:worker_threads";
 import { canonical, digest, DomainError, invariant } from "../common.js";
+import { explicitProjectAspect, KEYFRAME_CANVAS } from "../aspect.js";
 import type {
   ArtifactRef,
   CompileContext,
@@ -699,6 +700,12 @@ export function composeScenePlan(
     const intent = add(call(receiver, "shot", [lit(shot!.id)]), 0),
       existing = chooseNode(base, operation);
     if (operation.kind === "image") {
+      // A Codex keyframe of a project with a chosen format uses that aspect's canvas; otherwise the profile's preference.
+      const aspect =
+          profile!.adapter === "codex-image"
+            ? explicitProjectAspect(working.project)
+            : null,
+        canvas = aspect ? KEYFRAME_CANVAS[aspect] : null;
       const options = {
         intent,
         profile: lit(profile!.id),
@@ -710,7 +717,8 @@ export function composeScenePlan(
         ),
         width: number(
           Number(
-            profile!.configuration?.settings?.width ??
+            canvas?.width ??
+              profile!.configuration?.settings?.width ??
               (existing?.profileId === profile!.id
                 ? existing.args.width
                 : undefined) ??
@@ -719,7 +727,8 @@ export function composeScenePlan(
         ),
         height: number(
           Number(
-            profile!.configuration?.settings?.height ??
+            canvas?.height ??
+              profile!.configuration?.settings?.height ??
               (existing?.profileId === profile!.id
                 ? existing.args.height
                 : undefined) ??

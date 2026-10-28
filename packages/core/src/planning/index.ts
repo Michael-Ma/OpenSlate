@@ -2,6 +2,7 @@ import { parse } from "@babel/parser";
 import { Worker } from "node:worker_threads";
 import { canonical, digest, DomainError, invariant } from "../common.js";
 import { providerProfileArguments } from "../provider-profile.js";
+import { explicitProjectAspect, KEYFRAME_CANVAS, projectExportSize } from "../aspect.js";
 import { snapshotLocalExecution } from "../local-execution.js";
 import { snapshotCompileTranscriptionInputs, snapshotTranscriptionApplicationInput } from "./transcription-input.js";
 import type {
@@ -233,9 +234,15 @@ export function compilePlan(sourceText: string, context: CompileContext): Compil
       if (shot) verifyPrompt(shot, "image", prompt);
       const references = list(spec.references ?? [], "references").map(item => mediaRef(item, "image"));
       if (shot) for (const id of shot.referenceArtifactIds) invariant(references.some(item => item.kind === "asset" && item.artifact.artifactId === id), "STALE_PROMPT_INTENT", "Image is missing a required shot reference");
-      const width = spec.width ?? 1024; const height = spec.height ?? 1024;
+      // A Codex keyframe of a project with a chosen format uses that aspect's canvas (codex-image-turn-v2). Projects without
+      // a format, other adapters and images not linked to a shot keep the legacy square default and argument shape.
+      // A declaration saved with other explicit dimensions (a keyframe made before the format changed) compiles
+      // unchanged, without an aspect: its digest stays, and a video of the new aspect refuses it as a first frame.
+      const projectAspect = shot && profile.adapter === "codex-image" ? explicitProjectAspect(context.project) : null, canvas = projectAspect ? KEYFRAME_CANVAS[projectAspect] : null;
+      const width = spec.width ?? canvas?.width ?? 1024; const height = spec.height ?? canvas?.height ?? 1024;
       for (const value of [width, height]) invariant(typeof value === "number" && Number.isInteger(value) && value >= 16 && value <= 8192 && value % 2 === 0, "VALIDATION_ERROR", "Image dimensions must be even integers between 16 and 8192");
-      return makeNode(alias, "image", shot, profile, { ...profileArgs(profile), prompt, width: width as number, height: height as number, settings: jsonObject(spec.settings) }, references.map((value, index) => input("references", "reference", index, value)));
+      const aspect = canvas && width === canvas.width && height === canvas.height ? projectAspect : null;
+      return makeNode(alias, "image", shot, profile, { ...profileArgs(profile), prompt, width: width as number, height: height as number, ...(aspect ? { aspect } : {}), settings: jsonObject(spec.settings) }, references.map((value, index) => input("references", "reference", index, value)));
     }
     if (name === "humanReview") {
       const spec = fields(data, ["shots"], ["shots"]); const members = list(spec.shots, "shots"); invariant(members.length > 0 && members.length <= PLAN_LIMITS.nodes, "PLAN_LIMIT", "Review must contain a bounded nonempty list");
@@ -262,7 +269,9 @@ export function compilePlan(sourceText: string, context: CompileContext): Compil
       const match = approved.review.specifications.find(item => item.shot.id === shot.id && sameSource(item.image, approved.image) && item.profile.id === profile.id && item.profile.revision === profile.revision && item.prompt === prompt && item.frames === duration && canonical(item.settings) === canonical(settings));
       invariant(match, "REVIEW_SPEC_MISMATCH", "Video does not match the displayed keyframe, intent, motion, profile, duration and settings");
       if (approved.image.kind === "operation" && approved.image.node.shotId !== null) invariant(approved.image.node.shotId === shot.id, "REVIEW_SPEC_MISMATCH", "Keyframe was generated for a different shot");
-      const result = makeNode(alias, "video", shot, profile, { ...profileArgs(profile), prompt, durationFrames: duration, frameRate: { numerator: 30, denominator: 1 }, settings }, [input("firstFrame", "first_frame", 0, approved.image)], [approved.review.gate.id]);
+      // Viggle takes the project's aspect_ratio; without a chosen format the profile's aspect applies and the arguments keep their legacy shape.
+      const aspect = profile.adapter === "viggle-h3" ? explicitProjectAspect(context.project) : null;
+      const result = makeNode(alias, "video", shot, profile, { ...profileArgs(profile), prompt, durationFrames: duration, frameRate: { numerator: 30, denominator: 1 }, ...(aspect ? { aspect } : {}), settings }, [input("firstFrame", "first_frame", 0, approved.image)], [approved.review.gate.id]);
       invariant(result.kind === "operation", "VALIDATION_ERROR", "Expected video operation");
       approved.review.gate.members.push({ videoNodeId: result.node.id, shotId: shot.id, frameSource: source(approved.image), recipeDigest: result.node.specDigest });
       return result;
@@ -301,7 +310,7 @@ export function compilePlan(sourceText: string, context: CompileContext): Compil
     if (name === "render") {
       const spec = fields(data, ["timeline", "width", "height", "format"], ["timeline"]); const timeline = spec.timeline;
       invariant(timeline !== undefined && isRef(timeline) && timeline.kind === "operation" && timeline.node.kind === "timeline", "OUTPUT_TYPE_MISMATCH", "render requires a timeline operation");
-      const width = spec.width ?? 1280; const height = spec.height ?? 720;
+      const size = projectExportSize(context.project); const width = spec.width ?? size.width; const height = spec.height ?? size.height;
       for (const value of [width, height]) invariant(typeof value === "number" && Number.isInteger(value) && value >= 16 && value <= 8192 && value % 2 === 0, "VALIDATION_ERROR", "Invalid render dimensions");
       invariant(spec.format === undefined || spec.format === "mp4", "CAPABILITY_UNSUPPORTED", "Only mp4 render profiles are supported");
       return makeNode(alias, "render", null, null, { width: width as number, height: height as number, format: "mp4", frameRate: { numerator: 30, denominator: 1 } }, [input("timeline", "timeline", 0, timeline)]);
