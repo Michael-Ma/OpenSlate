@@ -2,6 +2,7 @@ import { canonical, invariant, shotIntentDigest, sceneVideoDurationFrames, shotV
 import type { CompiledPlan, ProviderProfile, ShotRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NodeBinding, ReviewSnapshot } from "./execution/engine.js";
+import type { LipSyncRoute } from "./execution/lip-sync-routing.js";
 
 /** Pure projection of the existing scene row. All persistence reads are supplied by the caller. */
 export function sceneRow(shot: ShotRecord, context: {
@@ -15,8 +16,11 @@ export function sceneRow(shot: ShotRecord, context: {
   approvals: { videoNodeId: string; approvalDigest: string }[];
   fixtures: Record<string, boolean | null>;
   tolerateAlternatives?: boolean;
+  /** How this shot's clip is made when it sings (fal lip sync); absent or null for an ordinary shot. */
+  lipSync?: LipSyncRoute | null;
 }) {
   const { snapshot, plan, lock, profiles, holds, review, bindings, approvals, fixtures, tolerateAlternatives } = context;
+  const lipSync = context.lipSync ?? null, planned = lipSync?.state === "planned" ? lipSync : null;
   const project = snapshot.project;
   const productionReview = (nodeId: string) => review?.members.find(m => m.videoNodeId === nodeId) ?? null;
 
@@ -66,9 +70,10 @@ export function sceneRow(shot: ShotRecord, context: {
     ? bindings.find((binding) => binding.id === videoTarget.id)?.candidateId
     : null;
   const videoProfile =
-    recipeCurrent && retainedCandidate && oldProfile
+    // A shot newly marked as singing is remade by lip sync instead of keeping its ordinary clip.
+    recipeCurrent && retainedCandidate && oldProfile && (!planned || oldProfile.id === planned.profile.id)
       ? oldProfile
-      : profiles.video;
+      : (planned?.profile ?? profiles.video);
   let durationFrames = shot.desiredFrames,
     durationCode: string | null = null;
   try {
@@ -80,13 +85,17 @@ export function sceneRow(shot: ShotRecord, context: {
   } catch {
     durationCode = "PROFILE_INCOMPATIBLE";
   }
-  const settings =
-    videoTarget?.profileId === videoProfile.id
+  // A lip-sync clip binds the song window the film plays under this shot now.
+  const lipSyncSettings = planned && videoProfile.id === planned.profile.id && durationCode === null ? planned.settings(durationFrames) : null;
+  const settings = lipSyncSettings
+    ? { lipSync: { ...lipSyncSettings } }
+    : videoTarget?.profileId === videoProfile.id
       ? (videoTarget.args.settings ?? {})
       : {};
   const videoCurrent =
     !!videoTarget &&
     videoTarget.profileId === videoProfile.id &&
+    (!lipSyncSettings || canonical(videoTarget.args.settings ?? {}) === canonical(settings)) &&
     videoTarget.intentDigest === shotIntentDigest(shot, "video", cue) &&
     videoTarget.args.prompt === shot.videoPrompt &&
     videoTarget.args.durationFrames === durationFrames;
@@ -174,6 +183,10 @@ export function sceneRow(shot: ShotRecord, context: {
     blockedCode: active.some((a) => a.phase === "submission_unknown")
       ? "SUBMISSION_UNKNOWN"
       : durationCode,
+    // Only singing shots carry this field, so ordinary rows and their digests are unchanged.
+    ...(lipSync ? { lipSync: lipSync.state === "planned"
+      ? { state: "planned" as const, profileId: lipSync.profile.id }
+      : { state: "unavailable" as const, reason: lipSync.reason } } : {}),
   };
 }
 

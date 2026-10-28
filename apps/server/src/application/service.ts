@@ -59,6 +59,8 @@ export interface ProductionServiceOptions {
   newProjectLocalExecution?: LocalExecutionIdentity;
   /** Limit the new-project pin to the resolved trusted profile selection. Omission means all. */
   newProjectLocalExecutionFor?: "all" | "external-video";
+  /** Ready lip-sync profiles pinned beside a real video model on new projects; they make only singing shots. */
+  newProjectLipSyncProfiles?: readonly ProviderProfile[];
 }
 interface ProjectCapabilityLock {
   projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string;
@@ -79,6 +81,7 @@ export class ProductionService {
   get recovery() { return this.engine.recovery; }
   private readonly newProjectLocalExecution: Readonly<LocalExecutionIdentity> | undefined;
   private readonly newProjectLocalExecutionFor: "all" | "external-video";
+  private readonly newProjectLipSyncProfiles: readonly ProviderProfile[];
   constructor(readonly store: Store, readonly engine: Engine, readonly profiles: ProviderProfile[] = DEFAULT_PROFILES,
     options: ProductionServiceOptions = {}) {
     const selected = options.newProjectLocalExecution;
@@ -87,6 +90,9 @@ export class ProductionService {
     invariant(scope === "all" || scope === "external-video", "LOCAL_EXECUTION_UNSUPPORTED", "Unsupported new-project local execution scope");
     invariant(scope !== "external-video" || this.newProjectLocalExecution, "LOCAL_EXECUTION_UNSUPPORTED", "External-video scope requires an exact local execution identity");
     this.newProjectLocalExecutionFor = scope;
+    this.newProjectLipSyncProfiles = structuredClone([...(options.newProjectLipSyncProfiles ?? [])]);
+    invariant(this.newProjectLipSyncProfiles.length <= 1 && this.newProjectLipSyncProfiles.every(profile => profile.kind === "video" && profile.adapter === "fal-h3-lipsync"),
+      "PROVIDER_SELECTION_INVALID", "Pin at most one lip-sync profile");
     migrateLegacyRequestSources(this.store);
   }
 
@@ -94,9 +100,12 @@ export class ProductionService {
     this.recovery.assertWritable();
     invariant(typeof name === "string" && name.trim().length > 0 && name.length <= 160, "VALIDATION_ERROR", "Provide a short project name");
     const selected = selection === undefined ? undefined : selectedProviderProfiles(selection);
-    const profiles = selected?.profiles ?? this.profiles;
+    const chosen = selected?.profiles ?? this.profiles;
     const pinLocalExecution = this.newProjectLocalExecution && (this.newProjectLocalExecutionFor === "all"
-      || profiles.some(profile => profile.kind === "video" && profile.adapter !== "fake"));
+      || chosen.some(profile => profile.kind === "video" && profile.adapter !== "fake"));
+    // Appended after the chosen profiles, so every "first video profile" lookup still finds the chosen one.
+    const profiles = pinLocalExecution && selected && chosen.some(profile => profile.kind === "video" && profile.adapter !== "fake")
+      ? [...chosen, ...structuredClone(this.newProjectLipSyncProfiles).filter(profile => !chosen.some(row => row.id === profile.id))] : chosen;
     return this.store.transaction(() => {
       const project: ProjectRecord = {
         id: newId(), revisionId: newId(), headVersion: 0, name, brief: "", story: "", scenes: [],

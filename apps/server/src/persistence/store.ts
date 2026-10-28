@@ -24,6 +24,8 @@ import type { TranscriptionAudioIntent, TranscriptionAudioReceipt, Transcription
 import { assertSpeechMappingAdmission, resolveSpeechAdmission } from "../execution/audio-execution-authority.js";
 import { assertSpeechSpoolLineage } from "../execution/audio-execution-lineage.js";
 import { assertViggleSpoolLineage } from "../execution/viggle-h3-lineage.js";
+import { assertFalLipSyncDispatch, assertFalLipSyncMapping, assertFalLipSyncObservation, assertFalLipSyncPollSchedule, assertFalLipSyncSubmit, FAL_LIPSYNC_KINDS } from "../execution/fal-lipsync-receipts.js";
+import type { FalLipSyncDispatch, FalLipSyncMapping, FalLipSyncObservation, FalLipSyncPollSchedule, FalLipSyncSubmit } from "../execution/fal-lipsync-receipts.js";
 import { resolveViggleAdmission, assertViggleMappingAdmission } from "../execution/viggle-h3-authority.js";
 import { assertViggleH3ExecutionMapping, assertViggleH3ExecutionDispatch, assertViggleH3ExecutionSubmit, assertViggleH3ExecutionObservation, assertViggleH3PollSchedule } from "../execution/viggle-h3-receipts.js";
 import type { ViggleH3ExecutionMapping, ViggleH3ExecutionDispatch, ViggleH3ExecutionSubmit, ViggleH3ExecutionObservation, ViggleH3PollSchedule } from "../execution/viggle-h3-receipts.js";
@@ -580,6 +582,37 @@ export class Store {
         }
       }
     }
+    if ((FAL_LIPSYNC_KINDS as readonly string[]).includes(kind)) {
+      // fal lip-sync receipts: same write-time proofs as the H3 receipts above.
+      reference("attempt", body.attemptId);
+      const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
+      assertConfiguredProviderAdmission(this, attempt);
+      const mapping = this.get<FalLipSyncMapping>("fal_lipsync_execution_mapping", attempt.id), dispatch = this.get<FalLipSyncDispatch>("fal_lipsync_execution_dispatch", attempt.id);
+      const submit = this.get<FalLipSyncSubmit>("fal_lipsync_execution_submit", attempt.id), value = { ...body, id, projectId };
+      if (kind === "fal_lipsync_execution_mapping") {
+        invariant(!submit || !!mapping, "FAL_LIPSYNC_EXECUTION_CONFLICT", "Closed lip-sync preparation cannot acquire a mapping");
+        assertFalLipSyncMapping(attempt, value as unknown as FalLipSyncMapping); reference("artifact", body.firstFrameArtifactId);
+      } else if (kind === "fal_lipsync_execution_dispatch") {
+        reference("fal_lipsync_execution_mapping", attempt.id);
+        invariant(!submit || !!dispatch, "FAL_LIPSYNC_EXECUTION_CONFLICT", "Closed lip-sync preparation cannot acquire a dispatch");
+        assertFalLipSyncDispatch(attempt, mapping!, value as unknown as FalLipSyncDispatch);
+      } else if (kind === "fal_lipsync_execution_submit") assertFalLipSyncSubmit(attempt, mapping, dispatch, value as unknown as FalLipSyncSubmit);
+      else {
+        reference("fal_lipsync_execution_mapping", attempt.id); reference("fal_lipsync_execution_dispatch", attempt.id); reference("fal_lipsync_execution_submit", attempt.id);
+        if (kind === "fal_lipsync_execution_observation") {
+          const observation = value as unknown as FalLipSyncObservation, outputId = observation.observation?.kind === "completed" ? observation.observation.outputReceiptId : undefined;
+          if (outputId !== undefined) reference("execution_output_receipt", outputId);
+          assertFalLipSyncObservation(attempt, mapping!, dispatch!, submit!, observation, outputId ? this.get("execution_output_receipt", outputId) : undefined);
+        } else {
+          const schedule = value as unknown as FalLipSyncPollSchedule; assertFalLipSyncPollSchedule(attempt, submit!, schedule);
+          if (schedule.lastObservationId !== null) {
+            reference("fal_lipsync_execution_observation", schedule.lastObservationId);
+            invariant(this.get<FalLipSyncObservation>("fal_lipsync_execution_observation", schedule.lastObservationId)!.attemptId === attempt.id,
+              "FAL_LIPSYNC_EXECUTION_CONFLICT", "Polling schedule cannot adopt another attempt's observation");
+          }
+        }
+      }
+    }
     if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule"].includes(kind)) {
       reference("attempt", body.attemptId);
       const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
@@ -762,6 +795,14 @@ export class Store {
         for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])
           invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Viggle poll identity and host policy are immutable");
         invariant(Number(next.count) >= Number(previous.count), "VIGGLE_H3_EXECUTION_CONFLICT", "Viggle polling cannot rewind");
+      }
+      if (["fal_lipsync_execution_mapping", "fal_lipsync_execution_dispatch", "fal_lipsync_execution_submit", "fal_lipsync_execution_observation"].includes(kind))
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", "Lip-sync execution receipts are immutable");
+      if (kind === "fal_lipsync_poll_schedule") {
+        const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
+        for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Lip-sync poll identity and host policy are immutable");
+        invariant(Number(next.count) >= Number(previous.count), "FAL_LIPSYNC_EXECUTION_CONFLICT", "Lip-sync polling cannot rewind");
       }
       if (kind === "h3_poll_schedule") {
         const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;

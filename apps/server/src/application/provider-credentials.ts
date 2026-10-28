@@ -1,10 +1,12 @@
 import { DomainError, invariant } from "@openslate/core";
 
-export type MediaCredentialId = "openai-media" | "minimax-video" | "viggle-video";
+export type MediaCredentialId = "openai-media" | "minimax-video" | "viggle-video" | "fal-video";
 const VARIABLES: Readonly<Record<MediaCredentialId, string>> = Object.freeze({
   "openai-media": "OPENSLATE_OPENAI_API_KEY",
   "minimax-video": "OPENSLATE_MINIMAX_API_KEY",
   "viggle-video": "OPENSLATE_VIGGLE_API_KEY",
+  /** fal.ai key ("id:secret") for MiniMax H3 Max lip sync. */
+  "fal-video": "OPENSLATE_FAL_API_KEY",
 });
 export interface MediaCredentialStatus { id: MediaCredentialId; configured: boolean }
 const valid = (value: unknown): value is string => typeof value === "string" && value.length >= 1 && value.length <= 8192 && !/[\s\x00-\x1f\x7f]/.test(value);

@@ -170,7 +170,8 @@ export class GenerationOverviewReader {
             }
           }
           overview.shots[shot.id] = { shotId: shot.id, sceneId: scene.id, label: `${index + 1}.${shotIndex + 1}`, framing: shot.framing, purpose: shot.purpose,
-            imagePrompt: shot.imagePrompt, motion: shot.motion, durationFrames: shot.desiredFrames, keyframe: { ...image, opened }, video, narration: audio, quotes: { regenerateKeyframe: quote(captured.lock, [row], "regenerateKeyframe") } };
+            imagePrompt: shot.imagePrompt, motion: shot.motion, durationFrames: shot.desiredFrames, keyframe: { ...image, opened }, video, narration: audio, quotes: { regenerateKeyframe: quote(captured.lock, [row], "regenerateKeyframe") },
+            ...("lipSync" in row && row.lipSync ? { lipSync: row.lipSync } : {}) };
           if (image.state === "direction_required") blockers.push({ code: "direction_required", shotId: shot.id });
           else if (image.state !== "ready") blockers.push({ code: "keyframe_missing", shotId: shot.id });
           else if (!opened && !row.videoComplete) blockers.push({ code: "frame_not_opened", shotId: shot.id });

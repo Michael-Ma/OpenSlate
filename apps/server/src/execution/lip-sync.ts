@@ -145,3 +145,68 @@ export class FakeLipSyncAdapter implements LipSyncAdapter {
     return next;
   }
 }
+
+// ---- Lip-sync generation (fal MiniMax H3 Max lip sync) ------------------------------------------------------------
+
+/** The adapter that makes singing shots. Its profiles are pinned beside, never instead of, the project's video profile. */
+export const LIP_SYNC_ADAPTER = "fal-h3-lipsync";
+export const isLipSyncProfile = (profile: { adapter?: unknown } | null | undefined): boolean => profile?.adapter === LIP_SYNC_ADAPTER;
+/** Only the explicit typed flag routes a shot to paid lip sync; direction text alone never does. */
+export const lipSyncRequested = (shot: Pick<ShotRecord, "performance">): boolean => shot.performance === "singing";
+/** Extra song after the clip end so a slightly short provider clip still covers every admitted frame. */
+export const LIP_SYNC_TAIL_SAMPLES = 9600;
+/** fal adds 1.2x to clips over 15 s; the tail never pushes a clip of 15 s or less over that line. */
+const LONG_CLIP_SAMPLES = 15 * 48000;
+/** Length of the audio sent for a clip of `clipFrames` (the provider's output lasts as long as its audio). */
+export function lipSyncAudioSamples(clipFrames: number): number {
+  const clip = clipFrames * SAMPLES_PER_FRAME;
+  return clip <= LONG_CLIP_SAMPLES ? Math.min(clip + LIP_SYNC_TAIL_SAMPLES, Math.max(clip, LONG_CLIP_SAMPLES)) : clip + LIP_SYNC_TAIL_SAMPLES;
+}
+
+/**
+ * Exact reviewed lip-sync input, stored in the video node's settings so the review, the recipe digest and the
+ * dispatch all bind the same song bytes and window. Moving the shot, changing its length, the music start or the
+ * song changes these numbers, which makes the clip outdated.
+ */
+export interface LipSyncSettings {
+  version: 1;
+  /** Full mix: no dependency-light vocal isolation exists (see the doc). */
+  audio: "mix";
+  audioId: string;
+  sha256: string;
+  /** Position of the first heard sample in the song. */
+  startSample: number;
+  durationSamples: number;
+  /** Silence before the song starts inside the clip (music starting after the shot). */
+  shotOffsetSamples: number;
+  /** Length of the audio sent (lipSyncAudioSamples): the clip plus a short tail. The provider's output lasts as long as its audio. */
+  clipSamples: number;
+}
+
+/**
+ * Lip-sync settings for one singing shot whose clip lasts `clipFrames`: the song heard from the shot's start on the
+ * film clock for the clip length plus a short tail. Null when no song is heard during the shot itself. Pure.
+ */
+export function lipSyncSettings(project: Pick<ProjectRecord, "scenes" | "shots" | "soundtrack">, shotId: string,
+  song: { audioId: string; sha256: string; samples: number }, clipFrames: number): LipSyncSettings | null {
+  invariant(Number.isSafeInteger(clipFrames) && clipFrames > 0 && clipFrames <= 10800, "VALIDATION_ERROR", "Clip length must be whole frames");
+  if (!songSegmentForShot(project, shotId, song)) return null;
+  const cut = storyboardAudioCuts(project).find((row) => row.shotId === shotId)!;
+  const songStart = (project.soundtrack!.startFrame ?? 0) * SAMPLES_PER_FRAME, clipStart = cut.startFrame * SAMPLES_PER_FRAME;
+  const clipSamples = lipSyncAudioSamples(clipFrames);
+  const from = Math.max(clipStart, songStart), to = Math.min(clipStart + clipSamples, songStart + song.samples);
+  return { version: 1, audio: "mix", audioId: song.audioId, sha256: song.sha256, startSample: from - songStart,
+    durationSamples: to - from, shotOffsetSamples: from - clipStart, clipSamples };
+}
+
+/** Strict shape check of saved settings; anything else is not a lip-sync recipe. */
+export function assertLipSyncSettings(value: unknown): asserts value is { lipSync: LipSyncSettings } {
+  const ok = (v: unknown, min: number, max: number) => Number.isSafeInteger(v) && Number(v) >= min && Number(v) <= max;
+  const row = value as { lipSync?: Record<string, unknown> } | null;
+  const s = row && typeof row === "object" && !Array.isArray(row) && Object.keys(row).length === 1 ? row.lipSync : undefined;
+  invariant(s && typeof s === "object" && Object.keys(s).length === 8 && s.version === 1 && s.audio === "mix"
+    && typeof s.audioId === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(s.audioId) && typeof s.sha256 === "string" && /^[a-f0-9]{64}$/.test(s.sha256)
+    && ok(s.clipSamples, 1, 10800 * SAMPLES_PER_FRAME + LIP_SYNC_TAIL_SAMPLES) && ok(s.startSample, 0, Number.MAX_SAFE_INTEGER)
+    && ok(s.durationSamples, 1, Number(s.clipSamples)) && ok(s.shotOffsetSamples, 0, Number(s.clipSamples) - Number(s.durationSamples)),
+  "LIP_SYNC_SETTINGS_INVALID", "Lip-sync settings must bind one exact song window");
+}

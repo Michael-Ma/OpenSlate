@@ -33,6 +33,7 @@ import { confirmationFramesCurrent, sceneConfirmationGuard } from "./scene-confi
 import type { SceneConfirmationRecord } from "./scene-confirmations.js";
 import type { ReviewSnapshot } from "./execution/engine.js";
 import type { NodeBinding } from "./execution/engine.js";
+import { lipSyncRoute } from "./execution/lip-sync-routing.js";
 
 export type SceneGenerationInput = {
   headVersion: number;
@@ -119,7 +120,7 @@ export function sceneView(
   const rows = project.shots
     .filter((s) => s.sceneId === sceneId)
     .map((shot) => sceneRow(shot, { snapshot, plan, lock, profiles, holds, review, bindings, approvals, fixtures,
-      tolerateAlternatives: shared?.tolerateAlternatives ?? false }));
+      tolerateAlternatives: shared?.tolerateAlternatives ?? false, lipSync: lipSyncRoute(store, project, lock, shot) }));
   const commandScopes = targetShotIds ?? [sceneId];
   const intersectsRequest = (requestId?: string) => {
     const request = requestId
@@ -462,6 +463,8 @@ export async function generateScene(production: ProductionService, projectId: st
       ? {
           frame: row.image!,
           ...(row.frameNodeId ? { frameNodeId: row.frameNodeId } : {}),
+          // A singing shot binds its reviewed song window; ordinary shots keep their saved settings.
+          ...("lipSync" in row && row.lipSync?.state === "planned" ? { settings: structuredClone(row.videoSettings) as import("@openslate/core").JsonObject } : {}),
         }
       : {}),
   }));

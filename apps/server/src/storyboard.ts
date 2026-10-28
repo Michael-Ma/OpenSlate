@@ -30,7 +30,8 @@ type Edit = {
     | "narration"
     | "undo"
     | "soundtrack"
-    | "shotTiming";
+    | "shotTiming"
+    | "shotPerformance";
   id?: string;
   sceneId?: string;
   beforeId?: string;
@@ -221,6 +222,14 @@ export function editStoryboard(
           row.promptIntent = { image: row.promptIntent.image, video: shotIntentDigest(row, "video", cue) };
           changed.add(row.id);
         }
+      } else if (input.kind === "shotPerformance") {
+        // Music video: mark a shot as sung to camera (made by lip sync) or ordinary. value "singing" | "none".
+        const row = shot();
+        invariant((input.value === "singing" || input.value === "none") && input.field === undefined,
+          "VALIDATION_ERROR", "Choose singing or none.");
+        if (input.value === "singing") row.performance = "singing"; else delete row.performance;
+        row.revisionId = newId();
+        changed.add(row.id);
       } else if (input.kind === "deleteShot") {
         const row = shot();
         assertNoRunningAttempts(s, projectId, new Set([row.id]));
@@ -447,6 +456,9 @@ export function editStoryboard(
         bindings
           .filter(
             (x) =>
+              // The performance flag changes how the next clip is made, never the current media: the shown clip
+              // stays until its lip-synced replacement succeeds.
+              input.kind !== "shotPerformance" && (
               (input.kind !== "sceneTitle" && ["timeline", "render"].includes(x.node.kind)) ||
               ((input.kind === "treatment" || input.kind === "scene") &&
                 (x.node.kind === "image" || x.node.kind === "video") &&
@@ -468,7 +480,7 @@ export function editStoryboard(
                 !(
                   shotFields?.every(field => ["imagePrompt", "videoPrompt", "action"].includes(field)) &&
                   !["image", "video"].includes(x.node.kind)
-                )),
+                ))),
           )
           .map((x) => x.id),
       );
@@ -489,7 +501,7 @@ export function editStoryboard(
       }
       // Hold only shots whose queued media is detached, never music/order/add operations.
       // The surrounding command transaction rolls back these holds on failure.
-      const holdFree = ["soundtrack", "moveShot", "moveScene", "sceneTitle", "deleteScene", "addScene", "addShot"].includes(input.kind);
+      const holdFree = ["soundtrack", "moveShot", "moveScene", "sceneTitle", "deleteScene", "addScene", "addShot", "shotPerformance"].includes(input.kind);
       if (!holdFree)
         for (const scopeId of new Set(bindings.filter(b => affected.has(b.id) && before.shots.some(shot => shot.id === b.node.shotId)).map(b => b.node.shotId!)))
           s.engine.setHold(projectId, { scopeId, ownerId: actor.requestId });
@@ -581,6 +593,7 @@ export function registerStoryboard(
                 "undo",
                 "soundtrack",
                 "shotTiming",
+                "shotPerformance",
               ],
             },
             expectedHeadVersion: { type: "integer", minimum: 0 },

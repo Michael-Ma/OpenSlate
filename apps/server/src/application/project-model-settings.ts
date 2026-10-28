@@ -68,7 +68,8 @@ export class ProjectModelSettings {
     for(const nodeId of [...protectedReasons.keys()])protect(nodeId);
     const replacements:Array<{nodeId:string;profileId:string}>=[],preserved:ProjectModelPreview['preserved']=[];
     for(const binding of work.bindings){const node=binding.node;const brief={nodeId:node.id,alias:node.alias,kind:node.kind,shotId:node.shotId};
-      if(!kinds.includes(node.kind as MediaKind)){preserved.push({...brief,reason:protectedReasons.get(node.id)??'unchanged'});continue;}
+      // Lip-sync clips stay on their pinned lip-sync profile; the video choice applies to ordinary shots only.
+      if(!kinds.includes(node.kind as MediaKind)||node.args.adapter==='fal-h3-lipsync'){preserved.push({...brief,reason:protectedReasons.get(node.id)??'unchanged'});continue;}
       const outside=data.scope.kind==='shots'&&(!node.shotId||!data.scope.shotIds.includes(node.shotId));const preferred=selected[node.kind as MediaKind];
       const reason=protectedReasons.get(node.id)??(outside?'outside_scope':preferred===node.args.profileIdentity?'unchanged':null);
       if(reason||!preferred)preserved.push({...brief,reason:reason??'unchanged'});else replacements.push({nodeId:node.id,profileId:preferred});
