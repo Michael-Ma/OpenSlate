@@ -412,19 +412,29 @@ export class ProductionService {
   }
 
   /** Application-only publication of a scene plan compiled in the isolated worker before any mutation. */
-  applyCompiledSceneGeneration(projectId: string, actor: ActorContext, compiled: CompiledPlan, logicalIds: Record<string, string>, expectedHeadVersion: number, expectedLockDigest: string, kind: "image" | "video"): ApplyReceipt {
+  applyCompiledSceneGeneration(projectId: string, actor: ActorContext, compiled: CompiledPlan, logicalIds: Record<string, string>, expectedHeadVersion: number, expectedLockDigest: string, kind: "image" | "video", reviewedNodeIds: readonly string[]): ApplyReceipt {
     invariant(actor.kind === "human", "ACTOR_DENIED", "Scene generation requires the human scene check");
     const before = this.store.getProject(projectId), lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
     invariant(lock?.projectId === projectId && digest(lock) === expectedLockDigest && before.headVersion === expectedHeadVersion, "REVISION_CONFLICT", "The reviewed scene or model changed during preparation");
     const proposal = parseChangeProposal({ variant: "plan", expectedHeadVersion, source: compiled.canonicalSource });
     const captured: PreparedChangeCapture = { before, next: structuredClone(before), lock, proposal, proposalDigest: digest(proposal), compiled, logicalIds };
-    const targets = new Set(compiled.nodes.filter(node => node.kind === kind && node.shotId && this.allows(before, actor, node.shotId)).map(node => node.id));
+    // Request authority may cover the entire film. Only this scene decision's
+    // exact operations can acquire fresh candidates, including known-failure retries.
+    invariant(Array.isArray(reviewedNodeIds), "SCOPE_DENIED", "Scene generation requires exact reviewed operations");
+    const targets = new Set(reviewedNodeIds);
+    const reviewed = compiled.nodes.filter(node => targets.has(node.id));
+    invariant(targets.size > 0 && targets.size <= 64 && targets.size === reviewedNodeIds.length
+      && reviewed.length === targets.size && reviewed.every(node => node.kind === kind && node.shotId
+        && before.shots.some(shot => shot.id === node.shotId) && this.allows(before, actor, node.shotId))
+      && new Set(reviewed.map(node => node.shotId)).size === targets.size
+      && new Set(reviewed.map(node => before.shots.find(shot => shot.id === node.shotId)?.sceneId)).size === 1,
+    "SCOPE_DENIED", "Scene generation requires the exact reviewed operations in one scene");
     const assessment = this.assessCompiledChange(captured, actor, undefined, targets);
     // A new human scene check after a known terminal failure is a new candidate,
     // rather than an unauthorized retry of the previous failed candidate.
     for (const change of assessment.impact.filter(item => item.kind === "reuse")) {
       const node = compiled.nodes.find(node => node.id === change.nodeId)!;
-      if (node.kind !== kind || !node.shotId || !this.allows(before, actor, node.shotId)) continue;
+      if (!targets.has(node.id)) continue;
       const binding = this.store.get<NodeBinding>("node_binding", node.id);
       const last = this.engine.attempts(projectId).filter(attempt => attempt.candidateId === binding?.candidateId && attempt.nodeId === node.id).at(-1);
       if (binding && !Object.keys(binding.outputs).length && last?.phase === "failed") {

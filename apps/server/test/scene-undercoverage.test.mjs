@@ -77,7 +77,8 @@ test('image-only scene publication creates no new video grant or candidate for t
   f.service.authorize(project.id, actor, [{ scopeId: shot.id, kind: 'image' }], 'image-only');
   const oldVideoGrants = f.store.list('grant', project.id).filter(grant => grant.kind === 'video').length;
   f.store.transaction(() => f.service.applyCompiledSceneGeneration(project.id, actor, compiled, f.logicalIds, saved.headVersion,
-    digest(f.store.get('capability_lock', saved.capabilityLockId)), 'image'));
+    digest(f.store.get('capability_lock', saved.capabilityLockId)), 'image',
+    compiled.nodes.filter(node => node.kind === 'image' && node.shotId === shot.id).map(node => node.id)));
   const video = compiled.nodes.find(node => node.kind === 'video');
   assert.equal(f.store.get('node_binding', video.id).candidateId, null);
   assert.equal(f.store.list('grant', project.id).filter(grant => grant.kind === 'video').length, oldVideoGrants);

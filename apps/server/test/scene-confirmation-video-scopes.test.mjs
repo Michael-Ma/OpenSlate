@@ -83,7 +83,8 @@ test('runner recomposes over an unrelated scene publication and preserves its ca
   const confirmation = await f.call('POST', '/scenes/scene-0/confirm', await f.confirmBody()).then(f.ok);
   const advancing = f.runner.advance();
   f.store.transaction(() => f.production.applyCompiledSceneGeneration(f.project.id, otherActor, otherPlan, aliases,
-    f.store.getProject(f.project.id).headVersion, digest(other.lock), 'image'));
+    f.store.getProject(f.project.id).headVersion, digest(other.lock), 'image',
+    otherPlan.nodes.filter(node => node.kind === 'image' && node.shotId === 'shot-1').map(node => node.id)));
   const saved = f.store.list('node_binding', f.project.id).find(b => b.node.shotId === 'shot-1');
   await advancing;
   const row = f.store.get('scene_confirmation', confirmation.confirmationId);
