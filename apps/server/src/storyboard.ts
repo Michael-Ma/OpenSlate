@@ -5,7 +5,7 @@ import { OPENAI_SPEECH_VOICES } from "@openslate/providers";
 import type { FastifyInstance } from "fastify";
 import { clipAudioDefault, digest, invariant, isClipAudioGain, newId, shotIntentDigest } from "@openslate/core";
 import { editedPrompt } from "./application/shot-prompts.js";
-import type { ProjectRecord, ShotRecord } from "@openslate/core";
+import type { ProjectRecord, ShotRecord, VisualStyle } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationAudio } from "./narration/types.js";
 import { assertNoRunningAttempts } from "./project-library.js";
@@ -32,7 +32,9 @@ type Edit = {
     | "soundtrack"
     | "shotTiming"
     | "shotPerformance"
-    | "shotClipAudio";
+    | "shotClipAudio"
+    /** Internal only (not on the HTTP route): the person's choice on a Director style card saves this look. */
+    | "visualStyle";
   id?: string;
   sceneId?: string;
   beforeId?: string;
@@ -45,6 +47,8 @@ type Edit = {
   timings?: Array<{ id: string; desiredFrames: number }>;
   /** deleteShots: several shots removed as one command, so one Undo restores them all. */
   ids?: string[];
+  /** visualStyle: the chosen look, without its app-issued revisionId. */
+  style?: Omit<VisualStyle, "revisionId">;
 };
 /** Set when a Director tool or a Director confirmation card ran the person's command. Never changes the edit itself. */
 export type StoryboardEditOrigin = { director: { requestId: string; epochId: string; invocationId: string } | { noteId: string } };
@@ -403,6 +407,11 @@ export function editStoryboard(
           next.soundtrack.gainMilliDb = gain;
         }
         global = true;
+      } else if (input.kind === "visualStyle") {
+        invariant(input.style && typeof input.style.styleId === "string", "VALIDATION_ERROR", "Choose a look.");
+        invariant(input.style.anchors.referenceArtifactIds.every(id => next.artifacts.some(a => a.artifactId === id)), "SCOPE_DENIED", "Style references an unknown artifact");
+        next.visualStyle = { ...structuredClone(input.style), revisionId: newId() };
+        global = true;
       } else if (input.kind === "undo") {
         const saved = s.store.get<SavedEdit>(
           "storyboard_edit",
@@ -475,7 +484,7 @@ export function editStoryboard(
             (x) =>
               // The performance flag changes how the next clip is made, never the current media: the shown clip
               // stays until its lip-synced replacement succeeds.
-              input.kind !== "shotPerformance" && (
+              input.kind !== "shotPerformance" && input.kind !== "visualStyle" && (
               (input.kind !== "sceneTitle" && ["timeline", "render"].includes(x.node.kind)) ||
               ((input.kind === "treatment" || input.kind === "scene") &&
                 (x.node.kind === "image" || x.node.kind === "video") &&
@@ -518,7 +527,7 @@ export function editStoryboard(
       }
       // Hold only shots whose queued media is detached, never music/order/add operations.
       // The surrounding command transaction rolls back these holds on failure.
-      const holdFree = ["soundtrack", "moveShot", "moveScene", "sceneTitle", "deleteScene", "addScene", "addShot", "shotPerformance", "shotClipAudio"].includes(input.kind);
+      const holdFree = ["soundtrack", "moveShot", "moveScene", "sceneTitle", "deleteScene", "addScene", "addShot", "shotPerformance", "shotClipAudio", "visualStyle"].includes(input.kind);
       if (!holdFree)
         for (const scopeId of new Set(bindings.filter(b => affected.has(b.id) && before.shots.some(shot => shot.id === b.node.shotId)).map(b => b.node.shotId!)))
           s.engine.setHold(projectId, { scopeId, ownerId: actor.requestId });

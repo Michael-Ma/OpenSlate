@@ -7,7 +7,7 @@ import { NarrationCanonicalService } from "../narration/canonical.js";
 import type { EnqueueSceneVoice } from "../scene-generation.js";
 import { assertDirectorProposalDecisionAuthority, decideProposal, proposeChange } from "./director-proposals.js";
 import type { ProposalPatch } from "@openslate/core";
-import { recordNotes, type NoteInput } from "./director-notes.js";
+import { recordNotes, recordStyleProposal, type NoteInput, type StyleProposalInput } from "./director-notes.js";
 import { isShippedDirectorRelease, SHIPPED_DIRECTOR_GUIDANCE } from "./director-shipped-guidance.js";
 import { readGuidance, type ReadGuidanceInput } from "./director-guidance-reads.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
@@ -274,6 +274,8 @@ export class ToolInvocationService {
           parsed.arguments as unknown as { proposalId: string }, parsed.name === 'accept_proposal' ? 'accept' : 'reject'); break;
         case "propose_change": value = proposeChange(this.service, projectId, actor, id, parsed.arguments as unknown as { patch: ProposalPatch }); break;
         case "record_notes": value = recordNotes(this.service, projectId, actor, id, parsed.arguments as unknown as { notes: NoteInput[] }); break;
+        // A free card like record_notes: allowed in discuss-only turns; only the person's choice saves a look.
+        case "propose_visual_style": value = recordStyleProposal(this.service, projectId, actor, id, parsed.arguments as unknown as StyleProposalInput); break;
         case "read_context": value = parsed.arguments.section === "characters"
           ? readCharacters({ service: this.service, projectId, actor, invocationId: id, ...(signal ? { signal } : {}) })
           : this.service.readContext(projectId, actor, parsed.arguments); break;
@@ -533,6 +535,10 @@ function contractSevenReceipt(store: Store, projectId: string, call: ToolInvocat
   if (["delete_shots", "delete_scene", "use_take", "control_execution"].includes(call.tool)) {
     const card = store.get<{ projectId: string; noteId: string; letter: string }>("director_card_receipt", call.id);
     if (card?.projectId === projectId) return { state: "awaiting_confirmation", noteId: card.noteId, letter: card.letter, applied: false };
+  }
+  if (call.tool === "propose_visual_style") {
+    const card = store.get<{ projectId: string; noteId: string; letter: string }>("director_card_receipt", call.id);
+    if (card?.projectId === projectId) return { state: "awaiting_choice", noteId: card.noteId, letter: card.letter, applied: false };
   }
   return null;
 }

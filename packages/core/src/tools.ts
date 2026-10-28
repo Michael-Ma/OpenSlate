@@ -1,7 +1,7 @@
 import { Ajv, type ErrorObject } from "ajv";
 import { canonical, digest, DomainError, invariant } from "./common.js";
 import type { JsonObject } from "./contracts.js";
-import { changeProposalSchema, contractSevenChangeProposalSchema, parseChangeProposal, sceneTitleSchema, shortFramingSchema, successorChangeProposalSchema } from "./workflow/index.js";
+import { changeProposalSchema, contractSevenChangeProposalSchema, parseChangeProposal, sceneTitleSchema, shortFramingSchema, successorChangeProposalSchema, visualStyleInputSchema } from "./workflow/index.js";
 import { legacyChangeProposalSchema } from "./legacy-change-schema.js";
 
 export const TOOL_NAMES = Object.freeze(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"] as const);
@@ -10,7 +10,7 @@ const V3_TOOL_NAMES = Object.freeze([...V2_TOOL_NAMES, "prepare_recording_transc
 const V5_TOOL_NAMES = Object.freeze([...V3_TOOL_NAMES, "record_notes", "propose_change"] as const);
 export const V6_TOOL_NAMES = Object.freeze([...V5_TOOL_NAMES, "make_keyframes", "accept_proposal", "reject_proposal"] as const);
 export const V7_TOOL_NAMES = Object.freeze([...V6_TOOL_NAMES, "set_soundtrack", "move_shot", "move_scene", "start_export", "undo_edit",
-  "delete_shots", "delete_scene", "use_take", "analyze_music", "make_character_sheets", "read_guidance"] as const);
+  "delete_shots", "delete_scene", "use_take", "analyze_music", "make_character_sheets", "read_guidance", "propose_visual_style"] as const);
 /** Every tool name any catalog has advertised. */
 export const ALL_TOOL_NAMES = V7_TOOL_NAMES;
 export type ToolName = typeof ALL_TOOL_NAMES[number];
@@ -209,6 +209,16 @@ const v7Descriptors = freeze(v6Descriptors.map(tool => tool.name === "read_conte
     package: { type: "string", pattern: "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", maxLength: 64 },
     path: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._/-]*\\.(?:md|json)$", maxLength: 192 },
   }, ["package"]), true),
+  descriptor("propose_visual_style", "Offer the person two or three looks for the whole film as one style card: each option is a complete visualStyle with one line on why it fits, one on its main risk with current models, an optional cost line and a tier (safe, distinct, bold). Free; nothing changes until the person chooses an option, which saves that look as the film's visualStyle. Allowed in discuss-only turns.", object({
+    text: { type: "string", minLength: 1, maxLength: 600 },
+    options: { type: "array", minItems: 2, maxItems: 3, items: object({
+      tier: { enum: ["safe", "distinct", "bold"] },
+      fits: { type: "string", minLength: 1, maxLength: 240 },
+      risk: { type: "string", minLength: 1, maxLength: 240 },
+      cost: { type: "string", minLength: 1, maxLength: 240 },
+      style: structuredClone(visualStyleInputSchema),
+    }, ["tier", "fits", "risk", "style"]) },
+  }, ["options"]), false),
 ));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({

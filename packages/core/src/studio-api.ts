@@ -435,6 +435,12 @@ export type NoteChoice =
   | { kind: "use_take"; shotId: string; artifactId: string }
   | { kind: "confirm_resume"; expectedAuthorityId: string | null };
 
+/** The browser's view of a style card (propose_visual_style); the full looks stay on the server. See docs/ai/ui-v8/contracts.md. */
+export interface StyleProposalView {
+  options: Array<{ styleId: string; label: string; fits: string; risk: string; cost?: string; tier: "safe" | "distinct" | "bold" }>;
+  currentStyleId?: string;
+}
+
 export interface DirectorNote {
   noteId: string;
   requestId: string;
@@ -449,6 +455,11 @@ export interface DirectorNote {
   /** The keyframe the Director looked at when writing the note, if any. */
   seenKeyframe?: { shotId: string; artifactId: string; sha256: string };
   choices: NoteChoice[];
+  /**
+   * Contract 7.0.0 style card: one accept choice per option, in order, labelled with the option's label, then a
+   * reply choice. Accepting an option saves its full look as project.visualStyle in the same command.
+   */
+  styleProposal?: StyleProposalView;
   /** stale: the anchored shot or the seen keyframe changed since the note was written. */
   state: "open" | "resolved" | "stale";
   /**

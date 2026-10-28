@@ -15,7 +15,11 @@ The UI for v8 step 5 uses the 7.0.0 routes as they exist on `feature/last-ferry-
 | Singing | `POST /storyboard { kind: "shotPerformance", id, value: "singing" \| "none" }` | Free and undoable. The price line uses the published 768p rate ($0.08/s, plus a 0.2 s tail, ×1.2 past 15 s) as an estimate; the scene confirm keeps the exact quote. |
 | Look | `project.visualStyle` on the snapshot | Read only (label, traits, rationale). |
 
-## Assumed: the visual-style proposal (no 7.0.0 path yet)
+## The visual-style proposal
+
+Server path (added with skills v8): the Director's 7.0.0 tool `propose_visual_style {text?, options: [{tier, fits, risk, cost?, style}]}` writes the note below, with `anchor: {}` and the full looks kept server-side (`director_style_proposal`). Resolving an option's accept choice saves that look with an internal, undoable storyboard command (`kind: "visualStyle"`, not on the HTTP route) under whole-film scope; `resolution.resultRef` is its commandId. The resolve route accepts `choiceIndex` 0–3 so three options plus reply fit. Whole-film style cards never go stale. Tests: `apps/server/test/director-style-proposal.test.mjs`.
+
+Originally assumed shape (now implemented as written):
 
 The Director's style proposal is an ordinary Director note. Its choices are one `accept` per option, in the options' order, with `label` equal to the option's label, plus an optional `reply`. It carries one extra field:
 

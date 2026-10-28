@@ -1,5 +1,5 @@
 import { canonical, digest, DomainError, invariant, newId } from '@openslate/core';
-import type { ActorContext, DirectorNote, NoteChoice, ProjectRecord, ResolveNoteInput, ReviewNotesFailure } from '@openslate/core';
+import type { ActorContext, DirectorNote, NoteChoice, ProjectRecord, ResolveNoteInput, ReviewNotesFailure, StyleProposalView, VisualStyle } from '@openslate/core';
 import type { FastifyInstance } from 'fastify';
 import type { Store } from '../persistence/store.js';
 import type { ProductionService, RequestRecord } from './service.js';
@@ -7,6 +7,7 @@ import type { ProposalRecord } from './director-proposals.js';
 import type { SceneConfirmationRecord } from '../scene-confirmations.js';
 import { requiredCommandKey } from './command-key.js';
 import { applyConfirmationCard } from './director-edits.js';
+import { editStoryboard } from '../storyboard.js';
 
 export type NoteInput = Pick<DirectorNote, 'anchor' | 'kind' | 'blocking' | 'text' | 'seenKeyframe' | 'choices'>;
 interface NoteBasis { projectId: string; invocationId: string; argumentsDigest: string; requestId: string; epochId: string; shots: { id: string; revisionId: string; digest?: string }[] }
@@ -120,6 +121,56 @@ export function recordConfirmationCard(service: ProductionService, projectId: st
     return note;
   });
 }
+export interface StyleProposalInput {
+  text?: string;
+  options: Array<{ tier: 'safe' | 'distinct' | 'bold'; fits: string; risk: string; cost?: string; style: Omit<VisualStyle, 'revisionId'> }>;
+}
+/** The full looks behind a style card, keyed by its noteId. The note itself carries only the browser's view. */
+interface StyleProposalRecord { projectId: string; noteId: string; styles: Array<Omit<VisualStyle, 'revisionId'>> }
+
+/**
+ * A style card (contract 7.0.0 propose_visual_style, docs/ai/ui-v8/contracts.md): a whole-film note with one accept
+ * choice per option, labelled with the option's label, and a reply choice. Nothing changes until the person chooses;
+ * their accept saves that option's look as project.visualStyle in the same command.
+ */
+export function recordStyleProposal(service: ProductionService, projectId: string, actor: ActorContext, invocationId: string, input: StyleProposalInput) {
+  return service.store.transaction(() => {
+    service.assertActor(projectId, actor);
+    invariant(actor.kind === 'director', 'ACTOR_DENIED', 'Style cards require a Director epoch');
+    const store = service.store, project = store.getProject(projectId);
+    const turn = store.list<{ id: string; requestId: string; epochId: string }>('director_turn', projectId).find(t => t.epochId === actor.epochId && t.requestId === actor.requestId);
+    invariant(turn, 'ACTOR_DENIED', 'Style cards require their application-owned turn');
+    const labels = input.options.map(option => option.style.label);
+    invariant(new Set(labels).size === labels.length && new Set(input.options.map(option => option.style.styleId)).size === labels.length,
+      'VALIDATION_ERROR', 'options: give each look its own styleId and label.');
+    for (const [index, option] of input.options.entries())
+      invariant(option.style.anchors.referenceArtifactIds.every(id => project.artifacts.some(a => a.artifactId === id)), 'SCOPE_DENIED', `options/${index}/style/anchors: use artifacts this film owns.`);
+    const view: StyleProposalView = {
+      options: input.options.map(option => ({ styleId: option.style.styleId, label: option.style.label, fits: option.fits, risk: option.risk, ...(option.cost ? { cost: option.cost } : {}), tier: option.tier })),
+      ...(project.visualStyle ? { currentStyleId: project.visualStyle.styleId } : {}),
+    };
+    const start = store.list<DirectorNote>('director_note', projectId).filter(n => n.turnId === turn.id).length;
+    const note: DirectorNote = { noteId: newId(), requestId: actor.requestId, turnId: turn.id, letter: letter(start), anchor: {}, kind: 'recommendation', blocking: false,
+      text: input.text ?? (project.visualStyle ? 'Other looks for the film. Nothing changes until you choose one.' : 'Looks for the film. Nothing changes until you choose one.'),
+      choices: [...labels.map(label => ({ kind: 'accept' as const, label })), { kind: 'reply' }], styleProposal: view, state: 'open', version: 1, createdAt: new Date().toISOString() };
+    store.insert('director_note', note.noteId, projectId, note);
+    store.insert('director_note_basis', note.noteId, projectId, { projectId, invocationId, argumentsDigest: digest(input), requestId: actor.requestId, epochId: actor.epochId, shots: [] } satisfies NoteBasis);
+    store.insert('director_style_proposal', note.noteId, projectId, { projectId, noteId: note.noteId, styles: input.options.map(option => structuredClone(option.style)) } satisfies StyleProposalRecord);
+    store.appendEvent(projectId, 'director.note', { noteId: note.noteId, requestId: actor.requestId, turnId: turn.id, letter: note.letter });
+    store.insert('director_card_receipt', invocationId, projectId, { projectId, noteId: note.noteId, letter: note.letter });
+    return { state: 'awaiting_choice', noteId: note.noteId, letter: note.letter, options: view.options.map(option => ({ styleId: option.styleId, label: option.label })), applied: false };
+  });
+}
+/** The look an accept choice on a style card picks, or null for any other note or choice. */
+function chosenStyle(store: Store, projectId: string, note: DirectorNote, choice: NoteChoice): Omit<VisualStyle, 'revisionId'> | null {
+  if (choice.kind !== 'accept' || !note.styleProposal) return null;
+  const record = store.get<StyleProposalRecord>('director_style_proposal', note.noteId);
+  invariant(record?.projectId === projectId, 'NOTE_RESULT_INVALID', 'This style card has lost its looks. Ask the Director for a fresh one.');
+  const style = record.styles.find(item => item.label === choice.label);
+  invariant(style, 'NOTE_RESULT_INVALID', 'Choose one of the looks on this card');
+  return style;
+}
+
 const CARD_KINDS = new Set(['confirm_delete_shots', 'confirm_delete_scene', 'use_take', 'confirm_resume']);
 export const isConfirmationCardChoice = (choice: NoteChoice): choice is Extract<NoteChoice, { kind: 'confirm_delete_shots' | 'confirm_delete_scene' | 'use_take' | 'confirm_resume' }> => CARD_KINDS.has(choice.kind);
 
@@ -175,6 +226,13 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
       invariant(input.resultRef === undefined, 'NOTE_RESULT_INVALID', 'A confirmation card applies its own change');
       resultRef = applyConfirmationCard(service, projectId, note.noteId, choice, key);
     }
+    // A style card's accept saves that look with the person's own storyboard command (undoable), on this click only.
+    const style = chosenStyle(store, projectId, note, choice);
+    if (style) {
+      invariant(note.state === 'open', 'NOTE_STALE', 'This card is no longer current. Ask the Director for a fresh one.');
+      invariant(input.resultRef === undefined, 'NOTE_RESULT_INVALID', 'A style card applies its own change');
+      resultRef = editStoryboard(service, projectId, { kind: 'visualStyle', style, expectedHeadVersion: store.getProject(projectId).headVersion }, `note-style:${key}`, { director: { noteId: note.noteId } }).commandId;
+    }
     const events = store.readEvents(projectId);
     const noteSequence = events.find(e => e.kind === 'director.note' && e.payload.noteId === noteId)?.sequence ?? Infinity;
     if (choice.kind === 'accept' || choice.kind === 'reply') invariant(note.state === 'open', 'NOTE_STALE', 'This note is no longer current');
@@ -211,7 +269,7 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
         && canonical(before[choice.field] ?? null) !== canonical(after[choice.field] ?? null), 'NOTE_RESULT_INVALID', 'Link the human edit of this field');
     }
     // A card's change may remove its own anchor (deletion), so it settles under whole-film scope.
-    const actor = service.beginRequest(projectId, 'local-user', 'Resolve this Director note.', { source: 'app', concurrency: 'alongside', scopeIds: card ? [projectId] : note.anchor.shotIds?.length ? note.anchor.shotIds : note.anchor.sceneId ? [note.anchor.sceneId] : [projectId], key: `resolve-note:${key}` });
+    const actor = service.beginRequest(projectId, 'local-user', 'Resolve this Director note.', { source: 'app', concurrency: 'alongside', scopeIds: card || style ? [projectId] : note.anchor.shotIds?.length ? note.anchor.shotIds : note.anchor.sceneId ? [note.anchor.sceneId] : [projectId], key: `resolve-note:${key}` });
     const resolved = saveResolution(service, projectId, note, { choiceIndex: input.choiceIndex, at: new Date().toISOString(), ...(resultRef ? { resultRef } : {}) }, actor.requestId);
     service.releaseAlongsideHolds(projectId, actor);
     return resolved;
@@ -220,7 +278,7 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
 export function registerDirectorNotes(app: FastifyInstance, service: () => ProductionService): void {
   app.post<{ Params: { projectId: string; noteId: string }; Body: ResolveNoteInput }>('/api/projects/:projectId/director/notes/:noteId/resolve', {
     schema: { body: { type: 'object', additionalProperties: false, required: ['choiceIndex', 'expectedVersion'], properties: {
-      choiceIndex: { type: 'integer', minimum: 0, maximum: 2 }, expectedVersion: { type: 'integer', minimum: 1 }, resultRef: { type: 'string', minLength: 1, maxLength: 160 },
+      choiceIndex: { type: 'integer', minimum: 0, maximum: 3 }, expectedVersion: { type: 'integer', minimum: 1 }, resultRef: { type: 'string', minLength: 1, maxLength: 160 },
     } } },
   }, async request => resolveNote(service(), request.params.projectId, request.params.noteId, request.body, requiredCommandKey(request)));
 }
