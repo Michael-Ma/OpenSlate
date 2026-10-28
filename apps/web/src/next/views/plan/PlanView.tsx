@@ -15,6 +15,9 @@ import { useMode, useStore, useStudio } from "../../store/react.tsx";
 import { useResource } from "../../store/useResource.ts";
 import { confirmImport, discardImport, headAfter, infoToast, refusal, sendImport, storyboardOutcome, takeRefusal, undoToast, type Outcome, type StoryboardReceipt } from "./commands.ts";
 import { DeleteDialog } from "./DeleteDialog.tsx";
+import { CastPanel, ShotCastDialog, useCastSave } from "./CastPanel.tsx";
+import { LookPanel } from "./LookPanel.tsx";
+import { CAST_PATH, castChips, withCasting, type CastRead } from "../../model/cast.ts";
 import { DiscardDialog } from "./DiscardDialog.tsx";
 import { ImportSheet } from "./ImportSheet.tsx";
 import { useLastChange } from "./last-change.ts";
@@ -103,6 +106,10 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   const pending = useStudio((s) => s.pending);
   const focus = useStudio((s) => s.focus);
   const imports = useResource<PlanImportsRead>("/plan-imports");
+  // Plan › Cast (v8): the characters, their sheets and every shot's cast. An older studio answers 404 and shows none.
+  const cast = useResource<CastRead>(CAST_PATH);
+  const saveCast = useCastSave(overview);
+  const [casting, setCasting] = useState<{ shotId: string; label: string } | null>(null);
   const outline = useMemo(() => planOutline(snapshot, overview, proposals), [snapshot, overview, proposals]);
   const storedById = useMemo(() => new Map<string, SnapshotShot>(snapshot.project.shots.map((row) => [row.id, row])), [snapshot.project.shots]);
   const fps = overview.fps;
@@ -673,6 +680,9 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
         ))}
       </div>
 
+      <LookPanel snapshot={snapshot} />
+      <CastPanel cast={cast} overview={overview} guard={guard} busy={busy} />
+
       <div className="scenes" onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropAt(null); }}>
         {outline.scenes.map((scene) => {
           const sceneEdit = editing && "sceneId" in editing && editing.sceneId === scene.sceneId ? editing.kind : null;
@@ -747,6 +757,8 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
                     onPoint={() => point({ kind: "shot", id: row.shotId }, row.label)}
                     onOpenKeyframes={() => { store.selectShot(row.shotId); store.setView("keyframes"); }}
                     onDelete={() => setConfirming({ kind: "shot", shotId: row.shotId })}
+                    cast={cast.data?.characters.length ? castChips(cast.data, row.shotId) : null}
+                    onCast={() => setCasting({ shotId: row.shotId, label: row.label })}
                   />
                 );
               })}
@@ -791,6 +803,10 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
           onConfirm={() => void confirmPlan()}
           onSettings={() => { setImportOpen(false); store.setView("settings"); }}
         />
+      ) : null}
+      {casting && cast.data ? (
+        <ShotCastDialog read={cast.data} shotId={casting.shotId} label={casting.label} busy={busy} guard={guard} onClose={() => setCasting(null)}
+          onSave={async (ids) => { if (await saveCast(withCasting(cast.data!, casting.shotId, ids), `casting:${casting.shotId}`)) setCasting(null); }} />
       ) : null}
       {asking ? <DiscardDialog name={asking.name} onKeep={() => setAsking(null)} onDiscard={() => { const go = asking.proceed; setAsking(null); go(); }} /> : null}
     </main>

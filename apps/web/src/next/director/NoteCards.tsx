@@ -10,6 +10,7 @@ import { noteBanner, type Label, type NoteBannerAction } from "../model/note-ban
 import { runNoteChoice } from "../model/note-command.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { useOpenTarget } from "./useOpenTarget.ts";
+import { ConfirmCard, decisionCard, StyleCard } from "./DecisionCards.tsx";
 
 /**
  * The Director's lettered notes under the reply that wrote them (DC-18): an amber card per open note, neutral once
@@ -26,6 +27,7 @@ export function NoteCards({ notes }: { notes: ThreadNote[] }) {
   const openTarget = useOpenTarget();
   const overview = useStudio((s) => s.overview);
   const proposals = useStudio((s) => s.proposals);
+  const snapshotNotes = useStudio((s) => s.snapshot?.notes);
   const store = useStore();
   const server = useGuarded("server");
   // A change accepted here can be undone here, as from the banner (by note: the proposal it accepted).
@@ -43,7 +45,19 @@ export function NoteCards({ notes }: { notes: ThreadNote[] }) {
 
   return (
     <div className="notes">
-      {notes.map(({ view, tone, opens }) => {
+      {notes.map((thread) => {
+        const { view, tone, opens } = thread;
+        // v8: a confirmation card or the Director's style proposal draws as its own card.
+        const raw = snapshotNotes?.find((n) => n.noteId === view.noteId);
+        const decision = decisionCard(raw, overview, locale);
+        if (decision && raw) {
+          const pills = opens.map((target) => (
+            <button type="button" key={`${target.kind}:${target.id}`} className="pill sm ghost" data-act="note-open" data-target={`${target.kind}:${target.id}`} onClick={() => open(target)}>{tm(target.label)}</button>
+          ));
+          return decision.kind === "style"
+            ? <StyleCard key={view.noteId} thread={thread} proposal={decision.proposal} note={raw} />
+            : <ConfirmCard key={view.noteId} thread={thread} card={decision.view} opens={pills.length ? <>{pills}</> : null} />;
+        }
         const banner = overview && tone === "open" ? noteBanner(view, overview, proposals, locale) : null;
         const choices = banner?.state === "open" ? banner : null;
         const video = choices?.actions.find((action) => action.action.kind === "confirm_video");

@@ -2,6 +2,8 @@ import type { StudioArtifactRef } from "@openslate/core/public";
 import { useId, useRef, useState, type DragEvent, type HTMLAttributes } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { Picture } from "../../keyframes/parts.tsx";
+import { CastAvatar } from "../../keyframes/CastAvatar.tsx";
+import type { CastChip } from "../../model/cast.ts";
 import { actionLine, type NoteChip, type ShotRowView, type StatusPillView } from "../../model/plan.ts";
 import type { Msg } from "../../model/types.ts";
 import { Menu, type MenuItem } from "./Menu.tsx";
@@ -98,13 +100,16 @@ interface Props {
   onPoint(): void;
   onOpenKeyframes(): void;
   onDelete(): void;
+  /** The shot's cast (Plan › Cast); null when the film has no characters (or the studio none of the routes). */
+  cast?: CastChip[] | null;
+  onCast?(): void;
 }
 
 /**
  * One shot: thumbnail (a drag handle: drop it on another row or scene to move it), purpose with framing · length ·
  * motion, the action and the prompt (the full prompts open below), narration, status, Edit and •••.
  */
-export function ShotRow({ row, guard, busy, flash, canMoveScene, dropBefore, drop, onEdit, onMove, onMoveScene, onDragStart, onDragEnd, onPoint, onOpenKeyframes, onDelete }: Props) {
+export function ShotRow({ row, guard, busy, flash, canMoveScene, dropBefore, drop, onEdit, onMove, onMoveScene, onDragStart, onDragEnd, onPoint, onOpenKeyframes, onDelete, cast = null, onCast }: Props) {
   const { t, tm, locale } = useI18n();
   const promptsId = useId();
   const [promptsOpen, setPromptsOpen] = useState(false);
@@ -144,6 +149,20 @@ export function ShotRow({ row, guard, busy, flash, canMoveScene, dropBefore, dro
         {/* Said only when it adds to the purpose: many films store the same sentence in both. */}
         {actionLine(row) ? <div className="shot-action" data-field="action">{t("plan.shot.action", { action: actionLine(row) })}</div> : null}
         <div className="shot-prompt">{t("plan.shot.picture", { prompt: row.prompt || t("plan.shot.not_written") })}</div>
+        {cast ? (
+          <div className="shot-cast" data-cast={cast.map((chip) => chip.characterId).join(" ")}>
+            {cast.length ? cast.map((chip) => (
+              <span key={chip.characterId} className={`cast-chip${chip.approved ? "" : " unapproved"}`} data-character={chip.characterId}>
+                <CastAvatar name={chip.name} picture={chip.picture} approved={chip.approved} size="xs" />{chip.name}
+              </span>
+            )) : <span className="muted">{t("cast.shot.none")}</span>}
+            {onCast ? (
+              <button type="button" className="link-btn" data-act="edit-cast" data-shot={row.shotId} aria-label={t("cast.shot.edit_label", { shot: row.label })} disabled={!!guard || busy} title={guard} onClick={onCast}>
+                {t("cast.shot.edit")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <button type="button" className="link-btn" data-act="toggle-prompts" data-shot={row.shotId} aria-expanded={promptsOpen} aria-controls={promptsOpen ? promptsId : undefined} onClick={() => setPromptsOpen((open) => !open)}>
           {t(promptsOpen ? "plan.shot.prompts_hide" : "plan.shot.prompts")}<span className="sr"> · {row.label}</span>
         </button>

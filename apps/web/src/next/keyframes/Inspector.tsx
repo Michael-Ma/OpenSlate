@@ -8,6 +8,8 @@ import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../model/checks.ts";
 import { durationIssue, editImpact, parseSeconds, type InspectorView } from "../model/inspector.ts";
 import { wordsOf, type ShotNarrationRead } from "../model/narration.ts";
 import { sentenceGap } from "../model/shell-states.ts";
+import { performanceEdit, singingView } from "../model/performance.ts";
+import "./singing.css";
 import type { EditDraft } from "../store/state.ts";
 import type { Resource } from "../store/useResource.ts";
 import { useStore, useStudio } from "../store/react.tsx";
@@ -70,6 +72,10 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
   // Save waits at once; the note says so only if the wait lasts (useSustained).
   const waitingLong = useSustained(comparison?.kind === "waiting");
   const regen = view.regenerate;
+  // Music video: the singing switch (shotPerformance), offered when the film has a song or the shot already sings.
+  const stored = snapshot?.project.shots.find((row) => row.id === shot.shotId);
+  const singing = singingView(shot, stored?.performance, fps, !!snapshot?.project.soundtrack, locale);
+  const singingBusy = useStudio((s) => !!s.pending[`edit:shotPerformance:${shot.shotId}`]);
   /** The row's Listen opened the narration panel: its player takes focus once the take has loaded. */
   const [listening, setListening] = useState(false);
   useEffect(() => { if (editing?.field !== "narration") setListening(false); }, [editing?.field]);
@@ -249,6 +255,18 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
       )}
 
       {!editing && !sub && view.notes.length ? <div className="insp-notes">{view.notes.map((note, index) => <p key={index} className="stale">{tm(note)}</p>)}</div> : null}
+      {!editing && !sub && singing.offered ? (
+        <div className="insp-sing" data-singing={singing.singing ? "on" : "off"}>
+          <label className="sing-switch" htmlFor={`sing-${shot.shotId}`}>
+            <input id={`sing-${shot.shotId}`} type="checkbox" role="switch" data-act="singing" data-shot={shot.shotId} checked={singing.singing} aria-describedby={`sing-note-${shot.shotId}`}
+              aria-label={t("singing.switch_label", { shot: view.label })} {...server} disabled={server.disabled || singingBusy}
+              onChange={(event) => void store.edit(performanceEdit(shot.shotId, event.target.checked), msg(event.target.checked ? "singing.on" : "singing.off", { shot: view.label }))} />
+            <span className="track" aria-hidden="true"><i /></span>
+            <span>{t("singing.label")}</span>
+          </label>
+          <p className="insp-note left" id={`sing-note-${shot.shotId}`}>{tm(singing.note)}</p>
+        </div>
+      ) : null}
       </div>
 
       {editing || sub ? null : (
@@ -268,9 +286,9 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
           ) : null}
           {view.noAnswer ? <GiveUp attemptId={view.noAnswer.attemptId} busy={busy.release} onRelease={onRelease} reason={view.noAnswer.reason ?? null} /> : null}
           {view.discard ? <GiveUp attemptId={view.discard.attemptId} busy={busy.release} onRelease={onDiscard} act="discard"
-            labels={{ note: "inspector.discard_note", ack: "inspector.discard_ack", open: "inspector.discard", confirm: "inspector.discard_confirm" }} /> : null}
-          {view.detach ? <GiveUp attemptId={view.detach.attemptId} busy={busy.release} onRelease={onDetach} act="detach"
-            labels={{ note: "inspector.detach_note", ack: "inspector.detach_ack", open: "inspector.detach", confirm: "inspector.detach_confirm" }} /> : null}
+            labels={{ note: "inspector.discard_note", ack: "inspector.discard_ack", open: "inspector.discard", confirm: "inspector.discard_confirm", title: "recovery.title.discard", charge: "recovery.charge.charged" }} /> : null}
+          {view.detach ? <GiveUp attemptId={view.detach.attemptId} busy={busy.release} onRelease={onDetach} act="detach" since={(view.detach.slot === "video" ? shot.video : shot.keyframe).startedAt ?? null}
+            labels={{ note: "inspector.detach_note", ack: "inspector.detach_ack", open: "inspector.detach", confirm: "inspector.detach_confirm", title: "recovery.title.detach", charge: "recovery.charge.maybe" }} /> : null}
           <button type="button" className="pill" data-act="edit-prompt" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "imagePrompt", value: shot.imagePrompt })}><span className="lbl">{t("inspector.edit_prompt")}</span></button>
           {/* Side by side in a compact inspector, its words are shortened only when they cannot fit (the short label still
               names the duration); its name keeps them all. */}

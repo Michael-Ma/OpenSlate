@@ -13,6 +13,9 @@ import { useMode, useStore, useStudio } from "../store/react.tsx";
 import { reviewingScene } from "../model/director.ts";
 import type { EditDraft } from "../store/state.ts";
 import { CheckBanner, type SettledCheck } from "./CheckBanner.tsx";
+import { CastBanner } from "./CastBanner.tsx";
+import { CAST_PATH, castChecks, castChips, type CastRead } from "../model/cast.ts";
+import { useResource } from "../store/useResource.ts";
 import { Inspector } from "./Inspector.tsx";
 import { useShotNarration } from "./narration-media.ts";
 import { NoteBanner } from "./NoteBanner.tsx";
@@ -75,6 +78,9 @@ function Workspace() {
   const snapshot = useStudio((s) => s.snapshot);
   const toast = useStudio((s) => s.toast);
   const view = useMemo(() => keyframesView(overview, sceneId, shotId, locale), [overview, sceneId, shotId, locale]);
+  // Plan › Cast (v8): faces on the cards, and the cast check before Make keyframes. A studio without it answers 404.
+  const cast = useResource<CastRead>(CAST_PATH);
+  const [castLater, setCastLater] = useState<ReadonlySet<string>>(new Set());
 
   const [settled, setSettled] = useState<SettledCheck | null>(null);
   const [playback, setPlayback] = useState<Playback | null>(null);
@@ -266,6 +272,10 @@ function Workspace() {
   const held = editHold(draft, overview);
   const stopShot = view.panel.stopped?.shotId;
   const planHold = stopShot ? editHold(draft, overview, stopShot) : null;
+  const castByShot = cast.data ? Object.fromEntries(view.cards.map((c) => [c.shotId, castChips(cast.data!, c.shotId)])) : undefined;
+  // The cast check leads only while the app has no narration check of its own here, or before any keyframe is made.
+  const castOpen = castChecks(cast.data, overview, view.scene.sceneId, locale).filter((check) => !castLater.has(`${view.scene.sceneId}:${check.characterId}`));
+  const castCheck = castOpen.length && (!sceneOrdinalChecks.length || view.scene.state === "not_started") && !settled ? castOpen[0]! : null;
 
   return (
     <main className="work kf" data-view="keyframes" data-scene={view.scene.sceneId} data-aspect={frameAspectAttr(overview)}>
@@ -280,6 +290,9 @@ function Workspace() {
           onNext={notes.next}
           onUndo={notes.undo}
         />
+      ) : castCheck ? (
+        <CastBanner check={castCheck} total={castOpen.length} chip={castByShot ? Object.values(castByShot).flat().find((chip) => chip.characterId === castCheck.characterId) ?? null : null}
+          onLater={() => setCastLater((set) => new Set([...set, `${view.scene.sceneId}:${castCheck.characterId}`]))} />
       ) : (
       <CheckBanner
         overview={overview}
@@ -357,6 +370,7 @@ function Workspace() {
           held={held}
           onOpen={openShot}
           onNoteChoice={notes.chooseOnCard}
+          {...(castByShot ? { cast: castByShot } : {})}
         />
         <VideoPanel
           panel={view.panel}

@@ -9,6 +9,8 @@ import type { Msg } from "../model/types.ts";
 import { Picture, StatusPill } from "./parts.tsx";
 import { useChipFit } from "./useChipFit.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
+import type { CastChip } from "../model/cast.ts";
+import { CastStack } from "./CastAvatar.tsx";
 
 /** Columns the wide layout shows at once; more cards scroll inside the row, fewer leave a dashed placeholder. */
 const VISIBLE = 3;
@@ -43,9 +45,11 @@ interface Props {
   held: Msg | null;
   onOpen(shotId: string): void;
   onNoteChoice(noteId: string, choiceIndex: number): void;
+  /** Each shot's cast (Plan › Cast), as small faces beside its length. */
+  cast?: Record<string, CastChip[]>;
 }
 
-export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNoteChoice }: Props) {
+export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNoteChoice, cast }: Props) {
   const { t, tm, locale } = useI18n();
   const label = (value: Label) => ("text" in value ? value.text : tm(value));
   const row = useRef<HTMLDivElement>(null);
@@ -163,7 +167,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
               </div>
               {bar ? <div className="vprog indeterminate" role="progressbar" aria-label={t("card.progress", { shot: card.label })} data-working={card.workingOn ?? undefined}><i /></div> : null}
             </div>
-            <div className="ttl"><b>{title}</b><span>{t("card.seconds", { seconds: card.seconds })}</span></div>
+            <div className="ttl"><b>{title}</b><span className="ttl-end">{cast?.[card.shotId]?.length ? <CastStack chips={cast[card.shotId]!} /> : null}{t("card.seconds", { seconds: card.seconds })}</span></div>
             {card.lipSync ? <div className="lipsync" data-lipsync={card.lipSync.state}>{tm(card.lipSync.label)}</div> : null}
             <div className="stl"><StatusPill status={card.status} tone={card.tone} /><span>{motion}</span></div>
           </article>
