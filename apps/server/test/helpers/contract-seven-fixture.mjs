@@ -1,4 +1,4 @@
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,7 @@ import { createDirectorSkillLock } from '../../dist/application/director-capabil
 import { DirectorContextService } from '../../dist/application/director-context.js';
 import { createApp } from '../../dist/app.js';
 import { projectFixture } from '../execution-fixture.mjs';
+import { writeSkillRelease } from '../../../../packages/director/test/skill-release-fixture.mjs';
 
 function writable(path) {
   chmodSync(path, 0o700);
@@ -21,18 +22,13 @@ function writable(path) {
 const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url));
 
 /**
- * No shipped guidance declares contract 7.0.0 yet (skills v8 is a later step). Tests lock 7.0.0 against a
- * throwaway copy of the V7 packages that declares it, in a temporary repository root; nothing in skills/ changes.
+ * No shipped guidance declares contract 7.0.0 yet (skills v8 is a later step). Tests lock 7.0.0 against a synthetic
+ * v8 release (V7 core copied with schema 2 manifests, plus small type, craft and format packages) in a temporary
+ * repository root; nothing in skills/ changes.
  */
-export function contractSevenRepository(root) {
+export function contractSevenRepository(root, options) {
   const fake = join(root, 'repo');
-  for (const id of ['production', 'plan-authoring']) {
-    const target = join(fake, 'skills', 'v8', id);
-    mkdirSync(target, { recursive: true });
-    cpSync(join(repositoryRoot, 'skills', 'v7', id), target, { recursive: true });
-    const manifestPath = join(target, 'openslate.skill.json'), manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    writeFileSync(manifestPath, JSON.stringify({ ...manifest, version: '8.0.0', compatibility: { ...manifest.compatibility, toolContract: '7.0.0' } }, null, 2));
-  }
+  writeSkillRelease(join(fake, 'skills', 'v8'), options);
   return fake;
 }
 
@@ -42,11 +38,12 @@ export function attachDirector(f, { version = '7.0.0', toolOptions = {}, t } = {
   const base = t ? mkdtempSync(join(tmpdir(), 'openslate-contract-seven-skills-')) : f.root;
   if (t) t.after(() => { writable(base); rmSync(base, { recursive: true, force: true }); });
   const repo = version === '7.0.0' ? contractSevenRepository(base) : repositoryRoot;
-  const saved = createDirectorSkillLock({ repositoryRoot: repo, snapshotRoot: join(base, `skills-${version}`) }, version);
+  const skillConfiguration = { repositoryRoot: repo, snapshotRoot: join(base, `skills-${version}`) };
+  const saved = createDirectorSkillLock(skillConfiguration, version);
   verifySkillLock(saved.lock, saved.environment);
   const contexts = new DirectorContextService(f.service, saved.environment);
   contexts.bootstrapLock(f.project.id, saved.lock);
-  f.lock = saved.lock;
+  f.lock = saved.lock; f.skillConfiguration = skillConfiguration; f.contexts = contexts;
   f.tools = new ToolInvocationService(f.service, toolOptions);
   f.openTurn = ({ source = 'user', editing = true, scopeIds = [f.project.id], text = 'Edit the film.' } = {}) => {
     for (const prior of f.store.list('director_turn', f.project.id).filter(turn => turn.state === 'running'))
@@ -56,7 +53,7 @@ export function attachDirector(f, { version = '7.0.0', toolOptions = {}, t } = {
     const turn = { id: randomUUID(), projectId: f.project.id, requestId: human.requestId, epochId: bridge.actor.epochId,
       state: 'running', runtimeId: 'offline-contract-seven', createdAt: new Date().toISOString() };
     f.store.insert('director_turn', turn.id, f.project.id, turn);
-    contexts.capture(f.project.id, bridge.actor, { lockId: saved.lock.id, selectedSkillIds: ['production', 'plan-authoring'] });
+    contexts.capture(f.project.id, bridge.actor, saved.lock.schemaVersion === 2 ? { lockId: saved.lock.id } : { lockId: saved.lock.id, selectedSkillIds: ['production', 'plan-authoring'] });
     const call = (tool, input, callId = randomUUID()) => f.tools.invoke(f.project.id, bridge.actor, callId, tool, input);
     return { human, bridge, turn, call };
   };

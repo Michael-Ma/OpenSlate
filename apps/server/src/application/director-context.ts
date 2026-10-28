@@ -1,12 +1,23 @@
 import { canonical, digest, invariant, STAGE_CONTRACTS, STAGES, validateStageScope } from "@openslate/core";
-import type { ActorContext } from "@openslate/core";
-import { activateSkills, readActivatedSkillFile, verifySkillLock } from "@openslate/director";
-import type { SkillActivation, SkillCapabilityLock, SkillEnvironment, SkillStageBinding } from "@openslate/director";
+import type { ActorContext, ProjectRecord } from "@openslate/core";
+import { activateSkills, readActivatedSkillFile, routeSkills, SKILL_LIMITS, verifySkillLock, verifySkillLockRelease } from "@openslate/director";
+import type { SkillActivation, SkillCapabilityLock, SkillEnvironment, SkillReadVia, SkillStageBinding } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 
 export const DIRECTOR_CONTEXT_MAX_BYTES = 1024 * 1024;
 interface LockRecord { id: string; projectId: string; lock: SkillCapabilityLock }
-interface ActivationRecord { id: string; projectId: string; requestId: string; epochId: string; activation: SkillActivation }
+/** snapshotRoot is the trusted root the activation verified against; read_guidance reads from the same snapshots. */
+export interface ActivationRecord { id: string; projectId: string; requestId: string; epochId: string; activation: SkillActivation; snapshotRoot?: string }
+
+/** Closed routing facts from saved state only; never from model arguments. */
+export function directorRoutingConditions(project: ProjectRecord): string[] {
+  const facts: string[] = [];
+  if ((project.characters ?? []).length > 0) facts.push("has_characters");
+  if (project.soundtrack) facts.push("has_soundtrack");
+  if (project.narration.script.trim() || project.shots.some(shot => shot.narration && shot.narration.mode !== "none" && shot.narration.text.trim())) facts.push("narration_planned");
+  if (project.visualStyle) facts.push("has_visual_style");
+  return facts;
+}
 
 /** Server-side context/skill provenance. This does not launch a reasoning process. */
 export class DirectorContextService {
@@ -45,7 +56,8 @@ export class DirectorContextService {
     });
   }
 
-  capture(projectId: string, actor: ActorContext, options: { lockId: string; selectedSkillIds: string[]; stageBindings?: SkillStageBinding[] }) {
+  /** Schema 1 locks select packages explicitly; schema 2 (release) locks are routed from saved state here. */
+  capture(projectId: string, actor: ActorContext, options: { lockId: string; selectedSkillIds?: string[]; stageBindings?: SkillStageBinding[] }) {
     this.service.recovery.assertWritable(projectId, actor.requestId);
     invariant(actor.kind === "director", "ACTOR_DENIED", "Director context must bind an immutable epoch");
     this.service.assertActor(projectId, actor);
@@ -81,8 +93,11 @@ export class DirectorContextService {
     });
     const snapshot = this.service.readContext(projectId, actor);
     invariant(Buffer.byteLength(canonical(snapshot)) <= DIRECTOR_CONTEXT_MAX_BYTES, "CONTEXT_TOO_LARGE", "Context requires a narrower projection; nothing was silently truncated");
-    // File verification stays outside the SQLite write transaction.
-    const activation = activateSkills(record.lock, { ...this.environment, requestId: actor.requestId, contextDigest: digest(snapshot), selectedSkillIds: options.selectedSkillIds,
+    // File verification stays outside the SQLite write transaction. Routing reads the saved film, not the request.
+    const routed = record.lock.schemaVersion === 2 ? this.service.store.getProject(projectId) : null;
+    const routing = routed ? routeSkills(routed.filmKind, verifySkillLockRelease(record.lock, this.environment.snapshotRoot), directorRoutingConditions(routed)) : undefined;
+    const activation = activateSkills(record.lock, { ...this.environment, requestId: actor.requestId, contextDigest: digest(snapshot),
+      ...(options.selectedSkillIds ? { selectedSkillIds: options.selectedSkillIds } : {}), ...(routing ? { routing } : {}),
       ...(options.stageBindings ? { stageBindings: options.stageBindings } : {}) });
     return this.service.store.transaction(() => {
       this.service.assertActor(projectId, actor);
@@ -92,13 +107,14 @@ export class DirectorContextService {
       invariant(priorLock?.projectId === projectId && priorLock.requestId === actor.requestId && priorLock.lockId === record.id, "CAPABILITY_MISMATCH", "A director epoch cannot switch its skill lock");
       const binding = { projectId, requestId: actor.requestId, epochId: actor.epochId };
       this.service.store.insert("director_context", activation.contextSnapshotId, projectId, { id: activation.contextSnapshotId, ...binding, snapshot, contextDigest: activation.contextDigest });
-      this.service.store.insert("skill_activation", activation.activationId, projectId, { id: activation.activationId, ...binding, activation });
+      this.service.store.insert("skill_activation", activation.activationId, projectId, { id: activation.activationId, ...binding, activation, snapshotRoot: this.environment.snapshotRoot });
       this.service.store.appendEvent(projectId, "director.context_captured", { requestId: actor.requestId, epochId: actor.epochId, contextSnapshotId: activation.contextSnapshotId, activationId: activation.activationId, lockId: record.id });
       return { snapshot, activation };
     });
   }
 
-  readSkill(projectId: string, actor: ActorContext, activationId: string, selection: { skillId: string; path: string }) {
+  /** via "read_guidance" is the Director's own on-demand read: bounded per activation and recorded like an injection. */
+  readSkill(projectId: string, actor: ActorContext, activationId: string, selection: { skillId: string; path: string }, options: { via?: SkillReadVia } = {}) {
     this.service.recovery.assertWritable(projectId, actor.requestId);
     invariant(actor.kind === "director", "ACTOR_DENIED", "Skill reads must retain their director epoch");
     this.service.assertActor(projectId, actor);
@@ -107,11 +123,21 @@ export class DirectorContextService {
       "SCOPE_DENIED", "Skill activation does not belong to this request and epoch");
     const lock = this.service.store.get<LockRecord>("director_skill_lock", record.activation.lockId);
     invariant(lock?.projectId === projectId, "SCOPE_DENIED", "Skill lock is absent");
-    const read = readActivatedSkillFile(lock.lock, record.activation, this.environment, selection);
+    const guidance = options.via === "read_guidance";
+    const used = () => this.service.store.db.prepare("SELECT count(*) AS count, coalesce(sum(json_extract(body,'$.bytes')),0) AS bytes FROM entities WHERE kind='skill_read' AND project_id=? AND json_extract(body,'$.epochId')=? AND json_extract(body,'$.evidence.activationId')=? AND json_extract(body,'$.via')='read_guidance'")
+      .get(projectId, actor.epochId, activationId) as { count: number; bytes: number };
+    const limit = (bytes: number) => { const prior = used();
+      invariant(prior.count < SKILL_LIMITS.guidanceReadsPerActivation && prior.bytes + bytes <= SKILL_LIMITS.guidanceReadBytes, "GUIDANCE_READ_LIMIT",
+        `This conversation already read ${prior.count} guidance files; at most ${SKILL_LIMITS.guidanceReadsPerActivation} files and ${SKILL_LIMITS.guidanceReadBytes} bytes per conversation. Continue with what you have read.`); };
+    if (guidance) limit(0);
+    const read = readActivatedSkillFile(lock.lock, record.activation, this.environment, selection, options.via ? { via: options.via } : {});
+    const bytes = Buffer.byteLength(read.content);
     return this.service.store.transaction(() => {
       this.service.assertActor(projectId, actor);
       invariant(canonical(this.service.store.get<ActivationRecord>("skill_activation", activationId)?.activation) === canonical(record.activation), "CAPABILITY_MISMATCH", "Skill activation changed during read");
-      this.service.store.insert("skill_read", read.evidence.readId, projectId, { id: read.evidence.readId, projectId, requestId: actor.requestId, epochId: actor.epochId, evidence: read.evidence });
+      if (guidance) limit(bytes);
+      this.service.store.insert("skill_read", read.evidence.readId, projectId, { id: read.evidence.readId, projectId, requestId: actor.requestId, epochId: actor.epochId, evidence: read.evidence,
+        ...(options.via ? { via: options.via, bytes } : {}) });
       return read;
     });
   }

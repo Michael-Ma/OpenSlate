@@ -8,7 +8,8 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { canonical, digest } from "@openslate/core";
 import { FakeProvider } from "@openslate/providers";
-import { verifySkillSnapshot } from "@openslate/director";
+import { verifySkillReleaseSnapshot, verifySkillSnapshot } from "@openslate/director";
+import { contractSevenRepository } from "./helpers/contract-seven-fixture.mjs";
 import { Store } from "../dist/persistence/store.js";
 import { CURRENT_SCHEMA_VERSION, MIGRATIONS } from "../dist/persistence/schema.js";
 import { createInstallationBackup, inspectInstallationBackup } from "../dist/persistence/installation-backup.js";
@@ -137,6 +138,18 @@ test("locked skills and request thumbnails copy exact bytes and reconstruct immu
     assert.equal(statSync(verified.immutableRoot).mode & 0o777, 0o555); assert.equal(statSync(verified.entryPath).mode & 0o777, 0o444);
   }
   assert.ok(result.manifest.files.some(file => file.path === thumbnailPath)); await inspectInstallationBackup({ directory: f.destination });
+});
+
+test("a release lock backs up every package and its release snapshot", async t => {
+  const f = fixture(t), root = join(f.source, "skill-snapshots"), checkout = contractSevenRepository(join(f.dir, "release-checkout"));
+  const { lock } = createDirectorSkillLock({ repositoryRoot: checkout, snapshotRoot: root }, "7.0.0");
+  assert.equal(lock.schemaVersion, 2);
+  f.store.insert("director_skill_lock", lock.id, f.project.id, { lock });
+  const result = await f.backup();
+  assert.ok(result.manifest.files.some(file => file.path === `skill-snapshots/${lock.release.releaseDigest}/release.json`));
+  assert.equal(verifySkillReleaseSnapshot(join(f.destination, "skill-snapshots"), lock.release.releaseDigest).release, "8.0.0");
+  for (const pin of lock.skills) assert.equal(verifySkillSnapshot(join(f.destination, "skill-snapshots"), pin.packageDigest).id, pin.id);
+  await inspectInstallationBackup({ directory: f.destination });
 });
 
 test("documents and all eight attachment picture slots retain their owned backup closure", async t => {

@@ -2,7 +2,7 @@ import { canonical, DomainError, invariant, toolHandlerId } from "@openslate/cor
 import type { ToolContractVersion } from "@openslate/core";
 import { verifySkillLock } from "@openslate/director";
 import type { SkillCapabilityLock } from "@openslate/director";
-import { createDirectorSkillLock, directorSkillEnvironment } from "./director-capabilities.js";
+import { createDirectorReleaseLock, createDirectorSkillLock, directorSkillEnvironment } from "./director-capabilities.js";
 import type { DirectorSkillConfiguration } from "./director-capabilities.js";
 
 interface ShippedGuidance {
@@ -34,8 +34,36 @@ export const SHIPPED_DIRECTOR_GUIDANCE: readonly ShippedGuidance[] = [
 for (const identity of SHIPPED_DIRECTOR_GUIDANCE) Object.freeze(identity);
 Object.freeze(SHIPPED_DIRECTOR_GUIDANCE);
 
-/** A version number alone does not identify the amended unreleased 6.0.0/V7 pair. */
-export function isCurrentShippedDirectorGuidance(lock: SkillCapabilityLock): boolean {
+/** A shipped multi-package release (schema 2 lock), keyed by its release digest instead of two package columns. */
+export interface ShippedReleaseGuidance {
+  toolContract: ToolContractVersion;
+  /** The release version, for example "8.0.0". */
+  guidanceVersion: string;
+  handlerDigest: string;
+  releaseDigest: string;
+}
+// Append a row when skills/v8 ships; the latest row becomes the fresh-turn upgrade target. Never replace a pin.
+export const SHIPPED_DIRECTOR_RELEASES: readonly ShippedReleaseGuidance[] = [];
+for (const identity of SHIPPED_DIRECTOR_RELEASES) Object.freeze(identity);
+Object.freeze(SHIPPED_DIRECTOR_RELEASES);
+
+const handlerMatches = (lock: SkillCapabilityLock, toolContract: ToolContractVersion, handlerDigest: string) =>
+  lock.bindings.some(binding => binding.kind === "handler" && binding.id === toolHandlerId(toolContract) && binding.digest === handlerDigest);
+const releaseRow = (lock: SkillCapabilityLock, row: ShippedReleaseGuidance) => lock.schemaVersion === 2 && lock.compatibility.toolContract === row.toolContract
+  && lock.release.version === row.guidanceVersion && lock.release.releaseDigest === row.releaseDigest && handlerMatches(lock, row.toolContract, row.handlerDigest);
+/** Whether a saved lock is one of the shipped releases. */
+export function isShippedDirectorRelease(lock: SkillCapabilityLock, releases: readonly ShippedReleaseGuidance[] = SHIPPED_DIRECTOR_RELEASES): boolean {
+  return releases.some(row => releaseRow(lock, row));
+}
+/** The contract new and upgraded conversations use: the latest shipped release, else the latest 6.0.0 identity. */
+export function currentShippedToolContract(releases: readonly ShippedReleaseGuidance[] = SHIPPED_DIRECTOR_RELEASES): ToolContractVersion {
+  return releases.at(-1)?.toolContract ?? "6.0.0";
+}
+
+/** A version number alone does not identify the amended unreleased 6.0.0/V7 pair, or a release. */
+export function isCurrentShippedDirectorGuidance(lock: SkillCapabilityLock, releases: readonly ShippedReleaseGuidance[] = SHIPPED_DIRECTOR_RELEASES): boolean {
+  const release = releases.at(-1);
+  if (release) return releaseRow(lock, release);
   const current = SHIPPED_DIRECTOR_GUIDANCE.filter(row => row.toolContract === "6.0.0").at(-1)!;
   return lock.compatibility.toolContract === current.toolContract && lock.skills.length === 2
     && lock.skills.some(skill => skill.id === "plan-authoring" && skill.version === current.guidanceVersion && skill.packageDigest === current.planAuthoringDigest)
@@ -44,11 +72,13 @@ export function isCurrentShippedDirectorGuidance(lock: SkillCapabilityLock): boo
 }
 
 /** Validate current source bytes before publishing any package into native discovery. */
-export function createCurrentShippedDirectorSkillLock(configuration: DirectorSkillConfiguration) {
+export function createCurrentShippedDirectorSkillLock(configuration: DirectorSkillConfiguration, releases: readonly ShippedReleaseGuidance[] = SHIPPED_DIRECTOR_RELEASES) {
   try {
+    const release = releases.at(-1);
     const pin = SHIPPED_DIRECTOR_GUIDANCE.filter(row => row.toolContract === "6.0.0").at(-1)!;
-    const current = createDirectorSkillLock(configuration, "6.0.0", "7", { production: pin.productionDigest, "plan-authoring": pin.planAuthoringDigest });
-    verifyShippedDirectorGuidance(current.lock, configuration);
+    const current = release ? createDirectorReleaseLock(configuration, release.toolContract, release.guidanceVersion.split(".")[0]!, release.releaseDigest)
+      : createDirectorSkillLock(configuration, "6.0.0", "7", { production: pin.productionDigest, "plan-authoring": pin.planAuthoringDigest });
+    verifyShippedDirectorGuidance(current.lock, configuration, releases);
     return current;
   } catch (error) {
     if (error instanceof DomainError && error.code === "SKILL_SNAPSHOT_INVALID") {
@@ -60,8 +90,8 @@ export function createCurrentShippedDirectorSkillLock(configuration: DirectorSki
 }
 
 /** Verifies a released lock using shipped pins and saved snapshots, never predecessor checkout bytes. */
-export function verifyShippedDirectorGuidance(lock: SkillCapabilityLock, configuration: DirectorSkillConfiguration): void {
-  const pin = SHIPPED_DIRECTOR_GUIDANCE.find(row => row.toolContract === lock.compatibility.toolContract
+export function verifyShippedDirectorGuidance(lock: SkillCapabilityLock, configuration: DirectorSkillConfiguration, releases: readonly ShippedReleaseGuidance[] = SHIPPED_DIRECTOR_RELEASES): void {
+  const pin = lock.schemaVersion === 2 ? releases.find(row => releaseRow(lock, row)) : SHIPPED_DIRECTOR_GUIDANCE.find(row => row.toolContract === lock.compatibility.toolContract
     && lock.skills.length === 2
     && lock.skills.some(skill => skill.id === "plan-authoring" && skill.version === row.guidanceVersion && skill.packageDigest === row.planAuthoringDigest)
     && lock.skills.some(skill => skill.id === "production" && skill.version === row.guidanceVersion && skill.packageDigest === row.productionDigest)
@@ -70,7 +100,8 @@ export function verifyShippedDirectorGuidance(lock: SkillCapabilityLock, configu
   const current = directorSkillEnvironment(configuration, pin.toolContract);
   const environment = { ...current, bindings: current.bindings!.map(binding => binding.kind === "handler" ? { ...binding, digest: pin.handlerDigest } : binding) };
   const skills = verifySkillLock(lock, environment);
-  const production = skills.find(skill => skill.id === "production")!;
+  const production = skills.find(skill => skill.id === "production");
+  invariant(production, "DIRECTOR_GUIDANCE_UNSUPPORTED", "This film's Director guidance does not match any version this OpenSlate ships.");
   const prompts = production.files.flatMap(file => {
     const stage = /^references\/stages\/([a-z_]+)\.md$/.exec(file.path)?.[1];
     return stage ? [{ id: `production/${stage}@1`, skillId: "production", path: file.path, sha256: file.sha256 }] : [];

@@ -20,7 +20,7 @@ import { DirectorToolSettings } from "./director-tools-upgrade.js";
 import type { DirectorToolsUpgrade } from "./director-tools-upgrade.js";
 import type { ProductionService } from "./service.js";
 import { createDirectorSkillLock } from "./director-capabilities.js";
-import { createCurrentShippedDirectorSkillLock } from "./director-shipped-guidance.js";
+import { createCurrentShippedDirectorSkillLock, currentShippedToolContract } from "./director-shipped-guidance.js";
 import type { SkillCapabilityLock } from "@openslate/director";
 import { snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
 import { readCodexStartupTimeout, readDirectorRunTimeout } from "./director-run-config.js";
@@ -274,7 +274,8 @@ export class LocalDirectorController {
         snapshotRoot: selection.mode === "native" ? join(this.config.dataDirectory, "native", projectId, "workspace", ".agents", "skills") : join(this.config.dataDirectory, "skill-snapshots"),
         runtimeId: selection.mode === "native" ? "codex-app-server" : "fake-workflow-v1" };
       const replacement = changedMode && oldLock ? (oldLock.lock.compatibility.toolContract === "6.0.0"
-        ? createCurrentShippedDirectorSkillLock(replacementConfiguration) : createDirectorSkillLock(replacementConfiguration, oldLock.lock.compatibility.toolContract as ToolContractVersion)).lock : null;
+        ? createCurrentShippedDirectorSkillLock(replacementConfiguration, []) : oldLock.lock.compatibility.toolContract === currentShippedToolContract()
+          ? createCurrentShippedDirectorSkillLock(replacementConfiguration) : createDirectorSkillLock(replacementConfiguration, oldLock.lock.compatibility.toolContract as ToolContractVersion)).lock : null;
       store.transaction(() => {
         this.service.recovery.assertWritable(projectId);
         store.command(scope, key, requestDigest, () => {

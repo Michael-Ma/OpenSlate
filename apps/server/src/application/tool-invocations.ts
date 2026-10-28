@@ -8,7 +8,8 @@ import type { EnqueueSceneVoice } from "../scene-generation.js";
 import { assertDirectorProposalDecisionAuthority, decideProposal, proposeChange } from "./director-proposals.js";
 import type { ProposalPatch } from "@openslate/core";
 import { recordNotes, type NoteInput } from "./director-notes.js";
-import { SHIPPED_DIRECTOR_GUIDANCE } from "./director-shipped-guidance.js";
+import { isShippedDirectorRelease, SHIPPED_DIRECTOR_GUIDANCE } from "./director-shipped-guidance.js";
+import { readGuidance, type ReadGuidanceInput } from "./director-guidance-reads.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { canonical, digest, DomainError, invariant, parseToolArguments, toolCatalog, toolHandlerId } from "@openslate/core";
 import type { ActorContext, JsonValue, ToolName, ToolContractVersion, ReviewNotesFailure } from "@openslate/core";
@@ -174,6 +175,8 @@ export class ToolInvocationService {
       if (record?.projectId !== projectId || record.lock.id !== call.skillLockId) return false;
       const { lockDigest, ...body } = record.lock;
       const handlers = record.lock.bindings.filter(handler => handler.kind === 'handler');
+      if (record.lock.schemaVersion === 2) return digest(body) === lockDigest && record.lock.compatibility.toolContract === call.toolContractVersion
+        && handlers.length === 1 && handlers[0]!.digest === call.catalogDigest && isShippedDirectorRelease(record.lock);
       return digest(body) === lockDigest && record.lock.compatibility.toolContract === call.toolContractVersion
         && SHIPPED_DIRECTOR_GUIDANCE.some(pin => pin.toolContract === call.toolContractVersion && pin.handlerDigest === call.catalogDigest
           && record.lock.skills.length === 2
@@ -195,7 +198,7 @@ export class ToolInvocationService {
     invariant(/^[A-Za-z0-9_-]{1,160}$/.test(callId), "VALIDATION_ERROR", "Invalid tool call identity");
     if (tool === "make_keyframes") assertDirectorGenerationAuthority(this.service, projectId, actor);
     if (tool === 'accept_proposal' || tool === 'reject_proposal') assertDirectorProposalDecisionAuthority(this.service, projectId, actor);
-    invariant(!this.service.store.get("keyframe_review_request", actor.requestId) || ["read_context", "record_notes", "propose_change", "read_skill"].includes(tool),
+    invariant(!this.service.store.get("keyframe_review_request", actor.requestId) || ["read_context", "record_notes", "propose_change", "read_skill", "read_guidance"].includes(tool),
       "ACTOR_DENIED", "Keyframe reviews may only read context, record notes and propose changes");
     const selected = this.catalog(projectId, actor);
     const id = digest({ projectId, epochId: actor.epochId, callId });
@@ -262,7 +265,7 @@ export class ToolInvocationService {
     let value: unknown;
     try {
       stopped();
-      if (store.get("plan_import", actor.requestId)) invariant(["read_context", "prepare_change", "inspect_artifact", "control_execution"].includes(parsed.name),
+      if (store.get("plan_import", actor.requestId)) invariant(["read_context", "prepare_change", "inspect_artifact", "control_execution", "read_guidance"].includes(parsed.name),
         "IMPORT_REVIEW_REQUIRED", "Interpret supplied material with prepare_change, then wait for human confirmation in Film plan. Other mutations and generation proposals are unavailable for this request.");
       switch (parsed.name) {
         case "make_keyframes": value = await makeDirectorKeyframes(this.service, projectId, actor, id, parsed.arguments,
@@ -330,6 +333,8 @@ export class ToolInvocationService {
           value = await analyzeMusic(store, this.#music, projectId, parsed.arguments.audioId as string, signal);
           break;
         }
+        // Free and read-only in every turn, like read_context: it reads this conversation's own locked guidance.
+        case "read_guidance": value = readGuidance(this.service, projectId, actor, parsed.arguments as unknown as ReadGuidanceInput); break;
         case "make_character_sheets": value = makeCharacterSheets({ service: this.service, projectId, actor, invocationId: id, ...(signal ? { signal } : {}) },
           parsed.arguments as unknown as { characterIds: string[]; regenerate?: boolean }); break;
         case "prepare_recording_transcription": {

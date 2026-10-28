@@ -8,6 +8,16 @@ The two production packages are `production` and `plan-authoring`. Each declares
 
 Legacy `skills/`, `skills/v2`, `skills/v3` and `skills/v4` are runtime compatibility inputs. Do not edit/delete old versions during prose cleanup. Current `skills/v5` has package version `5.0.0` and retains the `4.0.0` JSON tool contract. It describes configured-provider scene generation and requested audio without usage-approval steps. Package-content successors preserve historical digests instead of rewriting frozen snapshots.
 
+## Guidance releases (v8 and later)
+
+From guidance v8 a project locks a **release**, not two packages. `skills/v8/release.json` pins every package of the release with its digest; each package has a schema 2 manifest with a `role` (`core`, `type`, `craft`, `format`), `routes` (type and format packages only), `requires` and `optional` (`{id, when}` with a closed `when` enum). Schema 1 manifests keep exactly their six fields, so V1–V7 bytes and digests never change.
+
+- `loadSkillRelease` validates pins and digests, one contract, the shared major version (≥ 8), a closed acyclic dependency graph (required chains at most two deep; craft requires craft; type requires craft or format; core requires nothing), and route coverage (the release `routes` table names one owner or `fallback` for every application film kind, and agrees with every manifest). It then snapshots each package and the release itself (`<snapshotRoot>/<releaseDigest>/release.json`).
+- A schema 2 lock adds `release: {version, releaseDigest}` and pins every release package. Schema 1 locks verify exactly as before.
+- `routeSkills(filmKind, release, conditions)` is pure: core, then the type package from `filmKindRouteKey`, format packages, or the release fallback, then the `requires` closure and optional packages whose condition holds. A schema 2 activation records the decision (inputs, digest, selected, reasons) and is recomputed from its inputs on activation.
+- Only the routed packages' `SKILL.md` and the release's `inject` core references go into the Director input; the context lists every locked package with its files. Everything else is read with `read_guidance {package, path?}` (7.0.0, free, read-only, any turn), which reads only packages in the conversation's own lock and records a `skill_read` (`via: "read_guidance"`), at most 24 reads and 120 KiB per conversation. Codex enables only the routed entries.
+- Fresh native turns upgrade any shipped identity to the latest row of `SHIPPED_DIRECTOR_RELEASES` once one is appended; until then they stay on the current 6.0.0 identity. Word budgets in `release.json` are a CI check (`skillReleaseBudget`), not a runtime one.
+
 ## Model-facing tools
 
 | Tool | Responsibility |

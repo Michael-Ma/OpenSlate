@@ -558,6 +558,9 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         fail(Array.isArray(value.lock?.skills), "Invalid saved skill lock");
         for (const skill of value.lock.skills) fail(files.has(`skill-snapshots/${skill.packageDigest}/SKILL.md`)
           || files.has(`native/${value.projectId}/workspace/.agents/skills/${skill.packageDigest}/SKILL.md`), "A locked skill snapshot is missing");
+        if (value.lock.schemaVersion === 2) { const release = value.lock.release?.releaseDigest;
+          fail(typeof release === "string" && (files.has(`skill-snapshots/${release}/release.json`)
+            || files.has(`native/${value.projectId}/workspace/.agents/skills/${release}/release.json`)), "A locked guidance release snapshot is missing"); }
       }
     }
     // Current canonical references must retain their owned artifact identity too.

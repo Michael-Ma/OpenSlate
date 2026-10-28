@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, opendir, realpath, rename, rm, statfs } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonical, DomainError, invariant } from "@openslate/core";
-import { verifySkillSnapshot } from "@openslate/director";
+import { verifyPublishedSkillSnapshot } from "@openslate/director";
 import { acquireInstallationOwner } from "./installation-owner.js";
 import { snapshotDatabase, verifyDatabase } from "./database-snapshot.js";
 import { verifySchema } from "./schema.js";
@@ -162,7 +162,8 @@ async function skillDirectories(root: string, files: readonly BackupFile[], make
     for (let path = dirname(file.path); path === pkg || path.startsWith(`${pkg}/`); path = dirname(path)) dirs.add(path);
   }
   if (makeReadOnly) for (const path of [...dirs].sort().reverse()) await chmod(join(root, path), 0o555);
-  for (const pkg of packages) verifySkillSnapshot(join(root, dirname(pkg)), pkg.split("/").at(-1)!);
+  // Package snapshots and guidance release snapshots share the content-addressed snapshot directories.
+  for (const pkg of packages) verifyPublishedSkillSnapshot(join(root, dirname(pkg)), pkg.split("/").at(-1)!);
 }
 async function flushTree(root: string, files: readonly BackupFile[]): Promise<void> {
   const dirs = new Set<string>([root]);
