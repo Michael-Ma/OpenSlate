@@ -242,20 +242,22 @@ function StopButton() {
 }
 
 const stateKey = (shot: ShotProgress) => (shot.state === "failed" && shot.charged ? "failed_charged" : shot.state);
-const MARK: Record<ShotProgress["state"], string> = { done: "✓", making: "", queued: "", stopped: "", failed: "!", no_answer: "" };
+const MARK: Record<ShotProgress["state"], string> = { done: "✓", making: "", queued: "", waiting: "", stopped: "", given_up: "", failed: "!", no_answer: "" };
 
 /**
- * The keyframes a Director turn started, live (failure-display item 1): a head with the count and the price, one
- * segment and one chip per shot (a chip opens its shot), and one next step when a shot needs the person.
+ * The keyframes and voice lines a Director turn started, live (failure-display item 1): a head with the count and the
+ * price, one segment and one chip per shot (a chip opens its shot), and one next step when a shot needs the person.
+ * The head counts the keyframes, or the voice lines when the turn made only those; a chip names a voice line when that
+ * is what its state is about.
  */
 function GenerationProgressNote({ progress }: { progress: GenerationProgress }) {
   const { t, tm } = useI18n();
   const open = useOpenTarget();
-  const total = progress.shots.length;
-  const all = progress.done === total;
+  const total = progress.total;
+  const all = progress.allDone;
   const values = { count: progress.sceneCount, scenes: progress.scenes, done: progress.done, total };
-  const head = all ? msg(progress.sceneCount ? "director.progress.all_done" : "director.progress.all_done_shots", values)
-    : msg(progress.sceneCount ? "director.progress.head" : "director.progress.head_shots", values);
+  const voices = progress.media === "voices" ? "_voices" : "";
+  const head = msg(`director.progress.${all ? "all_done" : "head"}${voices}${progress.sceneCount ? "" : "_shots"}` as const, values);
   const scene = progress.sceneId && progress.sceneCount === 1 ? progress.scenes : null;
   return (
     <div className="gen-live" role="status" data-generation={progress.running ? "running" : all ? "done" : "attention"}>
@@ -269,7 +271,8 @@ function GenerationProgressNote({ progress }: { progress: GenerationProgress }) 
       {!all && (
         <div className="gl-shots">
           {progress.shots.map((shot) => {
-            const state = t(`director.progress.state.${stateKey(shot)}` as const);
+            const plain = t(`director.progress.state.${stateKey(shot)}` as const);
+            const state = shot.part === "voice" && progress.media === "keyframes" && shot.state !== "done" ? t("director.progress.state.voice", { state: plain }) : plain;
             return (
               <button type="button" key={shot.shotId} className={`shot-chip${shot.state === "failed" || shot.state === "no_answer" ? " needs" : ""}`}
                 data-act="progress-shot" data-shot={shot.shotId} data-state={shot.state} aria-label={t("director.progress.chip", { shot: shot.label, state })}

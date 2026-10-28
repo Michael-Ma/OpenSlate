@@ -1,29 +1,47 @@
-import type { DirectorGenerationBlock, DirectorGenerationEffect, GenerationOverview, MediaSlot, ShotOverview } from "@openslate/core/public";
+import type { DirectorGenerationBlock, DirectorGenerationEffect, GenerationOverview, MediaSlot, ShotNarration, ShotOverview } from "@openslate/core/public";
 import type { Locale } from "../../shared/locale-preference.ts";
 import { formatList } from "../i18n/typeset.ts";
+import { queuedToRun } from "./media-state.ts";
 import { priceMsg } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
 const intlLocale = (locale: Locale) => (locale === "zh-CN" ? "zh-CN" : "en-US");
 
 /**
- * Live progress of the keyframes a Director turn started, from the generation overview (design study
- * docs/ai/prototypes/failure-display, item 1). A regenerate keeps the take in use, so a shot's state is its
- * replacement's while there is one. Failures with automatic retries left are still being made.
+ * Live progress of the keyframes and voice lines a Director turn started, from the generation overview (design study
+ * docs/ai/prototypes/failure-display, item 1). A regenerate keeps the take in use, so a keyframe's state is its
+ * replacement's while there is one. Failures with automatic retries left are still being made. Only a queue that will
+ * run is "queued"; one waiting on the person or the studio is "waiting", so Stop goes away once nothing is on its way.
  */
-export type ShotProgressState = "done" | "making" | "queued" | "stopped" | "failed" | "no_answer";
+export type ShotProgressState = "done" | "making" | "queued" | "waiting" | "stopped" | "given_up" | "failed" | "no_answer";
 
-export interface ShotProgress {
-  shotId: string;
-  label: string;
+export interface PartProgress {
   state: ShotProgressState;
   /** failed: counted as spent (the reservation was not released). */
   charged: boolean;
 }
 
+export interface ShotProgress {
+  shotId: string;
+  label: string;
+  /** The part that needs the most attention decides the shot's state. */
+  state: ShotProgressState;
+  charged: boolean;
+  part: "keyframe" | "voice";
+  /** null when this turn did not make the shot's keyframe (a voice line only). */
+  keyframe: PartProgress | null;
+  /** null when no voice line of this shot is tracked. */
+  voice: PartProgress | null;
+}
+
 export interface GenerationProgress {
+  /** What the head counts: the keyframes, or the voice lines when the turn made only those. */
+  media: "keyframes" | "voices";
   shots: ShotProgress[];
   done: number;
+  total: number;
+  /** Every part of every shot is back. */
+  allDone: boolean;
   /** Scene ordinals as a list ("3", "2 and 3"), for the header. */
   scenes: string;
   sceneCount: number;
@@ -36,49 +54,85 @@ export interface GenerationProgress {
   next: { shotId: string; label: string; text: Msg } | null;
 }
 
-function slotProgress(slot: MediaSlot): { state: ShotProgressState; charged: boolean } {
+function slotProgress(slot: MediaSlot): PartProgress {
   const live = slot.replacement ?? slot;
   const charged = !!live.failure?.charged;
   switch (live.state) {
     case "ready": return { state: "done", charged };
     case "running": return { state: "making", charged };
-    case "queued": return { state: live.waiting?.code === "stopped" ? "stopped" : "queued", charged };
+    case "queued": return { state: live.waiting?.code === "stopped" ? "stopped" : queuedToRun(live) ? "queued" : "waiting", charged };
     case "no_answer": return { state: "no_answer", charged };
     case "failed": return { state: (live.failure?.autoRetriesLeft ?? 0) > 0 ? "making" : "failed", charged };
     // none, outdated, direction_required, choose_take: nothing of this request is on its way any more.
-    default: return { state: slot.state === "ready" ? "done" : "stopped", charged };
+    default: return { state: slot.state === "ready" ? "done" : slot.takenOff === "released" ? "given_up" : "stopped", charged };
   }
 }
 
-export function shotProgress(shot: ShotOverview): ShotProgress {
-  return { shotId: shot.shotId, label: shot.label, ...slotProgress(shot.keyframe) };
+/** A voice line still on its way or settled; a line without a voice (none, text only) is not tracked. */
+function narrationProgress(narration: ShotNarration): PartProgress | null {
+  const charged = !!narration.failure?.charged;
+  switch (narration.state) {
+    case "making": return { state: "making", charged };
+    case "ready": return { state: "done", charged };
+    case "no_answer": return { state: "no_answer", charged };
+    case "failed": return { state: (narration.failure?.autoRetriesLeft ?? 0) > 0 ? "making" : "failed", charged };
+    default: return null;
+  }
+}
+
+/** Most attention first: a failure, an unanswered job, work on its way, then how it ended. */
+const RANK: readonly ShotProgressState[] = ["failed", "no_answer", "making", "queued", "waiting", "given_up", "stopped", "done"];
+
+/** `keyframe`/`voice`: whether this turn made the shot's keyframe and voice line (both by default). */
+export function shotProgress(shot: ShotOverview, track: { keyframe: boolean; voice: boolean } = { keyframe: true, voice: true }): ShotProgress {
+  const keyframe = track.keyframe ? slotProgress(shot.keyframe) : null;
+  const voice = track.voice ? narrationProgress(shot.narration) : null;
+  const parts = [...(keyframe ? [{ part: "keyframe" as const, ...keyframe }] : []), ...(voice ? [{ part: "voice" as const, ...voice }] : [])];
+  const lead = parts.sort((a, b) => RANK.indexOf(a.state) - RANK.indexOf(b.state))[0] ?? { part: "keyframe" as const, state: "done" as const, charged: false };
+  return { shotId: shot.shotId, label: shot.label, state: lead.state, charged: lead.charged, part: lead.part, keyframe, voice };
 }
 
 function nextStep(shots: readonly ShotProgress[]): GenerationProgress["next"] {
-  const failed = shots.find((shot) => shot.state === "failed");
-  if (failed) return { shotId: failed.shotId, label: failed.label, text: msg("director.progress.next.failed", { shot: failed.label }) };
-  const waiting = shots.find((shot) => shot.state === "no_answer");
-  if (waiting) return { shotId: waiting.shotId, label: waiting.label, text: msg("director.progress.next.no_answer", { shot: waiting.label }) };
+  for (const state of ["failed", "no_answer"] as const) {
+    const shot = shots.find((s) => s.state === state);
+    if (shot) return { shotId: shot.shotId, label: shot.label, text: msg(`director.progress.next.${shot.part === "voice" ? "voice_" : ""}${state}`, { shot: shot.label }) };
+  }
   return null;
 }
 
-/** null for a transcription, or when the overview does not know the shots (yet). */
+/**
+ * null for a transcription, or when the overview does not know the shots (yet). The effect lists every target shot,
+ * voice-only ones included, while `keyframes` counts pictures only: a shot's keyframe was made by this turn unless
+ * it was already back, so the head counts the keyframes still away against `keyframes`.
+ */
 export function generationProgress(effect: DirectorGenerationEffect, overview: GenerationOverview | null, locale: Locale): GenerationProgress | null {
-  if (effect.kind !== "keyframes" || !overview || effect.keyframes === 0) return null;
-  const shots = effect.shotIds.flatMap((id) => (overview.shots[id] ? [shotProgress(overview.shots[id]!)] : []));
+  if (effect.kind !== "keyframes" || !overview || (effect.keyframes === 0 && effect.voiceLines === 0)) return null;
+  const track = { keyframe: effect.keyframes > 0, voice: effect.voiceLines > 0 };
+  const shots = effect.shotIds.flatMap((id) => (overview.shots[id] ? [shotProgress(overview.shots[id]!, track)] : []));
   if (!shots.length) return null;
   const ordinals = effect.sceneIds.flatMap((id) => { const scene = overview.scenes.find((s) => s.sceneId === id); return scene ? [String(scene.ordinal)] : []; });
+  const media = effect.keyframes > 0 ? "keyframes" : "voices";
+  const total = media === "keyframes" ? effect.keyframes : effect.voiceLines;
+  // Every target of a voice-only turn is a voice line, so those are counted as they come back.
+  const done = media === "keyframes" ? total - Math.min(total, shots.filter((shot) => shot.keyframe && shot.keyframe.state !== "done").length)
+    : Math.min(total, shots.filter((shot) => shot.voice?.state === "done").length);
+  const onItsWay = (part: PartProgress | null) => part?.state === "making" || part?.state === "queued";
   return {
+    media,
     shots,
-    done: shots.filter((shot) => shot.state === "done").length,
+    done,
+    total,
+    allDone: shots.every((shot) => shot.state === "done"),
     scenes: formatList(ordinals, intlLocale(locale)),
     sceneCount: ordinals.length,
     sceneId: effect.sceneIds.length === 1 ? effect.sceneIds[0]! : null,
     price: priceMsg(effect.quote, locale),
-    running: shots.some((shot) => shot.state === "making" || shot.state === "queued"),
+    // A voice line still being made keeps Stop next to a failed keyframe of the same shot.
+    running: shots.some((shot) => onItsWay(shot.keyframe) || onItsWay(shot.voice)),
     next: nextStep(shots),
   };
 }
+
 
 /**
  * A refused part of a Director request (item 2), with what unblocks it. Current while its jobs are still in the way;

@@ -229,7 +229,7 @@ button.atchip:hover{background:var(--track)}
 .shot-chip .m[data-state="making"]{border:1.5px solid var(--text-2);border-top-color:transparent;animation:gl-spin 1s linear infinite}
 .shot-chip .m[data-state="failed"]{background:var(--select);color:var(--select-ink)}
 .shot-chip .m[data-state="no_answer"]{border:1.5px dashed var(--text-2)}
-.shot-chip .m[data-state="queued"],.shot-chip .m[data-state="stopped"]{border:1.5px solid var(--track)}
+.shot-chip .m[data-state="queued"],.shot-chip .m[data-state="waiting"],.shot-chip .m[data-state="stopped"],.shot-chip .m[data-state="given_up"]{border:1.5px solid var(--track)}
 @keyframes gl-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.gl-bar i[data-state="making"],.shot-chip .m[data-state="making"]{animation:none}}
 .gl-next{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;padding-top:9px;border-top:1px solid var(--hairline);color:var(--text)}
