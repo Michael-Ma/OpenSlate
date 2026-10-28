@@ -10,7 +10,7 @@ const V3_TOOL_NAMES = Object.freeze([...V2_TOOL_NAMES, "prepare_recording_transc
 const V5_TOOL_NAMES = Object.freeze([...V3_TOOL_NAMES, "record_notes", "propose_change"] as const);
 export const V6_TOOL_NAMES = Object.freeze([...V5_TOOL_NAMES, "make_keyframes", "accept_proposal", "reject_proposal"] as const);
 export const V7_TOOL_NAMES = Object.freeze([...V6_TOOL_NAMES, "set_soundtrack", "move_shot", "move_scene", "start_export", "undo_edit",
-  "delete_shots", "delete_scene", "use_take", "analyze_music", "make_character_sheets"] as const);
+  "delete_shots", "delete_scene", "use_take", "analyze_music", "make_character_sheets", "read_guidance"] as const);
 /** Every tool name any catalog has advertised. */
 export const ALL_TOOL_NAMES = V7_TOOL_NAMES;
 export type ToolName = typeof ALL_TOOL_NAMES[number];
@@ -205,6 +205,10 @@ const v7Descriptors = freeze(v6Descriptors.map(tool => tool.name === "read_conte
   descriptor("use_take", "Offer a confirmation card to use an earlier keyframe take of a shot (artifactId from its take history). The shot's clip will need confirming and generating again. Nothing changes until the person clicks it.", object({ shotId: id, artifactId: id }, ["shotId", "artifactId"]), false),
   descriptor("analyze_music", "Read an owned recording's tempo, beats, sections (labels when known), vocal ranges and timed lyrics when known, and suggested shot lengths per section. Free and read-only; it never changes the film.", object({ audioId: id }, ["audioId"]), true),
   descriptor("make_character_sheets", "Start character sheets for planned characters the person asked for in this fresh editing conversation. regenerate: true makes a new take for characters that already have one. Approving a sheet stays the person's choice.", object({ characterIds: ids(32), regenerate: { type: "boolean" } }, ["characterIds"]), false),
+  descriptor("read_guidance", "Read one file of this conversation's locked Director guidance: package is a guidance package id from the guidance list, path a file it declares (SKILL.md when omitted). Returns the exact locked text with its sha256. Free and read-only in every turn; it never changes the film.", object({
+    package: { type: "string", pattern: "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", maxLength: 64 },
+    path: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._/-]*\\.(?:md|json)$", maxLength: 192 },
+  }, ["package"]), true),
 ));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
