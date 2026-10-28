@@ -36,6 +36,7 @@ import { ExternalAllowanceService } from "./external-allowances.js";
 import type { ProductionServiceOptions } from "./service.js";
 import type { MediaExecutionConfiguration } from "./media-execution-config.js";
 import { readCodexStartupTimeout } from "./director-run-config.js";
+import { characterSheetJobNode } from "../execution/character-sheet-execution.js";
 
 export interface MediaExecutionRuntimeOptions {
   store: Store; fakeProvider: FakeProvider; dataDirectory: string; configuration: Readonly<MediaExecutionConfiguration>;
@@ -162,7 +163,7 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
         const binding = store.get<NodeBinding>("node_binding", input.nodeId);
         invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId && binding.node.kind === "image",
           "EXTERNAL_SELECTION_STALE", "Codex preflight requires the exact current image candidate");
-        invariant(typeof binding.node.shotId === "string", "CODEX_IMAGE_PREFLIGHT_INVALID", "Codex image version 1 supports shot keyframes only");
+        invariant(typeof binding.node.shotId === "string" || characterSheetJobNode(store, binding), "CODEX_IMAGE_PREFLIGHT_INVALID", "Codex image version 1 supports shot keyframes and recorded character sheets only");
         assertCodexImageOperationOptions(input.profile, binding.node.args);
       }
       if (input.profile.adapter === "openai-speech" || input.profile.adapter === "openai-transcription") {

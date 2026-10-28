@@ -27,7 +27,9 @@ export function recordCharacterSheetTake(store: Store, input: Omit<CharacterShee
     const project = store.getProject(input.projectId);
     invariant((project.characters ?? []).some(character => character.id === input.characterId), "SCOPE_DENIED", "Character sheet names an unknown character");
     const record = store.get<ArtifactRecord>("artifact", input.artifact.artifactId);
-    invariant(record && record.projectId === input.projectId && input.artifact.kind === "image" && record.mimeType === "image/png"
+    // The labelled fixture model renders SVG stand-ins; only a generated fixture take may use one. Codex refuses fixture references.
+    const fixtureTake = record?.fixture === true && record.mimeType === "image/svg+xml" && input.attemptId !== null && record.attemptId === input.attemptId;
+    invariant(record && record.projectId === input.projectId && input.artifact.kind === "image" && (record.mimeType === "image/png" || fixtureTake)
       && canonical(record.artifact) === canonical(input.artifact), "CHARACTER_SHEET_INVALID", "A character sheet must be one exact PNG of this film");
     invariant(!store.get(CHARACTER_SHEET_TAKE_KIND, input.id), "CHARACTER_SHEET_INVALID", "This sheet take already exists");
     invariant(typeof input.prompt === "string" && input.prompt.trim().length > 0 && input.prompt.length <= 16000, "VALIDATION_ERROR", "A sheet take keeps its prompt");

@@ -8,6 +8,7 @@ import type { ArtifactRecord, Attempt, Candidate, Grant, NodeBinding } from "./e
 import { assertExternalAllowance, assertExternalAllowanceConsumption } from "./external-allowance-records.js";
 import type { AllowanceHumanRequest, ExternalAllowance, ExternalAllowanceConsumption } from "./external-allowance-records.js";
 import { assertCodexImageExecutionProfile, assertCodexImageExecutionMapping } from "./codex-image-receipts.js";
+import { assertCharacterSheetSelection, isCharacterSheetBinding } from "./character-sheet-execution.js";
 import type { CodexImageExecutionMapping } from "./codex-image-receipts.js";
 
 export interface CodexImageCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; [key: string]: unknown }
@@ -136,13 +137,19 @@ export function resolveCodexImageReferences(store: CodexImageAuthorityStore, att
 /** Current eligibility only. Historical result recovery does not reinterpret later edits/holds. */
 export function assertCodexImageCurrentSelection(store: CodexImageAuthorityStore, attempt: Attempt): void {
   const project = store.getProject(attempt.projectId), binding = store.get<NodeBinding>('node_binding', attempt.nodeId);
-  invariant(binding && binding.projectId === project.id && binding.state === 'active' && binding.planId === project.activePlanId
+  // A character sheet is the only image no shot owns. It lives outside the shot plan and must carry the exact sheet prompt.
+  const sheet = isCharacterSheetBinding(binding);
+  invariant(binding && binding.projectId === project.id && binding.state === 'active' && (sheet || binding.planId === project.activePlanId)
     && binding.candidateId === attempt.candidateId && binding.node.specDigest === attempt.specDigest && binding.node.kind === 'image'
     && canonical(binding.node.args) === canonical(attempt.request.args) && Object.keys(binding.outputs).length === 0,
   'CODEX_IMAGE_SELECTION_CHANGED', 'The admitted image selection is no longer current');
-  const node = binding.node, shot = project.shots.find(item => item.id === node.shotId);
-  invariant(shot && node.intentDigest === shotIntentDigest(shot, 'image') && shot.promptIntent.image === node.intentDigest
-    && node.args.prompt === shot.imagePrompt, 'CODEX_IMAGE_SELECTION_CHANGED', 'Current image prompt or references changed');
+  const node = binding.node;
+  if (sheet) assertCharacterSheetSelection(store, binding, 'CODEX_IMAGE_SELECTION_CHANGED');
+  else {
+    const shot = project.shots.find(item => item.id === node.shotId);
+    invariant(shot && node.intentDigest === shotIntentDigest(shot, 'image') && shot.promptIntent.image === node.intentDigest
+      && node.args.prompt === shot.imagePrompt, 'CODEX_IMAGE_SELECTION_CHANGED', 'Current image prompt or references changed');
+  }
   const inputs = node.inputs.map(input => {
     const upstream = input.source.kind === 'output' ? store.get<NodeBinding>('node_binding', input.source.nodeId) : undefined;
     invariant(!upstream || upstream.projectId === project.id && upstream.state === 'active' && upstream.planId === project.activePlanId,

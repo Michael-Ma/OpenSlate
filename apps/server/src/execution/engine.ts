@@ -34,6 +34,9 @@ import type { OwnedTranscriptionAttemptInput } from "../narration/owned-transcri
 import { assertPersonalVoiceCurrent } from '../narration/personal-voices.js';
 import { narrationSpeechHoldExemption, narrationSpeechShotScopes } from '../narration/narration-scope.js';
 import { automaticRetriesLeft, sceneConfirmationIdForCandidate } from "./retry-eligibility.js";
+import { assertCharacterSheetIntent, CHARACTER_SHEET_JOB_KIND, isCharacterSheetBinding } from "./character-sheet-execution.js";
+import type { CharacterSheetJob } from "./character-sheet-execution.js";
+import { recordCharacterSheetTake } from "../character-sheets.js";
 
 export interface Grant { id: string; projectId: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
 export interface Candidate { id: string; projectId: string; nodeId: string; grantId: string; origin: Grant["origin"] }
@@ -240,7 +243,8 @@ export class Engine {
         const binding: NodeBinding = { id: node.id, projectId, planId, node, candidateId, state: "active", outputs: reuse ? old.outputs : {}, ...(reuse && old.retainedTake ? { retainedTake: old.retainedTake } : {}), ...(old?.outdated && old.node.shotId === node.shotId && old.node.kind === node.kind && !(reuse && Object.keys(old.outputs).length) ? { outdated: old.outdated } : {}) };
         this.store.put("node_binding", node.id, projectId, binding); nodes.push(binding);
       }
-      for (const binding of previous.values()) if (!seen.has(binding.id)) this.store.put("node_binding", binding.id, projectId, { ...binding, state: "retired" });
+      // Character sheets are not part of any shot plan; a plan install neither owns nor retires them.
+      for (const binding of previous.values()) if (!seen.has(binding.id) && !isCharacterSheetBinding(binding)) this.store.put("node_binding", binding.id, projectId, { ...binding, state: "retired" });
       this.store.insert("plan", planId, projectId, { id: planId, projectId, compiled });
       this.store.appendEvent(projectId, "execution.plan_installed", { planId });
       return { planId, nodes };
@@ -494,7 +498,8 @@ export class Engine {
           && Object.keys(binding.outputs).length && !this.localBindingCurrent(binding))
           this.store.put("node_binding", binding.id, project.id, { ...binding, outputs: {} });
     });
-    const candidates = this.projects().flatMap(project => this.store.list<NodeBinding>("node_binding", project.id).filter(binding => binding.state === "active" && binding.planId === project.activePlanId && Object.keys(binding.outputs).length === 0));
+    const candidates = this.projects().flatMap(project => this.store.list<NodeBinding>("node_binding", project.id).filter(binding => binding.state === "active"
+      && (binding.planId === project.activePlanId || isCharacterSheetBinding(binding)) && Object.keys(binding.outputs).length === 0));
     const blocked: { nodeId: string; code: string }[] = []; let dispatched = 0; let reused = 0;
     const settled = await Promise.allSettled(candidates.map(async binding => {
       let attempt: Attempt;
@@ -889,7 +894,8 @@ export class Engine {
   }
   private currentBinding(projectId: string, nodeId: string): NodeBinding {
     const binding = this.store.get<NodeBinding>("node_binding", nodeId); const project = this.store.getProject(projectId);
-    invariant(binding?.projectId === projectId && binding.state === "active" && binding.planId === project.activePlanId, "STALE_BINDING", "Node no longer belongs to the active plan"); return binding;
+    invariant(binding?.projectId === projectId && binding.state === "active" && (binding.planId === project.activePlanId || isCharacterSheetBinding(binding)),
+      "STALE_BINDING", "Node no longer belongs to the active plan"); return binding;
   }
   /** Exact original operation and resolved inputs must match before Undo reattaches media. */
   outputsMatchOperation(binding: NodeBinding, outputs: NodeBinding["outputs"]): boolean {
@@ -939,6 +945,7 @@ export class Engine {
   }
   private checkIntent(project: ProjectRecord, node: PlanNode): void {
     if (node.kind !== "image" && node.kind !== "video") return;
+    if (node.characterId !== undefined) { assertCharacterSheetIntent(project, node); return; }
     if (node.shotId === null) return;
     const shot = project.shots.find(item => item.id === node.shotId);
     invariant(shot, "STALE_PROMPT_INTENT", "Shot no longer exists");
@@ -1329,9 +1336,15 @@ export class Engine {
         this.store.appendEvent(current.projectId, "attempt.ingestion_issue_resolved", { attemptId: current.id });
       }
       const binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
+      // A finished sheet is immutable take history even after Stop, a newer take or a character edit; approval is a later human step.
+      const sheetJob = this.store.get<CharacterSheetJob>(CHARACTER_SHEET_JOB_KIND, current.nodeId);
+      if (!current.released && sheetJob?.projectId === current.projectId && mapped.image) try {
+        recordCharacterSheetTake(this.store, { id: sheetJob.id, projectId: current.projectId, characterId: sheetJob.characterId,
+          artifact: mapped.image, prompt: String(current.request.args.prompt), attemptId: current.id });
+      } catch (error) { if (!(error instanceof DomainError)) throw error; }
       if (!current.released && binding && binding.projectId === current.projectId && binding.state === "active" && binding.candidateId === current.candidateId) {
         const project = this.store.getProject(current.projectId);
-        if (binding.planId === project.activePlanId) {
+        if (binding.planId === project.activePlanId || isCharacterSheetBinding(binding)) {
           try {
             this.checkIntent(project, binding.node);
             const speechInput = resolveNarrationSpeechNode(this.store, project, binding.node, binding.candidateId);

@@ -211,6 +211,11 @@ export interface PlanNode {
   specDigest: string;
   /** Host-authored source binding. Compilation alone does not establish ownership or generation authority. */
   applicationInput?: TranscriptionApplicationInput;
+  /**
+   * Character-sheet image owned by a planned character instead of a shot (`shotId` is null). Never produced by the
+   * planning compiler; only the application's character-sheet command creates such a node, outside the shot plan.
+   */
+  characterId?: Id;
 }
 
 export interface TranscriptionInputBinding {
