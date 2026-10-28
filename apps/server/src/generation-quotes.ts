@@ -32,6 +32,16 @@ export function unitQuote(lock: QuoteLock, kind: "video" | "speech"): PriceQuote
   return profile ? quoteUnits([profile]) : undefined;
 }
 
+/**
+ * Character sheets are image units on the pinned image profile, quoted like keyframes: Codex image is the
+ * subscription ($0, `subscription: "codex"`), a metered profile multiplies its unit cost, an unpriced one is unknown.
+ */
+export function characterSheetQuote(lock: QuoteLock, sheets: number): PriceQuote {
+  if (!Number.isSafeInteger(sheets) || sheets < 0 || sheets > 32) throw new RangeError("Quote between 0 and 32 character sheets");
+  const image = selectedProfile(lock, "image");
+  return quoteUnits(Array.from({ length: sheets }, () => image));
+}
+
 /** Flat host-configured estimates, taken exclusively from the project's pinned lock. */
 export function quote(lock: QuoteLock, rows: readonly QuoteRow[], kind: QuoteKind): PriceQuote {
   const units: (ProviderProfile | undefined)[] = [];

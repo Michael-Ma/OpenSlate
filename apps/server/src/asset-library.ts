@@ -8,6 +8,7 @@ import type { NarrationSpeechProposal } from "./narration/narration-speech-types
 import type { NarrationAudio } from "./narration/types.js";
 import { audioLibraryRole, type AudioLabel } from "./narration/audio-library-role.js";
 import type { SuppliedDocumentArtifact } from "./media/document-application.js";
+import { characterSheetTakes, isApprovedSheet } from "./character-sheets.js";
 
 /** One project-scoped join per collection. Immutable history survives scene deletion and archive. */
 export function projectAssets(production: ProductionService, project: ProjectRecord): AssetItem[] {
@@ -47,12 +48,25 @@ export function projectAssets(production: ProductionService, project: ProjectRec
   if (preview) current.add(preview.artifact.artifactId);
   if (project.soundtrack) current.add(project.soundtrack.audioId);
   const records = store.list<ArtifactRecord>("artifact", projectId);
+  const sheets = new Map(characterSheetTakes(store, projectId).map(take => [take.artifact.artifactId, take]));
+  const characters = new Map((project.characters ?? []).map(character => [character.id, character]));
   const counts = new Map<string, number>();
   const items: AssetItem[] = [];
   const firstEvent = store.readEvents(projectId)[0]?.occurredAt ?? new Date(0).toISOString();
   for (const record of records) {
     if (!["image", "video", "audio", "document"].includes(record.artifact.kind)) continue;
     const recording = audio.get(record.id);
+    const sheet = sheets.get(record.id);
+    if (sheet && sheet.artifact.sha256 === record.artifact.sha256 && record.artifact.kind === "image") {
+      // A character sheet belongs to a character, not a shot; its takes are numbered per character.
+      const group = `character:${sheet.characterId}`, takeIndex = (counts.get(group) ?? 0) + 1;
+      counts.set(group, takeIndex);
+      items.push({ artifact: { artifactId: record.artifact.artifactId, sha256: record.artifact.sha256, kind: "image" }, role: "character_sheet",
+        characterId: sheet.characterId, takeIndex, current: isApprovedSheet(project, sheet), source: record.fixture ? "demo" : sheet.attemptId ? "generated" : "imported",
+        label: characters.get(sheet.characterId)?.name.trim() || "Former character",
+        createdAt: metadata.get(`artifact:${record.id}`) ?? sheet.createdAt });
+      continue;
+    }
     const attempt = record.attemptId ? attempts.get(record.attemptId) : undefined;
     const binding = attempt ? bindings.get(attempt.nodeId) : undefined;
     const shotId = binding?.node.shotId ?? (attempt ? speechShots.get(attempt.nodeId) : undefined) ?? audioShots.get(record.id);
@@ -93,7 +107,7 @@ export function registerAssetLibrary(app: FastifyInstance, service: () => Produc
       offset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" }, kind: { enum: ["all", "image", "video", "audio", "document"] },
       source: { enum: ["all", "uploaded", "generated", "export", "imported", "demo"] }, search: { type: "string", maxLength: 160 },
       sceneId: { type: "string", minLength: 1, maxLength: 160 }, shotId: { type: "string", minLength: 1, maxLength: 160 },
-      role: { enum: ["keyframe", "clip", "voice", "music", "upload", "document", "export"] },
+      role: { enum: ["keyframe", "clip", "voice", "music", "upload", "document", "export", "character_sheet"] },
     } } },
   }, async request => {
     const production = service(), query = request.query, offset = Number(query.offset ?? 0);

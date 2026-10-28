@@ -554,7 +554,8 @@ export interface ProjectListItem {
   updatedAt: string;
 }
 
-export type AssetRole = "keyframe" | "clip" | "voice" | "music" | "upload" | "document" | "export";
+/** character_sheet: one four-view character reference image (front, side, back, face), bound into that character's keyframes once approved. */
+export type AssetRole = "keyframe" | "clip" | "voice" | "music" | "upload" | "document" | "export" | "character_sheet";
 
 // ---------------------------------------------------------------------------
 // Files sent with a Director message (composer attach, drop and paste)
@@ -636,7 +637,9 @@ export interface AssetItem {
   role: AssetRole;
   sceneId?: string;
   shotId?: string;
-  /** 1-based take number for keyframes and clips. */
+  /** The planned character a character sheet shows. */
+  characterId?: string;
+  /** 1-based take number for keyframes, clips and character sheets. */
   takeIndex?: number;
   current: boolean;
   source: "generated" | "imported" | "demo";

@@ -18,7 +18,7 @@ export interface AssetFilters {
 }
 export const ALL_ASSETS: AssetFilters = { role: "all", scene: "all" };
 
-const ROLE_ORDER: Record<AssetRole, number> = { keyframe: 0, clip: 1, voice: 2, music: 3, upload: 4, document: 5, export: 6 };
+const ROLE_ORDER: Record<AssetRole, number> = { keyframe: 0, clip: 1, voice: 2, music: 3, upload: 4, document: 5, export: 6, character_sheet: 7 };
 
 /** Unique per stored file. Artifact ids alone are not enough: a take can reuse its id with new bytes. */
 export const assetKey = (item: Pick<AssetItem, "artifact">): string => `${item.artifact.kind}:${item.artifact.artifactId}:${item.artifact.sha256}`;
@@ -119,6 +119,9 @@ export function titleMsg(item: AssetItem, overview: GenerationOverview, items: r
       return shot ? msg("assets.label.voice", { shot: shot.label }) : msg("assets.kind.voice");
     case "export":
       return msg(item.source === "demo" ? "assets.label.demo_export" : "assets.label.export");
+    case "character_sheet":
+      // The library labels a sheet with its character's name.
+      return take ? msg("assets.label.character_sheet", { name: item.label.trim(), take }) : msg("assets.kind.character_sheet");
     default:
       // A document keeps the name it was sent with.
       if (item.artifact.kind === "document") return item.label.trim() ? msg("assets.raw", { text: item.label.trim() }) : msg("assets.kind.document");
@@ -236,7 +239,8 @@ export interface AssetLibraryView {
 export function roleCounts(items: readonly AssetItem[]): Record<RoleFilter, number> {
   const counts = Object.fromEntries(ROLE_FILTERS.map((role) => [role, 0])) as Record<RoleFilter, number>;
   counts.all = items.length;
-  for (const item of items) counts[item.role]++;
+  // Character sheets have no filter of their own yet; they count under All only.
+  for (const item of items) if (item.role in counts) counts[item.role as RoleFilter]++;
   return counts;
 }
 
