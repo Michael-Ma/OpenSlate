@@ -42,6 +42,10 @@ interface Props {
   onNarrationSaved(commandId: string): void;
   onSaveMotion(motion: string, seconds: number): void;
   onRelease(attemptId: string): void;
+  /** Decision R2: discard a finished job whose output cannot be saved (it stays charged). */
+  onDiscard(attemptId: string): void;
+  /** Decision R3: stop waiting for a job the service keeps reporting as running (it stays billed). */
+  onDetach(attemptId: string): void;
   /** Open Plan on this shot's row (the prompts are edited there). */
   onEditInPlan(): void;
 }
@@ -51,7 +55,7 @@ interface Props {
  * Edits follow the shell's write guard (off while offline or expired); paid makes also stop while the film is
  * stopped. A control the guard turns off says why in its title.
  */
-export function Inspector({ view, shot, fps, draft, narrationDetail, busy, unconfirmed, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onNarrationSaved, onSaveMotion, onRelease, onEditInPlan }: Props) {
+export function Inspector({ view, shot, fps, draft, narrationDetail, busy, unconfirmed, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onNarrationSaved, onSaveMotion, onRelease, onDiscard, onDetach, onEditInPlan }: Props) {
   const { t, tm, locale } = useI18n();
   const store = useStore();
   const snapshot = useStudio(s => s.snapshot);
@@ -262,7 +266,11 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
               {view.failure.retryVideo && unconfirmed.video && !busy.video ? <p className="lost" data-unconfirmed="true">{t("error.PAID_UNCONFIRMED")}</p> : null}
             </div>
           ) : null}
-          {view.noAnswer ? <GiveUp attemptId={view.noAnswer.attemptId} busy={busy.release} onRelease={onRelease} /> : null}
+          {view.noAnswer ? <GiveUp attemptId={view.noAnswer.attemptId} busy={busy.release} onRelease={onRelease} reason={view.noAnswer.reason ?? null} /> : null}
+          {view.discard ? <GiveUp attemptId={view.discard.attemptId} busy={busy.release} onRelease={onDiscard} act="discard"
+            labels={{ note: "inspector.discard_note", ack: "inspector.discard_ack", open: "inspector.discard", confirm: "inspector.discard_confirm" }} /> : null}
+          {view.detach ? <GiveUp attemptId={view.detach.attemptId} busy={busy.release} onRelease={onDetach} act="detach"
+            labels={{ note: "inspector.detach_note", ack: "inspector.detach_ack", open: "inspector.detach", confirm: "inspector.detach_confirm" }} /> : null}
           <button type="button" className="pill" data-act="edit-prompt" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "imagePrompt", value: shot.imagePrompt })}><span className="lbl">{t("inspector.edit_prompt")}</span></button>
           {/* Side by side in a compact inspector, its words are shortened only when they cannot fit (the short label still
               names the duration); its name keeps them all. */}

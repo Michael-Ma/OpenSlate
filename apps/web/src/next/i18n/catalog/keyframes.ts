@@ -142,6 +142,17 @@ export const keyframes = {
   "inspector.give_up_note": { en: "The service did not confirm this job. It may still arrive and be charged.", zh: "服务没有确认这个任务。它可能稍后仍会返回并计费。" },
   "inspector.give_up_ack": { en: "I understand it may still finish and be charged, so a new try may mean paying twice.", zh: "我知道它仍可能完成并计费，重新生成可能要付两次钱。" },
   "inspector.give_up_confirm": { en: "Give up", zh: "确认放弃" },
+  "inspector.no_answer_reason": { en: "What Codex reported: {reason}", zh: "Codex 报告：{reason}" },
+  // Decision R2: a finished job whose output cannot be saved (an expired or damaged download).
+  "inspector.discard": { en: "Discard this finished job", zh: "丢弃这个已完成的任务" },
+  "inspector.discard_note": { en: "The service finished this job, but its output cannot be saved. It stays charged.", zh: "服务已完成这个任务，但输出无法保存。它仍会计费。" },
+  "inspector.discard_ack": { en: "I understand this job stays charged, and making the shot again is paid again.", zh: "我知道这个任务仍会计费，重新生成这个镜头需要再付一次钱。" },
+  "inspector.discard_confirm": { en: "Discard", zh: "确认丢弃" },
+  // Decision R3: a job the service keeps reporting as running.
+  "inspector.detach": { en: "Stop waiting for this job", zh: "不再等待这个任务" },
+  "inspector.detach_note": { en: "The service still reports this job as running. It may still finish and be charged.", zh: "服务仍报告这个任务在运行。它可能稍后完成并计费。" },
+  "inspector.detach_ack": { en: "I understand it may still finish and be charged, so a new try may mean paying twice. A late result is kept as an earlier take.", zh: "我知道它仍可能完成并计费，重新生成可能要付两次钱。迟到的结果会保留为较早的一版。" },
+  "inspector.detach_confirm": { en: "Stop waiting", zh: "确认不再等待" },
   "inspector.retry_video": { en: "Make the clip again", zh: "重新生成视频" },
   "inspector.retry_scene_clips": { en: "Make Scene {scene}'s {count, plural, one {# clip} other {# clips}}", zh: "生成第 {scene} 场的 {count} 段视频" },
   "inspector.takes_show": { en: "{count} · Compare", zh: "{count} · 比较" },

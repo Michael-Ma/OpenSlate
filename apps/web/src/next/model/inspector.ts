@@ -1,5 +1,5 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
-import { nativeDiagnosticMsg } from "../i18n/translate.ts";
+import { nativeDiagnosticMsg, nativeReasonMsg } from "../i18n/translate.ts";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { confirmationStop, heldByEdit, isWorking, seconds, shotHasNoAnswer, shotStatus, unresolvedQueue, videoPanel, waitingMsg, type CardTone } from "./keyframes.ts";
 import { narrationRow, type NarrationMode, type TakeOrigin } from "./narration.ts";
@@ -97,14 +97,38 @@ export interface InspectorView {
   regenerate: RegenerateAction;
   /** A failed keyframe or clip, with what was charged. */
   failure: { slot: "keyframe" | "video"; message: Msg; retryVideo: RetryVideo | null } | null;
-  /** A job the service never confirmed: offer to give up on it (plan decision D7). */
-  noAnswer: { slot: "keyframe" | "video" | "voice"; attemptId: string } | null;
+  /** A job the service never confirmed: offer to give up on it (plan decision D7), with Codex's allowlisted reason (R1). */
+  noAnswer: { slot: "keyframe" | "video" | "voice"; attemptId: string; reason?: Msg } | null;
+  /** A finished job whose output cannot be saved: offer a confirmed discard (decision R2). */
+  discard: { slot: "keyframe" | "video"; attemptId: string } | null;
+  /** A job the service has reported as running for a long while: offer to stop waiting (decision R3). */
+  detach: { slot: "keyframe" | "video"; attemptId: string } | null;
   /** An outdated keyframe or clip, and why. */
   notes: Msg[];
   /** The scene's last confirm stopped at this shot: why, and what to do next. */
   stopped: { reason: Msg; next: Msg } | null;
   /** The full prompts as stored: the picture prompt and the video prompt sent to the paid models (read-only here). */
   prompts: { image: string; video: string | null };
+}
+
+/**
+ * How long a job must have been reported running before Stop waiting is offered (decision R3). Only when the control
+ * appears: the server never infers failure or a refund from elapsed time, and detaching keeps the job billed.
+ */
+export const DETACH_AFTER_MS = 10 * 60 * 1000;
+
+/** The finished job behind a slot's output problem: the slot's own job, or its replacement's while a take is kept. */
+function discardTarget(slot: MediaSlot): string | null {
+  if (!slot.ingestionIssue) return null;
+  if (slot.replacement?.attemptId && slot.replacement.phase === "ingesting") return slot.replacement.attemptId;
+  return slot.state === "running" && slot.phase === "ingesting" && slot.attemptId ? slot.attemptId : null;
+}
+/** A job the provider still reports as running since long enough ago. */
+function detachTarget(slot: MediaSlot, now: number): string | null {
+  const live = slot.state === "running" ? slot : slot.replacement?.state === "running" ? slot.replacement : null;
+  if (!live || live.phase !== "remote_pending" || !live.attemptId || !live.startedAt) return null;
+  const started = Date.parse(live.startedAt);
+  return Number.isFinite(started) && now - started >= DETACH_AFTER_MS ? live.attemptId : null;
 }
 
 const priceFrom = (unitMicros: string | undefined, unknown: boolean, locale: string): Msg | null => {
@@ -213,7 +237,7 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
  * `narrationOrigin` is its current take's (takeOrigin), so a voice line is never called the person's recording.
  * `videoPrompt` also comes from the project snapshot (the overview does not carry it); null while it is not read.
  */
-export function inspectorView(overview: GenerationOverview, shot: ShotOverview, locale: string, narrationMode?: NarrationMode, narrationOrigin: TakeOrigin | null = null, videoPrompt: string | null = null): InspectorView {
+export function inspectorView(overview: GenerationOverview, shot: ShotOverview, locale: string, narrationMode?: NarrationMode, narrationOrigin: TakeOrigin | null = null, videoPrompt: string | null = null, now = Date.now()): InspectorView {
   const scene = overview.scenes.find((s) => s.sceneId === shot.sceneId);
   const { status, tone, reason } = shotStatus(overview, scene, shot);
   const rows: InspectorRow[] = [
@@ -238,12 +262,17 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
     failure = { slot: "video", message: failureMessage(clipTake, "video", true),
       retryVideo: canRetry(clipTake) && scene?.videoTargets.includes(shot.shotId) ? retryVideo(overview, shot, scene, locale) : null };
   // A replacement take with no answer can be given up too, while the current keyframe stays (card B15).
-  const noAnswerSlot = shot.keyframe.state === "no_answer" && shot.keyframe.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.attemptId }
-    : shot.keyframe.replacement?.state === "no_answer" && shot.keyframe.replacement.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.replacement.attemptId }
-    : !shot.video.ingestionIssue && shot.video.state === "no_answer" && shot.video.attemptId ? { slot: "video" as const, attemptId: shot.video.attemptId }
-    : !shot.video.ingestionIssue && shot.video.replacement?.state === "no_answer" && shot.video.replacement.attemptId ? { slot: "video" as const, attemptId: shot.video.replacement.attemptId }
+  const nativeWhy = (slot: { nativeDiagnostic?: { reason?: unknown } }) => { const why = nativeReasonMsg(slot.nativeDiagnostic?.reason); return why ? { reason: why } : {}; };
+  const noAnswerSlot = shot.keyframe.state === "no_answer" && shot.keyframe.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.attemptId, ...nativeWhy(shot.keyframe) }
+    : shot.keyframe.replacement?.state === "no_answer" && shot.keyframe.replacement.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.replacement.attemptId, ...nativeWhy(shot.keyframe.replacement) }
+    : !shot.video.ingestionIssue && shot.video.state === "no_answer" && shot.video.attemptId ? { slot: "video" as const, attemptId: shot.video.attemptId, ...nativeWhy(shot.video) }
+    : !shot.video.ingestionIssue && shot.video.replacement?.state === "no_answer" && shot.video.replacement.attemptId ? { slot: "video" as const, attemptId: shot.video.replacement.attemptId, ...nativeWhy(shot.video.replacement) }
     // A voice line the service never answered can be let go too (card V1): the line goes back to not voiced.
     : shot.narration.state === "no_answer" && shot.narration.attemptId ? { slot: "voice" as const, attemptId: shot.narration.attemptId } : null;
+  const discardVideo = discardTarget(shot.video), discardKeyframe = discardTarget(shot.keyframe);
+  const discard = discardVideo ? { slot: "video" as const, attemptId: discardVideo } : discardKeyframe ? { slot: "keyframe" as const, attemptId: discardKeyframe } : null;
+  const detachVideo = detachTarget(shot.video, now), detachKeyframe = detachTarget(shot.keyframe, now);
+  const detach = detachVideo ? { slot: "video" as const, attemptId: detachVideo } : detachKeyframe ? { slot: "keyframe" as const, attemptId: detachKeyframe } : null;
 
   // An outdated keyframe is explained next to its Regenerate button; an outdated clip here.
   const notes: Msg[] = [];
@@ -263,6 +292,8 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
     regenerate: regenerateAction(overview, shot, scene, locale),
     failure,
     noAnswer: noAnswerSlot,
+    discard,
+    detach,
     notes,
     stopped: stop && stop.shotId === shot.shotId ? { reason: stop.reason, next: stop.next } : null,
     prompts: { image: shot.imagePrompt, video: videoPrompt },

@@ -150,6 +150,14 @@ export const shell = {
   "attention.voice.failed_detail_free": { en: "Not charged. It is made again with the scene's next keyframes or video.", zh: "未计费。下次生成这一场的关键帧或视频时会重做。" },
   "attention.voice.no_answer_detail": { en: "It may still arrive.", zh: "这句配音之后仍可能返回。" },
   "attention.open": { en: "Open {shot}", zh: "打开 {shot}" },
+  // Decision R4: interrupted local film work, run again only when the person asks.
+  "attention.group.film": { en: "Film", zh: "影片" },
+  "attention.render.interrupted": { en: "The film render was interrupted", zh: "影片渲染中断了" },
+  "attention.timeline.interrupted": { en: "The film timeline build was interrupted", zh: "影片时间线生成中断了" },
+  "attention.render.detail": { en: "It stopped after it started on this computer. Run it again with the same content; nothing is charged.", zh: "它在本机开始后被中断。可以用相同内容重新运行，不会计费。" },
+  "attention.render_again": { en: "Render again", zh: "重新渲染" },
+  "attention.render_again_ack": { en: "I understand the render runs again on this computer.", zh: "我知道渲染会在本机重新运行。" },
+  "attention.render_again_confirm": { en: "Render again", zh: "确认重新渲染" },
   "stop.button": { en: "Stop", zh: "停止" },
   "stop.continue": { en: "Continue", zh: "继续" },
 } satisfies Record<string, Entry>;

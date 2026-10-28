@@ -41,6 +41,14 @@ function voiceDetail(line: ShotOverview["narration"]): MessageId {
   return why ? `attention.voice.failed_detail_${why}` : "attention.voice.failed_detail";
 }
 
+/** Film-wide local work that stopped after it started (decision R4): run again only when the person asks. */
+export interface FilmAttentionItem { key: string; attemptId: string; title: Msg; detail: Msg }
+
+export function filmAttentionItems(overview: GenerationOverview | null): FilmAttentionItem[] {
+  return (overview?.interruptedRenders ?? []).map((render) => ({ key: `render:${render.attemptId}`, attemptId: render.attemptId,
+    title: msg(render.kind === "timeline" ? "attention.timeline.interrupted" : "attention.render.interrupted"), detail: msg("attention.render.detail") }));
+}
+
 export function attentionItems(overview: GenerationOverview | null): AttentionItem[] {
   if (!overview) return [];
   const items: AttentionItem[] = [];

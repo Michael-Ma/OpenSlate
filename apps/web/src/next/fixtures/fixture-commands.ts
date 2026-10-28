@@ -18,6 +18,10 @@ import type {
   ProposalReceipt,
   ReleaseAttemptInput,
   ReleaseAttemptReceipt,
+  DiscardAttemptInput,
+  DiscardAttemptReceipt,
+  RetryLocalAttemptInput,
+  RetryLocalAttemptReceipt,
   ResolveNoteInput,
   SceneBlocker,
   SceneConfirmationView,
@@ -1078,8 +1082,65 @@ function control(world: FixtureWorld, body: ControlInput): ControlReceipt {
   throw new ApiError("VALIDATION_ERROR", 400);
 }
 
+/** The slot (or its replacement) whose job is `attemptId` and matches `live`, as the studio finds the attempt. */
+function slotOfAttempt(world: FixtureWorld, attemptId: string, live: (slot: Pick<MediaSlot, "state" | "phase" | "attemptId">) => boolean) {
+  return Object.values(world.overview.shots).flatMap((shot) => (["keyframe", "video"] as const).map((slot) => ({ shot, slot })))
+    .find(({ shot, slot }) => (shot[slot].attemptId === attemptId && live(shot[slot])) || (shot[slot].replacement?.attemptId === attemptId && live(shot[slot].replacement!)));
+}
+
+/** Take a job off its slot as the studio does after a release or discard: a kept take stays, else the slot is free. */
+function takeOff(world: FixtureWorld, entry: { shot: ShotOverview; slot: "keyframe" | "video" }, attemptId: string, released: boolean): void {
+  commit(world, (overview) => ({
+    overview: withShot(overview, entry.shot.shotId, (shot) => {
+      const { ingestionIssue: _issue, ...slot } = shot[entry.slot];
+      const releasedAttemptIds = released ? [...(slot.releasedAttemptIds ?? []), attemptId] : slot.releasedAttemptIds;
+      const kept = releasedAttemptIds?.length ? { releasedAttemptIds } : {};
+      if (slot.replacement?.attemptId === attemptId) {
+        const { replacement: _given, releasedAttemptIds: _old, ...rest } = slot;
+        return { ...shot, [entry.slot]: { ...rest, ...kept } };
+      }
+      const free: MediaSlot = { state: "none", takeCount: slot.takeCount, ...kept, takenOff: "released", ...(slot.previous ? { previous: slot.previous } : {}) };
+      return entry.slot === "keyframe" ? { ...shot, keyframe: { ...free, opened: false } } : { ...shot, video: free };
+    }),
+  }));
+}
+
+/**
+ * Decision R2: discard a finished job whose output cannot be saved (the slot shows an ingestion issue). As the studio:
+ * it stays charged and in history, is never offered again, and the shot can be made again.
+ */
+function discard(world: FixtureWorld, attemptId: string, body: DiscardAttemptInput): DiscardAttemptReceipt {
+  if (body?.expectedPhase !== "ingesting") throw new ApiError("VALIDATION_ERROR", 400);
+  if (body.acknowledgeDiscard !== true) throw new ApiError("DISCARD_NOT_ACKNOWLEDGED", 409);
+  const entry = slotOfAttempt(world, attemptId, (slot) => slot.phase === "ingesting");
+  if (!entry || !entry.shot[entry.slot].ingestionIssue) throw new ApiError("ATTEMPT_NOT_DISCARDABLE", 409);
+  takeOff(world, entry, attemptId, false);
+  return { attemptId, shotId: entry.shot.shotId, discardedAt: now() };
+}
+
+/** Decision R4: a fresh retry identity for an interrupted local render, once; the render itself is not shown here. */
+function retryLocal(world: FixtureWorld, attemptId: string, body: RetryLocalAttemptInput): RetryLocalAttemptReceipt {
+  if (body?.expectedFailure !== "LOCAL_EXECUTION_INTERRUPTED") throw new ApiError("VALIDATION_ERROR", 400);
+  if (body.acknowledgeRerender !== true) throw new ApiError("RERENDER_NOT_ACKNOWLEDGED", 409);
+  const render = (world.overview.interruptedRenders ?? []).find((item) => item.attemptId === attemptId);
+  if (!render) throw new ApiError("ATTEMPT_NOT_RETRYABLE", 409);
+  commit(world, (overview) => {
+    const rest = (overview.interruptedRenders ?? []).filter((item) => item.attemptId !== attemptId);
+    const { interruptedRenders: _old, ...base } = overview;
+    return { overview: rest.length ? { ...base, interruptedRenders: rest } : base };
+  });
+  return { attemptId, nodeId: `fixture-${render.kind}`, retriedAt: now() };
+}
+
 function release(world: FixtureWorld, attemptId: string, body: ReleaseAttemptInput): ReleaseAttemptReceipt {
   if (body?.acknowledgeDoubleCharge !== true) throw new ApiError("DOUBLE_CHARGE_NOT_ACKNOWLEDGED", 400);
+  if (body.expectedPhase === "remote_pending") {
+    // Decision R3: stop waiting for a job the service keeps reporting as running. It is still polled and billed.
+    const running = slotOfAttempt(world, attemptId, (slot) => slot.state === "running" && slot.phase === "remote_pending");
+    if (!running) throw new ApiError("ATTEMPT_NOT_RELEASABLE", 409);
+    takeOff(world, running, attemptId, true);
+    return { attemptId, shotId: running.shot.shotId, releasedAt: now() };
+  }
   if (body.expectedPhase !== "submission_unknown") throw new ApiError("VALIDATION_ERROR", 400);
   const entry = Object.values(world.overview.shots).flatMap((shot) => (["keyframe", "video"] as const).map((slot) => ({ shot, slot })))
     .find(({ shot, slot }) => (shot[slot].state === "no_answer" && shot[slot].attemptId === attemptId)
@@ -1184,6 +1245,8 @@ export function fixtureCommand(world: FixtureWorld, method: "GET" | "POST", path
     if (path === "/storyboard") return storyboard(world, body as StoryboardBody);
     if (path === "/controls") return control(world, body as ControlInput);
     if ((id = match(/^\/attempts\/([^/]+)\/release$/))) return release(world, id, body as ReleaseAttemptInput);
+    if ((id = match(/^\/attempts\/([^/]+)\/discard$/))) return discard(world, id, body as DiscardAttemptInput);
+    if ((id = match(/^\/attempts\/([^/]+)\/retry-local$/))) return retryLocal(world, id, body as RetryLocalAttemptInput);
     if ((id = match(/^\/director\/notes\/([^/]+)\/resolve$/))) return resolveNote(world, id, body as ResolveNoteInput);
     const proposal = path.match(/^\/director\/proposals\/([^/]+)\/(accept|reject|undo)$/);
     if (proposal) return proposalAction(world, decodeURIComponent(proposal[1]!), proposal[2] as "accept" | "reject" | "undo", body as AcceptProposalInput | undefined);

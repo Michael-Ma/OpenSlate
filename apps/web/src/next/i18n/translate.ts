@@ -2,13 +2,14 @@ import type { Locale } from "../../shared/locale-preference.ts";
 import type { Msg } from "../model/types.ts";
 import { formatMessage, type MessageValues } from "./format.ts";
 import { catalog, isMessageId, type MessageId } from "./messages.ts";
+import { NATIVE_UNKNOWN_REASONS } from "@openslate/core/public";
 
 const NATIVE_CATEGORIES = ["native_timeout", "native_spawn_failed", "native_auth_required", "native_protocol", "native_rate_limited", "native_unknown"] as const;
 
 /** Native text is never display copy: only allowlisted categories and validated metadata cross here. */
 export function nativeDiagnosticMsg(diagnostic: unknown, context: "setup" | "images" | "director", notDispatched = false): Msg | null {
   if (!diagnostic || typeof diagnostic !== "object") return null;
-  const { category, limitMs, instructionFiles } = diagnostic as { category?: unknown; limitMs?: unknown; instructionFiles?: unknown };
+  const { category, limitMs, instructionFiles, reason } = diagnostic as { category?: unknown; limitMs?: unknown; instructionFiles?: unknown; reason?: unknown };
   if (category === "native_instructions_unexpected" && context !== "images") {
     const path = (value: unknown): value is string => typeof value === "string" && value.length <= 4096
       && (value.startsWith("/") || value.startsWith("~/")) && !/[\\\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/.test(value)
@@ -22,7 +23,17 @@ export function nativeDiagnosticMsg(diagnostic: unknown, context: "setup" | "ima
   const timed = category === "native_timeout" && typeof limitMs === "number" && Number.isFinite(limitMs) && limitMs > 0 && limitMs <= 600_000;
   const id = `error.${context === "setup" ? "DIRECTOR_SETUP" : "CODEX_IMAGES"}_${category}${category === "native_timeout" && !timed ? "_no_limit" : ""}`;
   if (!isMessageId(id)) return null;
-  return { id, values: { ...(timed ? { seconds: Math.round(limitMs / 100) / 10 } : {}), ...(context === "images" ? { notDispatched: notDispatched === true ? 1 : 0 } : {}) } };
+  const values = { ...(timed ? { seconds: Math.round(limitMs / 100) / 10 } : {}), ...(context === "images" ? { notDispatched: notDispatched === true ? 1 : 0 } : {}) };
+  // Decision R1: an allowlisted reason narrows native_unknown; anything else keeps the plain message.
+  const why = category === "native_unknown" ? nativeReasonMsg(reason) : null;
+  return why ? { id: `${id}_reason` as MessageId, values, messages: { reason: why } } : { id, values };
+}
+
+/** The allowlisted native_unknown stage as words (decision R1), or null for anything outside the closed set. */
+export function nativeReasonMsg(reason: unknown): Msg | null {
+  if (typeof reason !== "string" || !(NATIVE_UNKNOWN_REASONS as readonly string[]).includes(reason)) return null;
+  const id = `error.native_reason.${reason}`;
+  return isMessageId(id) ? { id } : null;
 }
 
 export function translate(locale: Locale, id: MessageId, values?: MessageValues): string {

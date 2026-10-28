@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { attentionItems, type AttentionGroup, type AttentionItem } from "../model/attention.ts";
+import { attentionItems, filmAttentionItems, type AttentionGroup, type AttentionItem } from "../model/attention.ts";
+import { GiveUp } from "./GiveUp.tsx";
 import { NARROW_QUERY, noteOpenView, shownView } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 
@@ -16,6 +17,10 @@ export function AttentionMenu() {
   const store = useStore();
   const overview = useStudio((s) => s.overview);
   const items = useMemo(() => attentionItems(overview), [overview]);
+  // Decision R4: film-wide local work that stopped after it started; Render again is acknowledged in place.
+  const film = useMemo(() => filmAttentionItems(overview), [overview]);
+  const pending = useStudio((s) => s.pending);
+  const count = items.length + film.length;
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -24,7 +29,7 @@ export function AttentionMenu() {
     setOpen(false);
     if (refocus) button.current?.focus({ preventScroll: true });
   };
-  useEffect(() => { if (!items.length) setOpen(false); }, [items.length]);
+  useEffect(() => { if (!count) setOpen(false); }, [count]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -51,7 +56,7 @@ export function AttentionMenu() {
     return () => { document.removeEventListener("pointerdown", outside, true); window.removeEventListener("resize", away); };
   }, [open]);
 
-  if (!items.length) return null;
+  if (!count) return null;
 
   const go = (item: AttentionItem) => {
     close(false);
@@ -72,12 +77,12 @@ export function AttentionMenu() {
   return (
     <>
       <button ref={button} type="button" className="attn-btn" data-act="attention" aria-haspopup="dialog" aria-expanded={open}
-        aria-label={t("attention.button_label", { count: items.length })} onClick={() => setOpen((value) => !value)}>
-        <span className="count" aria-hidden="true">{items.length}</span><span className="attn-word">{t("attention.button")}</span>
+        aria-label={t("attention.button_label", { count })} onClick={() => setOpen((value) => !value)}>
+        <span className="count" aria-hidden="true">{count}</span><span className="attn-word">{t("attention.button")}</span>
       </button>
       {open && (
         <div ref={list} className="attn-pop" role="dialog" aria-label={t("attention.button")} style={{ visibility: "hidden" }} onKeyDown={onKeyDown}>
-          <h3>{t("attention.title", { count: items.length })}</h3>
+          <h3>{t("attention.title", { count })}</h3>
           <p className="sub">{t("attention.sub")}</p>
           {GROUPS.map((group) => {
             const rows = items.filter((item) => item.group === group);
@@ -95,6 +100,19 @@ export function AttentionMenu() {
               </section>
             );
           })}
+          {film.length ? (
+            <section aria-label={t("attention.group.film")}>
+              <div className="attn-group">{t("attention.group.film")}</div>
+              {film.map((item) => (
+                <div key={item.key} className="attn-item" data-item={item.key} data-group="film">
+                  <div className="t"><b>{tm(item.title)}</b>{tm(item.detail)}</div>
+                  <GiveUp attemptId={item.attemptId} className="attn-act" note={false} act="render-again" busy={Object.keys(pending).some((key) => key.startsWith("release:"))}
+                    labels={{ note: null, ack: "attention.render_again_ack", open: "attention.render_again", confirm: "attention.render_again_confirm" }}
+                    onRelease={(attemptId) => void store.retryLocalAttempt(attemptId)} />
+                </div>
+              ))}
+            </section>
+          ) : null}
           <div className="attn-foot">{t("attention.foot")}</div>
         </div>
       )}

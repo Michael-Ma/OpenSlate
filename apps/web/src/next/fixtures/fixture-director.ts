@@ -279,9 +279,23 @@ const MARKDOWN_REPLY = [
 /** Apply the `?director=` presets to a fresh sample world (tests pass the list themselves). */
 export function applyDirectorPresets(world: FixtureWorld, presets: readonly string[] = directorPresets()): void {
   // In one order whatever the list's, so the sample conversation stays in time order.
-  const order = ["codex", "no-ffmpeg", "markdown", "held", "failed", "jobs", "lost", "voices", "queue", "transcribing", "unanswered"];
+  const order = ["codex", "no-ffmpeg", "markdown", "held", "failed", "jobs", "lost", "voices", "queue", "transcribing", "unanswered", "stuck"];
   for (const preset of order.filter((name) => presets.includes(name))) {
     if (preset === "codex") world.director = { ...world.director, mode: "native", imageAttachmentsAvailable: true };
+    if (preset === "stuck") {
+      // Rule-drift decisions R1-R4: 3.1's Codex keyframe has no answer and Codex said why; 2.1's clip finished but its
+      // download expired; 2.2's clip has been reported running for two hours; and the film's local render stopped
+      // after it started on this computer.
+      const shots = { ...world.overview.shots }, at = new Date(Date.now() - 2 * 3_600_000).toISOString();
+      const s31 = shots[shotId("3.1")]!, s21 = shots[shotId("2.1")]!, s22 = shots[shotId("2.2")]!;
+      shots[s31.shotId] = { ...s31, keyframe: { state: "no_answer", phase: "submission_unknown", startedAt: at, attemptId: "fixture-attempt-stuck-3-1", takeCount: 0, opened: false,
+        nativeDiagnostic: { category: "native_unknown", reason: "process_exit" } } };
+      shots[s21.shotId] = { ...s21, video: { state: "running", phase: "ingesting", startedAt: at, attemptId: "fixture-attempt-stuck-2-1", takeCount: 0,
+        ingestionIssue: { code: "OUTPUT_DOWNLOAD_EXPIRED", at } } };
+      shots[s22.shotId] = { ...s22, video: { state: "running", phase: "remote_pending", startedAt: at, attemptId: "fixture-attempt-stuck-2-2", takeCount: 0 } };
+      world.overview = recompute({ ...world.overview, shots, interruptedRenders: [{ attemptId: "fixture-attempt-render", kind: "render", at }] },
+        world.snapshot.notes ?? [], world.snapshot.project.shots);
+    }
     if (preset === "no-ffmpeg") world.director = { ...world.director, mode: "native", imageAttachmentsAvailable: false };
     if (preset === "held") {
       const requestId = "request-held";

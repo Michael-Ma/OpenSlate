@@ -1,4 +1,4 @@
-import type { AcceptProposalInput, NarrationFitInput, NarrationFitReceipt, ControlInput, ControlReceipt, DirectorProposal, FrameViewInput, GenerationOverview, ProposalList, ProposalReceipt, ReleaseAttemptInput, ResolveNoteInput } from "@openslate/core/public";
+import type { AcceptProposalInput, NarrationFitInput, NarrationFitReceipt, ControlInput, ControlReceipt, DirectorProposal, FrameViewInput, GenerationOverview, ProposalList, ProposalReceipt, ReleaseAttemptInput, ResolveNoteInput, DiscardAttemptInput, RetryLocalAttemptInput } from "@openslate/core/public";
 import { ProjectSubscription } from "../../shared/project-subscription.ts";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
 import { errorMsg } from "../i18n/translate.ts";
@@ -492,9 +492,22 @@ export class StudioStore {
   }
 
   /** Give up on a job with no answer (plan decision D7); the person acknowledged the double-charge risk. */
-  releaseAttempt(attemptId: string): Promise<unknown> {
-    const body: ReleaseAttemptInput = { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true };
-    return this.#press(`release:${attemptId}`, { attemptId }, async () => ({ path: path(this.#state.projectId!, `/attempts/${encodeURIComponent(attemptId)}/release`), body }));
+  releaseAttempt(attemptId: string, expectedPhase: ReleaseAttemptInput["expectedPhase"] = "submission_unknown"): Promise<unknown> {
+    // remote_pending (decision R3): stop waiting for a job the service keeps reporting as running.
+    const body: ReleaseAttemptInput = { expectedPhase, acknowledgeDoubleCharge: true };
+    return this.#press(`release:${attemptId}`, expectedPhase === "submission_unknown" ? { attemptId } : { attemptId, expectedPhase }, async () => ({ path: path(this.#state.projectId!, `/attempts/${encodeURIComponent(attemptId)}/release`), body }));
+  }
+
+  /** Decision R2: discard a finished job whose output cannot be saved; the person acknowledged it stays charged. */
+  discardAttempt(attemptId: string): Promise<unknown> {
+    const body: DiscardAttemptInput = { expectedPhase: "ingesting", acknowledgeDiscard: true };
+    return this.#press(`release:discard:${attemptId}`, { attemptId }, async () => ({ path: path(this.#state.projectId!, `/attempts/${encodeURIComponent(attemptId)}/discard`), body }));
+  }
+
+  /** Decision R4: render interrupted local work again under a fresh retry identity; the person acknowledged it. */
+  retryLocalAttempt(attemptId: string): Promise<unknown> {
+    const body: RetryLocalAttemptInput = { expectedFailure: "LOCAL_EXECUTION_INTERRUPTED", acknowledgeRerender: true };
+    return this.#press(`release:retry-local:${attemptId}`, { attemptId }, async () => ({ path: path(this.#state.projectId!, `/attempts/${encodeURIComponent(attemptId)}/retry-local`), body }));
   }
 
   /** Settle a Director note with one of its choices (DC-10). Paid and edit choices pass the request or edit that carried them out. */

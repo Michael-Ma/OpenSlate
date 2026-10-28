@@ -338,6 +338,8 @@ function Workspace() {
               onNarrationSaved={(commandId) => { if (draft?.field === "narration") draftSaved({ ...draft, value: draft.value.trim() }, commandId); }}
               onSaveMotion={(motion, secondsValue) => void saveMotion(motion, secondsValue)}
               onRelease={(attemptId) => void store.releaseAttempt(attemptId)}
+              onDiscard={(attemptId) => void store.discardAttempt(attemptId)}
+              onDetach={(attemptId) => void store.releaseAttempt(attemptId, "remote_pending")}
               onEditInPlan={() => editInPlan(selected.shotId)}
             />
           </>
