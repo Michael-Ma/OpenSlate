@@ -467,3 +467,7 @@
 .take-meta span { color: var(--muted); font-size: 11px; }
 .take .status { align-self: flex-start; }
 .take .pill { justify-content: center; padding: 3px 6px; font-size: 11.5px; line-height: 1.25; text-align: center; white-space: normal; }
+
+/* A portrait or square film (data-aspect 9:16 or 1:1) shows each keyframe and clip whole, in its own shape, inside the
+   existing boxes instead of cropping it to 16:9. */
+.work.kf[data-aspect] :is(.card .pic, .take-pic, .preview .pv-frame) :is(.pic-img, .pv-clip) { object-fit: contain; background: var(--ground); }

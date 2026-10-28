@@ -16,6 +16,20 @@ export const MAX_FILM_SECONDS = 360;
 /** Card B6 and lead decision 4: the storyboard export renders 1280 × 720. */
 export const EXPORT_SIZE = { width: 1280, height: 720 } as const;
 
+/** The film's frame: aspect and export size. A film whose person chose no format is 16:9 at 1280 × 720 and shows no aspect label. */
+export interface FilmFrame { aspect: "16:9" | "9:16" | "1:1"; width: number; height: number; chosen: boolean }
+export function filmFrame(overview: Pick<GenerationOverview, "frame"> | null | undefined): FilmFrame {
+  const frame = overview?.frame;
+  return frame ? { aspect: frame.aspect, width: frame.width, height: frame.height, chosen: true } : { aspect: "16:9", ...EXPORT_SIZE, chosen: false };
+}
+/**
+ * The `data-aspect` of the Keyframes and Film workspaces: set for a portrait or square film, whose keyframe, clip and
+ * timeline previews then show the whole frame (keyframes.css, film.css). 16:9 keeps the existing 16:9 boxes.
+ */
+export function frameAspectAttr(overview: Pick<GenerationOverview, "frame"> | null | undefined): "9:16" | "1:1" | undefined {
+  const aspect = overview?.frame?.aspect; return aspect === "9:16" || aspect === "1:1" ? aspect : undefined;
+}
+
 /** One render job from GET /api/projects/:projectId/media; only the fields the panel needs. */
 export interface MediaJob {
   id: string;

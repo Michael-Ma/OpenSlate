@@ -8,6 +8,7 @@ import { editHold, shotPosition } from "../model/keyframes-stage.ts";
 import { confirmPress, keyframesPress, lostReplyHolds, PAID_PRESS, type PressIdentity } from "../model/keyframes-press.ts";
 import { advance, playingShot, type Playback } from "../model/motion.ts";
 import { msg } from "../model/types.ts";
+import { frameAspectAttr } from "../model/film-export.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
 import { reviewingScene } from "../model/director.ts";
 import type { EditDraft } from "../store/state.ts";
@@ -267,7 +268,7 @@ function Workspace() {
   const planHold = stopShot ? editHold(draft, overview, stopShot) : null;
 
   return (
-    <main className="work kf" data-view="keyframes" data-scene={view.scene.sceneId}>
+    <main className="work kf" data-view="keyframes" data-scene={view.scene.sceneId} data-aspect={frameAspectAttr(overview)}>
       <SceneHeader view={view} held={held} onScene={onScene} />
       {notes.banner ? (
         <NoteBanner

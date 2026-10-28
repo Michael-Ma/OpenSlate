@@ -8,7 +8,7 @@ import { currentPlacements, type PlaybackView } from "../../model/film-audio.ts"
 import { displayedHead } from "../../model/displayed-baseline.ts";
 import { displayedGain, musicGainSession, submitGain, type GainDraft } from "../../model/film-gain.ts";
 import { FilmClock } from "../../model/film-clock.ts";
-import { changeMsg, lastExport, musicMissing, whenMsg, type MediaView } from "../../model/film-export.ts";
+import { changeMsg, filmFrame, frameAspectAttr, lastExport, musicMissing, whenMsg, type MediaView } from "../../model/film-export.ts";
 import {
   clipStillOut, editPressId, filmMusic, filmTimeline, lengthEdit, lengthToast, moveEdit, musicChoiceEdit, musicMuteEdit, musicStartEdit,
   songFitEdit, songLength, soundtrackOf, type FilmEdit, type SongTimingView } from "../../model/film.ts";
@@ -63,6 +63,7 @@ function FilmWorkspace() {
   const mode = useMode();
   const { t, tm, locale } = useI18n();
   const overview = useStudio((s) => s.overview)!;
+  const frame = filmFrame(overview);
   const snapshot = useStudio((s) => s.snapshot);
   const projectId = useStudio((s) => s.projectId);
   const connection = useStudio((s) => s.connection);
@@ -294,10 +295,10 @@ function FilmWorkspace() {
   const when = last ? whenMsg(last.at, new Date(), locale) : null;
 
   return (
-    <main ref={main} className="work film-work" data-view="film" onKeyDown={onKeyDown}>
+    <main ref={main} className="work film-work" data-view="film" data-aspect={frameAspectAttr(overview)} onKeyDown={onKeyDown}>
       <div className="view-head">
         <h1>{t("film.title")}</h1>
-        <span className="line" data-act="film-line">{t("film.line", { seconds: timeline.total, shots: timeline.shots.length, clips: timeline.clipsReady, total: timeline.shots.length })}</span>
+        <span className="line" data-act="film-line">{frame.chosen ? <><span data-act="film-aspect">{frame.aspect}</span> · </> : null}{t("film.line", { seconds: timeline.total, shots: timeline.shots.length, clips: timeline.clipsReady, total: timeline.shots.length })}</span>
         <div className="actions" data-act="last-export">
           {last ? (
             <>

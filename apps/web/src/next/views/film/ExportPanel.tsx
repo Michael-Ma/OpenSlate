@@ -1,7 +1,7 @@
 import type { ExportView, GenerationOverview } from "@openslate/core/public";
 import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
-import { EXPORT_SIZE, MAX_FILM_SECONDS, blockersFirst, elapsedSeconds, filmSeconds, panelState, readinessRows, unavailableMsg, whenMsg, whyNotReady, type MediaView } from "../../model/film-export.ts";
+import { MAX_FILM_SECONDS, filmFrame, blockersFirst, elapsedSeconds, filmSeconds, panelState, readinessRows, unavailableMsg, whenMsg, whyNotReady, type MediaView } from "../../model/film-export.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 import { useNow, useReducedMotion } from "./clock-hooks.ts";
 import { useLineSeparators, useRowsBelow } from "./layout-hooks.ts";
@@ -44,7 +44,9 @@ export function ExportPanel({ overview, view, media, error, writable, busy, onEx
   // Stopped turns off what would start work, and the title says why (P5-DESIGN shell change 8).
   // Exports render on this computer and spend nothing, so Stop does not turn them off (card B12).
   const startOff = offline;
-  const size = { width: EXPORT_SIZE.width, height: EXPORT_SIZE.height };
+  // The export follows the film's aspect (9:16 renders 720 × 1280); a chosen aspect leads the size line.
+  const frame = filmFrame(overview), size = { width: frame.width, height: frame.height };
+  const aspectLead = frame.chosen ? <><span data-act="export-aspect">{frame.aspect}</span> · </> : null;
   const reduced = useReducedMotion();
   // The shots that stop the export come first, so a short screen shows the ones the summary names.
   const rows = state.kind === "idle" ? blockersFirst(readinessRows(overview, demo)) : [];
@@ -131,7 +133,7 @@ export function ExportPanel({ overview, view, media, error, writable, busy, onEx
             </button>
           ) : null}
         </div>
-        <div className="hint" data-act="export-size">{seconds <= MAX_FILM_SECONDS ? t("film.export.length", { seconds, ...size }) : t("film.export.free", size)}</div>
+        <div className="hint" data-act="export-size">{aspectLead}{seconds <= MAX_FILM_SECONDS ? t("film.export.length", { seconds, ...size }) : t("film.export.free", size)}</div>
         <button
           type="button"
           className={`pill go${ready ? " primary" : ""}`}

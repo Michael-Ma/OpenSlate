@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   readinessOf, readinessRows, whyNotReady, panelState, lastExport, failureMsg, changeMsg, whenMsg, elapsedSeconds,
-  filmFingerprint, changedSince, unavailableMsg, musicMissing, rowsBelow, coverHeight, alignedEndPadding, blockersFirst, filmSeconds, EXPORT_SIZE, STALLED_AFTER_SECONDS,
+  filmFingerprint, changedSince, unavailableMsg, musicMissing, rowsBelow, coverHeight, alignedEndPadding, blockersFirst, filmSeconds, EXPORT_SIZE, STALLED_AFTER_SECONDS, filmFrame, frameAspectAttr,
 } from '../../src/next/model/film-export.ts';
 import { lastFerryOverview, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
@@ -235,4 +235,14 @@ test('a demo export blocked by your own music or recording names it, not the cli
     ["The demo film can't be exported with your own recording in 2.1 and 3.2"]);
   assert.deepEqual(why([{ code: 'mixed_demo_media', shotId: shotId('1.1'), medium: 'clip' }]), ["Demo clips and made clips can't share one export"]);
   assert.deepEqual(why([{ code: 'mixed_demo_media', shotId: shotId('1.1') }]), ["Demo clips and made clips can't share one export"], 'an older server without a medium keeps the clip wording');
+});
+
+test('the film frame follows the overview: a chosen 9:16 film exports 720 x 1280 and marks its previews; older films stay 16:9', () => {
+  assert.deepEqual(filmFrame(lastFerryOverview()), { aspect: '16:9', width: 1280, height: 720, chosen: false });
+  assert.equal(frameAspectAttr(lastFerryOverview()), undefined);
+  const vertical = { ...lastFerryOverview(), frame: { aspect: '9:16', width: 720, height: 1280 } };
+  assert.deepEqual(filmFrame(vertical), { aspect: '9:16', width: 720, height: 1280, chosen: true });
+  assert.equal(frameAspectAttr(vertical), '9:16');
+  assert.equal(frameAspectAttr({ frame: { aspect: '16:9', width: 1280, height: 720 } }), undefined, 'a chosen 16:9 keeps the existing boxes');
+  assert.equal(frameAspectAttr({ frame: { aspect: '1:1', width: 720, height: 720 } }), '1:1');
 });

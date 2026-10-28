@@ -271,3 +271,11 @@
   .film-work .meter i { animation: none; }
   .film-work .switch::after { transition: none; }
 }
+
+/* A portrait or square film (data-aspect 9:16 or 1:1): stills and timeline thumbnails show the whole frame, and the
+   stacked player takes the film's shape, no taller than most of the screen. */
+.work.film-work[data-aspect] .fv-still { object-fit: contain; background: var(--ground); }
+@media (max-width: 1239px) {
+  .work.film-work[data-aspect="9:16"] .player.preview { aspect-ratio: 9 / 16; width: min(100%, calc(70vh * 9 / 16)); justify-self: center; margin-inline: auto; }
+  .work.film-work[data-aspect="1:1"] .player.preview { aspect-ratio: 1 / 1; width: min(100%, 70vh); justify-self: center; margin-inline: auto; }
+}

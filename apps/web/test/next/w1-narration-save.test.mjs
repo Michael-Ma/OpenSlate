@@ -10,7 +10,7 @@ import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
 const models = Object.assign({}, ...await Promise.all([
   'checks', 'inspector', 'keyframes', 'narration', 'keyframes-stage', 'keyframes-press', 'motion', 'types',
   'director', 'displayed-baseline', 'edit-conflict', 'inspector-fit', 'narration-edits', 'recording-words',
-  'narration-recording', 'shell-states', 'note-banner', 'note-command', 'notes',
+  'narration-recording', 'shell-states', 'note-banner', 'note-command', 'notes', 'film-export',
 ].map((name) => import(`../../src/next/model/${name}.ts`))));
 const Fragment = Symbol('fragment');
 const jsx = (type, props, ...children) => ({ type, props: { ...props, children } });
