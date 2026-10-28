@@ -368,3 +368,15 @@ test('HTTP storyboard export prepares, renders and publishes while stopped witho
   assert.deepEqual(f.engine.attempts(f.project.id), attempts); assert.deepEqual(f.store.list('grant', f.project.id), grants);
   assert.equal(f.provider.acceptedCount(), before); assert.deepEqual(f.production.stopView(f.project.id), stopState);
 });
+
+test('the export follows the film aspect: a 9:16 film renders 720 x 1280, a film without a format stays 1280 x 720', async t => {
+  const f = await fixture(t, { narration: false, soundtrack: false });
+  const legacy = captureStoryboard(f.store, f.project.id).input; assert.deepEqual([legacy.width, legacy.height], [1280, 720]);
+  f.mutate(project => { project.filmKind = { version: 'film-kind@1', kind: 'social', format: { platform: 'ig_reels', aspect: '9:16' } }; });
+  const vertical = captureStoryboard(f.store, f.project.id).input; assert.deepEqual([vertical.width, vertical.height], [720, 1280]);
+  const job = await f.prepare('vertical'); assert.deepEqual([job.manifest.width, job.manifest.height], [720, 1280]);
+  // The renderer validates the written picture against the frozen geometry before it publishes.
+  const result = await f.service.run(f.project.id, f.actor, job.id), row = f.store.get('artifact', result.artifact.artifactId);
+  const probe = await execute(ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', row.path]);
+  assert.equal(probe.stdout.trim(), '720,1280');
+});

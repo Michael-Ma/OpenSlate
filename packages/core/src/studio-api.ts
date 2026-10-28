@@ -309,6 +309,8 @@ export interface GenerationOverview {
   restartCasualties: string[];
   /** Local film renders that were interrupted after they started and can be run again by the person (decision R4). */
   interruptedRenders?: { attemptId: string; kind: "timeline" | "render"; at: string }[];
+  /** The film's frame when the person chose a format: its aspect and export size. Absent: 16:9 at 1280×720 (older projects). */
+  frame?: { aspect: "16:9" | "9:16" | "1:1"; width: number; height: number };
 }
 
 // ---------------------------------------------------------------------------

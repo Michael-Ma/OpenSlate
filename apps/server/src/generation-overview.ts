@@ -3,7 +3,7 @@ import { keyframeTakeHistory } from "./keyframe-take-history.js";
 import { openBlockingNotes } from "./application/director-notes.js";
 import { confirmationView, type SceneConfirmationRecord } from "./scene-confirmations.js";
 import type { FastifyInstance } from "fastify";
-import { canonical, digest, DomainError, invariant } from "@openslate/core";
+import { canonical, digest, DomainError, explicitProjectAspect, invariant, projectExportSize } from "@openslate/core";
 import type { ArtifactRef, FrameViewInput, FrameViewReceipt, GenerationOverview, MediaSlot, ProviderProfile, ShotNarration, StudioArtifactRef, WaitingCode } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationService } from "./narration/service.js";
@@ -80,6 +80,8 @@ export class GenerationOverviewReader {
         controlAuthorityId: "authorityId" in snapshot.control ? snapshot.control.authorityId : null,
         scenes: [], shots: {}, restartCasualties: snapshot.attempts.filter(a => !a.released && a.phase === "submission_unknown" && a.createdAt < this.production.engine.startedAt).map(a => a.id) };
       const interrupted = this.production.engine.interruptedLocalWork(projectId);
+      const aspect = explicitProjectAspect(project);
+      if (aspect) overview.frame = { aspect, ...projectExportSize(project) };
       if (interrupted.length) overview.interruptedRenders = interrupted.map(({ attemptId, kind, at }) => ({ attemptId, kind, at }));
       for (const [index, scene] of project.scenes.entries()) {
         const captured = sceneView(this.production, projectId, scene.id, { snapshot, review, tolerateAlternatives: true });

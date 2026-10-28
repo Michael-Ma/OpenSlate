@@ -1,4 +1,4 @@
-import { canonical, digest, invariant, shotIntentDigest, shotVideoTiming } from "@openslate/core";
+import { canonical, digest, invariant, projectExportSize, shotIntentDigest, shotVideoTiming } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan } from "@openslate/core";
 import type { ExportReadiness, ExportRecord } from "@openslate/core/public";
 import type { NodeBinding } from "../execution/engine.js";
@@ -139,7 +139,7 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
     return { readiness: { ready: !blockers.length, demo, seconds: totalFrames / 30, blockers },
       target: { kind: "storyboard", revisionId: project.revisionId, headVersion: project.headVersion, demo, film, inputs,
         dependencyNodeIds: [...dependencyNodeIds].sort(), scopeIds: [projectId, ...project.scenes.map(s => s.id), ...shots.map(s => s.id)].sort() },
-      input: { projectId, targetRevisionId: project.revisionId, width: 1280, height: 720, clips, audio, ...(demo ? { demo: true as const } : {}) }, fixtureClips, fixtureAudio };
+      input: { projectId, targetRevisionId: project.revisionId, ...projectExportSize(project), clips, audio, ...(demo ? { demo: true as const } : {}) }, fixtureClips, fixtureAudio };
   });
 }
 export function changedFilm(previous: FilmFingerprint, current: FilmFingerprint): ExportRecord["outdatedBy"] {
