@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { cpSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { digest, FILM_KINDS } from "@openslate/core";
+import { digest, FILM_KIND_KINDS } from "@openslate/core";
 
 export const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const sha = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -25,7 +25,7 @@ export function packageDigest(dir) {
 
 const entry = (id, body) => `---\nname: ${id}\ndescription: Synthetic ${id} guidance for offline tests.\n---\n\n# ${id}\n\n${body}\n`;
 
-/** A small release: copied V7 core, one type package, two craft packages and one format package. */
+/** A small release: copied V7 core, two type packages (music video, social), two craft packages and one format modifier. */
 export function syntheticPackages({ toolContract = "7.0.0", version = "8.0.0", requiredToolIds = ["read_context", "read_guidance"] } = {}) {
   const compatibility = { toolContract, planLanguage: "1.0.0", workflowContract: "1.0.0" };
   const core = id => ({ id, role: "core", copyFrom: join(repositoryRoot, "skills/v7", id) });
@@ -35,10 +35,12 @@ export function syntheticPackages({ toolContract = "7.0.0", version = "8.0.0", r
       requires: ["craft-story"], optional: [{ id: "craft-characters", when: "has_characters" }, { id: "format-social-vertical", when: "modifier:social_vertical" }],
       files: { "SKILL.md": entry("type-music-video", "Plan to the song. Read [the section map](references/section-map.md) before scene planning.\n\n" + words(120)),
         "references/section-map.md": "# Section map\n\nMUSIC-VIDEO-SECTION-MAP " + words(600) + "\n" } },
+    { id: "type-social", role: "type", routes: { kinds: ["social"], subtypes: ["skit", "pov", "meme"] }, requires: ["craft-story"],
+      files: { "SKILL.md": entry("type-social", "Hook, one beat, loop. " + words(90)) } },
     { id: "craft-story", role: "craft",
       files: { "SKILL.md": entry("craft-story", "Find the core sentence and image. " + words(80)), "references/frameworks.md": "# Frameworks\n\nCRAFT-STORY-FRAMEWORKS " + words(900) + "\n" } },
     { id: "craft-characters", role: "craft", files: { "SKILL.md": entry("craft-characters", "Identity and wardrobe. " + words(60)) } },
-    { id: "format-social-vertical", role: "format", routes: { kinds: ["social_vertical"] }, requires: ["craft-story"],
+    { id: "format-social-vertical", role: "format", requires: ["craft-story"],
       files: { "SKILL.md": entry("format-social-vertical", "Safe areas and hooks. " + words(70)) } },
   ].map(item => ({ version, compatibility, requiredToolIds, requires: [], optional: [], ...item }));
 }
@@ -47,7 +49,7 @@ export function syntheticPackages({ toolContract = "7.0.0", version = "8.0.0", r
  * Writes a release directory. Override any release.json field through `release`, or mutate packages first.
  * Core packages are copied from V7 with a schema 2 manifest; only the copy changes, never skills/v7.
  */
-export function writeSkillRelease(root, { packages = syntheticPackages(), release = {}, routeKinds = FILM_KINDS, manifest = (_, value) => value } = {}) {
+export function writeSkillRelease(root, { packages = syntheticPackages(), release = {}, routeKinds = FILM_KIND_KINDS, manifest = (_, value) => value } = {}) {
   mkdirSync(root, { recursive: true });
   for (const item of packages) {
     const dir = join(root, item.id);

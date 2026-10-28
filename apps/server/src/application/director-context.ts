@@ -1,4 +1,4 @@
-import { canonical, digest, invariant, STAGE_CONTRACTS, STAGES, validateStageScope } from "@openslate/core";
+import { canonical, digest, invariant, normalizeFilmKind, STAGE_CONTRACTS, STAGES, validateStageScope } from "@openslate/core";
 import type { ActorContext, ProjectRecord } from "@openslate/core";
 import { activateSkills, readActivatedSkillFile, routeSkills, SKILL_LIMITS, verifySkillLock, verifySkillLockRelease } from "@openslate/director";
 import type { SkillActivation, SkillCapabilityLock, SkillEnvironment, SkillReadVia, SkillStageBinding } from "@openslate/director";
@@ -16,6 +16,7 @@ export function directorRoutingConditions(project: ProjectRecord): string[] {
   if (project.soundtrack) facts.push("has_soundtrack");
   if (project.narration.script.trim() || project.shots.some(shot => shot.narration && shot.narration.mode !== "none" && shot.narration.text.trim())) facts.push("narration_planned");
   if (project.visualStyle) facts.push("has_visual_style");
+  if (normalizeFilmKind(project.filmKind)?.audience === "kids") facts.push("audience:kids");
   return facts;
 }
 

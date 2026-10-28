@@ -205,7 +205,8 @@ function manifest(value: unknown): SkillManifest {
   check(typeof record.role === "string" && (SKILL_ROLES as readonly string[]).includes(record.role), "Unknown skill role");
   const role = record.role as SkillRole;
   const routed = record.routes === undefined ? undefined : routes(record.routes);
-  check((role === "type" || role === "format") === (routed !== undefined), "Type and format packages declare routes; core and craft packages do not");
+  // A type package is a spine and must route kinds; a format package is a modifier and may also route kinds.
+  check(role === "type" ? routed !== undefined : role === "format" || routed === undefined, "Type packages declare routes; core and craft packages do not");
   const requires = array(record.requires ?? [], SKILL_LIMITS.packages).map(identifier); unique(requires, "required package");
   const optional = array(record.optional ?? [], SKILL_LIMITS.packages).map(item => { const entry = object(item, ["id", "when"]); return { id: identifier(entry.id), when: condition(entry.when) }; });
   unique(optional.map(item => item.id), "optional package");
@@ -630,7 +631,6 @@ export function routeSkillsFromKey(key: FilmKindRouteKey, release: SkillReleaseV
   const { typePackage, formatPackages, toneTags } = routingKey(key);
   const facts = new Set(array(conditions, SKILL_ROUTING_CONDITIONS.length).map(condition));
   for (const format of formatPackages) { const derived = `modifier:${format.replace(/^format-/, "").replaceAll("-", "_")}`; if (SKILL_ROUTING_CONDITIONS.includes(derived)) facts.add(derived); }
-  for (const tag of toneTags) if (SKILL_ROUTING_CONDITIONS.includes(`audience:${tag}`)) facts.add(`audience:${tag}`);
   const inputs = { typePackage, formatPackages, toneTags, conditions: [...facts].sort() };
   const { graph, release: manifest } = release;
   const selected: string[] = []; const reasons: Record<string, string> = {};

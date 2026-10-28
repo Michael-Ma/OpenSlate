@@ -1,4 +1,4 @@
-import { digest, FILM_KINDS, invariant, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, STAGES, toolCatalog, toolContractAtLeast, toolHandlerId } from "@openslate/core";
+import { digest, FILM_KIND_KINDS, invariant, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, STAGES, toolCatalog, toolContractAtLeast, toolHandlerId } from "@openslate/core";
 import type { ToolContractVersion } from "@openslate/core";
 import { createSkillLock, createSkillReleaseLock, loadSkillCatalog, loadSkillRelease, SKILL_RELEASE_MIN_MAJOR } from "@openslate/director";
 import type { SkillCapabilityLock, SkillEnvironment } from "@openslate/director";
@@ -36,7 +36,7 @@ const stagePrompts = () => STAGES.map(stage => ({ id: `production/${stage}@1`, s
 export function createDirectorReleaseLock(options: DirectorSkillConfiguration, version: ToolContractVersion, guidanceVersion: string, expectedReleaseDigest?: string): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
   invariant(Number(guidanceVersion) >= SKILL_RELEASE_MIN_MAJOR && toolContractAtLeast(version, "7.0.0"), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported guidance release");
   const environment = directorSkillEnvironment(options, version);
-  const release = loadSkillRelease({ ...environment, releaseRoot: join(options.repositoryRoot, `skills/v${guidanceVersion}`), routeKinds: FILM_KINDS,
+  const release = loadSkillRelease({ ...environment, releaseRoot: join(options.repositoryRoot, `skills/v${guidanceVersion}`), routeKinds: FILM_KIND_KINDS,
     ...(expectedReleaseDigest ? { expectedReleaseDigest } : {}) });
   invariant(release.release.core.includes("production"), "DIRECTOR_GUIDANCE_UNSUPPORTED", "A guidance release needs the production core package");
   return { environment, lock: createSkillReleaseLock(release, { bindings: environment.bindings!, prompts: stagePrompts() }) };

@@ -11,7 +11,7 @@ import { SKILL_LIMITS, verifySkillLockSnapshots } from '@openslate/director';
 import { Store } from '../dist/persistence/store.js';
 import { Engine } from '../dist/execution/engine.js';
 import { ProductionService } from '../dist/application/service.js';
-import { DirectorContextService } from '../dist/application/director-context.js';
+import { DirectorContextService, directorRoutingConditions } from '../dist/application/director-context.js';
 import { createDirectorSkillLock } from '../dist/application/director-capabilities.js';
 import { createDirectorInput } from '../dist/application/director-input.js';
 import { DirectorToolSettings } from '../dist/application/director-tools-upgrade.js';
@@ -50,8 +50,8 @@ test('read_guidance joins only the 7.0.0 catalog; the 6.0.0 catalog is unchanged
 
 test('a release lock injects only the routed entries and the core references, and Codex enables only routed skills', t => {
   const f = seven(t);
-  assert.equal(f.lock.schemaVersion, 2); assert.equal(f.lock.skills.length, 6);
-  setProject(f, { filmKind: 'music_video' });
+  assert.equal(f.lock.schemaVersion, 2); assert.equal(f.lock.skills.length, 7);
+  setProject(f, { filmKind: { version: 'film-kind@1', kind: 'music_video' } });
   const turn = freshTurn(f), input = prepare(f, turn), context = JSON.parse(input.context);
   const routed = ['production', 'plan-authoring', 'type-music-video', 'craft-story'];
   assert.deepEqual(context.references.map(ref => `${ref.skillId}/${ref.path}`),
@@ -60,7 +60,7 @@ test('a release lock injects only the routed entries and the core references, an
   assert.deepEqual(context.guidance.routing.selected, routed);
   assert.equal(context.guidance.routing.reasons['type-music-video'], 'route:type');
   assert.deepEqual(context.guidance.packages.map(item => [item.package, item.injected]).sort(),
-    [['craft-characters', false], ['craft-story', true], ['format-social-vertical', false], ['plan-authoring', true], ['production', true], ['type-music-video', true]]);
+    [['craft-characters', false], ['craft-story', true], ['format-social-vertical', false], ['plan-authoring', true], ['production', true], ['type-music-video', true], ['type-social', false]]);
   assert.match(context.instructions, /read_guidance \{package, path\}/);
   // Lazy: nothing beyond entries and the two core references, so references and stage files stay out of context.
   for (const marker of ['MUSIC-VIDEO-SECTION-MAP', 'CRAFT-STORY-FRAMEWORKS']) assert.doesNotMatch(input.context, new RegExp(marker));
@@ -85,11 +85,18 @@ test('routing follows saved facts: general falls back, characters add their craf
   let context = JSON.parse(prepare(f, freshTurn(f)).context);
   assert.deepEqual(context.guidance.routing.selected, ['production', 'plan-authoring', 'craft-story']);
   assert.equal(context.guidance.routing.reasons['craft-story'], 'fallback');
-  setProject(f, { filmKind: 'music_video', characters: [{ id: 'c1', revisionId: 'r1', name: 'Mara', identity: 'Tall, short dark hair.', wardrobe: [], sheet: null }] });
+  setProject(f, { filmKind: { version: 'film-kind@1', kind: 'music_video' }, characters: [{ id: 'c1', revisionId: 'r1', name: 'Mara', identity: 'Tall, short dark hair.', wardrobe: [], sheet: null }] });
   context = JSON.parse(prepare(f, freshTurn(f)).context);
   assert.deepEqual(context.guidance.routing.selected, ['production', 'plan-authoring', 'type-music-video', 'craft-story', 'craft-characters']);
   assert.equal(context.guidance.routing.reasons['craft-characters'], 'when:has_characters');
   assert.deepEqual(context.guidance.routing.selected, f.store.list('skill_activation', f.project.id).at(-1).activation.routing.selected);
+});
+
+test('routing facts come from saved state only, including a kids audience', t => {
+  const f = seven(t), base = f.saved();
+  assert.deepEqual(directorRoutingConditions(base), []);
+  assert.deepEqual(directorRoutingConditions({ ...base, filmKind: { version: 'film-kind@1', kind: 'narrative', audience: 'kids' }, visualStyle: { id: 'x' },
+    soundtrack: { audioId: 'a', gainMilliDb: 0 }, narration: { script: 'Once upon a time.', source: 'generated' } }), ['has_soundtrack', 'narration_planned', 'has_visual_style', 'audience:kids']);
 });
 
 test('read_guidance reads any package in the conversation\'s lock, records a skill_read and changes nothing', async t => {
