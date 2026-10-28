@@ -368,10 +368,55 @@ export function finishedExports(world: FixtureWorld): ExportRecord[] {
   return state(world).exports.map((entry) => entry.record).filter((record) => record.state === "done" && !!record.artifact);
 }
 
-/** Music imported in the Assets view joins the film's library, so Change music lists it. */
-export function addMusicRecording(world: FixtureWorld, recording: MusicRecording): void {
+/**
+ * Music imported in the Assets view joins the film's library, so Change music lists it. As in the studio, it
+ * becomes the film's music when the film never chose any (No music stays chosen). True when it did.
+ */
+export function addMusicRecording(world: FixtureWorld, recording: MusicRecording): boolean {
   const fixture = state(world);
   if (!fixture.library.some((r) => r.id === recording.id)) fixture.library = [recording, ...fixture.library];
+  if ((world.snapshot as SnapshotWithMusic).project.soundtrack !== undefined) return soundtrackOf(world)?.audioId === recording.id;
+  world.update((w) => {
+    setSoundtrack(w, { audioId: recording.id, gainMilliDb: -18000 });
+    bump(w, fixture);
+    fixture.undo = null;
+  });
+  return true;
+}
+
+/**
+ * GET /audio-library/:id/timing in the sample film: every recording is a steady 120 BPM song, and the fit keeps
+ * the shots' proportions within 3–15 s with cuts on beats (the studio also lands scene ends on sections).
+ */
+function songTiming(world: FixtureWorld, audioId: string): unknown {
+  const fixture = state(world);
+  const recording = fixture.library.find((r) => r.id === audioId);
+  if (!recording) throw new ApiError("NOT_FOUND", 404);
+  const fps = world.overview.fps, beat = fps / 2;
+  const durationFrames = Math.round((recording.durationSeconds ?? 0) * fps);
+  const music = soundtrackOf(world);
+  const start = music?.audioId === audioId ? music.startFrame ?? 0 : 0;
+  const order = world.overview.scenes.flatMap((scene) => scene.shotIds).map((id) => world.overview.shots[id]!).filter(Boolean);
+  const min = 3 * fps, max = 15 * fps, target = Math.min(10800, start + durationFrames);
+  const total = Math.max(order.length * min, Math.min(order.length * max, target));
+  const weight = order.reduce((n, shot) => n + shot.durationFrames, 0) || 1;
+  const timings: Array<{ id: string; desiredFrames: number }> = [];
+  let previous = 0, cumulative = 0;
+  order.forEach((shot, i) => {
+    cumulative += shot.durationFrames;
+    if (i === order.length - 1) { timings.push({ id: shot.shotId, desiredFrames: total - previous }); return; }
+    const left = order.length - i - 1;
+    const low = Math.max(previous + min, total - left * max), high = Math.min(previous + max, total - left * min);
+    const ideal = Math.round(total * cumulative / weight), onBeat = Math.round(ideal / beat) * beat;
+    const cut = Math.max(low, Math.min(high, onBeat >= low && onBeat <= high ? onBeat : ideal));
+    timings.push({ id: shot.shotId, desiredFrames: cut - previous });
+    previous = cut;
+  });
+  return {
+    audioId, sha256: recording.sha256, headVersion: world.snapshot.project.headVersion, musicVideo: true, selected: music?.audioId === audioId,
+    timing: { durationFrames, bpm: 120, beatFrames: Array.from({ length: Math.floor(durationFrames / beat) }, (_, i) => i * beat), sectionStartFrames: [0] },
+    fit: { targetFrames: target, totalFrames: total, timings, shortfallFrames: Math.max(0, target - total), overflowFrames: Math.max(0, total - target) },
+  };
 }
 
 /** Simulated server routes the Film view needs in the sample film. */
@@ -393,5 +438,6 @@ export const filmRoutes: FixtureRoute[] = [
     // The sample studio imports audio (the Assets view's import), up to 128 MiB and 6 minutes like the studio.
     return { recordings, coverage: { offset, total: all.length, nextOffset: next < all.length ? next : null }, capabilities: { import: true, maxBytes: 128 * MIB, maxSeconds: 360 } };
   } },
+  { method: "GET", match: /^\/audio-library\/([^/?]+)\/timing$/, handle: (world, [id]) => songTiming(world, decodeURIComponent(id ?? "")) },
   { method: "POST", match: /^\/storyboard$/, handle: (world, _params, body) => storyboard(world, body) },
 ];

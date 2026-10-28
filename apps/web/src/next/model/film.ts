@@ -393,6 +393,35 @@ export function musicOn(music: FilmMusic | null, t: number, total: number): bool
   return span.seconds > 0 && t >= span.start - 1e-9 && t < span.start + span.seconds - 1e-9;
 }
 
+// ---- the song sets the film's length (music videos) ----------------------------------------
+
+/** GET /api/projects/:projectId/audio-library/:audioId/timing. */
+export interface SongTimingView {
+  audioId: string;
+  headVersion: number;
+  musicVideo: boolean;
+  selected: boolean;
+  timing: { durationFrames: number; bpm: number | null; beatFrames: number[]; sectionStartFrames: number[] };
+  fit: { targetFrames: number; totalFrames: number; timings: Array<{ id: string; desiredFrames: number }>; shortfallFrames: number; overflowFrames: number };
+}
+
+/**
+ * How the film's length compares with its music (start offset plus the recording): shown when they differ by
+ * half a second or more, so the person can fit the shots to the song. Null without measured, audible music.
+ */
+export function songLength(music: FilmMusic | null, total: number): { song: number; film: number; differs: boolean } | null {
+  if (!music || music.missing || music.muted || music.seconds === null) return null;
+  const song = round1(music.start + music.seconds);
+  return { song, film: round1(total), differs: Math.abs(song - total) >= 0.5 };
+}
+
+/** The Fit to song command from the studio's fit, or null when it would change nothing or is stale. */
+export function songFitEdit(view: SongTimingView | null, overview: GenerationOverview): FilmEdit | null {
+  if (!view || view.headVersion !== overview.headVersion || !view.fit.timings.length) return null;
+  const timings = view.fit.timings.filter((row) => overview.shots[row.id] && overview.shots[row.id]!.durationFrames !== row.desiredFrames);
+  return timings.length ? { kind: "shotTiming", timings } : null;
+}
+
 // ---- free edits ------------------------------------------------------------------------
 
 export interface LengthLimits {
@@ -417,7 +446,9 @@ export function lengthLimits(shot: ShotOverview, fps: number): LengthLimits {
 export type FilmEdit =
   | { kind: "shot"; id: string; field: "desiredFrames"; value: string }
   | { kind: "moveShot"; id: string; sceneId: string; beforeId?: string }
-  | { kind: "soundtrack"; field: "audioId" | "startFrame" | "gainMilliDb" | "muted"; value: string };
+  | { kind: "soundtrack"; field: "audioId" | "startFrame" | "gainMilliDb" | "muted"; value: string }
+  /** Several shot lengths as one command with one Undo (Fit to song). */
+  | { kind: "shotTiming"; timings: Array<{ id: string; desiredFrames: number }> };
 
 /** A new length in whole seconds, within the limits; null when the step would leave them. */
 export function lengthEdit(shot: ShotOverview, fps: number, step: number): { edit: FilmEdit; seconds: number } | null {
@@ -455,7 +486,7 @@ export const musicChoiceEdit = (audioId: string | null): FilmEdit => ({ kind: "s
 
 /** The press id and the toast for each edit, so a press is never sent twice and Undo names the change. */
 export function editPressId(edit: FilmEdit): string {
-  return edit.kind === "soundtrack" ? `edit:soundtrack:${edit.field}` : `edit:${edit.kind}:${edit.id}`;
+  return edit.kind === "soundtrack" ? `edit:soundtrack:${edit.field}` : edit.kind === "shotTiming" ? "edit:shotTiming" : `edit:${edit.kind}:${edit.id}`;
 }
 
 /** "0:04" style start times and dB levels are formatted by the caller's clock; toasts take plain values. */

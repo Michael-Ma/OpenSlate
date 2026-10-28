@@ -11,7 +11,7 @@ import { FilmClock } from "../../model/film-clock.ts";
 import { changeMsg, lastExport, musicMissing, whenMsg, type MediaView } from "../../model/film-export.ts";
 import {
   clipStillOut, editPressId, filmMusic, filmTimeline, lengthEdit, lengthToast, moveEdit, musicChoiceEdit, musicMuteEdit, musicStartEdit,
-  soundtrackOf, type FilmEdit } from "../../model/film.ts";
+  songFitEdit, songLength, soundtrackOf, type FilmEdit, type SongTimingView } from "../../model/film.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 import { msg, type Msg } from "../../model/types.ts";
 import { useMode, useStore, useStudio } from "../../store/react.tsx";
@@ -215,6 +215,25 @@ function FilmWorkspace() {
       });
     });
   };
+  // Fit to song: the studio fits the current shots to the chosen song's length, sections and beats; one command, one Undo.
+  const song = songLength(music, timeline.total);
+  const fitToSong = async () => {
+    if (!music || !projectId || editingRef.current) return;
+    let view: SongTimingView;
+    try {
+      view = await store.read<SongTimingView>(`/audio-library/${encodeURIComponent(music.audioId)}/timing`);
+    } catch (error) {
+      store.dispatch({ type: "toast", message: msg("film.toast.fit_song_failed", { code: (error as { code?: string }).code ?? "NETWORK_ERROR" }), tone: "info" });
+      return;
+    }
+    const edit = songFitEdit(view, store.getState().overview ?? overview);
+    if (!edit) { store.dispatch({ type: "toast", message: msg("film.toast.fit_song_same"), tone: "info" }); return; }
+    const film = Math.round(view.fit.totalFrames / overview.fps * 10) / 10;
+    const toast = view.fit.shortfallFrames > 0 ? msg("film.toast.fit_song_short", { seconds: Math.round(view.fit.shortfallFrames / overview.fps) })
+      : view.fit.overflowFrames > 0 ? msg("film.toast.fit_song_long", { seconds: Math.round(view.fit.overflowFrames / overview.fps) })
+      : msg("film.toast.fit_song", { film });
+    void runEdit(edit, toast);
+  };
   const openInKeyframes = () => {
     if (!selectedShot) return;
     store.selectShot(selectedShot.shotId);
@@ -351,6 +370,8 @@ function FilmWorkspace() {
             onGain={musicGain}
             onMute={toggleMute}
             onChange={setMenuAnchor}
+            song={song}
+            onFit={() => void fitToSong()}
           />
         ) : (
           <span className="dim">{t("film.tools.hint")}</span>

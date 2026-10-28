@@ -170,6 +170,7 @@ interface Body {
   commandId?: string;
   withShots?: boolean;
   fields?: Record<string, unknown>;
+  timings?: Array<{ id?: unknown; desiredFrames?: unknown }>;
 }
 
 /** Shot fields whose behaviour the Keyframes fixture already simulates. */
@@ -178,7 +179,7 @@ const KEYFRAMES_FIELDS = new Set(["imagePrompt", "motion", "desiredFrames", "vid
 const DIRECTION_FIELDS = new Set(["purpose", "action", "framing"]);
 
 /** The storyboard kinds the server has (its body schema); the Plan view makes all of them but soundtrack. */
-const SERVER_KINDS = new Set(["treatment", "scene", "sceneTitle", "deleteScene", "moveScene", "addScene", "shot", "shotFields", "addShot", "deleteShot", "moveShot", "narration", "undo", "soundtrack"]);
+const SERVER_KINDS = new Set(["treatment", "scene", "sceneTitle", "deleteScene", "moveScene", "addScene", "shot", "shotFields", "addShot", "deleteShot", "moveShot", "narration", "undo", "soundtrack", "shotTiming"]);
 const OTHER_VIEWS_KINDS = new Set(["soundtrack"]);
 /** What the server still takes while a written plan is pending (storyboard.ts, IMPORT_PENDING). */
 const DURING_IMPORT = new Set(["treatment", "scene", "shot", "shotFields", "narration"]);
@@ -462,6 +463,26 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
           overview: { ...overview, shots: { ...overview.shots, [shot.shotId]: { ...shot, narration } } },
           project: { ...project, shots: project.shots.map((s) => (s.id === shot.shotId ? { ...s, narration: { mode, text: line, voice: s.narration?.voice ?? "stock" } } : s)) },
         };
+      });
+      break;
+    }
+    case "shotTiming": {
+      // Fit to song (the Film view): several lengths as one change, refused whole like the server's.
+      const rows = Array.isArray(body.timings) ? body.timings : [];
+      if (!rows.length || rows.length > 64 || new Set(rows.map((row) => row.id)).size !== rows.length) throw new ApiError("VALIDATION_ERROR", 400);
+      const lengths = new Map<string, number>();
+      for (const row of rows) {
+        const shot = world.overview.shots[typeof row.id === "string" ? row.id : ""];
+        if (!shot) throw new ApiError("NOT_FOUND", 404);
+        const frames = row.desiredFrames;
+        if (typeof frames !== "number" || !Number.isInteger(frames) || frames < MIN_SHOT_SECONDS * fps || frames > MAX_SHOT_SECONDS * fps) throw new ApiError("VALIDATION_ERROR", 400);
+        assertLength(shot, frames, fps);
+        if (frames !== shot.durationFrames) lengths.set(shot.shotId, frames);
+      }
+      change(world, (overview, project) => {
+        const shots = { ...overview.shots };
+        for (const [id, durationFrames] of lengths) shots[id] = { ...shots[id]!, durationFrames, video: outdateClip(shots[id]!.video, "desiredFrames") };
+        return { overview: { ...overview, shots }, project: { ...project, shots: project.shots.map((s) => (lengths.has(s.id) ? { ...s, desiredFrames: lengths.get(s.id)! } : s)) } };
       });
       break;
     }

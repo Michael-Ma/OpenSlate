@@ -351,8 +351,13 @@ export function refusalMsg(code: string, kind?: ImportKind): Msg {
   }
 }
 
-export function importDoneMsg(kind: ImportKind, use: AudioUse, name: string): Msg {
-  if (kind === "audio") return msg(use === "music" ? "assets.import.done.music" : "assets.import.done.audio", { name });
+/** The studio made this imported music the film's soundtrack (a film that had never chosen music). */
+export function importedAsFilmMusic(kind: ImportKind, receipt: unknown): boolean {
+  return kind === "audio" && (receipt as { recording?: { selectedAsMusic?: unknown } } | null)?.recording?.selectedAsMusic === true;
+}
+
+export function importDoneMsg(kind: ImportKind, use: AudioUse, name: string, filmMusic = false): Msg {
+  if (kind === "audio") return msg(use === "music" ? (filmMusic ? "assets.import.done.film_music" : "assets.import.done.music") : "assets.import.done.audio", { name });
   return msg(kind === "image" ? "assets.import.done.image" : "assets.import.done.video", { name });
 }
 

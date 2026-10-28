@@ -94,13 +94,16 @@ interface MusicToolsProps {
   onGain(draft: GainDraft): Promise<GainResult>;
   onMute(): void;
   onChange(anchor: HTMLElement): void;
+  /** Song and film length when they differ (a music video's song sets the film's length). */
+  song?: { song: number; film: number; differs: boolean } | null;
+  onFit?(): void;
 }
 
 /** A volume is saved this long after the last arrow key or release, so a run of steps is one edit and one Undo. */
 export const GAIN_SETTLE_MS = 400;
 
 /** The music track: start, volume (−60 to 0 dB), mute, and Change music (music-role audio only, SB-24). */
-export function MusicTools({ music, total, writable, saving, baseline, session, onStart, onGain, onMute, onChange }: MusicToolsProps) {
+export function MusicTools({ music, total, writable, saving, baseline, session, onStart, onGain, onMute, onChange, song, onFit }: MusicToolsProps) {
   const { t } = useI18n();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const slider = useRef<HTMLInputElement>(null);
@@ -177,6 +180,12 @@ export function MusicTools({ music, total, writable, saving, baseline, session, 
         <button type="button" className="switch" role="switch" data-act="mute-switch" aria-checked={music.muted} aria-labelledby="fv-mute-label" disabled={!writable} title={offline} onClick={onMute} />
       </span>
       <button type="button" className="pill sm" data-act="music-menu" aria-haspopup="menu" disabled={!writable} title={offline} onClick={(event) => onChange(event.currentTarget)}>{t("film.tools.change_music")}</button>
+      {song?.differs && onFit ? (
+        <span className="inline" data-act="song-length">
+          <span className="muted num">{t("film.tools.song_length", { song: song.song, film: song.film })}</span>
+          <button type="button" className="pill sm" data-act="fit-song" disabled={!writable || saving} title={offline ?? t("film.tools.fit_song_title")} onClick={onFit}>{t("film.tools.fit_song")}</button>
+        </span>
+      ) : null}
     </>
   );
 }

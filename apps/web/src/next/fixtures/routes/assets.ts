@@ -325,8 +325,8 @@ function importAudio(world: FixtureWorld, raw: string | undefined, body: UploadB
   const artifact = ref(id, "audio");
   const label = q.get("name")?.trim() || "Uploaded recording";
   add(world, { artifact, role, current: false, source: "imported", label, createdAt: localNow(), ...(seconds ? { durationSeconds: seconds } : {}) }, false);
-  if (role === "music") addMusicRecording(world, { id, label, sha256: artifact.sha256, durationSeconds: seconds, role: "music" });
-  return { recording: { id, label, sha256: artifact.sha256, durationSeconds: seconds, samples: 0, byteLength: size, origin: "uploaded", role } };
+  const selectedAsMusic = role === "music" && addMusicRecording(world, { id, label, sha256: artifact.sha256, durationSeconds: seconds, role: "music" });
+  return { recording: { id, label, sha256: artifact.sha256, durationSeconds: seconds, samples: 0, byteLength: size, origin: "uploaded", role, selectedAsMusic } };
 }
 
 /** PDF, TXT or MD up to 32 MiB; the sample film pretends to read a few pages of text from each. */

@@ -152,7 +152,7 @@ function Library() {
     setFilters(ALL_ASSETS);
     if (result.artifactId) setPendingId(result.artifactId);
     list.reload();
-    store.dispatch({ type: "toast", message: importDoneMsg(result.kind, result.use, result.name), tone: "info" });
+    store.dispatch({ type: "toast", message: importDoneMsg(result.kind, result.use, result.name, result.filmMusic), tone: "info" });
   };
 
   const point = () => {

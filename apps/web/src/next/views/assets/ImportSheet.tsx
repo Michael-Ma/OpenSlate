@@ -11,6 +11,7 @@ import {
   IMPORT_ACCEPT,
   formatBytes,
   importedArtifactId,
+  importedAsFilmMusic,
   importIdentity,
   refusalMsg,
   retryable,
@@ -33,6 +34,8 @@ export interface ImportResult {
   use: AudioUse;
   name: string;
   artifactId: string | null;
+  /** Imported music became the film's soundtrack. */
+  filmMusic?: boolean;
   /** The sheet was closed while the studio checked the file: the import finished in the background. */
   background: boolean;
 }
@@ -170,7 +173,7 @@ export function ImportSheet({ onClose, onImported }: { onClose(): void; onImport
             checking: () => { current.sentAll = true; set({ state: "checking" }); },
           });
           keys.settle(identity);
-          if (active()) onImported({ kind: fileKind, use: chosenUse, name: chosen.name, artifactId: importedArtifactId(fileKind, receipt), background: !mounted.current });
+          if (active()) onImported({ kind: fileKind, use: chosenUse, name: chosen.name, artifactId: importedArtifactId(fileKind, receipt), filmMusic: importedAsFilmMusic(fileKind, receipt), background: !mounted.current });
           return;
         } catch (error) {
           if (aborted(error, controller.signal)) {

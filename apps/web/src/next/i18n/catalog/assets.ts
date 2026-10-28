@@ -157,6 +157,7 @@ export const assetsMessages = {
   "assets.import.retry": { en: "Try again", zh: "重试" },
   "assets.import.offline": { en: "Can’t reach the studio. Importing works again once it’s back.", zh: "连不上工作室，恢复连接后才能导入。" },
   "assets.import.done.music": { en: "Imported {name} as music.", zh: "已导入 {name}，用作音乐。" },
+  "assets.import.done.film_music": { en: "Imported {name}. It is now the film's music.", zh: "已导入 {name}，已设为影片音乐。" },
   "assets.import.done.audio": { en: "Imported {name} as other audio.", zh: "已导入 {name}，用作其他音频。" },
   "assets.import.done.image": { en: "Imported {name}.", zh: "已导入 {name}。" },
   "assets.import.done.video": { en: "Imported {name}.", zh: "已导入 {name}。" },
