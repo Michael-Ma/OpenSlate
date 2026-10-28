@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { digest, FILM_KINDS, toolCatalog, toolContractAtLeast, parseToolArguments, V6_TOOL_NAMES } from '@openslate/core';
+import { digest, FILM_KINDS, FILM_KIND_VERSION, normalizeFilmKind, toolCatalog, toolContractAtLeast, parseToolArguments, V6_TOOL_NAMES } from '@openslate/core';
 import { SHIPPED_DIRECTOR_GUIDANCE } from '../dist/application/director-shipped-guidance.js';
 import { editStoryboard } from '../dist/storyboard.js';
 import { isMusicVideoProject } from '../dist/narration/music-video.js';
@@ -42,7 +42,7 @@ test('contract 7.0.0 adds tools without changing any shipped catalog', () => {
     assert.ok(next.names.includes(name) && !six.names.includes(name), name);
   assert.ok(toolContractAtLeast('7.0.0', '6.0.0') && !toolContractAtLeast('6.0.0', '7.0.0'));
   assert.throws(() => parseToolArguments('control_execution', { action: 'stop' }, '6.0.0'), /registered schema/);
-  assert.throws(() => parseToolArguments('prepare_change', { variant: 'project', expectedHeadVersion: 0, creative: { project: { filmKind: 'music_video' } } }, '6.0.0'));
+  assert.throws(() => parseToolArguments('prepare_change', { variant: 'project', expectedHeadVersion: 0, creative: { project: { filmKind: { kind: 'music_video' } } } }, '6.0.0'));
   assert.throws(() => parseToolArguments('set_soundtrack', {}, '7.0.0'), 'an empty soundtrack change is refused by schema');
   assert.equal(parseToolArguments('set_soundtrack', { audioId: null }, '7.0.0').arguments.audioId, null);
 });
@@ -121,19 +121,22 @@ test('prepare_change places new scenes and shots with beforeId and sets filmKind
     motion: { cameraGrammar: 'slow dolly', frameRateFeel: '24fps-cinematic', motionScale: 'subtle' },
     negatives: ['clean frame'], anchors: { referenceArtifactIds: [], characterSheets: [] }, variationAxes: ['timeOfDay'], rationale: 'Fits a quiet ferry story.' };
   const prepared = await turn.call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: {
-    project: { filmKind: 'music_video', visualStyle: style },
+    project: { filmKind: { kind: 'music_video', subtype: 'performance', basis: { kind: 'stated' } }, visualStyle: style },
     createScenes: [{ key: 'opening', title: 'Opening', purpose: 'Open on the water', beforeId: 'scene-0' }], createShots: [draft] } });
   await turn.call('apply_change', { preparedId: prepared.preparedId });
   const saved = f.saved();
   assert.equal(saved.scenes[0].title, 'Opening');
   assert.deepEqual(saved.shots.filter(s => s.sceneId === 'scene-1').map(s => s.action), ['A gull lands', 'A boot on a bench']);
-  assert.equal(saved.filmKind, 'music_video');
+  assert.deepEqual(saved.filmKind, { version: FILM_KIND_VERSION, kind: 'music_video', subtype: 'performance', basis: { kind: 'stated' } });
   assert.equal(saved.visualStyle.styleId, 'grounded-realism');
   assert.ok(saved.visualStyle.revisionId, 'the application issues the style revision');
   assert.ok(isMusicVideoProject(saved), 'filmKind decides, even though the brief never says music video');
   // An unknown insert target is refused by the same patch application.
   assert.equal(await code(f.openTurn().call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: { createShots: [{ ...draft, key: 'x', beforeId: 'shot-0' }] } })), 'SCOPE_DENIED');
-  assert.equal(await code(f.openTurn().call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: { project: { filmKind: 'opera' } } })), 'VALIDATION_ERROR');
+  assert.equal(await code(f.openTurn().call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: { project: { filmKind: { kind: 'opera' } } } })), 'VALIDATION_ERROR');
+  assert.equal(await code(f.openTurn().call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: { project: { filmKind: 'explainer' } } })), 'VALIDATION_ERROR', 'the catalog takes the structured record only');
+  assert.equal(await code(f.openTurn().call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: { project: { filmKind: { kind: 'music_video', subtype: 'skit' } } } })), 'VALIDATION_ERROR', 'subtype belongs to its kind');
+  assert.equal(f.saved().filmKind.subtype, 'performance', 'a refused change saves nothing');
   assert.ok(FILM_KINDS.includes('music_video') && FILM_KINDS.includes('explainer'));
 });
 
@@ -142,6 +145,45 @@ test('filmKind replaces the text detection; text stays only as the fallback', ()
   assert.equal(isMusicVideoProject(base), true);
   assert.equal(isMusicVideoProject({ ...base, filmKind: 'explainer' }), false);
   assert.equal(isMusicVideoProject({ name: 'x', brief: 'y', story: 'z', filmKind: 'music_video' }), true);
+  assert.equal(isMusicVideoProject({ ...base, filmKind: { version: FILM_KIND_VERSION, kind: 'social', subtype: 'skit' } }), false);
+  assert.equal(isMusicVideoProject({ ...base, filmKind: { version: FILM_KIND_VERSION, kind: 'undecided' } }), true, 'undecided falls back to the words');
+  assert.equal(isMusicVideoProject({ name: 'x', brief: 'y', story: 'z', filmKind: { version: FILM_KIND_VERSION, kind: 'music_video' } }), true);
+});
+
+test('read_context exposes filmKind and what intake still has to ask; a stored pre-structure string reads as the record', async t => {
+  const f = seven(t);
+  const fresh = await f.openTurn().call('read_context', {});
+  assert.equal(fresh.project.filmKind, null);
+  assert.deepEqual(fresh.project.filmKindIntake.ask, ['kind', 'aspect'], 'kind and aspect must be settled before planning');
+  const asked = { kind: 'undecided', format: { platform: 'ig_reels' }, basis: { platform: 'stated' } };
+  const turn = f.openTurn();
+  await turn.call('apply_change', { preparedId: (await turn.call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: { project: { filmKind: asked } } })).preparedId });
+  const waiting = await f.openTurn().call('read_context', {});
+  assert.equal(waiting.project.filmKind.kind, 'undecided');
+  assert.deepEqual(waiting.project.filmKindIntake.ask, ['kind'], 'Reels settles the aspect');
+  assert.equal(waiting.project.filmKindIntake.defaults.aspect, '9:16');
+  // The owner's example, saved after the person answered.
+  const ig = { kind: 'social', subtype: 'skit', tones: ['comedy'], format: { platform: 'ig_reels', aspect: '9:16', targetSeconds: 20 }, audience: 'general', source: 'generated',
+    basis: { kind: 'asked', subtype: 'inferred', tones: 'stated', platform: 'stated', aspect: 'default', lengthBand: 'stated', audience: 'default', source: 'default' } };
+  const next = f.openTurn();
+  await next.call('apply_change', { preparedId: (await next.call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: { project: { filmKind: ig } } })).preparedId });
+  const read = await f.openTurn().call('read_context', { section: 'overview' });
+  assert.deepEqual(read.project.filmKind, { version: FILM_KIND_VERSION, ...ig, format: { ...ig.format, lengthBand: 'up_to_30s' } });
+  assert.deepEqual(read.project.filmKindIntake.ask, []);
+  // 7.0.0 never shipped, but a development database may hold the old flat string.
+  const saved = f.store.getProject(f.project.id);
+  f.store.saveProject({ ...saved, filmKind: 'music_video' }, saved.headVersion);
+  assert.deepEqual(f.saved().filmKind, normalizeFilmKind('music_video'));
+  assert.equal(f.saved().filmKind.kind, 'music_video');
+  assert.ok(isMusicVideoProject(f.saved()));
+  assert.equal((await f.openTurn().call('read_context', {})).project.filmKind.kind, 'music_video');
+});
+
+test('6.0.0 read_context has no filmKind fields', async t => {
+  const f = seven(t, { version: '6.0.0' });
+  const read = await f.openTurn().call('read_context', {});
+  assert.equal('filmKind' in read.project, false);
+  assert.equal('filmKindIntake' in read.project, false);
 });
 
 test('delete_shots writes a card; only the person\'s click deletes, with the same result and Undo as their delete', async t => {

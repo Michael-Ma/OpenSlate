@@ -100,6 +100,13 @@ test('music video detection and the default-soundtrack decision', () => {
   assert.deepEqual(defaultSoundtrackDecision(p('An MV'), 'upload'), { adopt: false, reason: 'not_music' });
   assert.deepEqual(defaultSoundtrackDecision(p('An MV', null), 'music'), { adopt: false, reason: 'removed' });
   assert.deepEqual(defaultSoundtrackDecision(p('An MV', { audioId: 'x', gainMilliDb: -6000 }), 'music'), { adopt: false, reason: 'already_chosen' });
+  // film-kind@1: a decided kind decides; an undecided kind falls back to the person's words.
+  const mv = { version: 'film-kind@1', kind: 'music_video', subtype: 'performance', format: { aspect: '9:16' }, basis: { kind: 'stated' } };
+  assert.deepEqual(defaultSoundtrackDecision({ ...p('A ferry at dawn'), filmKind: mv }, 'music'), { adopt: true, gainMilliDb: 0 });
+  assert.deepEqual(defaultSoundtrackDecision({ ...p('An MV'), filmKind: { version: 'film-kind@1', kind: 'documentary', subtype: 'mini_doc' } }, 'music'), { adopt: true, gainMilliDb: null });
+  assert.deepEqual(defaultSoundtrackDecision({ ...p('An MV'), filmKind: { version: 'film-kind@1', kind: 'undecided' } }, 'music'), { adopt: true, gainMilliDb: 0 });
+  assert.deepEqual(defaultSoundtrackDecision({ ...p('A documentary'), filmKind: { version: 'film-kind@1', kind: 'undecided' } }, 'music'), { adopt: true, gainMilliDb: null });
+  assert.deepEqual(defaultSoundtrackDecision({ ...p('A ferry at dawn'), filmKind: 'music_video' }, 'music'), { adopt: true, gainMilliDb: 0 }, 'a pre-structure string still reads');
 });
 
 const token = 'offline_music_video_token';

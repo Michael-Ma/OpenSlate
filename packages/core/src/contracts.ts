@@ -1,3 +1,4 @@
+import type { FilmKind } from "./film-kind.js";
 /** Shared domain values. All persisted IDs are issued by application services. */
 export type Id = string;
 export type JsonValue =
@@ -121,12 +122,6 @@ export interface ProviderConfiguration {
   settings?: JsonObject;
 }
 
-/** Video types the Director recognises at intake (docs/ai/skill-drafts/video-types) plus music video. */
-export const FILM_KINDS = Object.freeze(["narrative_short", "commercial_ad", "product_showcase", "brand_film", "explainer", "tutorial",
-  "mini_doc", "testimonial", "social_vertical", "trailer_teaser", "event_recap", "fashion_lookbook", "place_film",
-  "kids_animated_story", "app_promo", "narrated_story", "tribute", "music_video"] as const);
-export type FilmKind = typeof FILM_KINDS[number];
-
 export interface VisualStyleTraits {
   palette: string;
   lighting: string;
@@ -177,7 +172,7 @@ export interface ProjectRecord {
   scenes: Array<{ id: Id; revisionId: Id; purpose: string; title?: string }>;
   /** Planned characters with per-scene wardrobe. Absent on plans written before character planning. */
   characters?: CharacterRecord[];
-  /** Explicit video type, set by the Director at intake. Absent on older plans. */
+  /** Structured video type (film-kind@1), set at intake. Absent on older plans; storage normalizes pre-structure strings. */
   filmKind?: FilmKind;
   /** The film's single look. Stored only; prompt compilation comes later. Absent on older plans. */
   visualStyle?: VisualStyle;

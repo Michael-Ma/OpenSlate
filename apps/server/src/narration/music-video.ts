@@ -1,15 +1,17 @@
+import { decidedKind } from "@openslate/core";
 import type { ProjectRecord } from "@openslate/core";
 
 /**
- * Whether a film is a music video. The explicit `filmKind` the Director sets at intake decides. Older plans have
- * no film kind; only then does this read the person's own words in the name, brief and story (English and Chinese
- * phrasings; "MV" only as a whole word).
+ * Whether a film is a music video. A decided `filmKind.kind` (film-kind@1; a pre-structure string is read the same
+ * way) decides. Older plans have no film kind, and an `undecided` kind has not been chosen; only then does this
+ * read the person's own words in the name, brief and story (English and Chinese phrasings; "MV" only as a whole word).
  */
 const MUSIC_VIDEO = /music[\s-]*video|lyric[\s-]*video|音乐视频|音樂視頻|音乐录影带|音樂錄影帶|歌曲(短片|视频|視頻)/i;
 /** Upper case only, so a lower-case "mv" (a shell command, a unit) does not count. */
 const MV = /\bMVs?\b/;
 export function isMusicVideoProject(project: Pick<ProjectRecord, "name" | "brief" | "story" | "filmKind">): boolean {
-  if (project.filmKind !== undefined) return project.filmKind === "music_video";
+  const kind = decidedKind(project.filmKind);
+  if (kind !== undefined) return kind === "music_video";
   return [project.name, project.brief, project.story].some((text) => typeof text === "string" && (MUSIC_VIDEO.test(text) || MV.test(text)));
 }
 

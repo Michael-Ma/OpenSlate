@@ -5,9 +5,9 @@ import { audioLibraryRole, type AudioLabel } from "../narration/audio-library-ro
 import { SONG_TIMING_VERSION, type SongTiming } from "../media/song-timing.js";
 import { projectRequest } from "./request-source.js";
 import type { RequestRecord } from "./service.js";
-import { canonical, digest, invariant, workflowReadiness } from "@openslate/core";
+import { canonical, digest, filmKindIntake, invariant, workflowReadiness } from "@openslate/core";
 import { continuedRequestAuthorities } from './pending-edit-continuation.js';
-import type { ActorContext, CompiledPlan, DirectorProposal, ProjectRecord, ProviderProfile } from "@openslate/core";
+import type { ActorContext, CompiledPlan, DirectorProposal, FilmKind, FilmKindIntake, ProjectRecord, ProviderProfile } from "@openslate/core";
 import type { ProductionService } from "./service.js";
 import type { NarrationAudio, NarrationState, SegmentRevision } from "../narration/types.js";
 import { NarrationService } from "../narration/service.js";
@@ -29,6 +29,9 @@ interface PlanMetadata {
   nodeCount: number; reviewGateCount: number; sourceKind: "canonical";
 }
 type ProjectMetadata = Pick<ProjectRecord, "id" | "headVersion" | "revisionId" | "name" | "brief" | "story" | "narration" | "activePlanId" | "capabilityLockId" | "maxFrames"> & {
+  /** 7.0.0: the saved film-kind@1 record (null when never set) and what intake still has to ask. */
+  filmKind?: FilmKind | null;
+  filmKindIntake?: FilmKindIntake;
   shots: Pick<ProjectRecord["shots"][number], "id" | "revisionId" | "sceneId" | "desiredFrames">[];
   scenes: Pick<ProjectRecord["scenes"][number], "id" | "revisionId" | "title" | "purpose">[];
 };
@@ -176,7 +179,8 @@ export function projectDirectorContext(service: ProductionService, projectId: st
     const audioRequests = contextAudioRequests(service.store, projectId, actor);
     const applicationCapabilities = projectApplicationCapabilities(toolVersion, audioRequests);
     const base: DirectorContextProjection = {
-      section, project: { id, headVersion, revisionId, name, brief, story, narration, activePlanId, capabilityLockId, maxFrames, shots: [], scenes: [] },
+      section, project: { id, headVersion, revisionId, name, brief, story, narration, activePlanId, capabilityLockId, maxFrames,
+        ...(toolContractAtLeast(toolVersion, "7.0.0") ? { filmKind: saved.filmKind ?? null, filmKindIntake: filmKindIntake(saved.filmKind) } : {}), shots: [], scenes: [] },
       headVersion, revisionId, activePlanId, cursor,
       guard: { projectId, headVersion, revisionId, activePlanId, graphDigest: plan.graphDigest, capabilityLockId, applicationCapabilitiesDigest: digest(applicationCapabilities), domainCursor, dataDigest: "" },
       request: { source: request.source, id: request.id, scopeIds: request.scopeIds, editing: request.editing, state: request.state }, plan, profiles: lock.profiles,

@@ -10,7 +10,7 @@ import type { NarrationSpeechReview } from "../narration/narration-speech-types.
 import Database from "better-sqlite3";
 import { mkdirSync, existsSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { canonical, digest, DomainError, invariant, newId } from "@openslate/core";
+import { canonical, digest, DomainError, invariant, newId, normalizeStoredFilmKind } from "@openslate/core";
 import type { JsonObject, ProjectEvent, ProjectRecord } from "@openslate/core";
 import { verifySchema } from "./schema.js";
 import { initializeDatabase } from "./migrations.js";
@@ -115,11 +115,12 @@ export class Store {
   getProject(id: string): ProjectRecord {
     const row = this.db.prepare("SELECT body,head_version FROM projects WHERE id=?").get(id) as ProjectRow | undefined;
     invariant(row, "NOT_FOUND", "Project not found");
-    return JSON.parse(row.body) as ProjectRecord;
+    // Unshipped 7.0.0 stored filmKind as a flat string; read it as the structured film-kind@1 record.
+    return normalizeStoredFilmKind(JSON.parse(row.body) as ProjectRecord);
   }
 
   listProjects(): ProjectRecord[] {
-    return (this.db.prepare("SELECT body FROM projects ORDER BY rowid DESC").all() as ProjectRow[]).map(row => JSON.parse(row.body) as ProjectRecord);
+    return (this.db.prepare("SELECT body FROM projects ORDER BY rowid DESC").all() as ProjectRow[]).map(row => normalizeStoredFilmKind(JSON.parse(row.body) as ProjectRecord));
   }
 
   saveProject(project: ProjectRecord, expectedHeadVersion: number): ProjectRecord {

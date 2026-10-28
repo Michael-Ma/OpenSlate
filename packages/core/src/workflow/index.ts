@@ -1,7 +1,8 @@
 import { Ajv } from "ajv";
 import { digest, invariant, newId } from "../common.js";
-import { FILM_KINDS } from "../contracts.js";
-import type { CompiledPlan, CueRecord, FilmKind, ProjectRecord, ShotRecord, VisualStyle } from "../contracts.js";
+import { filmKindInputSchema, LEGACY_FILM_KIND_VALUES, normalizeFilmKind, parseFilmKind } from "../film-kind.js";
+import type { FilmKindInput, LegacyFilmKindValue } from "../film-kind.js";
+import type { CompiledPlan, CueRecord, ProjectRecord, ShotRecord, VisualStyle } from "../contracts.js";
 import { shotVideoTiming } from '../video-timing.js';
 
 export const STAGES = ["intake", "story", "scene_plan", "shot_plan", "narration", "storyboard", "video", "assembly", "review"] as const;
@@ -56,7 +57,8 @@ export interface ShotUpdate {
 
 /** Contract 7.0.0 project fields. A visual style's revisionId is issued by the application. */
 export interface ProjectPatch {
-  filmKind?: FilmKind;
+  /** The whole structured record (film-kind@1). A pre-structure string is accepted only from held 7.0.0 proposals. */
+  filmKind?: FilmKindInput | LegacyFilmKindValue;
   visualStyle?: Omit<VisualStyle, "revisionId"> | null;
 }
 
@@ -149,10 +151,12 @@ export const visualStyleInputSchema = object({
   rationale: line(300),
 }, ["styleId", "libraryVersion", "label", "traits", "imageBlock", "motionBlock", "motion", "negatives", "anchors", "variationAxes", "rationale"]);
 const wardrobeEntry = object({ sceneId: short, outfit: line(600), notes: { type: "string", maxLength: 300 } }, ["sceneId", "outfit"]);
-function addContractSevenFields(input: unknown): void {
+function addContractSevenFields(input: unknown, legacyFilmKind = false): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON Schema surgery on a cloned literal.
   const creative = input as Record<string, any>;
-  creative.project = { ...object({ filmKind: { enum: FILM_KINDS }, visualStyle: { anyOf: [visualStyleInputSchema, { type: "null" }] } }), minProperties: 1 };
+  // The application parser also reads the pre-structure 7.0.0 strings a held proposal may carry; the catalog does not offer them.
+  const filmKind = legacyFilmKind ? { anyOf: [structuredClone(filmKindInputSchema), { enum: LEGACY_FILM_KIND_VALUES }] } : structuredClone(filmKindInputSchema);
+  creative.project = { ...object({ filmKind, visualStyle: { anyOf: [visualStyleInputSchema, { type: "null" }] } }), minProperties: 1 };
   creative.createScenes!.items.properties.beforeId = short;
   creative.createShots!.items.properties.beforeId = short;
   creative.updateShots!.items.properties.characterIds = { type: "array", maxItems: 32, uniqueItems: true, items: short };
@@ -165,7 +169,7 @@ function addContractSevenFields(input: unknown): void {
 }
 export const contractSevenChangeProposalSchema = structuredClone(successorChangeProposalSchema);
 addContractSevenFields((contractSevenChangeProposalSchema.properties as { creative: CreativeSchema }).creative.properties);
-addContractSevenFields((compatibleChangeProposalSchema.properties as { creative: CreativeSchema }).creative.properties);
+addContractSevenFields((compatibleChangeProposalSchema.properties as { creative: CreativeSchema }).creative.properties, true);
 
 /** Whether a creative patch carries 7.0.0 character fields, which the character tools apply. */
 export function hasCharacterPatchFields(patch: CreativePatch | undefined): boolean {
@@ -195,7 +199,11 @@ export function applyCreativePatch(
   if (patch.brief !== undefined) next.brief = patch.brief;
   if (patch.story !== undefined) next.story = patch.story;
   invariant(!hasCharacterPatchFields(patch), "VALIDATION_ERROR", "Character changes are applied by the character tools, not a creative patch");
-  if (patch.project?.filmKind !== undefined) next.filmKind = patch.project.filmKind;
+  if (patch.project?.filmKind !== undefined) {
+    const input = typeof patch.project.filmKind === "string" ? normalizeFilmKind(patch.project.filmKind) : patch.project.filmKind;
+    invariant(input, "VALIDATION_ERROR", "Unknown filmKind");
+    next.filmKind = parseFilmKind(input);
+  }
   if (patch.project?.visualStyle === null) delete next.visualStyle;
   else if (patch.project?.visualStyle !== undefined) {
     const style = structuredClone(patch.project.visualStyle);
@@ -284,7 +292,7 @@ export interface StageRequirement { stageId: StageId; scopeId: string }
 export function requiredStages(before: ProjectRecord, next: ProjectRecord, plan: CompiledPlan | null): StageRequirement[] {
   const requirements = new Map<string, StageRequirement>();
   const add = (stageId: StageId, scopeId: string) => requirements.set(`${stageId}:${scopeId}`, { stageId, scopeId });
-  if (before.brief !== next.brief || before.filmKind !== next.filmKind || digest(before.visualStyle ?? null) !== digest(next.visualStyle ?? null)) add("intake", next.id);
+  if (before.brief !== next.brief || digest(before.filmKind ?? null) !== digest(next.filmKind ?? null) || digest(before.visualStyle ?? null) !== digest(next.visualStyle ?? null)) add("intake", next.id);
   if (before.story !== next.story) add("story", next.id);
   if (digest(before.narration) !== digest(next.narration)) add("narration", next.id);
   for (const scene of next.scenes) if (digest(before.scenes.find(s => s.id === scene.id) ?? null) !== digest(scene)) add("scene_plan", scene.id);
