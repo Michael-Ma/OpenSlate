@@ -487,6 +487,12 @@ export async function generateScene(production: ProductionService, projectId: st
   }
   invariant(prepared, "SCENE_REVIEW_STALE", "Other scene work kept changing during preparation. Confirm this scene again.");
   const { compiled, aliases } = prepared;
+  const reviewedNodeIds = operations.map(operation => {
+    const nodes = compiled.nodes.filter(node => node.kind === operation.kind && node.shotId === operation.shotId
+      && (!operation.nodeId || node.id === operation.nodeId));
+    invariant(nodes.length === 1, "SCENE_REVIEW_STALE", "The exact reviewed operation changed during preparation");
+    return nodes[0]!.id;
+  });
   // The review installs only this scene. A whole-film planning hold is narrowed to its other scenes.
   return store.transaction(() =>
     store.command(scope, key, commandDigest, () => {
@@ -611,6 +617,7 @@ export async function generateScene(production: ProductionService, projectId: st
         options.actor ? publication.view.headVersion : input.headVersion,
         digest(captured.lock),
         input.kind,
+        reviewedNodeIds,
       );
       // Publication needs empty execution slots for fresh grants, but presentation keeps
       // the exact previous take and dependent outputs until replacement success.
