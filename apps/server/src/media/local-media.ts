@@ -10,7 +10,7 @@ import { assertTranscriptionAudioCapacity, assertTranscriptionAudioMeasurement, 
 import type { MeasuredTranscriptionAudio, TranscriptionAudioOptions, TranscriptionAudioRecipe } from "./transcription-audio-types.js";
 import type { FrozenRenderManifest, LocalMediaOptions, MediaAudioNormalizationIdentity, MediaLimits, MediaNormalizationIdentity, MediaProbe, RenderCompletion, RenderManifestInput, RenderOptions, RenderResult, SuppliedMedia } from "./types.js";
 
-const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioSources: 65, maxAudioPlacements: 65, timeoutMs: 120000 };
+const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioSources: 130, maxAudioPlacements: 260, timeoutMs: 120000 };
 // No playlists, concat demuxer, devices or network protocols. MOV external data
 // references remain disabled by the demuxer's default; files are copied first.
 const INPUT_OPTIONS = ["-protocol_whitelist", "file", "-format_whitelist", "mov,matroska,webm,avi,wav,mp3,flac,ogg"];
@@ -69,7 +69,7 @@ export class LocalMediaService {
     });
     mkdirSync(options.rootDir, { recursive: true, mode: 0o700 });
     this.rootDir = realpathSync(options.rootDir);
-    for (const dir of ["tmp", "blobs", "sources", "manifests", "completions"]) mkdirSync(join(this.rootDir, dir), { recursive: true, mode: 0o700 });
+    for (const dir of ["tmp", "blobs", "sources", "manifests", "completions", "clip-audio"]) mkdirSync(join(this.rootDir, dir), { recursive: true, mode: 0o700 });
     this.ffmpeg = options.ffmpegPath;
     this.ffprobe = options.ffprobePath;
     this.limits = Object.freeze({ ...DEFAULTS, ...options.limits });
@@ -78,8 +78,9 @@ export class LocalMediaService {
     integer(this.limits.maxDurationFrames, 1, 10800, "duration limit");
     integer(this.limits.maxClips, 1, 64, "clip limit");
     integer(this.limits.maxAudioTracks, 0, 8, "audio track limit");
-    integer(this.limits.maxAudioSources, 0, 65, "audio source limit");
-    integer(this.limits.maxAudioPlacements, 0, 65, "audio placement limit");
+    // Kept clip sound adds one source per clip and up to three ducked pieces per shot (clip-audio.ts).
+    integer(this.limits.maxAudioSources, 0, 130, "audio source limit");
+    integer(this.limits.maxAudioPlacements, 0, 260, "audio placement limit");
     integer(this.limits.timeoutMs, 50, MAX_TOOL_TIMEOUT_MS, "tool time limit");
   }
 
@@ -274,6 +275,53 @@ export class LocalMediaService {
       const result: SuppliedMedia = { id: digest(body), ...body };
       await this.installJson("sources", result.id, result);
       return frozen(result);
+    }));
+  }
+
+  /**
+   * The sound of an imported clip as normalized 48 kHz stereo PCM. Clip import keeps only silent video
+   * ("silent-h264-30fps-v1"); the untouched original stays in the blob store, so its audio stream is read from there,
+   * trimmed to the clip's measured picture. Content-addressed and cached: a clip is derived once, and a clip with
+   * no audio stream is remembered as such. Never reads a caller path.
+   */
+  async deriveClipAudio(video: SuppliedMedia, options: { signal?: AbortSignal } = {}): Promise<{ media: SuppliedMedia } | { reason: "no_audio_stream" | "source_unavailable" }> {
+    const { signal } = options;
+    const value = structuredClone(video);
+    return this.exclusive(async () => this.temporary(async dir => {
+      await this.verifySource(value, signal);
+      invariant(value.kind === "video" && value.probe.video && HASH.test(value.originalSha256), "MEDIA_INVALID_INPUT", "Clip audio needs a normalized video source");
+      const key = digest({ recipe: "clip-audio-v1", video: value.id });
+      const recordPath = join(this.rootDir, "clip-audio", `${key}.json`);
+      let cached: { media?: SuppliedMedia; reason?: "no_audio_stream" } | undefined;
+      try { cached = await this.readRecord(recordPath, signal) as typeof cached; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      if (cached?.reason === "no_audio_stream") return { reason: "no_audio_stream" as const };
+      if (cached?.media) { await this.verifySource(cached.media, signal); return { media: frozen(await this.readSource(cached.media, signal)) }; }
+      const original = join(this.rootDir, "blobs", `${value.originalSha256}.source`);
+      let observed: { sha256: string; byteLength: number };
+      try { observed = await this.hashFile(original, this.limits.maxInputBytes, signal); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { reason: "source_unavailable" as const }; throw error; }
+      if (observed.sha256 !== value.originalSha256 || observed.byteLength !== value.originalByteLength) return { reason: "source_unavailable" as const };
+      const input = join(dir, "input");
+      await copyFile(original, input, constants.COPYFILE_EXCL);
+      const inputProbe = await this.inspect(input, signal);
+      if (!inputProbe.audio) { await this.installJson("clip-audio", key, { reason: "no_audio_stream" }); return { reason: "no_audio_stream" as const }; }
+      const output = join(dir, "clip-audio.wav"), toolchainDigest = await this.toolchainDigest(signal);
+      const seconds = value.probe.video.frames / FPS;
+      await this.run(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...INPUT_OPTIONS, "-i", input, "-map_metadata", "-1", "-map_chapters", "-1",
+        "-map", `0:${inputProbe.audio.streamIndex}`, "-vn", "-af", "aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2",
+        "-t", String(seconds), "-fs", String(this.limits.maxOutputBytes), output], signal);
+      const probe = await this.inspect(output, signal);
+      invariant(probe.audio?.sampleRate === SAMPLE_RATE && probe.audio.channels === 2 && probe.audio.samples !== null && probe.audio.samples > 0 && !probe.video, "MEDIA_VALIDATION_FAILED", "Clip audio must have measured 48 kHz stereo samples");
+      await this.decode(output, signal);
+      aborted(signal);
+      const normalized = await this.installFile(output, "wav", this.limits.maxOutputBytes);
+      const body = { artifactId: `clip-audio_${value.id}`, kind: "audio" as const, originalSha256: value.originalSha256, originalByteLength: value.originalByteLength,
+        sha256: normalized.sha256, byteLength: normalized.byteLength, probe, toolchainDigest };
+      const media: SuppliedMedia = { id: digest(body), ...body };
+      await this.installJson("sources", media.id, media);
+      await this.installJson("clip-audio", key, { media });
+      return { media: frozen(media) };
     }));
   }
 

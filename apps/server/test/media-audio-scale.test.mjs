@@ -43,7 +43,9 @@ test("64 sequential cue placements use two distinct audio streams with decoded s
     let energy = 0; for (let offset = 2600; offset < 3000; offset++) energy += sample(index * 3200 + offset) ** 2;
     assert.ok(Math.sqrt(energy / 400) < 80, `missing silence gap at cue ${index}`);
   }
-  await assert.rejects(service.freezeManifest({ ...input, audio: [...audio, audio[0], audio[0]] }), code("MEDIA_INVALID_INPUT"));
+  // The placement limit (default 260 since kept clip sound; 65 here) still refuses one more.
+  const capped = new LocalMediaService({ rootDir: service.rootDir, allowedInputRoots: [root], ffmpegPath: ffmpeg, ffprobePath: ffprobe, limits: { maxAudioPlacements: 65 } });
+  await assert.rejects(capped.freezeManifest({ ...input, audio: [...audio, audio[0], audio[0]] }), code("MEDIA_INVALID_INPUT"));
   await assert.rejects(service.freezeManifest({ ...input, audio: audio.slice(0, 9).map(placement => ({ ...placement, atSample: 0 })) }), code("MEDIA_INVALID_INPUT"));
   const oneSource = new LocalMediaService({ rootDir: service.rootDir, allowedInputRoots: [root], ffmpegPath: ffmpeg, ffprobePath: ffprobe, limits: { maxAudioSources: 1 } });
   await assert.rejects(oneSource.freezeManifest(input), code("MEDIA_INVALID_INPUT"));
@@ -75,5 +77,9 @@ test('64 individual voice placements plus music render through two chronological
   const decoded = await execute(ffmpeg, ['-nostdin', '-v', 'error', '-i', rendered.artifact.path, '-map', '0:a:0', '-ac', '1', '-f', 's16le', '-'], { encoding: 'buffer', maxBuffer: 1024 * 1024, timeout: 10000 });
   const power = (start, frequency) => { let real = 0, imaginary = 0; for (let index = 0; index < 1600; index++) { const value = decoded.stdout.readInt16LE((start + index) * 2), angle = 2 * Math.PI * frequency * index / 48000; real += value * Math.cos(angle); imaginary += value * Math.sin(angle); } return real ** 2 + imaginary ** 2; };
   for (const index of [0, 8, 9, 31, 63]) { const frequency = 500 + (index % 9) * 100; assert.ok(power(index * 4800 + 1600, frequency) > power(index * 4800 + 1600, frequency + 50) * 10, `wrong voice at ${index}`); }
-  await assert.rejects(service.freezeManifest({ projectId: 'voices', targetRevisionId: 'over-limit', width: 160, height: 90, clips: manifest.clips, audio: [...audio, audio[0]] }), code('MEDIA_INVALID_INPUT'));
+  const capped = new LocalMediaService({ rootDir: service.rootDir, allowedInputRoots: [root], ffmpegPath: ffmpeg, ffprobePath: ffprobe, limits: { maxAudioPlacements: 65 } });
+  await assert.rejects(capped.freezeManifest({ projectId: 'voices', targetRevisionId: 'over-limit', width: 160, height: 90, clips: manifest.clips, audio: [...audio, audio[0]] }), code('MEDIA_INVALID_INPUT'));
+  const placements = Array.from({ length: 260 }, (_, index) => ({ source: voices[index % 9], startSample: 0, durationSamples: 1000, atSample: index * 1100, gainMilliDb: 0 }));
+  assert.equal((await service.freezeManifest({ projectId: 'voices', targetRevisionId: 'default-limit', width: 160, height: 90, clips: manifest.clips, audio: placements })).audio.length, 260);
+  await assert.rejects(service.freezeManifest({ projectId: 'voices', targetRevisionId: 'default-over', width: 160, height: 90, clips: manifest.clips, audio: [...placements, placements[0]] }), code('MEDIA_INVALID_INPUT'));
 });

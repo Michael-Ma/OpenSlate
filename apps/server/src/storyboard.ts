@@ -3,7 +3,7 @@ import { assertAcceptedNarrationDurationFloor } from "./application/publication-
 import { assertUndoUnused, captureMediaUndo, restoreCanonicalUndo, restoreMediaUndo, restoreNarrationWorkspaceUndo, type MediaUndo } from "./storyboard-history.js";
 import { OPENAI_SPEECH_VOICES } from "@openslate/providers";
 import type { FastifyInstance } from "fastify";
-import { digest, invariant, newId, shotIntentDigest } from "@openslate/core";
+import { clipAudioDefault, digest, invariant, isClipAudioGain, newId, shotIntentDigest } from "@openslate/core";
 import { editedPrompt } from "./application/shot-prompts.js";
 import type { ProjectRecord, ShotRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
@@ -31,7 +31,8 @@ type Edit = {
     | "undo"
     | "soundtrack"
     | "shotTiming"
-    | "shotPerformance";
+    | "shotPerformance"
+    | "shotClipAudio";
   id?: string;
   sceneId?: string;
   beforeId?: string;
@@ -230,6 +231,22 @@ export function editStoryboard(
         if (input.value === "singing") row.performance = "singing"; else delete row.performance;
         row.revisionId = newId();
         changed.add(row.id);
+      } else if (input.kind === "shotClipAudio") {
+        // Keep or mute the clip's own sound, or set its level. A mix choice only: the shot's revision, intent and
+        // media stay as they are. field "keep" ("true" | "false"), "gainMilliDb" (-60000..0) or "default" (follow the project).
+        const row = shot(), fallback = clipAudioDefault(next);
+        if (input.field === "keep") {
+          invariant(input.value === "true" || input.value === "false", "VALIDATION_ERROR", "Choose keep or mute.");
+          row.clipAudio = { keep: input.value === "true", ...(row.clipAudio?.gainMilliDb !== undefined ? { gainMilliDb: row.clipAudio.gainMilliDb } : {}) };
+        } else if (input.field === "gainMilliDb") {
+          const gain = Number(input.value);
+          invariant(input.value !== undefined && input.value.trim() !== "" && isClipAudioGain(gain), "VALIDATION_ERROR", "Use a gain between -60 and 0 dB.");
+          row.clipAudio = { keep: row.clipAudio?.keep ?? fallback.keep, gainMilliDb: gain };
+        } else {
+          invariant(input.field === "default" && (input.value === undefined || input.value === ""), "VALIDATION_ERROR", "Unknown clip sound field.");
+          delete row.clipAudio;
+        }
+        global = true;
       } else if (input.kind === "deleteShot") {
         const row = shot();
         assertNoRunningAttempts(s, projectId, new Set([row.id]));
@@ -501,7 +518,7 @@ export function editStoryboard(
       }
       // Hold only shots whose queued media is detached, never music/order/add operations.
       // The surrounding command transaction rolls back these holds on failure.
-      const holdFree = ["soundtrack", "moveShot", "moveScene", "sceneTitle", "deleteScene", "addScene", "addShot", "shotPerformance"].includes(input.kind);
+      const holdFree = ["soundtrack", "moveShot", "moveScene", "sceneTitle", "deleteScene", "addScene", "addShot", "shotPerformance", "shotClipAudio"].includes(input.kind);
       if (!holdFree)
         for (const scopeId of new Set(bindings.filter(b => affected.has(b.id) && before.shots.some(shot => shot.id === b.node.shotId)).map(b => b.node.shotId!)))
           s.engine.setHold(projectId, { scopeId, ownerId: actor.requestId });
@@ -594,6 +611,7 @@ export function registerStoryboard(
                 "soundtrack",
                 "shotTiming",
                 "shotPerformance",
+                "shotClipAudio",
               ],
             },
             expectedHeadVersion: { type: "integer", minimum: 0 },

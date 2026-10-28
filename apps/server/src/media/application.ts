@@ -13,6 +13,8 @@ import { fixtureSource } from "./demo-source.js";
 import { captureRender } from "./timeline-capture.js";
 import type { CapturedRender } from "./timeline-capture.js";
 import { validateUploadName } from "./upload-name.js";
+import { clipAudioPlacements, resolveClipAudio, type ClipAudioReport, type ClipAudioSkip } from "./clip-audio.js";
+import type { SuppliedMedia } from "./types.js";
 
 interface Request { projectId: string; principalId: string; scopeIds: string[]; state: string }
 const errorCode = (error: unknown): string => error instanceof DomainError ? error.code : "MEDIA_RENDER_FAILED";
@@ -133,9 +135,11 @@ export class MediaApplicationService {
       invariant(canonical(captureStoryboard(this.store, projectId).target) === canonical(capture.target), "REVISION_CONFLICT", "Film changed while freezing export");
       this.assertUnpaused({ projectId, target: capture.target });
     });
+    const fixtureVideo = new Map<string, SuppliedMedia>();
     for (const clip of capture.fixtureClips) {
       const source = await this.whenMediaAvailable(() => fixtureSource(this.store, this.media, projectId, clip.artifact, clip.durationFrames), assertCurrent);
       renderInput.clips.push({ source, startFrame: 0, durationFrames: clip.durationFrames, fit: "contain" });
+      fixtureVideo.set(clip.artifact.artifactId, source);
     }
     const fixtureAudioSources = new Map<string, Awaited<ReturnType<typeof fixtureSource>>>();
     for (const placement of capture.fixtureAudio) {
@@ -146,15 +150,29 @@ export class MediaApplicationService {
       }
       renderInput.audio!.push({ source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample });
     }
+    // Kept clip sound (absent from older captures): each clip's own audio, aligned to its shot and ducked under voice.
+    let clipAudio: ClipAudioReport[] = [];
+    if (capture.clipAudio?.shots.length) {
+      const derived = new Map<string, { media: SuppliedMedia } | { reason: ClipAudioSkip }>();
+      for (const shot of capture.clipAudio.shots)
+        derived.set(shot.shotId, await resolveClipAudio(this.media, shot.fixture ? fixtureVideo.get(shot.artifact.artifactId) : shot.source,
+          operation => this.whenMediaAvailable(operation, assertCurrent)));
+      const mixed = clipAudioPlacements(capture.clipAudio, derived);
+      renderInput.audio!.push(...mixed.placements);
+      clipAudio = mixed.report;
+    }
     const manifest = await this.media.freezeManifest(renderInput);
     return this.store.transaction(() => {
       this.authorize(projectId, authority);
       const previous = this.store.get<MediaRenderJob>("media_render", reserved.id); if (previous) return previous;
       invariant(canonical(captureStoryboard(this.store, projectId).target) === canonical(capture.target), "REVISION_CONFLICT", "Film changed while freezing export");
       const job: MediaRenderJob = { id: reserved.id, projectId, actor: authority, target: capture.target, manifest, outputArtifactId: reserved.outputArtifactId,
-        state: "prepared", ownerToken: null, leaseUntil: null, cancelRequested: false, artifact: null, createdAt: new Date().toISOString(), finishedAt: null, errorCode: null };
+        state: "prepared", ownerToken: null, leaseUntil: null, cancelRequested: false, artifact: null, createdAt: new Date().toISOString(), finishedAt: null, errorCode: null,
+        ...(clipAudio.length ? { clipAudio } : {}) };
       this.store.insert("media_render", job.id, projectId, job);
       this.store.appendEvent(projectId, "media.render_prepared", { renderJobId: job.id, manifestDigest: manifest.digest });
+      const skipped = clipAudio.filter(entry => entry.state === "skipped");
+      if (skipped.length) this.store.appendEvent(projectId, "media.clip_audio_skipped", { renderJobId: job.id, shots: skipped.map(entry => ({ shotId: entry.shotId, reason: entry.reason! })) });
       return job;
     });
   }

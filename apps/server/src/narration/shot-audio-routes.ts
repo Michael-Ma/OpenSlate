@@ -2,6 +2,7 @@ import { recordHumanFields } from "../application/human-fields.js";
 import { defaultNarratorVoice } from "./default-voice.js";
 import { assertExpectedHumanRequest } from "../application/expected-human-request.js";
 import { soundtrackPlacement } from "./soundtrack-placement.js";
+import { clipPlaybackPlacements, playbackClips, registerClipAudioContent } from "../media/clip-audio-playback.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { canonical, digest, invariant, newId } from "@openslate/core";
 import type { ActorContext } from "@openslate/core";
@@ -417,6 +418,7 @@ export function registerShotAudioRoutes(
   const { detail, saveWriting, actorForShot } = workspace;
   const { production, narration, canonical: commits } = options, store = production.store;
   const base = "/api/projects/:projectId/narration/shots/:shotId";
+  registerClipAudioContent(app, { store, media: () => narration.mediaAvailable ? narration.media : undefined });
   app.get<{ Params: { projectId: string; shotId: string } }>(
     base,
     async (request) => detail(request.params.projectId, request.params.shotId),
@@ -614,8 +616,8 @@ export function registerShotAudioRoutes(
   );
   app.get<{ Params: { projectId: string } }>(
     "/api/projects/:projectId/narration/playback",
-    async (request) =>
-      store.transaction(() => {
+    async (request) => {
+      const view = store.transaction(() => {
         const { projectId } = request.params,
           project = store.getProject(projectId),
           saved = commits.workspaceCurrent(projectId);
@@ -686,7 +688,14 @@ export function registerShotAudioRoutes(
           revisionId: project.revisionId,
           placements,
           soundtrack,
+          clips: playbackClips(store, project),
         };
-      }),
+      });
+      // Kept clip sound, ducked under the voice placements above (media/clip-audio-playback.ts). Read in the same
+      // transaction as the rest of the view; only the derivation of each clip's sound is asynchronous.
+      const { clips, ...rest } = view;
+      const clipPlacements = await clipPlaybackPlacements(narration.mediaAvailable ? narration.media : undefined, clips, rest.placements);
+      return { ...rest, placements: [...rest.placements, ...clipPlacements] };
+    },
   );
 }

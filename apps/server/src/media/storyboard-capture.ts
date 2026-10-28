@@ -8,7 +8,8 @@ import type { NarrationAudio } from "../narration/types.js";
 import { projectAudioPlacements, storyboardAudioCuts } from "../narration/audio-placement.js";
 import { soundtrackPlacement } from "../narration/soundtrack-placement.js";
 import type { OwnedMediaSource, RenderTarget } from "./application-types.js";
-import type { RenderManifestInput } from "./types.js";
+import type { RenderManifestInput, SuppliedMedia } from "./types.js";
+import { captureClipAudio, clipAudioFingerprint, type ClipAudioCapture } from "./clip-audio.js";
 
 export interface FilmFingerprint { shots: string; order: string; music: string; narration: string }
 export interface StoryboardRenderTarget extends Pick<RenderTarget, "revisionId" | "headVersion" | "inputs" | "dependencyNodeIds" | "scopeIds"> {
@@ -25,6 +26,8 @@ export interface StoryboardCapture {
   input: RenderManifestInput;
   fixtureClips: FixtureClip[];
   fixtureAudio: FixtureAudio[];
+  /** Kept clip sound, mixed at freeze time (clip-audio.ts). Empty for a film whose clip sound is muted. */
+  clipAudio: ClipAudioCapture;
 }
 
 /** SQL-only capture, shared by readiness, freeze and final publication. No Director timeline is needed. */
@@ -43,6 +46,7 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
     const placedAbsoluteCues = new Set<string>(), voices: { shotId: string; fixture: boolean }[] = [];
     let musicFixture: boolean | undefined;
     const shotFingerprints: unknown[] = [], voiceFingerprints: unknown[] = [];
+    const clipsByShot = new Map<string, { artifact: ArtifactRef; fixture: boolean; source: SuppliedMedia | null }>();
     const ownedArtifact = (ref: ArtifactRef) => {
       const row = store.get<Artifact>("artifact", ref.artifactId);
       return row?.projectId === projectId && canonical(row.artifact) === canonical(ref) && typeof row.fixture === "boolean" ? row : undefined;
@@ -72,12 +76,13 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
         blockers.push({ code: "clip_outdated", shotId: shot.id });
       if (ref && artifact) {
         selected.push({ shotId: shot.id, fixture: artifact.fixture });
+        clipsByShot.set(shot.id, { artifact: ref, fixture: artifact.fixture, source: artifact.fixture ? null : source?.source ?? null });
         inputs.push({ nodeId: node?.id ?? null, port: "video", artifact: ref });
         if (node) dependencyNodeIds.add(node.id);
         if (artifact.fixture) fixtureClips.push({ artifact: ref, durationFrames: shot.desiredFrames });
         else if (source) clips.push({ source: source.source, startFrame: 0, durationFrames: shot.desiredFrames, fit: "contain" });
       }
-      shotFingerprints.push({ id: shot.id, revisionId: shot.revisionId, frames: shot.desiredFrames, intent: shot.promptIntent.video, clip: ref ?? null });
+      shotFingerprints.push({ id: shot.id, revisionId: shot.revisionId, frames: shot.desiredFrames, intent: shot.promptIntent.video, clip: ref ?? null, ...clipAudioFingerprint(project, shot) });
       const timing = shotVideoTiming(project, shot);
       let settled = timing.ready;
       const segment = cue && narration?.projectId === projectId && narration.script === project.narration.script
@@ -105,6 +110,8 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
       if (!settled) blockers.push({ code: "voice_unsettled", shotId: shot.id });
       voiceFingerprints.push({ id: shot.id, narration: shot.narration ?? null, pending: shot.narrationPending ?? null, timingMode: shot.narrationTimingMode ?? null, cue: cue ?? null, segment: segment[0]?.audioPlacement ?? null });
     }
+    // Voice placements only (music is added below): they duck kept clip sound.
+    const clipAudio = captureClipAudio(project, cuts, clipsByShot, [...audio, ...fixtureAudio]);
     const totalFrames = shots.reduce((sum, shot) => sum + shot.desiredFrames, 0);
     if (!shots.length) blockers.push({ code: "empty_film" });
     if (totalFrames > Math.min(project.maxFrames, 10800) || shots.length > 64) blockers.push({ code: "too_long" });
@@ -139,7 +146,7 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
     return { readiness: { ready: !blockers.length, demo, seconds: totalFrames / 30, blockers },
       target: { kind: "storyboard", revisionId: project.revisionId, headVersion: project.headVersion, demo, film, inputs,
         dependencyNodeIds: [...dependencyNodeIds].sort(), scopeIds: [projectId, ...project.scenes.map(s => s.id), ...shots.map(s => s.id)].sort() },
-      input: { projectId, targetRevisionId: project.revisionId, ...projectExportSize(project), clips, audio, ...(demo ? { demo: true as const } : {}) }, fixtureClips, fixtureAudio };
+      input: { projectId, targetRevisionId: project.revisionId, ...projectExportSize(project), clips, audio, ...(demo ? { demo: true as const } : {}) }, fixtureClips, fixtureAudio, clipAudio };
   });
 }
 export function changedFilm(previous: FilmFingerprint, current: FilmFingerprint): ExportRecord["outdatedBy"] {
