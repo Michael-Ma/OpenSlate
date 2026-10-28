@@ -5,6 +5,10 @@ import type { ProductionService } from '../application/service.js';
 import type { NarrationService } from './service.js';
 import type { NarrationAudio, SuppliedNarrationAudio } from './types.js';
 import { ManagedUploadStore } from './managed-upload.js';
+import { defaultSoundtrackDecision, isMusicVideoProject } from './music-video.js';
+import { analyzeSongFile, fitShotsToSong, SONG_TIMING_VERSION, type SongTiming } from '../media/song-timing.js';
+import { storyboardAudioCuts } from './audio-placement.js';
+import { editStoryboard } from '../storyboard.js';
 
 const id = { type: 'string', minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -16,6 +20,39 @@ function entry(audio: NarrationAudio, label: string, role: AudioRole): AudioLibr
     'MEDIA_INTEGRITY_ERROR', 'The recording has no verified normalized audio identity');
   return { id: audio.id, label, sha256: audio.media.sha256, durationSeconds: measured.samples / 48000, samples: measured.samples,
     byteLength: audio.media.byteLength, origin: 'originEvidence' in audio ? 'generated' : 'uploaded', role };
+}
+
+interface SongTimingRecord { id: string; projectId: string; sha256: string; timing: SongTiming }
+/** Song timing is derived from the exact normalized bytes, once, and cached beside the recording. */
+async function songTiming(production: ProductionService, narration: NarrationService, audio: NarrationAudio): Promise<SongTiming> {
+  const store = production.store, cached = store.get<SongTimingRecord>('song_timing', audio.id);
+  if (cached?.projectId === audio.projectId && cached.sha256 === audio.media.sha256 && cached.timing.version === SONG_TIMING_VERSION) return cached.timing;
+  const { path } = await narration.media.verifiedSource(audio.media);
+  const timing = await analyzeSongFile(path, 128 * 1024 * 1024);
+  store.put<SongTimingRecord>('song_timing', audio.id, audio.projectId, { id: audio.id, projectId: audio.projectId, sha256: audio.media.sha256, timing });
+  return timing;
+}
+
+/**
+ * Default soundtrack: music imported into a film that never chose music becomes its soundtrack through the
+ * person's own soundtrack command (same validation, Undo and events); a music video also plays it at 0 dB.
+ * A refused selection (an import awaiting review, recovery, a concurrent edit) leaves the import itself intact.
+ */
+function adoptDefaultSoundtrack(production: ProductionService, projectId: string, audioId: string, role: AudioRole, importId: string): void {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const project = production.store.getProject(projectId), decision = defaultSoundtrackDecision(project, role);
+    if (!decision.adopt) return;
+    try {
+      const selected = editStoryboard(production, projectId, { kind: 'soundtrack', field: 'audioId', value: audioId, expectedHeadVersion: project.headVersion }, `audio-library-default:${importId}:audioId`);
+      if (decision.gainMilliDb !== null)
+        editStoryboard(production, projectId, { kind: 'soundtrack', field: 'gainMilliDb', value: String(decision.gainMilliDb), expectedHeadVersion: selected.headVersion }, `audio-library-default:${importId}:gain`);
+      return;
+    } catch (error) {
+      if (attempt === 0 && (error as { code?: string }).code === 'REVISION_CONFLICT') continue;
+      production.store.appendEvent(projectId, 'audio_library.default_soundtrack_skipped', { audioId, code: (error as { code?: string }).code ?? 'UNKNOWN' });
+      return;
+    }
+  }
 }
 
 /** Uploaded audio is an owned library asset. It creates no narration sections, cues, holds or paid authority. */
@@ -43,6 +80,24 @@ export function registerAudioLibraryRoutes(app: FastifyInstance, options: { prod
         capabilities: { import: narration.mediaAvailable, maxBytes: uploads.maxBytes, maxSeconds: 360 } };
     }).deferred();
     return reply.header('Cache-Control', 'private, no-store').send(view);
+  });
+  app.get<{ Params: { projectId: string; audioId: string } }>(`${base}/:audioId/timing`, { schema: { params: object({ projectId: id, audioId: id }, ['projectId', 'audioId']) } }, async (request, reply) => {
+    const { projectId, audioId } = request.params;
+    invariant(narration.mediaAvailable, 'NARRATION_MEDIA_UNAVAILABLE', 'Song timing needs local media tools');
+    const audio = store.get<NarrationAudio>('narration_audio', audioId);
+    invariant(audio?.projectId === projectId && audio.media.kind === 'audio', 'NOT_FOUND', 'Choose a recording owned by this film');
+    const timing = await songTiming(production, narration, audio);
+    const project = store.getProject(projectId), cuts = storyboardAudioCuts(project);
+    const shots = cuts.map(cut => project.shots.find(shot => shot.id === cut.shotId)!).map(shot => {
+      const cue = project.cues.find(cue => cue.id === shot.cueId);
+      return { id: shot.id, sceneId: shot.sceneId, desiredFrames: shot.desiredFrames,
+        ...(shot.narrationTimingMode === 'within_shot' && cue?.accepted ? { minFrames: cue.durationFrames } : {}) };
+    });
+    const startFrame = project.soundtrack?.audioId === audioId ? project.soundtrack.startFrame ?? 0 : 0;
+    return reply.header('Cache-Control', 'private, no-store').send({
+      audioId, sha256: audio.media.sha256, headVersion: project.headVersion, musicVideo: isMusicVideoProject(project),
+      selected: project.soundtrack?.audioId === audioId, timing, fit: fitShotsToSong(shots, timing, startFrame, Math.min(project.maxFrames, 10800)),
+    });
   });
   app.post<{ Params: { projectId: string }; Querystring: { name?: string; role?: AudioRole }; Body: AsyncIterable<Uint8Array> }>(`${base}/uploads`, {
     bodyLimit: uploads.maxBytes,
@@ -85,9 +140,15 @@ export function registerAudioLibraryRoutes(app: FastifyInstance, options: { prod
       invariant(audio.projectId === projectId && audio.media.originalSha256 === upload.sha256 && audio.media.originalByteLength === upload.byteLength,
         'UPLOAD_CORRUPT', 'The saved recording differs from this exact import');
       await narration.media.verifiedSource(audio.media);
+      if (intent.role === 'music') {
+        adoptDefaultSoundtrack(production, projectId, audio.id, intent.role, intent.id);
+        // Timing is a convenience for planning; an unreadable beat never fails the import.
+        try { await songTiming(production, narration, audio); } catch { /* the timing route reports it */ }
+      }
+      const selectedAsMusic = store.getProject(projectId).soundtrack?.audioId === audio.id;
       // Return data so Fastify waits for staging cleanup before publishing a successful response.
       // Sending here would let an immediate same-key retry race directory removal in finally.
-      reply.header('Cache-Control', 'private, no-store'); return { recording: entry(audio, intent.label, intent.role) };
+      reply.header('Cache-Control', 'private, no-store'); return { recording: { ...entry(audio, intent.label, intent.role), selectedAsMusic } };
     } finally { await upload.release(); }
   });
 }

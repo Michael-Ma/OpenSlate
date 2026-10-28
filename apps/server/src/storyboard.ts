@@ -28,7 +28,8 @@ type Edit = {
     | "moveShot"
     | "narration"
     | "undo"
-    | "soundtrack";
+    | "soundtrack"
+    | "shotTiming";
   id?: string;
   sceneId?: string;
   beforeId?: string;
@@ -37,6 +38,8 @@ type Edit = {
   value?: string;
   commandId?: string;
   withShots?: boolean;
+  /** shotTiming: new lengths for several shots as one command (fit to the song), each 3–15 s. */
+  timings?: Array<{ id: string; desiredFrames: number }>;
 };
 type SavedEdit = {
   id: string;
@@ -194,6 +197,24 @@ export function editStoryboard(
           image: names.every(field => field === "videoPrompt") ? prior.promptIntent.image : shotIntentDigest(row, "image", cue),
           video: names.every(field => field === "imagePrompt") ? prior.promptIntent.video : shotIntentDigest(row, "video", cue),
         };
+      } else if (input.kind === "shotTiming") {
+        const timings = input.timings;
+        invariant(Array.isArray(timings) && timings.length > 0 && timings.length <= 64 &&
+          new Set(timings.map(row => row.id)).size === timings.length && input.field === undefined && input.value === undefined,
+          "VALIDATION_ERROR", "Give one length for each of up to 64 distinct shots.");
+        for (const timing of timings) {
+          const row = next.shots.find(x => x.id === timing.id);
+          invariant(row, "NOT_FOUND", "Shot does not belong to this film.");
+          invariant(Number.isSafeInteger(timing.desiredFrames) && timing.desiredFrames >= 90 && timing.desiredFrames <= 450,
+            "VALIDATION_ERROR", "Use 3–15 seconds per shot.");
+          if (row.desiredFrames === timing.desiredFrames) continue;
+          row.desiredFrames = timing.desiredFrames;
+          row.revisionId = newId();
+          const cue = next.cues.find(cue => cue.id === row.cueId);
+          // Length is video intent only: the keyframe's intent and both prompts stay as they are.
+          row.promptIntent = { image: row.promptIntent.image, video: shotIntentDigest(row, "video", cue) };
+          changed.add(row.id);
+        }
       } else if (input.kind === "deleteShot") {
         const row = shot();
         assertNoRunningAttempts(s, projectId, new Set([row.id]));
@@ -400,7 +421,7 @@ export function editStoryboard(
       const changedTiming = new Set(next.shots.filter(row => intentChanged(row.id, "video")).map(row => row.id));
       const effectiveInput = undoing?.input ?? input;
       const shotFields = effectiveInput.kind === "shotFields" ? Object.keys(effectiveInput.fields ?? {}) :
-        effectiveInput.kind === "shot" ? [effectiveInput.field ?? ""] : null;
+        effectiveInput.kind === "shot" ? [effectiveInput.field ?? ""] : effectiveInput.kind === "shotTiming" ? ["desiredFrames"] : null;
       const mediaChanged = (shotId: string | null | undefined, kind: "image" | "video") => {
         const old = before.shots.find(shot => shot.id === shotId);
         const current = next.shots.find(shot => shot.id === shotId);
@@ -466,7 +487,7 @@ export function editStoryboard(
           outputs: {},
           ...(Object.values(b.outputs)[0] || b.outdated ? { outdated: {
             at: new Date().toISOString(),
-            fields: [...new Set([...(Object.keys(b.outputs).length ? [] : b.outdated?.fields ?? []), ...(input.kind === "shotFields" ? Object.keys(input.fields!) : [input.field ?? input.kind])])],
+            fields: [...new Set([...(Object.keys(b.outputs).length ? [] : b.outdated?.fields ?? []), ...(input.kind === "shotFields" ? Object.keys(input.fields!) : input.kind === "shotTiming" ? ["desiredFrames"] : [input.field ?? input.kind])])],
             previous: Object.values(b.outputs)[0] ?? b.outdated!.previous,
           } } : {}),
         });
@@ -541,6 +562,7 @@ export function registerStoryboard(
                 "narration",
                 "undo",
                 "soundtrack",
+                "shotTiming",
               ],
             },
             expectedHeadVersion: { type: "integer", minimum: 0 },
@@ -555,6 +577,8 @@ export function registerStoryboard(
             } },
             field: text,
             value: { type: "string", maxLength: 16000 },
+            timings: { type: "array", minItems: 1, maxItems: 64, items: { type: "object", additionalProperties: false, required: ["id", "desiredFrames"],
+              properties: { id: text, desiredFrames: { type: "integer", minimum: 90, maximum: 450 } } } },
           },
         },
       },
