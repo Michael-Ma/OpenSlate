@@ -7,6 +7,7 @@ import { useOpenTarget } from "./useOpenTarget.ts";
 import { directorElapsed, resolveRef, scriptedTag, threadScrolled, threadView, type Attention, type GenerationLine, type ThreadBox, type ThreadEntry } from "../model/director.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
+import { GiveUp } from "../app/GiveUp.tsx";
 import { HeldEdits } from "./HeldEdits.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { NoteCards } from "./NoteCards.tsx";
@@ -218,11 +219,15 @@ function SentFiles({ files }: { files: MessageAttachmentView[] }) {
   );
 }
 
-/** What the Director started, with its price; Stop halts the film while some of it is still being made. */
+/**
+ * What the Director started, with its price; Stop halts the film while some of it is still being made. An unanswered
+ * transcription offers Give up, with the same acknowledgement as the inspector.
+ */
 function GenerationNote({ line }: { line: GenerationLine }) {
   const { t, tm } = useI18n();
   const store = useStore();
   const guard = useGuarded("server");
+  const releasing = useStudio((s) => !!line.release && !!s.pending[`release:${line.release}`]);
   return (
     <div className="gen-note" role="status" data-generation={line.running ? "running" : "done"} data-outcome={line.outcome ?? undefined}>
       {line.outcome === "failed" || line.outcome === "no_answer" ? <span className={`mark ${line.outcome}`} aria-hidden="true">{line.outcome === "failed" ? "!" : ""}</span> : null}
@@ -230,6 +235,7 @@ function GenerationNote({ line }: { line: GenerationLine }) {
       {line.running ? (
         <button type="button" className="pill sm" data-act="stop-generation" {...guard} title={guard.title ?? t("director.generation.stop_hint")} disabled={guard.disabled} onClick={() => void store.stopFilm()}>{t("director.generation.stop")}</button>
       ) : null}
+      {line.release ? <GiveUp attemptId={line.release} busy={releasing} onRelease={(attemptId) => void store.releaseAttempt(attemptId)} className="gen-give-up" note={false} /> : null}
     </div>
   );
 }
@@ -242,20 +248,22 @@ function StopButton() {
 }
 
 const stateKey = (shot: ShotProgress) => (shot.state === "failed" && shot.charged ? "failed_charged" : shot.state);
-const MARK: Record<ShotProgress["state"], string> = { done: "✓", making: "", queued: "", stopped: "", failed: "!", no_answer: "" };
+const MARK: Record<ShotProgress["state"], string> = { done: "✓", making: "", queued: "", waiting: "", stopped: "", given_up: "", failed: "!", no_answer: "" };
 
 /**
- * The keyframes a Director turn started, live (failure-display item 1): a head with the count and the price, one
- * segment and one chip per shot (a chip opens its shot), and one next step when a shot needs the person.
+ * The keyframes and voice lines a Director turn started, live (failure-display item 1): a head with the count and the
+ * price, one segment and one chip per shot (a chip opens its shot), and one next step when a shot needs the person.
+ * The head counts the keyframes, or the voice lines when the turn made only those; a chip names a voice line when that
+ * is what its state is about.
  */
 function GenerationProgressNote({ progress }: { progress: GenerationProgress }) {
   const { t, tm } = useI18n();
   const open = useOpenTarget();
-  const total = progress.shots.length;
-  const all = progress.done === total;
+  const total = progress.total;
+  const all = progress.allDone;
   const values = { count: progress.sceneCount, scenes: progress.scenes, done: progress.done, total };
-  const head = all ? msg(progress.sceneCount ? "director.progress.all_done" : "director.progress.all_done_shots", values)
-    : msg(progress.sceneCount ? "director.progress.head" : "director.progress.head_shots", values);
+  const voices = progress.media === "voices" ? "_voices" : "";
+  const head = msg(`director.progress.${all ? "all_done" : "head"}${voices}${progress.sceneCount ? "" : "_shots"}` as const, values);
   const scene = progress.sceneId && progress.sceneCount === 1 ? progress.scenes : null;
   return (
     <div className="gen-live" role="status" data-generation={progress.running ? "running" : all ? "done" : "attention"}>
@@ -269,7 +277,8 @@ function GenerationProgressNote({ progress }: { progress: GenerationProgress }) 
       {!all && (
         <div className="gl-shots">
           {progress.shots.map((shot) => {
-            const state = t(`director.progress.state.${stateKey(shot)}` as const);
+            const plain = t(`director.progress.state.${stateKey(shot)}` as const);
+            const state = shot.part === "voice" && progress.media === "keyframes" && shot.state !== "done" ? t("director.progress.state.voice", { state: plain }) : plain;
             return (
               <button type="button" key={shot.shotId} className={`shot-chip${shot.state === "failed" || shot.state === "no_answer" ? " needs" : ""}`}
                 data-act="progress-shot" data-shot={shot.shotId} data-state={shot.state} aria-label={t("director.progress.chip", { shot: shot.label, state })}

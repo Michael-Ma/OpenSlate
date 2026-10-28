@@ -35,7 +35,50 @@ test('a shot follows its replacement while a new take is made, and a failure wit
   overview = withShot(overview, '2.2', (shot) => ({ ...shot, keyframe: { ...shot.keyframe, state: 'failed', failure: failure({ technical: true, autoRetriesLeft: 2 }) } }));
   assert.equal(shotProgress(overview.shots[shotId('2.2')]).state, 'making');
   overview = withShot(overview, '2.3', (shot) => ({ ...shot, keyframe: { ...shot.keyframe, state: 'failed', failure: failure({ charged: true }) } }));
-  assert.deepEqual(shotProgress(overview.shots[shotId('2.3')]), { shotId: shotId('2.3'), label: '2.3', state: 'failed', charged: true });
+  const { shotId: id, label, state, charged, part } = shotProgress(overview.shots[shotId('2.3')]);
+  assert.deepEqual({ id, label, state, charged, part }, { id: shotId('2.3'), label: '2.3', state: 'failed', charged: true, part: 'keyframe' });
+});
+
+test('progress also follows the voice lines the turn started; a voice-only turn is counted in voice lines', () => {
+  const voiced = (overview, label, narration) => withShot(overview, label, (shot) => ({ ...shot, narration: { ...shot.narration, ...narration } }));
+  // Scene 2: 2.2's keyframe is made with its voice line, 2.3 only needs its voice line (its keyframe is back).
+  let overview = withShot(lastFerryOverview(), '2.2', (shot) => ({ ...shot, keyframe: { ...shot.keyframe, state: 'running' } }));
+  overview = voiced(overview, '2.2', { state: 'making', attemptId: 'v-2' });
+  overview = voiced(overview, '2.3', { state: 'making', attemptId: 'v-3' });
+  const mixed = { ...effect(['2.2', '2.3'], [2]), keyframes: 1, voiceLines: 2 };
+  let progress = generationProgress(mixed, overview, 'en');
+  assert.deepEqual([progress.media, progress.done, progress.total, progress.running], ['keyframes', 0, 1, true]);
+  assert.deepEqual(progress.shots.map((s) => [s.label, s.state, s.part]), [['2.2', 'making', 'keyframe'], ['2.3', 'making', 'voice']]);
+  // The keyframe is back and 2.3's voice line failed: 1/1 keyframes, and the voice line is the next step.
+  overview = withShot(overview, '2.2', (shot) => ({ ...shot, keyframe: { ...shot.keyframe, state: 'ready' } }));
+  overview = voiced(overview, '2.2', { state: 'ready', attemptId: undefined });
+  overview = voiced(overview, '2.3', { state: 'failed', attemptId: undefined, failure: failure() });
+  progress = generationProgress(mixed, overview, 'en');
+  assert.deepEqual([progress.done, progress.total, progress.allDone, progress.running], [1, 1, false, false]);
+  assert.equal(progress.next.shotId, shotId('2.3'));
+  assert.equal(translateMsg('en', progress.next.text), "2.3's voice line failed. Open the shot to see why.");
+  assert.equal(translateMsg('zh-CN', progress.next.text), '2.3 的配音失败了，打开这个镜头看原因。');
+  // A voice line still being made keeps Stop next to a failed keyframe of the same shot.
+  const both = voiced(withShot(overview, '2.2', (shot) => ({ ...shot, keyframe: { ...shot.keyframe, state: 'failed', failure: failure() } })), '2.2', { state: 'making' });
+  assert.equal(generationProgress(mixed, both, 'en').running, true);
+  // Voice lines only: the turn still gets progress, counted in voice lines; an unanswered one can be given up.
+  const voiceOnly = { ...effect(['2.3'], [2]), keyframes: 0, voiceLines: 1 };
+  const waiting = generationProgress(voiceOnly, voiced(lastFerryOverview(), '2.3', { state: 'no_answer', attemptId: 'v-9' }), 'en');
+  assert.deepEqual([waiting.media, waiting.done, waiting.total, waiting.shots[0].state, waiting.shots[0].keyframe], ['voices', 0, 1, 'no_answer', null]);
+  assert.match(translateMsg('en', waiting.next.text), /^2\.3's voice line is waiting for the service's answer\. Open the shot to give up on it/);
+  const back = generationProgress(voiceOnly, voiced(lastFerryOverview(), '2.3', { state: 'ready' }), 'en');
+  assert.deepEqual([back.done, back.allDone, back.running, back.next], [1, true, false, null]);
+});
+
+test('a queue that will not run is waiting, not queued, so Stop goes away; a keyframe given up says so', () => {
+  const queued = (code) => withShot(lastFerryOverview(), '2.2', (shot) => ({ ...shot, keyframe: { ...shot.keyframe, state: 'queued', waiting: { code, since: 'now' } } }));
+  const one = (overview) => generationProgress(effect(['2.2'], [2]), overview, 'en');
+  assert.deepEqual([one(queued('capacity')).shots[0].state, one(queued('capacity')).running], ['queued', true]);
+  for (const code of ['review', 'unknown', 'timing', 'input_pending'])
+    assert.deepEqual([one(queued(code)).shots[0].state, one(queued(code)).running], ['waiting', false], code);
+  assert.equal(one(queued('stopped')).shots[0].state, 'stopped');
+  const off = (takenOff) => one(withShot(lastFerryOverview(), '2.2', (shot) => ({ ...shot, keyframe: { ...shot.keyframe, state: 'none', takenOff } }))).shots[0].state;
+  assert.deepEqual([off('released'), off('stopped')], ['given_up', 'stopped']);
 });
 
 test('progress counts the shots back, keeps Stop while any is on its way, and names the failed shot before the waiting one', () => {

@@ -222,7 +222,7 @@ test('a paid press whose reply was lost says pressing again checks without payin
   assert.equal(store.getState().toast.tone, 'error');
   assert.deepEqual(store.savedPressIds(), [`regenerate:${shotId('2.2')}`]);
   // The request landed: the studio is making the take, once.
-  assert.equal(port.world.overview.shots[shotId('2.2')].keyframe.state, 'running');
+  assert.equal(port.world.overview.shots[shotId('2.2')].keyframe.replacement.state, 'running');
   // Pressing again (before the film shows the job) resends the same request with the same key: the studio replays it.
   losing = false;
   assert.equal(press.pressId, `regenerate:${shotId('2.2')}`);

@@ -343,6 +343,11 @@ export function cardStatus(shot: ShotOverview): ShotStatus {
   // as before any confirm, and the video panel offers the confirm itself.
   if (video.state === "queued" && !awaitsConfirm(video)) return waiting(video);
   if (video.state === "running") return { status: msg("card.video.making"), tone: "working" };
+  // A new clip that failed or got no answer needs the person; "Video saved" would hide it.
+  if (video.state === "ready" && (video.replacement?.state === "failed" || video.replacement?.state === "no_answer")) {
+    const newClip = replacementStatus(video);
+    if (newClip) return newClip;
+  }
   if (video.state === "ready" && keyframe.state === "ready") return { status: msg("card.video.saved"), tone: "opened" };
   if (video.state === "failed") return { status: msg(video.failure?.charged ? "card.video.failed_charged" : "card.video.failed"), tone: "attention" };
   if (video.state === "no_answer") return { status: msg("card.no_answer"), tone: "attention" };

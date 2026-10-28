@@ -12,6 +12,7 @@ import type { EditDraft } from "../store/state.ts";
 import type { Resource } from "../store/useResource.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
+import { GiveUp } from "../app/GiveUp.tsx";
 import { useNarrow } from "../app/useNarrow.ts";
 import { useSustained } from "../app/useSustained.ts";
 import { NarrationPanel } from "./NarrationPanel.tsx";
@@ -255,7 +256,7 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
               <p>{tm(view.failure.message)}</p>
               {view.failure.retryVideo ? (
                 <button type="button" className="pill sm" data-act="retry-video" data-shot={shot.shotId} {...run} disabled={!view.failure.retryVideo.enabled || busy.video || run.disabled} onClick={onRetryVideo}>
-                  {t("inspector.retry_video")}{view.failure.retryVideo.price ? ` · ${tm(view.failure.retryVideo.price)}` : ""}
+                  {tm(view.failure.retryVideo.label)}{view.failure.retryVideo.price ? ` · ${tm(view.failure.retryVideo.price)}` : ""}
                 </button>
               ) : null}
               {view.failure.retryVideo && unconfirmed.video && !busy.video ? <p className="lost" data-unconfirmed="true">{t("error.PAID_UNCONFIRMED")}</p> : null}
@@ -379,34 +380,6 @@ function FormButtons({ saving, disabled, saveBlocked, onCancel }: { saving: bool
     <div className="two">
       <button type="submit" className="pill chosen" data-act="save-edit" {...server} disabled={disabled || saving || server.disabled || !!saveBlocked} title={server.title ?? (saveBlocked ? tm(saveBlocked) : undefined)}>{t(saving ? "inspector.saving" : "inspector.save")}</button>
       <button type="button" className="pill" data-act="cancel-edit" onClick={onCancel}>{t("inspector.cancel")}</button>
-    </div>
-  );
-}
-
-/** Give up on a job the service never confirmed (plan decision D7): an explicit acknowledgement first. */
-function GiveUp({ attemptId, busy, onRelease }: { attemptId: string; busy: boolean; onRelease(attemptId: string): void }) {
-  const { t } = useI18n();
-  const server = useGuarded("server");
-  const [open, setOpen] = useState(false);
-  const [acknowledged, setAcknowledged] = useState(false);
-  const ack = `give-up-ack-${attemptId}`;
-  return (
-    <div className="insp-alert" role="status">
-      <p>{t("inspector.give_up_note")}</p>
-      {open ? (
-        <>
-          <label className="ack" htmlFor={ack}>
-            <input id={ack} type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />
-            <span>{t("inspector.give_up_ack")}</span>
-          </label>
-          <div className="two">
-            <button type="button" className="pill chosen" data-act="give-up-confirm" {...server} disabled={!acknowledged || busy || server.disabled} onClick={() => onRelease(attemptId)}>{t("inspector.give_up_confirm")}</button>
-            <button type="button" className="pill" data-act="give-up-cancel" onClick={() => { setOpen(false); setAcknowledged(false); }}>{t("inspector.cancel")}</button>
-          </div>
-        </>
-      ) : (
-        <button type="button" className="pill sm" data-act="give-up" {...server} onClick={() => setOpen(true)}>{t("inspector.give_up")}</button>
-      )}
     </div>
   );
 }

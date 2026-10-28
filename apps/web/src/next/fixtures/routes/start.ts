@@ -205,7 +205,7 @@ const bumpHead = (data: { snapshot: ProjectSnapshot; overview: GenerationOvervie
 };
 
 const RUNNING = new Set(["queued", "running", "no_answer"]);
-const runningIn = (overview: GenerationOverview) => Object.values(overview.shots).some((shot) => RUNNING.has(shot.keyframe.state) || RUNNING.has(shot.video.state) || shot.narration.state === "making");
+const runningIn = (overview: GenerationOverview) => Object.values(overview.shots).some((shot) => [shot.keyframe, shot.video].some((slot) => RUNNING.has(slot.state) || RUNNING.has(slot.replacement?.state ?? "")) || shot.narration.state === "making");
 
 function asObject(body: unknown): Record<string, unknown> {
   return body && typeof body === "object" ? (body as Record<string, unknown>) : {};

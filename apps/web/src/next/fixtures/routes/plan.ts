@@ -146,7 +146,8 @@ const outdateClip = (video: MediaSlot, field: string | string[]): MediaSlot => {
   return { ...rest, state: "outdated", previous: artifact, outdatedFields: typeof field === "string" ? [field] : field };
 };
 
-const isWorking = (slot: MediaSlot) => slot.state === "running" || slot.state === "queued";
+/** A new take running next to the current output is a job too. */
+const isWorking = (slot: MediaSlot) => [slot.state, slot.replacement?.state].some((state) => state === "running" || state === "queued");
 
 /** A written direction lifts a new shot out of "needs direction" (the server's promptState becomes ready). */
 const directed = (shot: ShotOverview): ShotOverview => (shot.keyframe.state === "direction_required" ? { ...shot, keyframe: { ...shot.keyframe, state: "none" } } : shot);

@@ -113,8 +113,13 @@ function recomputeScene(overview: GenerationOverview, scene: SceneOverview, note
   const keyframesReady = shots.filter((shot) => shot.keyframe.state === "ready").length;
   const videoTargets = state === "making_video" || keyframesReady > 0 ? shots.filter((shot) => shot.video.state !== "ready").map((shot) => shot.shotId) : [];
   const keyframeTargets = shots
-    .filter((shot) => shot.keyframe.state === "none" || shot.keyframe.state === "outdated" || (shot.keyframe.state === "failed" && shot.keyframe.failure?.retryAllowed !== false) || needsVoice(shot, projectShots))
+    // Every incomplete keyframe, as the server's generationTargets: a refused one is made again by the next press.
+    .filter((shot) => shot.keyframe.state === "none" || shot.keyframe.state === "outdated" || shot.keyframe.state === "failed" || needsVoice(shot, projectShots))
     .map((shot) => shot.shotId);
+  // As the server: any unanswered keyframe, clip, voice line or new take blocks the scene, whatever it targets.
+  const unanswered: SceneBlocker[] = shots
+    .filter((shot) => [shot.keyframe.state, shot.video.state, shot.narration.state, shot.keyframe.replacement?.state, shot.video.replacement?.state].includes("no_answer"))
+    .map((shot) => ({ code: "no_answer_in_scene", shotId: shot.shotId }));
   const blockers: SceneBlocker[] = [];
   if (videoTargets.length) {
     const targets = videoTargets.map((id) => overview.shots[id]!);
@@ -130,12 +135,13 @@ function recomputeScene(overview: GenerationOverview, scene: SceneOverview, note
       const shotId = note.anchor.shotIds?.[0];
       blockers.push({ code: "recommendation_open", ...(shotId ? { shotId } : {}) });
     }
-    if (shots.some((shot) => shot.keyframe.state === "no_answer" || shot.video.state === "no_answer")) blockers.push({ code: "no_answer_in_scene" });
+    blockers.push(...unanswered);
     if (overview.stopped) blockers.push({ code: "stopped" });
     if (directorCovers(overview, scene)) blockers.push({ code: "director_working" });
-  } else if (keyframeTargets.length) {
-    if (overview.stopped) blockers.push({ code: "stopped" });
-    if (directorCovers(overview, scene)) blockers.push({ code: "director_working" });
+  } else {
+    blockers.push(...unanswered);
+    if (keyframeTargets.length && overview.stopped) blockers.push({ code: "stopped" });
+    if (keyframeTargets.length && directorCovers(overview, scene)) blockers.push({ code: "director_working" });
   }
   if (state === "making_video" || scene.keyframesRun?.state === "running") blockers.push({ code: "confirmation_running" });
   return {
@@ -204,12 +210,14 @@ interface Extra {
   voiceOwners: Record<string, string>;
   /** Shots whose next keyframe the service refuses (the `jobs` Director preset), not charged. */
   failNext: Set<string>;
+  /** Shots whose next voice line the service refuses (the `voices` Director preset), not charged. */
+  failNextVoice: Set<string>;
 }
 
 const extras = new WeakMap<FixtureWorld, Extra>();
 function extra(world: FixtureWorld): Extra {
   let value = extras.get(world);
-  if (!value) { value = { serial: 0, undo: null, takes: {}, opened: new Set(), madeAt: {}, requests: {}, edits: {}, accepted: {}, voiceOwners: {}, failNext: new Set() }; extras.set(world, value); }
+  if (!value) { value = { serial: 0, undo: null, takes: {}, opened: new Set(), madeAt: {}, requests: {}, edits: {}, accepted: {}, voiceOwners: {}, failNext: new Set(), failNextVoice: new Set() }; extras.set(world, value); }
   return value;
 }
 const nextId = (world: FixtureWorld, prefix: string) => `${prefix}-${++extra(world).serial}`;
@@ -386,7 +394,10 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
     let next = overview;
     for (const id of images)
       next = withShot(next, id, (shot) => {
-        const previous = shot.keyframe.state === "ready" ? shot.keyframe.artifact : shot.keyframe.previous;
+        // A new take of a keyframe that is back runs as its replacement: the current one stays in use, as in the studio.
+        if (shot.keyframe.state === "ready")
+          return { ...shot, keyframe: { ...shot.keyframe, replacement: { state: "running", phase: "running", attemptId: attempts[id]! } } };
+        const previous = shot.keyframe.previous;
         return {
           ...shot,
           keyframe: { state: "running", phase: "running", startedAt: started, attemptId: attempts[id]!, takeCount: shot.keyframe.takeCount, opened: false, ...(previous ? { previous } : {}) },
@@ -399,10 +410,19 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
     let next = w.overview;
     for (const id of images)
       next = withShot(next, id, (shot) => {
-        if (shot.keyframe.state !== "running" || shot.keyframe.attemptId !== attempts[id]) return shot;
+        const replacing = shot.keyframe.state === "ready" && shot.keyframe.replacement?.state === "running" && shot.keyframe.replacement.attemptId === attempts[id];
+        if (!replacing && (shot.keyframe.state !== "running" || shot.keyframe.attemptId !== attempts[id])) return shot;
         const take = shot.keyframe.takeCount + 1;
         const artifact = takeArtifact(shot.label, take);
-        if (extra(w).failNext.delete(id)) return { ...shot, keyframe: { state: "failed", takeCount: shot.keyframe.takeCount, opened: false,
+        const refused = extra(w).failNext.delete(id);
+        if (replacing) {
+          // A refused new take leaves the current keyframe and clip; a new one becomes current and outdates the clip.
+          if (refused) return { ...shot, keyframe: { ...shot.keyframe, replacement: { state: "failed", attemptId: attempts[id]!,
+            failure: { code: "PROVIDER_REFUSED", technical: false, retryAllowed: false, autoRetriesLeft: 0, charged: false, at: now() } } } };
+          extra(w).madeAt[takeKey(artifact)] = localTime(new Date());
+          return { ...shot, keyframe: { state: "ready", artifact, takeCount: take, opened: false }, video: outdateClip(shot.video, "keyframe") };
+        }
+        if (refused) return { ...shot, keyframe: { state: "failed", takeCount: shot.keyframe.takeCount, opened: false,
           ...(shot.keyframe.previous ? { previous: shot.keyframe.previous } : {}),
           failure: { code: "PROVIDER_REFUSED", technical: false, retryAllowed: false, autoRetriesLeft: 0, charged: false, at: now() } } };
         extra(w).madeAt[takeKey(artifact)] = localTime(new Date());
@@ -420,11 +440,13 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
 /**
  * The scripted Director starting keyframes (and their voice lines) because the person asked in the conversation:
  * each scene that still has keyframes to make starts the way its Make keyframes press would. Scenes that cannot
- * start (working, stopped, nothing to make) are left out. Returns what started, with its estimate.
+ * start (working, stopped, nothing to make) are left out. Returns what started per scene, with its estimate: the
+ * studio records one generation effect for each scene it started.
  */
-export function fixtureDirectorKeyframes(world: FixtureWorld): { sceneIds: string[]; shotIds: string[]; keyframes: number; voiceLines: number; quote: PriceQuote; blocked: DirectorGenerationBlock[] } | null {
+export interface FixtureSceneStart { sceneIds: [string]; shotIds: string[]; keyframes: number; voiceLines: number; quote: PriceQuote }
+export function fixtureDirectorKeyframes(world: FixtureWorld): { started: FixtureSceneStart[]; blocked: DirectorGenerationBlock[] } | null {
   if (world.overview.stopped) return null;
-  const started = { sceneIds: [] as string[], shotIds: [] as string[], keyframes: 0, voiceLines: 0 };
+  const started: FixtureSceneStart[] = [];
   const blocked: DirectorGenerationBlock[] = [];
   for (const scene of [...world.overview.scenes].sort((a, b) => a.ordinal - b.ordinal)) {
     if (!scene.keyframeTargets.length) continue;
@@ -437,10 +459,9 @@ export function fixtureDirectorKeyframes(world: FixtureWorld): { sceneIds: strin
       if (error.code !== "ALREADY_COMPLETE") blocked.push(sceneBlock(world, scene, error.code));
       continue;
     }
-    started.sceneIds.push(scene.sceneId); started.shotIds.push(...scene.keyframeTargets);
-    started.keyframes += images; started.voiceLines += voices;
+    started.push({ sceneIds: [scene.sceneId], shotIds: [...scene.keyframeTargets], keyframes: images, voiceLines: voices, quote: generationQuote(images, voices) });
   }
-  return started.sceneIds.length || blocked.length ? { ...started, quote: generationQuote(started.keyframes, started.voiceLines), blocked } : null;
+  return started.length || blocked.length ? { started, blocked } : null;
 }
 
 /** The jobs in a refused scene's way: unanswered or running keyframes and clips, as the studio's recovery lists them. */
@@ -460,6 +481,11 @@ function sceneBlock(world: FixtureWorld, scene: SceneOverview, code: string): Di
 /** The `jobs` Director preset: the service will refuse this shot's next keyframe. */
 export function fixtureFailNextKeyframe(world: FixtureWorld, shotId: string): void {
   extra(world).failNext.add(shotId);
+}
+
+/** The `voices` Director preset: the service will refuse this shot's next voice line. */
+export function fixtureFailNextVoice(world: FixtureWorld, shotId: string): void {
+  extra(world).failNextVoice.add(shotId);
 }
 
 /** The browser-run video press (before phase P3). Kept for older clients; new ones confirm through /confirm. */
@@ -538,10 +564,22 @@ function startVoices(world: FixtureWorld, scene: SceneOverview, targets: string[
     let next = withScene(overview, scene.sceneId, (s) => ({ ...s, [field]: { confirmationId, state: "running", currentShotId: first, currentStep: "speech" } }));
     for (const id of targets)
       next = withShot(next, id, (shot) => ({ ...shot, video: { state: "queued", takeCount: shot.video.takeCount, waiting: { code: "voice", since }, ...(shot.video.previous ? { previous: shot.video.previous } : {}) } }));
-    return { overview: withShot(next, first, (shot) => ({ ...shot, narration: { ...shot.narration, state: "making" } })) };
+    return { overview: withShot(next, first, (shot) => ({ ...shot, narration: makingLine(shot.narration, confirmationId, first) })) };
   });
   scheduleVoice(world, { sceneId: scene.sceneId, confirmationId, targets, voices, frames, kind, texts, intents }, 0, "speech");
   return { confirmationId, state: "running", currentShotId: first, currentStep: "speech" };
+}
+
+/** A voice line being made carries its attempt, as the server's overview does; the line's last failure is over. */
+function makingLine(narration: ShotNarration, confirmationId: string, shotId: string): ShotNarration {
+  const { failure: _failure, ...line } = narration;
+  return { ...line, state: "making", attemptId: `voice-${confirmationId}-${shotId}` };
+}
+
+/** A settled voice line has no attempt or failure of its own any more. */
+function settledLine(narration: ShotNarration, state: "text_only" | "ready"): ShotNarration {
+  const { attemptId: _attemptId, failure: _failure, ...line } = narration;
+  return { ...line, state };
 }
 
 /** Stop a confirm partway: its clips that were still waiting are taken off, and the scene says why and where. */
@@ -564,7 +602,7 @@ function scheduleVoice(world: FixtureWorld, run: VoiceRun, index: number, step: 
       if (extra(w).voiceOwners[shotId] !== confirmationId) return overview;
       delete extra(w).voiceOwners[shotId];
       return overview.shots[shotId]?.narration.state === "making"
-        ? withShot(overview, shotId, (shot) => ({ ...shot, narration: { ...shot.narration, state: "text_only" } })) : overview;
+        ? withShot(overview, shotId, (shot) => ({ ...shot, narration: settledLine(shot.narration, "text_only") })) : overview;
     };
     // Stop cancels the confirm; a cancelled or replaced one goes no further. A voice job already sent still finishes.
     if (!scene || scene[field]?.confirmationId !== confirmationId || scene[field]?.state !== "running") {
@@ -574,7 +612,15 @@ function scheduleVoice(world: FixtureWorld, run: VoiceRun, index: number, step: 
     }
     if (extra(w).voiceOwners[shotId] !== confirmationId) return;
     if (next.shots[shotId]?.narration.text !== run.texts[shotId] || (JSON.stringify(w.snapshot.project.shots.find((row) => row.id === shotId)?.narration) ?? "") !== run.intents[shotId]) { settle(w, blockConfirm(clearOwnedMaking(next), run, "SCENE_REVIEW_STALE", shotId)); return; }
-    if (step === "speech") next = withShot(next, shotId, (shot) => ({ ...shot, narration: { ...shot.narration, state: "text_only" } }));
+    // A refused voice line fails (not charged) and stops the run at its shot, as the studio's speech step does.
+    if (step === "speech" && extra(w).failNextVoice.delete(shotId)) {
+      delete extra(w).voiceOwners[shotId];
+      next = withShot(next, shotId, (shot) => ({ ...shot, narration: { ...settledLine(shot.narration, "text_only"), state: "failed",
+        failure: { code: "PROVIDER_REFUSED", technical: false, retryAllowed: false, autoRetriesLeft: 0, charged: false, at: now() } } }));
+      settle(w, blockConfirm(next, run, "PROVIDER_REFUSED", shotId));
+      return;
+    }
+    if (step === "speech") next = withShot(next, shotId, (shot) => ({ ...shot, narration: settledLine(shot.narration, "text_only") }));
     // A confirmed frame that changed meanwhile (a new take, an edited prompt) stops the confirm at its shot.
     const changed = targets.find((id) => { const keyframe = next.shots[id]?.keyframe; return keyframe?.state !== "ready" || keyframe.artifact?.artifactId !== run.frames[id]; });
     if (changed) { settle(w, blockConfirm(next, run, "SCENE_REVIEW_STALE", changed)); return; }
@@ -591,7 +637,7 @@ function scheduleVoice(world: FixtureWorld, run: VoiceRun, index: number, step: 
     const estimate = shot.narration.estimatedSeconds ?? estimateNarrationSeconds(shot.narration.text);
     const measured = Math.round(estimate * FIXTURE_VOICE_STRETCH * 10) / 10;
     const { estimatedSeconds: _estimate, ...line } = shot.narration;
-    next = withShot(next, shotId, (s) => ({ ...s, narration: { ...line, state: "ready", measuredSeconds: measured } }));
+    next = withShot(next, shotId, (s) => ({ ...s, narration: { ...settledLine(line as ShotNarration, "ready"), measuredSeconds: measured } }));
     delete extra(w).voiceOwners[shotId];
     if (measured > shot.durationFrames / w.overview.fps + 1e-9 && !shot.narration.fit) {
       settle(w, blockConfirm(next, run, "NARRATION_CUE_OUT_OF_RANGE", shotId));
@@ -600,7 +646,7 @@ function scheduleVoice(world: FixtureWorld, run: VoiceRun, index: number, step: 
     const following = voices[index + 1];
     if (following) {
       extra(w).voiceOwners[following] = confirmationId;
-      next = withShot(next, following, (s) => ({ ...s, narration: { ...s.narration, state: "making" } }));
+      next = withShot(next, following, (s) => ({ ...s, narration: makingLine(s.narration, confirmationId, following) }));
       settle(w, at(following, "speech"));
       scheduleVoice(w, run, index + 1, "speech");
       return;
@@ -851,13 +897,22 @@ function narrationFit(world: FixtureWorld, shotId: string, body: NarrationFitInp
  * the current preview, recorded as the Director acting on that message. A letter must name exactly one proposal.
  */
 export function fixtureAcceptOnWord(world: FixtureWorld, letter: string, requestId: string): { ok: true; proposal: DirectorProposal } | { ok: false; code: string } {
+  return fixtureDecideOnWord(world, letter, requestId, "accept");
+}
+
+/** Declining a proposal by its letter, the same way: set aside, recorded as the Director acting on that message. */
+export function fixtureDeclineOnWord(world: FixtureWorld, letter: string, requestId: string): { ok: true; proposal: DirectorProposal } | { ok: false; code: string } {
+  return fixtureDecideOnWord(world, letter, requestId, "reject");
+}
+
+function fixtureDecideOnWord(world: FixtureWorld, letter: string, requestId: string, action: "accept" | "reject"): { ok: true; proposal: DirectorProposal } | { ok: false; code: string } {
   const ids = new Set((world.snapshot.notes ?? []).filter((note) => note.letter.toLowerCase() === letter.toLowerCase())
     .flatMap((note) => note.choices.flatMap((choice) => (choice.kind === "proposal" ? [choice.proposalId] : []))));
   if (ids.size !== 1) return { ok: false, code: ids.size ? "PROPOSAL_AMBIGUOUS" : "NOT_FOUND" };
   const proposal = world.proposals.find((p) => ids.has(p.proposalId));
   if (!proposal) return { ok: false, code: "NOT_FOUND" };
   try {
-    return { ok: true, proposal: proposalAction(world, proposal.proposalId, "accept", { previewDigest: proposal.previewDigest }, { actor: "director_on_user_request", requestId }).proposal };
+    return { ok: true, proposal: proposalAction(world, proposal.proposalId, action, { previewDigest: proposal.previewDigest }, { actor: "director_on_user_request", requestId }).proposal };
   } catch (error) {
     return { ok: false, code: error instanceof ApiError ? error.code : "PROPOSAL_STALE" };
   }
@@ -1027,7 +1082,22 @@ function release(world: FixtureWorld, attemptId: string, body: ReleaseAttemptInp
   if (body?.acknowledgeDoubleCharge !== true) throw new ApiError("DOUBLE_CHARGE_NOT_ACKNOWLEDGED", 400);
   if (body.expectedPhase !== "submission_unknown") throw new ApiError("VALIDATION_ERROR", 400);
   const entry = Object.values(world.overview.shots).flatMap((shot) => (["keyframe", "video"] as const).map((slot) => ({ shot, slot })))
-    .find(({ shot, slot }) => shot[slot].state === "no_answer" && shot[slot].attemptId === attemptId);
+    .find(({ shot, slot }) => (shot[slot].state === "no_answer" && shot[slot].attemptId === attemptId)
+      || (shot[slot].replacement?.state === "no_answer" && shot[slot].replacement?.attemptId === attemptId));
+  // A transcription the service never answered: given up, it stays unanswered (a late reply may still arrive) but
+  // offers no Give up again. (The studio's turn view still sends the released attempt's id; it should drop it too.)
+  const transcribed = !entry && (world.snapshot.turns ?? []).some((turn) => turn.effects?.generation?.some((effect) => effect.transcription?.state === "no_answer" && effect.transcription.attemptId === attemptId));
+  if (transcribed) {
+    world.update((w) => {
+      w.snapshot = { ...w.snapshot, turns: (w.snapshot.turns ?? []).map((turn) => !turn.effects?.generation ? turn : { ...turn, effects: { ...turn.effects,
+        generation: turn.effects.generation.map((effect) => {
+          if (effect.transcription?.attemptId !== attemptId) return effect;
+          const { attemptId: _released, ...transcription } = effect.transcription;
+          return { ...effect, transcription };
+        }) } }) };
+    });
+    return { attemptId, shotId: null, releasedAt: now() };
+  }
   if (!entry) {
     // A voice line with no answer goes back to its words, not voiced yet (the server keeps the old job's charge).
     const voiced = Object.values(world.overview.shots).find((shot) => shot.narration.state === "no_answer" && shot.narration.attemptId === attemptId);
@@ -1041,7 +1111,13 @@ function release(world: FixtureWorld, attemptId: string, body: ReleaseAttemptInp
   commit(world, (overview) => ({
     overview: withShot(overview, entry.shot.shotId, (shot) => {
       const slot = shot[entry.slot];
-      const released: MediaSlot = { state: "none", takeCount: slot.takeCount, releasedAttemptIds: [...(slot.releasedAttemptIds ?? []), attemptId], ...(slot.previous ? { previous: slot.previous } : {}) };
+      const releasedAttemptIds = [...(slot.releasedAttemptIds ?? []), attemptId];
+      // A new take given up: the current output stays (the server restores the retained take).
+      if (slot.replacement?.attemptId === attemptId) {
+        const { replacement: _given, ...kept } = slot;
+        return { ...shot, [entry.slot]: { ...kept, releasedAttemptIds } };
+      }
+      const released: MediaSlot = { state: "none", takeCount: slot.takeCount, releasedAttemptIds, takenOff: "released", ...(slot.previous ? { previous: slot.previous } : {}) };
       return entry.slot === "keyframe" ? { ...shot, keyframe: { ...released, opened: false } } : { ...shot, video: released };
     }),
   }));
@@ -1078,7 +1154,9 @@ function useTake(world: FixtureWorld, shotId: string, artifactId: string): UseTa
   const take = shotTakes(world, shotId).keyframes.find((entry) => entry.artifact.artifactId === artifactId);
   if (!take) throw new ApiError("NOT_FOUND", 404);
   if (!take.selectable) throw new ApiError("TAKE_NOT_SELECTABLE", 409);
-  if (isWorking(shot.keyframe) || shot.keyframe.state === "no_answer" || isWorking(shot.video)) throw new ApiError("ATTEMPT_EXISTS", 409);
+  // A new take in progress or unanswered is a job on this keyframe too.
+  const newTake = shot.keyframe.replacement?.state;
+  if (isWorking(shot.keyframe) || shot.keyframe.state === "no_answer" || newTake === "running" || newTake === "queued" || newTake === "no_answer" || isWorking(shot.video)) throw new ApiError("ATTEMPT_EXISTS", 409);
   if (take.current) throw new ApiError("ALREADY_COMPLETE", 409);
   const state = extra(world);
   const commandId = nextId(world, "command");
