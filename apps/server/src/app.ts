@@ -16,6 +16,7 @@ import { registerStoryboard } from "./storyboard.js";
 import { registerPlanImports } from "./plan-imports.js";
 import { registerProjectLibrary } from "./project-library.js";
 import { registerAssetLibrary } from "./asset-library.js";
+import { registerCharacters } from "./characters.js";
 import { registerProjectEventStream } from "./application/project-event-stream.js";
 import { registerStudioSessions, type StudioSessions } from "./studio-sessions.js";
 import Fastify, { LogController } from "fastify";
@@ -139,6 +140,7 @@ export function createApp(options: AppOptions = {}) {
   });
   registerPlanImports(app, service, options.director);
   registerStoryboard(app, service);
+  registerCharacters(app, service);
   registerShotTakes(app, service);
   app.get<{ Reply: HealthResponse }>("/api/health", async () => ({ name: APP_NAME, status: "ok", stage: "foundation" }));
   options.webAssets?.register(app);

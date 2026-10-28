@@ -232,7 +232,16 @@ Rendering style: <影片视觉风格，可选>
 5. 新笔记选项 `approve_character_sheet { characterId, takeId }` 和 `regenerate_character_sheet { characterId }`；Director 只能提供，不能执行批准。
 6. `make_keyframes` 新增拒绝码 `CHARACTER_SHEET_REQUIRED`（附 `characterIds`），以及人类可选的 “不用设定图继续” 覆盖。
 
-### 4.2 服务端（无需改目录，但本次未做）
+### 4.2 服务端（已实现，见 v8 第 3 步）
+
+实现：`apps/server/src/characters.ts`（路由与命令）、`apps/server/src/execution/character-sheet-execution.ts`（不属于镜头的 sheet 节点）、`apps/server/src/application/character-tools.ts`（Director 处理函数）。与下面的原规格不同的地方：
+- sheet 绑定放在固定的 `planId: "character-sheets"` 下，不在镜头计划里，安装计划时不会被 retire；每次生成都写一条 `character_sheet_job` 记录，里面是精确的节点。授权检查要求这条记录存在、节点完全一致，且 prompt 等于 `characterSheetPrompt(character, { aspect: "1:1" })`。
+- 只支持 `codex-image` 和 fixture（`fake`）两种模型；其他 image 模型返回 `CHARACTER_SHEET_PROFILE_UNSUPPORTED`。
+- 上传设定图：先用现有的 `/images/uploads` 上传，再调 `/sheet/import`，传 `{ artifactId, sha256 }`。
+- 批准时把设定图加进 `project.artifacts`，这样计划编译器可以把它当作 `p.asset` 引用。
+- 生成任务完成后，engine 在同一事务里写入 take（`character_sheet_take`，id 为节点 id），即使任务已被 Stop 或角色已改，也照样写入。
+
+原规格：
 
 - `GET /api/projects/:id/characters`：角色、出场、takes、问题、报价。
 - `PUT /api/projects/:id/characters`（人在 Plan 里编辑，走现有 revision/冲突检查，内部调用 `assertCharacterPlan`）。
