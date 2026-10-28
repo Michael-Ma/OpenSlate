@@ -52,6 +52,13 @@ export interface ShotRecord {
   cueId: Id | null;
   /** Characters visible in this shot, in reference order. Absent on plans written before character planning. */
   characterIds?: Id[];
+
+  // Music-video performance (lip sync). Optional and omitted on ordinary shots, so older plans and digests are unchanged.
+  /**
+   * "singing": the shot shows a vocalist whose mouth must match the song under it. It is made by the lip-sync profile
+   * from its keyframe and that shot's song segment instead of the project's normal video profile.
+   */
+  performance?: "singing";
 }
 
 /** One character's outfit for one scene. Clothing only; identity stays on the character. */

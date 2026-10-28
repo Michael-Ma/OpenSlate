@@ -179,6 +179,12 @@ export interface ShotOverview {
   narration: ShotNarration;
   /** Exact selected-shot estimate, including a missing voice line. */
   quotes?: { regenerateKeyframe: PriceQuote };
+  /**
+   * Singing shots only (`performance: "singing"`). "planned": the clip is made by lip sync from the keyframe and this
+   * shot's song; `video` then reports that clip with the usual states. "unavailable": no ready lip-sync model or no song
+   * is heard under the shot, so the clip is made on the normal video model without matching the mouth.
+   */
+  lipSync?: { state: "planned"; profileId: string } | { state: "unavailable"; reason: "no_profile" | "no_song" };
 }
 
 export interface PriceQuote {

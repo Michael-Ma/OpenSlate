@@ -31,6 +31,8 @@ export interface SceneOperation {
   nodeId?: string;
   frameNodeId?: string;
   frame?: ArtifactRef;
+  /** Video only: exact reviewed settings that replace the retained ones (a lip-sync shot binds its song segment). */
+  settings?: { [key: string]: JsonValue };
 }
 const fail = (condition: unknown, message: string): void =>
   invariant(condition, "SCENE_PLAN_INVALID", message);
@@ -433,8 +435,14 @@ export function composeScenePlan(
               "nodeId",
               "frameNodeId",
               "frame",
+              "settings",
             ].includes(key),
-          ),
+          ) &&
+          (operation.settings === undefined ||
+            (operation.kind === "video" &&
+              operation.settings !== null &&
+              typeof operation.settings === "object" &&
+              !Array.isArray(operation.settings))),
       ),
     "Choose distinct shots for one bounded picture operation",
   );
@@ -597,6 +605,7 @@ export function composeScenePlan(
     intent: Ast,
     frame: Ast,
     deferredImageWork = false,
+    reviewedSettings?: SceneOperation["settings"],
   ): void => {
     const expression = operationCall(node),
       options = resolve(arr(expression.arguments)[1]!),
@@ -647,7 +656,8 @@ export function composeScenePlan(
       duration = prior;
     }
     const settings = json(
-      node.profileId === profile.id ? (node.args.settings ?? {}) : {},
+      reviewedSettings ??
+        (node.profileId === profile.id ? (node.args.settings ?? {}) : {}),
     );
     for (const [name, value] of Object.entries({
       intent,
@@ -785,7 +795,7 @@ export function composeScenePlan(
         frame = imageReference(image!);
       }
       if (existing) {
-        updateVideo(existing, shot!, profile!, intent, frame);
+        updateVideo(existing, shot!, profile!, intent, frame, false, operation.settings);
         changed.add(existing.id);
       } else {
         const duration = sceneVideoDurationFrames(shot!, profile!);
@@ -800,6 +810,9 @@ export function composeScenePlan(
                   videoProfile: lit(profile!.id),
                   motionPrompt: lit(shot!.videoPrompt),
                   seconds: number(duration / 30),
+                  ...(operation.settings
+                    ? { settings: json(operation.settings) }
+                    : {}),
                 }),
               ]),
             }),
@@ -815,6 +828,9 @@ export function composeScenePlan(
                 firstFrame: call(receiver, "approvedImage", [frame, review]),
                 prompt: lit(shot!.videoPrompt),
                 seconds: number(duration / 30),
+                ...(operation.settings
+                  ? { settings: json(operation.settings) }
+                  : {}),
               }),
             ]),
           ),

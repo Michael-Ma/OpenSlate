@@ -29,3 +29,4 @@ export type { OpenAITranscriptionRequest, OpenAITranscriptionDescription, OpenAI
 
 export * from "./viggle-h3.js";
 export * from "./codex-image.js";
+export * from "./fal-h3-lipsync.js";
