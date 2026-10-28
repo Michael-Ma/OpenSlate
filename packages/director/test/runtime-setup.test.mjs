@@ -186,6 +186,30 @@ test("later directory aliases and instruction/settings additions are refused by 
   await symlink(outside, descriptor.home);
   await assert.rejects(preparePrivateCodexHome(descriptor), error => error.code === "SETUP_DIRECTORY_CHANGED");
 });
+
+test("Codex's own trust record for a directory inside the application root is accepted; any other setting is not", async t => {
+  const f = await fixture(t), result = await setupLocalCodex(f.input), descriptor = result.runtimeOptions.privateCodexHome;
+  const root = join(descriptor.home, "..", ".."), path = join(descriptor.home, "config.toml");
+  const own = join(await realpath(root), "workspaces", "a".repeat(64));
+  // The image worker's prepared thread writes exactly this; its start must not be refused for it.
+  await writeFile(path, `[projects."${own}"]\ntrust_level = "trusted"\n`);
+  await preparePrivateCodexHome(descriptor);
+  for (const [why, text] of [
+    ["a directory outside the application root", `[projects."/tmp/elsewhere"]\ntrust_level = "trusted"\n`],
+    ["the application root itself", `[projects."${await realpath(root)}"]\ntrust_level = "trusted"\n`],
+    ["a relative escape", `[projects."${own}/../../.."]\ntrust_level = "trusted"\n`],
+    ["another trust level", `[projects."${own}"]\ntrust_level = "untrusted"\n`],
+    ["an extra setting", `[projects."${own}"]\ntrust_level = "trusted"\nmodel = "other"\n`],
+    ["a top-level setting", `model_instructions_file = "x"\n`],
+  ]) {
+    await writeFile(path, text);
+    await assert.rejects(preparePrivateCodexHome(descriptor), error => error.code === "SETUP_INSTRUCTIONS_UNEXPECTED", why);
+  }
+  await unlink(path);
+  await symlink(join(f.root, "linked.toml"), path);
+  await writeFile(join(f.root, "linked.toml"), `[projects."${own}"]\ntrust_level = "trusted"\n`);
+  await assert.rejects(preparePrivateCodexHome(descriptor), error => error.code === "SETUP_INSTRUCTIONS_UNEXPECTED", "a linked file");
+});
 for (const [scenario, code] of [
   ["version", "SETUP_VERSION_MISMATCH"], ["auth", "SETUP_AUTH_REQUIRED"], ["model", "SETUP_MODEL_UNAVAILABLE"],
   ["effort", "SETUP_MODEL_UNSUPPORTED"], ["cursor-loop", "SETUP_MODEL_CATALOG_INVALID"], ["policy", "SETUP_POLICY_MISMATCH"],

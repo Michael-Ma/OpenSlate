@@ -1,4 +1,4 @@
-import { lstat, mkdir, readlink, readdir, realpath, stat, symlink, unlink } from "node:fs/promises";
+import { lstat, mkdir, readFile, readlink, readdir, realpath, stat, symlink, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { requireRuntime, RuntimeFault } from "./validation.js";
 
@@ -22,8 +22,30 @@ export async function verifyPrivateCodexHome(home: string): Promise<void> {
   const directory = await lstat(home);
   requireRuntime(directory.isDirectory() && !directory.isSymbolicLink() && await realpath(home) === home,
     "SETUP_DIRECTORY_CHANGED", "The Director home changed after setup");
-  requireRuntime(!(await readdir(home)).some(name => forbidden.has(name.toLowerCase())),
-    "SETUP_INSTRUCTIONS_UNEXPECTED", "The private Director home contains unexpected instruction or settings files");
+  for (const name of await readdir(home)) {
+    if (!forbidden.has(name.toLowerCase())) continue;
+    requireRuntime(name === "config.toml" && await onlyOwnTrust(join(home, name), dirname(dirname(home))),
+      "SETUP_INSTRUCTIONS_UNEXPECTED", "The private Director home contains unexpected instruction or settings files");
+  }
+}
+
+/**
+ * Codex records that it trusts a thread's working directory by writing `[projects."<cwd>"] trust_level = "trusted"`
+ * into its home's config.toml (the image worker's prepared thread does this). That file is accepted only when it holds
+ * nothing but such entries for directories inside this application's own root; any other setting is still refused.
+ */
+async function onlyOwnTrust(path: string, root: string): Promise<boolean> {
+  const entry = await lstat(path);
+  if (!entry.isFile() || entry.isSymbolicLink() || entry.size > 64 * 1024) return false;
+  const lines = (await readFile(path, "utf8")).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length || lines.length % 2) return false;
+  for (let i = 0; i < lines.length; i += 2) {
+    const header = /^\[projects\."([^"\\]+)"\]$/.exec(lines[i]!);
+    if (!header || lines[i + 1] !== 'trust_level = "trusted"') return false;
+    const project = header[1]!;
+    if (!validPath(project) || project === root || !within(root, project)) return false;
+  }
+  return true;
 }
 
 /** Recheck before every launch: a setup result does not authorize later filesystem aliases. */
