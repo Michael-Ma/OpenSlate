@@ -1028,7 +1028,16 @@ function release(world: FixtureWorld, attemptId: string, body: ReleaseAttemptInp
   if (body.expectedPhase !== "submission_unknown") throw new ApiError("VALIDATION_ERROR", 400);
   const entry = Object.values(world.overview.shots).flatMap((shot) => (["keyframe", "video"] as const).map((slot) => ({ shot, slot })))
     .find(({ shot, slot }) => shot[slot].state === "no_answer" && shot[slot].attemptId === attemptId);
-  if (!entry) throw new ApiError("ATTEMPT_NOT_RELEASABLE", 409);
+  if (!entry) {
+    // A voice line with no answer goes back to its words, not voiced yet (the server keeps the old job's charge).
+    const voiced = Object.values(world.overview.shots).find((shot) => shot.narration.state === "no_answer" && shot.narration.attemptId === attemptId);
+    if (!voiced) throw new ApiError("ATTEMPT_NOT_RELEASABLE", 409);
+    commit(world, (overview) => ({ overview: withShot(overview, voiced.shotId, (shot) => {
+      const { attemptId: _released, failure: _failure, ...line } = shot.narration;
+      return { ...shot, narration: { ...line, state: "text_only" } };
+    }) }));
+    return { attemptId, shotId: voiced.shotId, releasedAt: now() };
+  }
   commit(world, (overview) => ({
     overview: withShot(overview, entry.shot.shotId, (shot) => {
       const slot = shot[entry.slot];

@@ -231,7 +231,7 @@ export const directorRoutes: FixtureRoute[] = [
  * - `markdown`: one more reply that uses lists, a table, code, links and references.
  * - `jobs`: 1.2's clip waits for an answer the service never sent (so Scene 1's keyframes are refused, ATTEMPT_EXISTS),
  *   and the service refuses 3.2's next keyframe: the live progress, the blocked line and Needs attention all show.
- * - `lost`: the voice service never replied for 2.3's line, and the transcription of a recording the person sent got
+ * - `lost`: 1.2's voice line waits for an answer (Give up returns it to its words), the voice service never replied for 2.3's line, and the transcription of a recording the person sent got
  *   no reply either (both SUBMISSION_RESPONSE_LOST, counted as spent): the voice row, Needs attention and the thread
  *   say it may be charged and how it is made again.
  */
@@ -301,6 +301,8 @@ export function applyDirectorPresets(world: FixtureWorld, presets: readonly stri
       const shots = { ...world.overview.shots };
       const shot = shots[shotId("2.3")]!;
       shots[shot.shotId] = { ...shot, narration: { ...shot.narration, state: "failed", failure: lost } };
+      const waiting = shots[shotId("1.2")]!;
+      shots[waiting.shotId] = { ...waiting, narration: { ...waiting.narration, state: "no_answer", attemptId: "fixture-attempt-1-2-voice" } };
       world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? [], world.snapshot.project.shots);
       const requestId = "request-lost";
       const message: ConversationEntry = { id: requestId, role: "user", text: "Here is my reading of the opening line, can you write it down?", requestId, at: laterToday(4) };

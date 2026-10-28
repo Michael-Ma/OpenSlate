@@ -95,7 +95,7 @@ export interface InspectorView {
   /** A failed keyframe or clip, with what was charged. */
   failure: { slot: "keyframe" | "video"; message: Msg; retryVideo: { enabled: boolean; price: Msg | null } | null } | null;
   /** A job the service never confirmed: offer to give up on it (plan decision D7). */
-  noAnswer: { slot: "keyframe" | "video"; attemptId: string } | null;
+  noAnswer: { slot: "keyframe" | "video" | "voice"; attemptId: string } | null;
   /** An outdated keyframe or clip, and why. */
   notes: Msg[];
   /** The scene's last confirm stopped at this shot: why, and what to do next. */
@@ -219,7 +219,9 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
   const noAnswerSlot = shot.keyframe.state === "no_answer" && shot.keyframe.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.attemptId }
     : shot.keyframe.replacement?.state === "no_answer" && shot.keyframe.replacement.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.replacement.attemptId }
     : !shot.video.ingestionIssue && shot.video.state === "no_answer" && shot.video.attemptId ? { slot: "video" as const, attemptId: shot.video.attemptId }
-    : !shot.video.ingestionIssue && shot.video.replacement?.state === "no_answer" && shot.video.replacement.attemptId ? { slot: "video" as const, attemptId: shot.video.replacement.attemptId } : null;
+    : !shot.video.ingestionIssue && shot.video.replacement?.state === "no_answer" && shot.video.replacement.attemptId ? { slot: "video" as const, attemptId: shot.video.replacement.attemptId }
+    // A voice line the service never answered can be let go too (card V1): the line goes back to not voiced.
+    : shot.narration.state === "no_answer" && shot.narration.attemptId ? { slot: "voice" as const, attemptId: shot.narration.attemptId } : null;
 
   // An outdated keyframe is explained next to its Regenerate button; an outdated clip here.
   const notes: Msg[] = [];

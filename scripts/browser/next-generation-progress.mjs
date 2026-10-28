@@ -110,6 +110,15 @@ export const scenarios = [
       await page.waitForSelector(".attn-pop");
       await expectText(page, '.attn-pop .attn-item[data-item="shot-2-3:voice"]', /2\.3 配音失败[\s\S]*服务没有返回结果，可能已计费。/);
       await page.screenshot({ path: shot("lost-reply-1440") });
+      // 1.2's unanswered voice line opens with Give up; letting it go clears it from the list.
+      await expectText(page, '[data-act="attention"]', /^2\s*需要处理$/);
+      await page.click('.attn-pop [data-act="attention-open"][data-shot="shot-1-2"]');
+      await expectText(page, ".insp h3", /^镜头 1\.2$/);
+      await page.click('.insp [data-act="give-up"]');
+      await page.check('.insp .ack input');
+      await page.click('.insp [data-act="give-up-confirm"]');
+      await expectText(page, '[data-act="attention"]', /^1\s*需要处理$/);
+      if (await page.locator('.insp [data-act="give-up"]').count()) fail("Give up stayed after the voice line was let go");
     },
   },
 ];
