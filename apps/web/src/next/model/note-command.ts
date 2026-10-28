@@ -112,7 +112,7 @@ export async function runNoteChoice(store: ChoiceStore, overview: GenerationOver
   const owner = noteCommandOwner(store, overview);
   if (!owner) return null;
   switch (action.kind) {
-    case "accept": return (await store.resolveNote(action.noteId, action.choiceIndex)) ? { kind: "settled", undo: null } : null;
+    case "accept": case "card": return (await store.resolveNote(action.noteId, action.choiceIndex)) ? { kind: "settled", undo: null } : null;
     case "regenerate": return (await runNoteRegeneration(store, overview, action)) ? { kind: "settled", undo: null } : null;
     case "confirm_video": return (await runNoteVideoConfirm(store, overview, action)) ? { kind: "settled", undo: null } : null;
     case "edit": {

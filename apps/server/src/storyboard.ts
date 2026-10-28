@@ -45,7 +45,7 @@ type Edit = {
   ids?: string[];
 };
 /** Set when a Director tool or a Director confirmation card ran the person's command. Never changes the edit itself. */
-export interface StoryboardEditOrigin { director: { requestId: string; epochId: string; invocationId: string } | { noteId: string } }
+export type StoryboardEditOrigin = { director: { requestId: string; epochId: string; invocationId: string } | { noteId: string } };
 type SavedEdit = {
   id: string;
   before: ProjectRecord;

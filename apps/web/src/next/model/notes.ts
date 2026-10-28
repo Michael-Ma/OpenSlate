@@ -16,7 +16,9 @@ export type NoteAction =
   /** The scene's "Confirm frames & generate video", pressed from the note; it resolves with the confirmation. */
   | { kind: "confirm_video"; noteId: string; choiceIndex: number; sceneId: string }
   /** Points the composer at the note's anchor so the person can answer in words. */
-  | { kind: "reply"; noteId: string; choiceIndex: number };
+  | { kind: "reply"; noteId: string; choiceIndex: number }
+  /** A contract 7.0.0 confirmation card: resolving the note runs the change on the server. */
+  | { kind: "card"; noteId: string; choiceIndex: number };
 
 export interface NoteChoiceView {
   label: Msg | { text: string };
@@ -61,6 +63,10 @@ function choiceLabel(choice: NoteChoice, overview: GenerationOverview, proposals
     case "edit_field": return msg(`note.choice.edit.${choice.field}`, { shot: labels(overview, [choice.shotId]) });
     case "reply": return msg("note.choice.reply");
     case "confirm_video": return msg("note.choice.confirm_video", { scene: ordinalOf(overview, choice.sceneId) });
+    case "confirm_delete_shots": return msg("note.choice.confirm_delete_shots", { shots: labels(overview, choice.shotIds) });
+    case "confirm_delete_scene": return msg("note.choice.confirm_delete_scene", { scene: ordinalOf(overview, choice.sceneId) });
+    case "use_take": return msg("note.choice.use_take", { shot: labels(overview, [choice.shotId]) });
+    case "confirm_resume": return msg("note.choice.confirm_resume");
     case "proposal": {
       const proposal = proposals.find((p) => p.proposalId === choice.proposalId);
       const changes = proposal?.preview.changes ?? [];
@@ -116,6 +122,8 @@ function settledMsg(choice: NoteChoice, overview: GenerationOverview, proposals:
     case "edit_field": return msg("note.settled.edited", { shot: labels(overview, [choice.shotId]) });
     case "proposal": return msg(fromMessage(choice, proposals) ? "note.settled.applied_from_message" : "note.settled.applied");
     case "reply": return msg("note.settled.replied");
+    case "confirm_resume": return msg("note.settled.resumed");
+    case "confirm_delete_shots": case "confirm_delete_scene": case "use_take": return msg("note.settled.card_applied");
   }
 }
 
@@ -128,6 +136,7 @@ function action(note: DirectorNote, choice: NoteChoice, choiceIndex: number): No
     case "proposal": return { kind: "proposal", ...base, proposalId: choice.proposalId };
     case "confirm_video": return { kind: "confirm_video", ...base, sceneId: choice.sceneId };
     case "reply": return { kind: "reply", ...base };
+    case "confirm_delete_shots": case "confirm_delete_scene": case "use_take": case "confirm_resume": return { kind: "card", ...base };
   }
 }
 

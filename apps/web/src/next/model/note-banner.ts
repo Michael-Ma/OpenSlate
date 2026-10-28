@@ -238,6 +238,7 @@ export function settledMsg(action: NoteAction, label: Label, overview: Generatio
     case "proposal": return msg("note.settled.applied");
     case "confirm_video": return msg("note.settled.video_confirmed", { scene: overview.scenes.find((s) => s.sceneId === action.sceneId)?.ordinal ?? "?" });
     case "reply": return msg("note.settled.replied");
+    case "card": return msg("note.settled.card_applied");
   }
 }
 
