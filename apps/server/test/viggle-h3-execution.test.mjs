@@ -11,7 +11,7 @@ import { ViggleH3Execution, ViggleDownloadPending, viggleHasCompletedObservation
 import { ExecutionOutputStore } from '../dist/execution/output-store.js';
 import { EnvironmentMediaCredentials } from '../dist/application/provider-credentials.js';
 import { assertViggleRecords, assertViggleSpoolLineage } from '../dist/execution/viggle-h3-lineage.js';
-import { assertViggleH3ExecutionMapping, viggleH3CompletedObservationId } from '../dist/execution/viggle-h3-receipts.js';
+import { assertViggleH3ExecutionMapping, assertViggleH3FirstFrameAspect, assertViggleH3OperationOptions, viggleH3CompletedObservationId, viggleH3RequestAspect } from '../dist/execution/viggle-h3-receipts.js';
 import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from '../dist/application/installation-recovery.js';
 import { fixture, context, due, rows, taskId, key, json, accepted, pending, completed, hash } from './viggle-h3-execution-fixture.mjs';
 
@@ -413,4 +413,37 @@ test('a worker that died before the dispatch marker is fenced as never sent: rel
   assert.equal(rows(f, 'viggle_h3_execution_submit')[0].observation.kind, 'not_dispatched');
   for (let cycle = 0; cycle < 3; cycle++) { await f.engine.reconcile(); await f.engine.runReady(); }
   assert.equal(f.calls.post, 0); assert.equal(f.calls.credentials, 0);
+});
+
+const reels = { version: 'film-kind@1', kind: 'social', format: { platform: 'ig_reels', aspect: '9:16' } };
+test('a 9:16 film sends aspect_ratio 9:16 with its portrait first frame; the profile aspect stays for older requests', async t => {
+  let form;
+  const f = await fixture(t, { filmKind: reels, pngSize: [180, 320], fetch: async (url, init) => {
+    form = await new Request(url, { method: 'POST', headers: init.headers, body: Buffer.from(init.body) }).formData(); return accepted();
+  } });
+  assert.equal(f.node.args.aspect, '9:16'); assert.equal(f.profile.configuration.settings.aspectRatio, '16:9');
+  assert.deepEqual(await f.bridge.submit(f.request, context(f)), { type: 'accepted', taskId });
+  assert.equal(form.get('aspect_ratio'), '9:16');
+  const mapping = rows(f, 'viggle_h3_execution_mapping')[0];
+  assert.equal(mapping.transport.aspectRatio, '9:16'); assert.deepEqual([mapping.transport.firstFrame.width, mapping.transport.firstFrame.height], [180, 320]);
+  assertViggleRecords(f.store, f.attempt.id);
+  const legacy = await fixture(t, { fetch: async (url, init) => {
+    form = await new Request(url, { method: 'POST', headers: init.headers, body: Buffer.from(init.body) }).formData(); return accepted();
+  } });
+  assert.equal(Object.hasOwn(legacy.node.args, 'aspect'), false);
+  await legacy.bridge.submit(legacy.request, context(legacy)); assert.equal(form.get('aspect_ratio'), '16:9');
+});
+
+test('a first frame of another shape is refused before any POST', async t => {
+  const f = await fixture(t, { filmKind: reels });
+  assert.equal(f.node.args.aspect, '9:16'); assert.deepEqual([f.image.width, f.image.height], [320, 180]);
+  const outcome = await f.bridge.submit(f.request, context(f));
+  assert.equal(outcome.type, 'rejected'); assert.equal(outcome.retryAllowed, false); assert.equal(f.calls.post, 0); assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0);
+  assert.equal(rows(f, 'viggle_h3_execution_mapping').length, 0);
+  assert.equal(rows(f, 'viggle_h3_execution_submit')[0].observation.code, 'LOCAL_INPUT_INVALID');
+  assert.throws(() => assertViggleH3FirstFrameAspect(f.request.args, 1024, 1024), error => error.code === 'VIGGLE_H3_FIRST_FRAME_ASPECT');
+  assert.doesNotThrow(() => assertViggleH3FirstFrameAspect(f.request.args, 1024, 1536));
+  assert.doesNotThrow(() => assertViggleH3FirstFrameAspect(Object.fromEntries(Object.entries(f.request.args).filter(([k]) => k !== 'aspect')), 1024, 1024), 'older requests have no aspect check');
+  assert.equal(viggleH3RequestAspect(f.request.args, f.profile), '9:16');
+  assert.throws(() => assertViggleH3OperationOptions(f.profile, { ...f.request.args, aspect: '4:5' }), error => error.code === 'VIGGLE_H3_PREFLIGHT_INVALID');
 });

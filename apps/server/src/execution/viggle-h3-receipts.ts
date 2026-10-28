@@ -1,8 +1,8 @@
 import { configuredProviderUse, providerAdmissionRequest, allowanceMappingMatches } from "./provider-use.js";
-import { canonical, digest, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
+import { canonical, digest, frameMatchesAspect, invariant, isProjectAspect, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { JsonObject, ProviderProfile } from "@openslate/core";
 import { describeViggleH3Request, VIGGLE_H3_ADAPTER_VERSION, VIGGLE_H3_LIMITS, viggleH3MetadataDigest } from "@openslate/providers";
-import type { ViggleH3Description, ViggleH3Diagnostic, ViggleH3PollResult, ViggleH3SubmitResult } from "@openslate/providers";
+import type { ViggleH3AspectRatio, ViggleH3Description, ViggleH3Diagnostic, ViggleH3PollResult, ViggleH3SubmitResult } from "@openslate/providers";
 import type { Attempt } from "./engine.js";
 import { assertOutputReceiptIdentity } from "./output-store.js";
 import type { OutputReceipt } from "./output-store.js";
@@ -60,10 +60,26 @@ export function assertViggleH3ExecutionProfile(profile: ProviderProfile, attempt
   "VIGGLE_H3_EXECUTION_CONFLICT", "Viggle requires its exact full consumed profile definition");
   moneyMicros(profile.unitCostMicros);
 }
+const VIGGLE_ARGUMENT_FIELDS = ["profileIdentity", "profileRevision", "adapter", "executionVersion", "profileConfiguration", "profileDigest", "prompt", "durationFrames", "frameRate", "settings"];
+/**
+ * The aspect_ratio a request sends. A video of a project with a chosen format carries `aspect` in its arguments; older
+ * requests and projects without a format have none and send the profile's aspect, exactly as before.
+ */
+export function viggleH3RequestAspect(args: JsonObject, profile: Pick<ProviderProfile, "configuration">): ViggleH3AspectRatio {
+  if (!Object.hasOwn(args, "aspect")) return profile.configuration!.settings!.aspectRatio as ViggleH3AspectRatio;
+  invariant(isProjectAspect(args.aspect), "VIGGLE_H3_PREFLIGHT_INVALID", "Video aspect must be 16:9, 9:16 or 1:1");
+  return args.aspect;
+}
+/** A request with a project aspect refuses a first frame of another shape (for example a square keyframe for a 9:16 video). */
+export function assertViggleH3FirstFrameAspect(args: JsonObject, width: unknown, height: unknown): void {
+  if (!Object.hasOwn(args, "aspect")) return;
+  invariant(isProjectAspect(args.aspect) && frameMatchesAspect(Number(width), Number(height), args.aspect), "VIGGLE_H3_FIRST_FRAME_ASPECT",
+    `The first frame (${String(width)}×${String(height)}) does not match the film's ${String(args.aspect)} frame; make the keyframe again`);
+}
 /** Cheap pre-admission validation. PNG ownership and approval are checked separately by the bridge. */
 export function assertViggleH3OperationOptions(profile: ProviderProfile, args: JsonObject): void {
   try {
-    viggleH3Fields(args, ["profileIdentity", "profileRevision", "adapter", "executionVersion", "profileConfiguration", "profileDigest", "prompt", "durationFrames", "frameRate", "settings"]);
+    viggleH3Fields(args, [...VIGGLE_ARGUMENT_FIELDS, ...(Object.hasOwn(args, "aspect") ? ["aspect"] : [])]);
     viggleH3Fields(args.settings, []); viggleH3Fields(profile.configuration, ["model", "settings"]);
     viggleH3Fields(profile.configuration.settings, ["quality", "resolution", "aspectRatio"]);
     const expected = providerProfileArguments(profile), configuration = profile.configuration;
@@ -73,7 +89,7 @@ export function assertViggleH3OperationOptions(profile: ProviderProfile, args: J
       && canonical(args.frameRate) === canonical({ numerator: 30, denominator: 1 }), "VIGGLE_H3_EXECUTION_CONFLICT", "Unsupported Viggle operation");
     describeViggleH3Request({ prompt: args.prompt as string, durationSeconds: Number(args.durationFrames) / 30,
       quality: configuration.settings!.quality as "low" | "high", resolution: configuration.settings!.resolution as "480p" | "768p" | "1080p",
-      aspectRatio: configuration.settings!.aspectRatio as "16:9", watermark: false });
+      aspectRatio: viggleH3RequestAspect(args, profile), watermark: false });
   } catch { invariant(false, "VIGGLE_H3_PREFLIGHT_INVALID", "Unsupported Viggle operation options"); }
 }
 export function assertViggleH3ExecutionMapping(attempt: Attempt, mapping: ViggleH3ExecutionMapping): void {
@@ -83,13 +99,13 @@ export function assertViggleH3ExecutionMapping(attempt: Attempt, mapping: Viggle
   const request = attempt.request, config = request.profile!.configuration, description = mapping.transport;
   viggleH3Fields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", ...(configuredProviderUse(request) ? ["providerUse"] : ["externalAllowanceId"])]);
   viggleH3Fields(config, ["model", "settings"]); viggleH3Fields(config.settings, ["quality", "resolution", "aspectRatio"]);
-  viggleH3Fields(request.args, ["profileIdentity", "profileRevision", "adapter", "executionVersion", "profileConfiguration", "profileDigest", "prompt", "durationFrames", "frameRate", "settings"]);
+  viggleH3Fields(request.args, [...VIGGLE_ARGUMENT_FIELDS, ...(Object.hasOwn(request.args, "aspect") ? ["aspect"] : [])]);
   viggleH3Fields(request.args.settings, []);
   viggleH3Fields(description, ["adapterVersion", "model", "mode", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "firstFrame", "requestDigest", "bodySha256", "bodyByteLength"]);
   viggleH3Fields(mapping.firstFrame, ["artifactId", "artifactDigest", "approvalId", "approvalDigest", "snapshotId", "snapshotDigest"]);
   invariant(config.model === "MiniMax-H3" && description.mode === "first_frame" && description.watermark === false
     && description.model === config.model && description.adapterVersion === VIGGLE_H3_ADAPTER_VERSION
-    && description.resolution === config.settings.resolution && description.quality === config.settings.quality && description.aspectRatio === config.settings.aspectRatio
+    && description.resolution === config.settings.resolution && description.quality === config.settings.quality && description.aspectRatio === viggleH3RequestAspect(request.args, request.profile!)
     && integer(description.durationSeconds, 3, 15)
     && request.args.durationFrames === description.durationSeconds * 30
     && Number(request.args.durationFrames) >= mapping.profileDefinition.minFrames! && Number(request.args.durationFrames) <= mapping.profileDefinition.maxFrames!
@@ -106,6 +122,7 @@ export function assertViggleH3ExecutionMapping(attempt: Attempt, mapping: Viggle
     && integer(bodyByteLength, image.byteLength, VIGGLE_H3_LIMITS.requestBytes) && viggleH3Hash(bodySha256)
     && requestDigest === viggleH3MetadataDigest(request.args.prompt, metadata),
   "VIGGLE_H3_EXECUTION_CONFLICT", "H3 transport metadata differs from its exact owned PNG");
+  assertViggleH3FirstFrameAspect(request.args, image.width, image.height);
   // The body hash includes encoded bytes: Store cannot reconstruct it from an artifact hash alone.
 }
 export function assertViggleH3ExecutionDispatch(attempt: Attempt, mapping: ViggleH3ExecutionMapping, dispatch: ViggleH3ExecutionDispatch): void {

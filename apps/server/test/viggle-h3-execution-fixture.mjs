@@ -43,8 +43,8 @@ export const tool = name => process.env[`OPENSLATE_${name.toUpperCase()}_PATH`] 
 function crc(bytes) { let n = 0xffffffff; for (const byte of bytes) { n ^= byte; for (let bit = 0; bit < 8; bit++) n = (n >>> 1) ^ ((n & 1) ? 0xedb88320 : 0); } return (n ^ 0xffffffff) >>> 0; }
 function chunk(type, data) { const bytes = Buffer.alloc(data.length + 12); bytes.writeUInt32BE(data.length); bytes.write(type, 4); data.copy(bytes, 8); bytes.writeUInt32BE(crc(bytes.subarray(4, -4)), bytes.length - 4); return bytes; }
 /** Synthetic complete RGB PNG. The fixture imports/decodes it with the actual managed image service. */
-export function pngBytes() {
-  const width = 320, height = 180, ihdr = Buffer.alloc(13), pixels = Buffer.alloc((width * 3 + 1) * height);
+export function pngBytes(width = 320, height = 180) {
+  const ihdr = Buffer.alloc(13), pixels = Buffer.alloc((width * 3 + 1) * height);
   ihdr.writeUInt32BE(width); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 2;
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) { const i = y * (width * 3 + 1) + 1 + x * 3; pixels[i] = x % 256; pixels[i + 1] = y; pixels[i + 2] = 90; }
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(pixels)), chunk('IEND', Buffer.alloc(0))]);
@@ -102,11 +102,12 @@ export async function fixture(t, options = {}) {
     ...(ingester ? { outputIngestor: ingester } : {}), externalAdmission: new DurableExternalAdmission(store, () => {}) };
   const engine = new Engine(store, bridge, engineOptions), production = new ProductionService(store, engine, profiles), allowances = new ExternalAllowanceService(store);
   let project = projectFixture(randomUUID(), 1); project.name = 'Offline Viggle bridge'; project.shots[0].desiredFrames = seconds * 30; refreshIntent(project.shots[0]);
+  if (options.filmKind !== undefined) project.filmKind = options.filmKind;
   store.createProject(project); store.insert('capability_lock', project.capabilityLockId, project.id, { profiles });
   store.insert('project_revision', project.revisionId, project.id, { project });
   const human = production.beginRequest(project.id, 'offline-human', 'Import and approve this exact synthetic first frame', { scopeIds: [project.id], editing: true });
   const images = new LocalImageStore({ rootDir: join(artifactRoot, 'images'), ffmpegPath: tool('ffmpeg'), ffprobePath: tool('ffprobe') });
-  const png = pngBytes(), imageService = new ImageApplicationService(production, images);
+  const png = pngBytes(...(options.pngSize ?? [])), imageService = new ImageApplicationService(production, images);
   const imported = await imageService.importImage(project.id, human, { expectedHeadVersion: project.headVersion, key: randomUUID(), bytes: png, sha256: hash(png) });
   project = store.getProject(project.id); const reference = imported.artifact, image = store.get('artifact', reference.artifactId), imagePath = image.path;
   const q = JSON.stringify, shot = project.shots[0], settings = options.shotSettings ? `,settings:${q(options.shotSettings)}` : '';

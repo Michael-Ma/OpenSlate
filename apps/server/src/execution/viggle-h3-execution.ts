@@ -4,14 +4,14 @@ import { open, realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import { assertExecutionRequest, describeViggleH3Request, ViggleH3Provider, registerExecutionProvider } from "@openslate/providers";
-import type { ExecutionCallOptions, ExecutionOutcome, ExecutionProvider, ExecutionRequest, ViggleH3Request, ViggleH3Resolution, ViggleH3Quality, ViggleH3AspectRatio, ViggleH3SubmitResult } from "@openslate/providers";
+import type { ExecutionCallOptions, ExecutionOutcome, ExecutionProvider, ExecutionRequest, ViggleH3Request, ViggleH3Resolution, ViggleH3Quality, ViggleH3SubmitResult } from "@openslate/providers";
 import { EnvironmentMediaCredentials } from "../application/provider-credentials.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { Store } from "../persistence/store.js";
 import type { Attempt } from "./engine.js";
 import { ExecutionOutputStore, isOutputStoreCapacityError } from "./output-store.js";
 import { ProtectedVideoDownloader } from "./video-download.js";
-import { assertViggleH3ExecutionDispatch, assertViggleH3ExecutionMapping, assertViggleH3ExecutionObservation, assertViggleH3ExecutionSubmit, assertViggleH3OperationOptions, assertViggleH3PollPolicy, assertViggleH3PollSchedule, viggleH3ObservationId } from "./viggle-h3-receipts.js";
+import { assertViggleH3ExecutionDispatch, assertViggleH3ExecutionMapping, assertViggleH3ExecutionObservation, assertViggleH3ExecutionSubmit, assertViggleH3FirstFrameAspect, assertViggleH3OperationOptions, assertViggleH3PollPolicy, viggleH3RequestAspect, assertViggleH3PollSchedule, viggleH3ObservationId } from "./viggle-h3-receipts.js";
 import type { ViggleH3ExecutionDispatch, ViggleH3ExecutionMapping, ViggleH3ExecutionObservation, ViggleH3ExecutionSubmit, ViggleH3PollObservation, ViggleH3PollPolicy, ViggleH3PollSchedule, ViggleH3SubmitObservation } from "./viggle-h3-receipts.js";
 import { assertViggleFirstDispatch, assertViggleDispatchLease, assertViggleMappingAdmission, resolveViggleAdmission, resolveViggleFrame, viggleFramePin, viggleRecord } from "./viggle-h3-authority.js";
 import type { ViggleFrameEvidence } from "./viggle-h3-authority.js";
@@ -397,9 +397,10 @@ export class ViggleH3Execution implements ExecutionProvider {
     invariant(bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
       && bytes.readUInt32BE(16) === record.width && bytes.readUInt32BE(20) === record.height,
     "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG dimensions differ from their validated record");
+    assertViggleH3FirstFrameAspect(request.args, record.width, record.height);
     return { prompt: String(request.args.prompt), durationSeconds: Number(request.args.durationFrames) / 30,
       resolution: configuration.settings!.resolution as ViggleH3Resolution, quality: configuration.settings!.quality as ViggleH3Quality,
-      aspectRatio: configuration.settings!.aspectRatio as ViggleH3AspectRatio, watermark: false,
+      aspectRatio: viggleH3RequestAspect(request.args, request.profile!), watermark: false,
       firstFrame: { bytes, sha256: reference.sha256, width: record.width!, height: record.height!,
         byteLength: bytes.length, mediaType: "image/png" } };
   }
