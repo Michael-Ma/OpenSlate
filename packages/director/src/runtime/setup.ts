@@ -153,12 +153,17 @@ async function session<T>(options: ReturnType<typeof validateOptions>, signal: A
         transport.fail(new RuntimeFault("SETUP_INTERACTIVE_DENIED", "Finish native authentication outside OpenSlate before checking again"));
       }
     } });
+  let failed = false;
   try {
     const rpc = (method: string, params: unknown) => transport.request(method, params, signal);
     await rpc("initialize", { clientInfo: { name: "openslate-setup", version: "1" }, capabilities: { experimentalApi: true } });
     transport.notification("initialized");
     return await run(rpc);
-  } finally { await transport.close(); }
+  } catch (error) { failed = true; throw error; }
+  finally {
+    try { await transport.close(); }
+    catch (error) { if (!failed) throw error; /* Preserve the primary safe start failure. */ }
+  }
 }
 function readServers(config: Record<string, unknown>): [string, unknown][] {
   const value = config.mcp_servers;
@@ -287,7 +292,7 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
     // RuntimeFault messages are locally authored. Never expose an OS error, RPC body or child stderr.
     const issue = timedOut ? nativeTimeoutFault("SETUP_TIMEOUT", "Local runtime setup exceeded its time limit", setupLimitMs) :
       cancellation.signal.aborted ? new RuntimeFault("SETUP_ABORTED", "Local runtime setup was cancelled") :
-      error instanceof RuntimeFault ? error : new RuntimeFault("SETUP_FAILED", "Local runtime setup could not complete; check selected paths and native installation");
+      error instanceof RuntimeFault ? error : new RuntimeFault("SETUP_FAILED", "Local runtime setup could not complete; check selected paths and native installation", classifyNativeDiagnostic(error));
     readiness.issues.push({ code: issue.code, message: issue.message });
     readiness.nativeDiagnostic = classifyNativeDiagnostic(issue);
     return { readiness };

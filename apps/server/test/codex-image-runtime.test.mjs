@@ -94,7 +94,7 @@ test('an inconsistent native image record leaves the overview readable, without 
 });
 
 for(const [code,category] of [['RUNTIME_RPC_TIMEOUT','native_timeout'],['ENOENT','native_spawn_failed'],['SETUP_AUTH_REQUIRED','native_auth_required'],
-  ['RUNTIME_PROTOCOL_INVALID','native_protocol'],[429,'native_rate_limited'],['UNRECOGNIZED','native_unknown']])
+  ['RUNTIME_PROTOCOL_INVALID','native_protocol'],['CODEX_IMAGE_MCP_UNEXPECTED','native_protocol'],[429,'native_rate_limited'],['UNRECOGNIZED','native_unknown']])
 test(`native preparation ${category} is retained and publicly projected without raw data or a retry`,async t=>{
   const f=fixture(t),raw='PRIVATE_NATIVE_MESSAGE /private/account/token secret-value',logs=[],nativeDiagnostic={category,...(category==='native_timeout'?{limitMs:60000}:{})};
   t.mock.method(console,'warn',(...args)=>logs.push(args));

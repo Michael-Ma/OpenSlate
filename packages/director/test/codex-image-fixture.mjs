@@ -45,6 +45,7 @@ lines.on("line", line => {
     return respond(id, { userAgent: "codex-cli/0.153.4" });
   }
   if (method === "config/read") {
+    if (imageProcess && imageScenario === "mcp-drift") config.mcp_servers.unexpected = { enabled: true, command: "PRIVATE_MUST_NOT_RUN" };
     if(imageScenario==="close-setup" && !imageProcess && !verifying) {
       const started=Date.now(),wait=setInterval(()=>{
         if(existsSync(process.env.IMAGE_FIXTURE_CONTROL+".release")){clearInterval(wait);respond(id,{config});}

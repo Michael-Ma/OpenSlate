@@ -8,7 +8,7 @@ import type { SceneConfirmationRecord } from '../scene-confirmations.js';
 import { requiredCommandKey } from './command-key.js';
 
 export type NoteInput = Pick<DirectorNote, 'anchor' | 'kind' | 'blocking' | 'text' | 'seenKeyframe' | 'choices'>;
-interface NoteBasis { projectId: string; invocationId: string; argumentsDigest: string; requestId: string; epochId: string; shots: { id: string; revisionId: string }[] }
+interface NoteBasis { projectId: string; invocationId: string; argumentsDigest: string; requestId: string; epochId: string; shots: { id: string; revisionId: string; digest?: string }[] }
 const shotsFor = (project: ProjectRecord, anchor: DirectorNote['anchor']) => project.shots.filter(shot => anchor.shotIds?.includes(shot.id) || (!anchor.shotIds && anchor.sceneId === shot.sceneId));
 function letter(index: number): string {
   let value = '';
@@ -22,7 +22,9 @@ export function directorNotes(store: Store, projectId: string): DirectorNote[] {
     if (note.state !== 'open') return note;
     const basis = store.get<NoteBasis>('director_note_basis', note.noteId);
     const changed = !basis || (note.anchor.sceneId && !project.scenes.some(s => s.id === note.anchor.sceneId))
-      || basis.shots.some(pin => !project.shots.some(s => s.id === pin.id && s.revisionId === pin.revisionId))
+      // Narration-only edits and scene moves preserve picture revisions. Notes
+      // describe the anchored shot, so new bases also fence its exact saved data.
+      || basis.shots.some(pin => !project.shots.some(s => s.id === pin.id && s.revisionId === pin.revisionId && (pin.digest === undefined || digest(s) === pin.digest)))
       || canonical(shotsFor(project, note.anchor).map(s => s.id).sort()) !== canonical(basis.shots.map(s => s.id).sort());
     const seen = note.seenKeyframe;
     const current = seen ? store.list<{ state: string; planId: string; node: { shotId?: string; kind: string }; outputs: Record<string, { artifactId: string; sha256: string }> }>('node_binding', projectId)
@@ -85,7 +87,7 @@ export function recordNotes(service: ProductionService, projectId: string, actor
     for (const note of notes) {
       store.insert('director_note', note.noteId, projectId, note);
       store.insert('director_note_basis', note.noteId, projectId, { projectId, invocationId, argumentsDigest: digest(input), requestId: actor.requestId, epochId: actor.epochId,
-        shots: shotsFor(project, note.anchor).map(s => ({ id: s.id, revisionId: s.revisionId })) } satisfies NoteBasis);
+        shots: shotsFor(project, note.anchor).map(s => ({ id: s.id, revisionId: s.revisionId, digest: digest(s) })) } satisfies NoteBasis);
       store.appendEvent(projectId, 'director.note', { noteId: note.noteId, requestId: actor.requestId, turnId: turn.id, letter: note.letter });
     }
     const receipt = { notes: notes.map(n => ({ noteId: n.noteId, letter: n.letter })) };

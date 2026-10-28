@@ -67,6 +67,8 @@ export interface Attempt {
   preparation?: { intentId: string; intentDigest: string; waitCount: number; nextEligibleAt: number };
   /** Mutable backoff for repeated identical unknown observations; never evidence. */
   unknownWait?: { count: number; nextEligibleAt: number };
+  /** Mutable local contention marker; repeated waits are not new history. */
+  ingestionDeferred?: "local_media_busy";
   applicationInput?: OwnedTranscriptionAttemptInput;
   narrationSpeech?: NarrationSpeechAttemptInput;
   outputs: Record<string, ArtifactRef>; createdAt: string;
@@ -808,9 +810,11 @@ export class Engine {
         const held = error instanceof DomainError && error.code === "EXECUTION_HELD";
         const recoverable = verifiedCompletion || (error instanceof DomainError && error.code === "RESTORED_AUTHORITY_REQUIRES_NEW") || (!!this.store.get("local_execution_dispatch", current.id)
           && !(error instanceof DomainError && ["LOCAL_EXECUTION_INTERRUPTED", "LOCAL_EXECUTION_CONFLICT"].includes(error.code)));
-        this.store.put("attempt", current.id, current.projectId, { ...current, phase: held || recoverable ? "ingesting" : "failed", leaseExpiresAt: 0,
-          failure: held ? null : { id: error instanceof DomainError ? error.code : "LOCAL_EXECUTION_FAILED", technical: true, source: "local_media", retryAllowed: false } });
-        this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase: held || recoverable ? "ingesting" : "failed" });
+        const phase: AttemptPhase = held || recoverable ? "ingesting" : "failed";
+        const failure = held ? null : { id: error instanceof DomainError ? error.code : "LOCAL_EXECUTION_FAILED", technical: true, source: "local_media", retryAllowed: false };
+        this.store.put("attempt", current.id, current.projectId, { ...current, phase, leaseExpiresAt: 0, failure });
+        if (phase !== current.phase || canonical(failure) !== canonical(current.failure))
+          this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase });
       });
       throw error;
     } finally {
@@ -1251,7 +1255,7 @@ export class Engine {
       // Reconciliation re-observes the same answer every cycle. Only a change in
       // observable state is history; an identical unknown answer backs off instead.
       const unchanged = phase === current.phase && taskId === current.taskId && canonical(failure) === canonical(current.failure);
-      const { unknownWait: previousWait, ...base } = current;
+      const { unknownWait: previousWait, ingestionDeferred: _deferred, ...base } = current;
       const unknownWait = unchanged && phase === "submission_unknown" ? unknownBackoff(previousWait?.count ?? 0) : undefined;
       const updated: Attempt = { ...base, phase, taskId, failure, leaseExpiresAt: ingesting && !issue ? current.leaseExpiresAt : 0, ...(unknownWait ? { unknownWait } : {}) };
       this.store.put("attempt", current.id, current.projectId, updated);
@@ -1292,8 +1296,9 @@ export class Engine {
       // liability, but let the next cycle recover it without a vendor call.
       this.store.transaction(() => {
         const current = this.owns(attempt); if (!current || current.phase !== "ingesting") return;
-        this.store.put("attempt", current.id, current.projectId, { ...current, leaseExpiresAt: 0 });
-        this.store.appendEvent(current.projectId, "attempt.ingestion_deferred", { attemptId: current.id, reason: "local_media_busy" });
+        this.store.put("attempt", current.id, current.projectId, { ...current, leaseExpiresAt: 0, ingestionDeferred: "local_media_busy" });
+        if (current.ingestionDeferred !== "local_media_busy")
+          this.store.appendEvent(current.projectId, "attempt.ingestion_deferred", { attemptId: current.id, reason: "local_media_busy" });
       });
       return;
     }
@@ -1316,7 +1321,8 @@ export class Engine {
         this.store.appendEvent(attempt.projectId, "artifact.published", { artifactId: record.id, attemptId: attempt.id, fixture: record.fixture });
       }
       const issue = activeAttemptIngestionIssue(this.store, current);
-      const finished: Attempt = { ...current, phase: "succeeded", outputs: mapped, taskId: executionTaskId(completed), leaseExpiresAt: 0 };
+      const { ingestionDeferred: _deferred, ...base } = current;
+      const finished: Attempt = { ...base, phase: "succeeded", outputs: mapped, taskId: executionTaskId(completed), leaseExpiresAt: 0 };
       this.store.put("attempt", current.id, current.projectId, finished); this.setReservation(current, "charged");
       if (issue) {
         this.store.put("attempt_ingestion_issue", current.id, current.projectId, { ...issue, active: false, resolvedAt: new Date().toISOString() });

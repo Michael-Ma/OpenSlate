@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { CodexImageWorkerTransport } from "../dist/index.js";
+import { CodexImageWorkerTransport, classifyNativeDiagnostic } from "../dist/index.js";
 import { ImageRpc } from "../dist/media/image-rpc.js";
 import { CODEX_RUNTIME_LIMITS } from "../dist/runtime/policy.js";
 const entry=fileURLToPath(new URL("codex-image-fixture.mjs",import.meta.url));
@@ -34,8 +34,26 @@ test("construction is lazy; readiness has no threads, turns, credentials or inhe
  assert.ok(!JSON.stringify(readiness).includes(f.root));assert.ok(!JSON.stringify(readiness).includes("PRIVATE"));
  assert.ok(calls.filter(x=>x.kind==="launch").every(x=>x.parentSecretAbsent&&x.apiEnvironmentAbsent));
 });
-for(const scenario of ["api-key","capability"])test(`new work blocks ${scenario} without starting any turn`,async t=>{
+for(const scenario of ["api-key","capability","mcp-drift"])test(`new work blocks ${scenario} without starting any turn`,async t=>{
  const f=await fixture(t,scenario);const ready=await f.worker.checkReadiness();assert.equal(ready.status,"blocked");assert.deepEqual(ready.nativeDiagnostic,{category:scenario==="api-key"?"native_auth_required":"native_protocol"});assert.ok(!methods(await f.records()).includes("turn/start"));
+});
+for(const operation of ["prepare","checkReadiness"])test(`${operation} preserves its primary native start reason when cleanup also fails`,async t=>{
+ const f=await fixture(t,"api-key"),close=ImageRpc.prototype.close;
+ ImageRpc.prototype.close=async function(){await close.call(this);throw Error("PRIVATE_CLEANUP_ERROR");};
+ try {
+  if(operation==="prepare")await assert.rejects(f.worker.prepare(input()),error=>{
+   assert.equal(error.code,"CODEX_IMAGE_CHATGPT_REQUIRED");assert.deepEqual(classifyNativeDiagnostic(error),{category:"native_auth_required"});return true;
+  });
+  else {const ready=await f.worker.checkReadiness();assert.equal(ready.status,"blocked");assert.deepEqual(ready.nativeDiagnostic,{category:"native_auth_required"});}
+ } finally {ImageRpc.prototype.close=close;}
+ assert.ok(!methods(await f.records()).includes("turn/start"));
+});
+test("successful native checks with failed cleanup return blocked readiness without private errors",async t=>{
+ const f=await fixture(t),close=ImageRpc.prototype.close;
+ ImageRpc.prototype.close=async function(){await close.call(this);throw Error("PRIVATE_CLEANUP_ERROR");};
+ let ready;try {ready=await f.worker.checkReadiness();}finally{ImageRpc.prototype.close=close;}
+ assert.equal(ready.status,"blocked");assert.deepEqual(ready.nativeDiagnostic,{category:"native_unknown"});
+ assert.ok(!JSON.stringify(ready).includes("PRIVATE"));assert.ok(!methods(await f.records()).includes("turn/start"));
 });
 test("image startup settings are bounded independently of its turn execution deadline",async t=>{
  const f=await fixture(t);

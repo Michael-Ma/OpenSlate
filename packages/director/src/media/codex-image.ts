@@ -171,12 +171,14 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       await this.#close(rpc); rpc = undefined; imageStopped(signal);
       return { status: "ready", code: null, runtimeVersion: "0.153.4", authMode: "chatgpt" };
     } catch (error) { return { status: "blocked", code: safeCode(error), runtimeVersion: "0.153.4", authMode: "chatgpt", nativeDiagnostic: classifyNativeDiagnostic(error) }; }
-    finally { if (rpc) await this.#close(rpc); }
+    // Successful readiness already confirmed cleanup in the try block. A later
+    // cleanup fault must not replace the primary failure returned above.
+    finally { if (rpc) try { await this.#close(rpc); } catch { /* Preserve the primary start diagnostic. */ } }
   }
   async prepare(supplied: CodexImageInput, options: { signal?: AbortSignal } = {}): Promise<CodexImagePrepared> {
     const signal = options.signal; imageStopped(signal); const input = snapshotInput(supplied), description = describeCodexImageInput(input);
     requireRuntime(!this.#preparing && !this.#held && !this.#turnRunning, "CODEX_IMAGE_BUSY", "Image worker is already preparing a turn"); this.#preparing = true;
-    let rpc: ImageRpc | undefined;
+    let rpc: ImageRpc | undefined, failed = false;
     try {
       const ready = await this.#setup(signal), workspace = await imageDirectory(ready.options.cwd, description.turnInputDigest);
       requireRuntime(await imageFileSha(ready.binary, signal) === ready.runtimeDigest, "CODEX_IMAGE_BINARY_CHANGED", "Native binary changed after setup");
@@ -208,7 +210,12 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       const timer = setTimeout(() => { if (this.#held?.rpc === heldRpc) this.#held = undefined; void this.#close(heldRpc).catch(() => {}); }, 120_000); timer.unref();
       this.#held = { prepared, rpc, config, timer }; rpc = undefined;
       return structuredClone(prepared);
-    } finally { this.#preparing = false; if (rpc) await this.#close(rpc); }
+    } catch (error) { failed = true; throw error; }
+    finally {
+      this.#preparing = false;
+      if (rpc) try { await this.#close(rpc); }
+      catch (error) { if (!failed) throw error; /* Preserve the primary safe start failure. */ }
+    }
   }
   async #load(prepared: CodexImagePrepared, signal?: AbortSignal): Promise<Configuration> {
     const root = await realpath(this.#input.directory), configurations = join(root, "configurations");

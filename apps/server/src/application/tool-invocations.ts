@@ -8,6 +8,7 @@ import type { EnqueueSceneVoice } from "../scene-generation.js";
 import { assertDirectorProposalDecisionAuthority, decideProposal, proposeChange } from "./director-proposals.js";
 import type { ProposalPatch } from "@openslate/core";
 import { recordNotes, type NoteInput } from "./director-notes.js";
+import { SHIPPED_DIRECTOR_GUIDANCE } from "./director-shipped-guidance.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { canonical, digest, DomainError, invariant, parseToolArguments, toolCatalog, toolHandlerId } from "@openslate/core";
 import type { ActorContext, JsonValue, ToolName, ToolContractVersion, ReviewNotesFailure } from "@openslate/core";
@@ -143,6 +144,30 @@ export class ToolInvocationService {
       "CAPABILITY_MISMATCH", "Tool implementation differs from its immutable lock");
     const audioRequests = record.lock.skills.length > 0 && record.lock.skills.every(skill => Number(skill.version.split('.')[0]) >= 5);
     return { catalog, lockId: binding.lockId, audioRequests };
+  }
+
+  /** Recognize historical receipt identity only; this never verifies or enables a runtime or new invocation. */
+  private reconciliationCatalogMatches(projectId: string, call: ToolInvocation, epoch: { requestId: string; principalId: string }): boolean {
+    try {
+      if (!call.toolContractVersion || !(SUPPORTED_TOOL_CONTRACTS as readonly string[]).includes(call.toolContractVersion)) return false;
+      if (call.catalogDigest === toolCatalog(call.toolContractVersion).digest) return true;
+      if (!call.skillLockId || call.projectId !== projectId || call.requestId !== epoch.requestId) return false;
+      const store = this.service.store;
+      const request = store.get<{ projectId: string; principalId: string }>('message', call.requestId);
+      const binding = store.get<{ projectId: string; requestId: string; lockId: string }>('director_epoch_lock', call.epochId);
+      if (request?.projectId !== projectId || request.principalId !== epoch.principalId || binding?.projectId !== projectId
+        || binding.requestId !== call.requestId || binding.lockId !== call.skillLockId) return false;
+      const record = store.get<{ projectId: string; lock: SkillCapabilityLock }>('director_skill_lock', call.skillLockId);
+      if (record?.projectId !== projectId || record.lock.id !== call.skillLockId) return false;
+      const { lockDigest, ...body } = record.lock;
+      const handlers = record.lock.bindings.filter(handler => handler.kind === 'handler');
+      return digest(body) === lockDigest && record.lock.compatibility.toolContract === call.toolContractVersion
+        && SHIPPED_DIRECTOR_GUIDANCE.some(pin => pin.toolContract === call.toolContractVersion && pin.handlerDigest === call.catalogDigest
+          && record.lock.skills.length === 2
+          && record.lock.skills.some(skill => skill.id === 'plan-authoring' && skill.version === pin.guidanceVersion && skill.packageDigest === pin.planAuthoringDigest)
+          && record.lock.skills.some(skill => skill.id === 'production' && skill.version === pin.guidanceVersion && skill.packageDigest === pin.productionDigest)
+          && handlers.length === 1 && handlers[0]!.id === toolHandlerId(pin.toolContract) && handlers[0]!.digest === pin.handlerDigest);
+    } catch { return false; } // Damaged history stays unresolved without aborting other calls' reconciliation.
   }
 
   async invoke(projectId: string, actor: ActorContext, callId: string, tool: string, input: unknown,
@@ -328,7 +353,8 @@ export class ToolInvocationService {
       for (const call of store.list<ToolInvocation>("tool_invocation", projectId).filter(call => call.epochId === epochId && ["started", "unresolved"].includes(call.state))) {
         if (store.get("tool_reconciliation", call.id)) continue;
         let receipt: unknown = null;
-        if (call.tool === 'make_keyframes' && call.toolContractVersion === '6.0.0' && call.catalogDigest === toolCatalog('6.0.0').digest) {
+        const catalogMatches = this.reconciliationCatalogMatches(projectId, call, epoch);
+        if (call.tool === 'make_keyframes' && call.toolContractVersion === '6.0.0' && catalogMatches) {
           const saved = store.get<DirectorKeyframesReceipt>('director_keyframes_receipt', call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) {
             // Effects commit with scene publication; blocks commit with refusal checkpoints.
@@ -341,11 +367,11 @@ export class ToolInvocationService {
               refused: saved.refused, complete: saved.complete };
           }
         }
-        if ((call.tool === "record_notes" || call.tool === "propose_change") && call.toolContractVersion && ["5.0.0", "6.0.0"].includes(call.toolContractVersion) && call.catalogDigest === toolCatalog(call.toolContractVersion).digest) {
+        if ((call.tool === "record_notes" || call.tool === "propose_change") && call.toolContractVersion && ["5.0.0", "6.0.0"].includes(call.toolContractVersion) && catalogMatches) {
           const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; receipt: unknown }>(call.tool === "record_notes" ? "director_notes_receipt" : "director_proposal_receipt", call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) receipt = saved.receipt;
         }
-        if ((call.tool === 'accept_proposal' || call.tool === 'reject_proposal') && call.toolContractVersion === '6.0.0' && call.catalogDigest === toolCatalog('6.0.0').digest) {
+        if ((call.tool === 'accept_proposal' || call.tool === 'reject_proposal') && call.toolContractVersion === '6.0.0' && catalogMatches) {
           const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; action: string; receipt: unknown }>('director_proposal_decision_receipt', call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest
             && saved.action === (call.tool === 'accept_proposal' ? 'accept' : 'reject')) receipt = saved.receipt;
@@ -374,7 +400,7 @@ export class ToolInvocationService {
             }
           }
         }
-        if (call.tool === 'prepare_recording_transcription' && call.toolContractVersion === '6.0.0' && call.catalogDigest === toolCatalog('6.0.0').digest) {
+        if (call.tool === 'prepare_recording_transcription' && call.toolContractVersion === '6.0.0' && catalogMatches) {
           const saved = store.list<DirectorAttachmentTranscriptionRecord>('director_attachment_transcription', projectId)
             .find(row => row.requestId === call.requestId && row.epochId === epochId && row.key === `director-tool:${call.id}` && row.state === 'succeeded');
           if (saved) {
@@ -384,7 +410,7 @@ export class ToolInvocationService {
             } catch { /* Only exact retained application evidence settles a lost response. */ }
           }
         }
-        if (!receipt && (call.toolContractVersion && (SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(call.toolContractVersion)) && call.catalogDigest === toolCatalog(call.toolContractVersion).digest && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
+        if (!receipt && (call.toolContractVersion && (SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(call.toolContractVersion)) && catalogMatches && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
           const command = call.recovery.audioProposalCommand, kind = audioKind(call.tool);
           if (command.kind === kind && command.key === `director-tool:${call.id}`) {
             const suffix = kind === "recording_transcription" ? "owned-transcription" : "narration-speech";

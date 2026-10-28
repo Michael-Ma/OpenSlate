@@ -412,7 +412,7 @@ export class ProductionService {
   }
 
   /** Application-only publication of a scene plan compiled in the isolated worker before any mutation. */
-  applyCompiledSceneGeneration(projectId: string, actor: ActorContext, compiled: CompiledPlan, logicalIds: Record<string, string>, expectedHeadVersion: number, expectedLockDigest: string, kind: "image" | "video", reviewedNodeIds: readonly string[]): ApplyReceipt {
+  applyCompiledSceneGeneration(projectId: string, actor: ActorContext, compiled: CompiledPlan, logicalIds: Record<string, string>, expectedHeadVersion: number, expectedLockDigest: string, kind: "image" | "video", reviewedNodeIds: readonly string[], retainHolds = false): ApplyReceipt {
     invariant(actor.kind === "human", "ACTOR_DENIED", "Scene generation requires the human scene check");
     const before = this.store.getProject(projectId), lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
     invariant(lock?.projectId === projectId && digest(lock) === expectedLockDigest && before.headVersion === expectedHeadVersion, "REVISION_CONFLICT", "The reviewed scene or model changed during preparation");
@@ -449,7 +449,7 @@ export class ProductionService {
     }
     this.checkFootprint(before, captured.next, actor, compiled, assessment.impact);
     const deferred = kind === "image" ? assessment.impact.filter(change => ["new", "replace"].includes(change.kind) && compiled.nodes.some(node => node.id === change.nodeId && node.kind === "video")).map(change => change.nodeId) : [];
-    return this.publishPreparedChange(projectId, actor, this.finalizePreparedChange(projectId, actor, captured, assessment, deferred));
+    return this.publishPreparedChange(projectId, actor, this.finalizePreparedChange(projectId, actor, captured, assessment, deferred), retainHolds);
   }
 
   /** Trusted synchronous host boundary after review re-verifies bytes and isolated composition.
@@ -457,7 +457,7 @@ export class ProductionService {
    * This method is never a model tool; admission independently verifies the exact owned bytes again.
    */
   commitOwnedTranscriptionReview(projectId: string, human: ActorContext, input: ReviewOwnedTranscription,
-    options: { signal?: AbortSignal; requested?: true; requestedAtCursor?: number;
+    options: { signal?: AbortSignal; requested?: true; requestedAtCursor?: number; retainHolds?: boolean;
       /** Trusted host hook: authority and visible effects commit with the paid operation. */
       onPublished?: (receipt: OwnedTranscriptionApplyReceipt) => void } = {}): OwnedTranscriptionApplyReceipt {
     const signal = options.signal, requested = options.requested === true, requestedAtCursor = options.requestedAtCursor;
@@ -488,7 +488,9 @@ export class ProductionService {
           sourceBinding: owned.sourceBinding, nodeId: node.id, specDigest: node.specDigest, compiledDigest: digest(owned.compiled) };
         this.store.insert("owned_transcription_review", review.id, projectId, review);
         const prepared = this.recordPreparedChange(projectId, human, captured, assessment, { [node.id]: grant.id });
-        const applied = this.publishPreparedChange(projectId, human, prepared);
+        // A Director's attached recording selects no picture work. Its original
+        // conversation keeps ownership of any unfinished film edits.
+        const applied = this.publishPreparedChange(projectId, human, prepared, options.retainHolds === true);
         const binding = this.store.get<{ candidateId: string }>("node_binding", node.id)!;
         const candidate = this.store.get("candidate", binding.candidateId)!;
         const application: OwnedTranscriptionApplication = { id: binding.candidateId, version: 1, projectId,

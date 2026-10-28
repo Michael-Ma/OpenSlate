@@ -184,8 +184,11 @@ function noteTransition(service: ProductionService, proposal: ProposalRecord, re
       service.releaseFinishedRequestHolds(proposal.projectId, other.requestId);
     }
     if (reopen) {
-      const basis = service.store.get<{ shots: { id: string; revisionId: string }[] }>('director_note_basis', note.noteId);
-      if (basis) service.store.put('director_note_basis', note.noteId, proposal.projectId, { ...basis, shots: basis.shots.map(pin => ({ ...pin, revisionId: service.store.getProject(proposal.projectId).shots.find(s => s.id === pin.id)?.revisionId ?? pin.revisionId })) });
+      const basis = service.store.get<{ shots: { id: string; revisionId: string; digest?: string }[] }>('director_note_basis', note.noteId);
+      if (basis) service.store.put('director_note_basis', note.noteId, proposal.projectId, { ...basis, shots: basis.shots.map(pin => {
+        const shot = service.store.getProject(proposal.projectId).shots.find(s => s.id === pin.id);
+        return shot ? { ...pin, revisionId: shot.revisionId, digest: digest(shot) } : pin;
+      }) });
     }
     service.store.appendEvent(proposal.projectId, reopen ? 'director.note_reopened' : 'director.note_resolved', { noteId: note.noteId, proposalId: proposal.id });
   }

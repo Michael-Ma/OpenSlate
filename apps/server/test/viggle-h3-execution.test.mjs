@@ -141,6 +141,67 @@ test('known polling cooldown is durable and a late worker cannot shorten a repla
   assert.equal(f.calls.post, 1); await second.poll(taskId, f.request); assert.equal(f.calls.query, 2);
 });
 
+for (const kind of ['pending', 'unknown']) test(`identical ${kind} polls with fresh HTTP request ids retain bounded history across restart`, async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => {
+    if (init.method === 'POST') return accepted();
+    return json(kind === 'pending' ? await pending().json() : { error: { code: 'RATE_LIMITED', message: 'PRIVATE_NOT_RETAINED',
+      retryable: true, details: {}, remediation: { action: 'wait', retry_after_ms: 20000 }, request_id: null } },
+      kind === 'pending' ? 200 : 429, { 'x-request-id': `req_fresh_${f.calls.query}`, ...(kind === 'unknown' ? { 'retry-after': '20' } : {}) });
+  } });
+  await f.bridge.submit(f.request, context(f)); let active = f;
+  for (let cycle = 0; cycle < 12; cycle++) {
+    if (cycle === 6) active = { ...f, ...reopen(f, false) };
+    due(active); const outcome = await active.bridge.poll(taskId, f.request);
+    assert.equal(outcome.type, kind === 'pending' ? 'accepted' : 'unknown');
+  }
+  const observations = rows(active, 'viggle_h3_execution_observation');
+  assert.equal(observations.length, 1, 'transport trace ids are not new task state');
+  assert.equal(observations[0].observation.receipt.requestId, 'req_fresh_1');
+  if (kind === 'unknown') {
+    assert.deepEqual(observations[0].observation.error, { code: 'RATE_LIMITED', category: 'throttled', retryAfterMs: 20000 });
+    assert.equal(rows(active, 'viggle_h3_poll_schedule')[0].nextPollAt - f.clock.value, 20000);
+  }
+  assertViggleRecords(active.store, f.attempt.id);
+  assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 12); assert.equal(f.calls.download, 0);
+});
+
+test('nonterminal deduplication retains real status, HTTP status and retry timing changes', async t => {
+  let status = 'queued', httpStatus = 200, retryAfterMs = 20000;
+  const f = await fixture(t, { fetch: async (_url, init) => {
+    if (init.method === 'POST') return accepted();
+    const body = httpStatus === 200 ? await pending(status).json() : httpStatus === 429 ? { error: { code: 'RATE_LIMITED', message: 'PRIVATE',
+      retryable: true, details: {}, remediation: { action: 'wait', retry_after_ms: retryAfterMs }, request_id: null } } : {};
+    return json(body, httpStatus, { 'x-request-id': `req_changed_${f.calls.query}` });
+  } });
+  await f.bridge.submit(f.request, context(f));
+  const poll = async () => { due(f); return f.bridge.poll(taskId, f.request); };
+  await poll(); status = 'processing'; await poll(); status = 'queued'; await poll();
+  assert.equal(rows(f, 'viggle_h3_execution_observation').length, 2);
+  httpStatus = 500; await poll(); httpStatus = 503; await poll(); httpStatus = 500; await poll();
+  assert.equal(rows(f, 'viggle_h3_execution_observation').length, 4);
+  httpStatus = 429; await poll(); retryAfterMs = 60000; await poll();
+  assert.equal(rows(f, 'viggle_h3_execution_observation').length, 6);
+  assert.equal(rows(f, 'viggle_h3_poll_schedule')[0].nextPollAt - f.clock.value, 60000);
+  retryAfterMs = 20000; await poll();
+  assert.equal(rows(f, 'viggle_h3_execution_observation').length, 6);
+  assert.equal(rows(f, 'viggle_h3_poll_schedule')[0].nextPollAt - f.clock.value, 20000);
+  assertViggleRecords(f.store, f.attempt.id); assert.equal(f.calls.post, 1);
+});
+
+test('nonterminal deduplication never promotes a matching receipt with corrupt lineage', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted()
+    : json(await pending().json(), 200, { 'x-request-id': `req_corrupt_${f.calls.query}` }) });
+  await f.bridge.submit(f.request, context(f)); due(f); await f.bridge.poll(taskId, f.request);
+  const retained = rows(f, 'viggle_h3_execution_observation')[0];
+  tamper(f, 'viggle_h3_execution_observation', { ...retained, mappingDigest: '0'.repeat(64) });
+  const schedule = rows(f, 'viggle_h3_poll_schedule')[0];
+  f.store.put('viggle_h3_poll_schedule', schedule.id, f.project.id, { ...schedule, lastObservationId: null });
+  due(f); assert.equal((await f.bridge.poll(taskId, f.request)).type, 'unknown');
+  assert.equal(rows(f, 'viggle_h3_execution_observation').length, 1);
+  assert.throws(() => assertViggleRecords(f.store, f.attempt.id), { code: 'VIGGLE_H3_EXECUTION_CONFLICT' });
+  assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 2); assert.equal(f.calls.download, 0);
+});
+
 test('expired signed locator refreshes only through another known-task GET and retains both immutable observations', async t => {
   let f, status = 400;
   f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed(String(f.calls.query)), downloadStatus: () => status });

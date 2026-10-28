@@ -103,6 +103,21 @@ test("the classifier reads whole words: the app's authority errors are not a Cod
   assert.equal(classifyNativeDiagnostic({ code: -32000, data: { code: "rate-limited" } }).category, "native_rate_limited");
 });
 
+test("known native preparation guards retain their allowlisted reason", () => {
+  for (const code of ["RUNTIME_PLATFORM_UNSUPPORTED", "RUNTIME_MODE_UNSUPPORTED", "RUNTIME_VERSION_UNSUPPORTED", "RUNTIME_CONFIG_INVALID",
+    "RUNTIME_METHOD_DENIED", "RUNTIME_OUTPUT_LIMIT", "RUNTIME_REQUEST_TOO_LARGE", "RUNTIME_BACKPRESSURE", "RUNTIME_REQUEST_LIMIT",
+    "SETUP_NODE_VERSION", "SETUP_PATH_INVALID", "SETUP_PATH_OVERLAP", "SETUP_COMMAND_INVALID", "SETUP_ENV_INVALID",
+    "SETUP_AUTH_HOME_INVALID", "SETUP_AUTH_LINK_INVALID", "SETUP_DIRECTORY_CHANGED", "CODEX_IMAGE_PLATFORM_UNSUPPORTED",
+    "CODEX_IMAGE_MODEL_UNSUPPORTED", "CODEX_IMAGE_ENV_INVALID", "CODEX_IMAGE_LIMIT_INVALID", "CODEX_IMAGE_PATH_INVALID",
+    "CODEX_IMAGE_CONFIG_LIMIT", "CODEX_IMAGE_MCP_UNEXPECTED", "CODEX_IMAGE_BINARY_CHANGED", "CODEX_IMAGE_FILE_INVALID",
+    "CODEX_IMAGE_FILE_CHANGED", "CODEX_IMAGE_REFERENCE_CHANGED", "CODEX_IMAGE_REFERENCE_INVALID"])
+    assert.deepEqual(classifyNativeDiagnostic({ code, message: "PRIVATE token=/native/account" }), { category: "native_protocol" }, code);
+  assert.deepEqual(classifyNativeDiagnostic({ code: "CODEX_IMAGE_INTERACTIVE_DENIED" }), { category: "native_auth_required" });
+  assert.deepEqual(classifyNativeDiagnostic({ code: "SETUP_INSTRUCTIONS_UNEXPECTED" }), { category: "native_instructions_unexpected" });
+  for (const code of ["CODEX_IMAGE_CLOSED", "CODEX_IMAGE_BUSY", "RUNTIME_PROCESS_EXIT", "RUNTIME_TRANSPORT_FAILED", "RUNTIME_CLEANUP_FAILED"])
+    assert.deepEqual(classifyNativeDiagnostic({ code, message: "PRIVATE auth required" }), { category: "native_unknown" }, code);
+});
+
 test("instruction diagnostic reclassification preserves only bounded printable file metadata", () => {
   assert.deepEqual(classifyNativeDiagnostic({ code: "RUNTIME_INSTRUCTIONS_UNEXPECTED" }), { category: "native_instructions_unexpected" });
   const files = ["~/.codex/AGENTS.md", "/tmp/AGENTS.override.md", "/tmp/AGENTS.override.md", "PRIVATE_TEXT", "/tmp/../private", "/tmp/AGENTS.md\nPRIVATE", "/tmp/\u202ePRIVATE"];

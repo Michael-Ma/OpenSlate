@@ -1,3 +1,4 @@
+import { composeOwnedTranscriptionPlan } from '../narration/owned-transcription-composition.js';
 import type { ArtifactRecord } from "../execution/engine.js";
 import { assertConfiguredProviderAdmission } from "../execution/provider-use.js";
 import { assertRequestedNarrationShotScope } from "../narration/narration-scope.js";
@@ -9,7 +10,7 @@ import { assertNarrationSpeechReview, assertNarrationSpeechApplication, assertNa
 import Database from "better-sqlite3";
 import { viggleBackupClosure } from "./viggle-backup.js";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { canonical, composeTranscriptionPlanIsolated, digest, invariant, snapshotLocalExecution } from "@openslate/core";
+import { canonical, digest, invariant, snapshotLocalExecution } from "@openslate/core";
 import type { CompiledPlan, ProjectRecord, ProviderProfile } from "@openslate/core";
 import { assertOwnedTranscriptionSource, assertOwnedTranscriptionProposal, ownedTranscriptionCatalog } from "../narration/owned-transcription-records.js";
 import type { OwnedTranscriptionSource } from "../narration/owned-transcription-types.js";
@@ -141,7 +142,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       const catalog = ownedTranscriptionCatalog(speechReader, projectId, base);
       for (const item of catalog) await ownedSource(get("owned_transcription_source", item.id), projectId);
       const logicalIds = { ...value.logicalIds }, localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
-      const compiled = await composeTranscriptionPlanIsolated(base, value.operation, { project, profiles: lock.profiles, logicalIds,
+      const compiled = await composeOwnedTranscriptionPlan(speechReader, base, value.operation, { project, profiles: lock.profiles, logicalIds,
         allocateId: () => { fail(false, "Owned transcription proposal lacks an exact saved logical ID"); return ""; },
         transcriptionInputs: [...catalog, { id: binding.id, digest: digest(binding), consumerAlias: binding.consumerAlias, artifact: binding.artifact }],
         ...(localExecution ? { localExecution } : {}) });

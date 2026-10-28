@@ -108,6 +108,45 @@ test("every preparation repairs a missing, redirected or copied sign-in link wit
   assert.equal(await readlink(link), descriptor.authSource);
 });
 
+test("setup preserves a safe OS preparation cause after replacing private error prose", async t => {
+  const f = await fixture(t);
+  f.input.nativeHome = join(f.root, "PRIVATE_MISSING_NATIVE_HOME");
+  const result = await setupLocalCodex(f.input);
+  assert.equal(result.readiness.status, "blocked");
+  assert.equal(result.readiness.issues[0].code, "SETUP_FAILED");
+  assert.deepEqual(result.readiness.nativeDiagnostic, { category: "native_spawn_failed" });
+  assert.equal(result.runtimeOptions, undefined);
+  assert.deepEqual(await f.records(), []);
+  assert.ok(!JSON.stringify(result).includes("PRIVATE"));
+  assert.ok(!JSON.stringify(result).includes(f.root));
+});
+
+test("setup keeps its primary native failure when owned-process cleanup also fails", async t => {
+  const f = await fixture(t, "auth"), close = CodexTransport.prototype.close;
+  CodexTransport.prototype.close = async function () { await close.call(this); throw Error("PRIVATE_CLEANUP_ERROR"); };
+  let result;
+  try { result = await setupLocalCodex(f.input); }
+  finally { CodexTransport.prototype.close = close; }
+  assert.equal(result.readiness.status, "blocked");
+  assert.equal(result.readiness.issues[0].code, "SETUP_AUTH_REQUIRED");
+  assert.deepEqual(result.readiness.nativeDiagnostic, { category: "native_auth_required" });
+  assert.ok(!JSON.stringify(result).includes("PRIVATE"));
+  assert.ok(!(await f.records()).some(row => row.method?.startsWith("turn/")));
+});
+
+test("successful setup checks still refuse failed owned-process cleanup", async t => {
+  const f = await fixture(t), close = CodexTransport.prototype.close;
+  CodexTransport.prototype.close = async function () { await close.call(this); throw Error("PRIVATE_CLEANUP_ERROR"); };
+  let result;
+  try { result = await setupLocalCodex(f.input); }
+  finally { CodexTransport.prototype.close = close; }
+  assert.equal(result.readiness.status, "blocked");
+  assert.equal(result.runtimeOptions, undefined);
+  assert.deepEqual(result.readiness.nativeDiagnostic, { category: "native_unknown" });
+  assert.ok(!JSON.stringify(result).includes("PRIVATE"));
+  assert.ok(!(await f.records()).some(row => row.method?.startsWith("turn/")));
+});
+
 for (const scenario of ["missing", "directory", "dangling-link", "selected-home-missing"]) test(`missing usable sign-in (${scenario}) blocks setup before native launch`, async t => {
   const f = await fixture(t), auth = join(f.input.codexHome, "auth.json");
   await unlink(auth);

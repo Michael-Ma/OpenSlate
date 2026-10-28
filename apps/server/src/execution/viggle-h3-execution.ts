@@ -302,15 +302,27 @@ export class ViggleH3Execution implements ExecutionProvider {
       policy: this.#policy, count: 0, nextPollAt: this.now() + this.#policy.initialMs, claimId: null, lastObservationId: null });
   }
   private saveObservation(attempt: Attempt, observation: ViggleH3PollObservation): ViggleH3ExecutionObservation {
-    const id = viggleH3ObservationId(attempt.id, observation), previous = this.#store.get<ViggleH3ExecutionObservation>("viggle_h3_execution_observation", id);
-    if (previous) {
-      // The same protected receipt may be reported again with another HTTP trace. Keep its first immutable observation.
-      invariant(observation.kind === "completed" && previous.observation.kind === "completed" || canonical(previous.observation) === canonical(observation),
-        "VIGGLE_H3_EXECUTION_CONFLICT", "Observation identity collision"); return previous;
-    }
-    const mapping = this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id)!, dispatch = this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id)!;
-    return this.#store.insert("viggle_h3_execution_observation", id, attempt.projectId, { ...this.identity(attempt), id, mappingDigest: digest(mapping),
-      dispatchDigest: digest(dispatch), observedAt: this.now(), observation });
+    return this.#store.transaction(() => {
+      const id = viggleH3ObservationId(attempt.id, observation), previous = this.#store.get<ViggleH3ExecutionObservation>("viggle_h3_execution_observation", id);
+      if (previous) {
+        // The same protected receipt may be reported again with another HTTP trace. Keep its first immutable observation.
+        invariant(observation.kind === "completed" && previous.observation.kind === "completed" || canonical(previous.observation) === canonical(observation),
+          "VIGGLE_H3_EXECUTION_CONFLICT", "Observation identity collision"); return previous;
+      }
+      const mapping = this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id)!, dispatch = this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id)!;
+      if (observation.kind === "pending" || observation.kind === "unknown") {
+        // HTTP trace ids are not new task state. Reuse exact validated evidence,
+        // retaining status, HTTP status, diagnostic and retry timing unchanged.
+        const state = (value: ViggleH3PollObservation) => canonical({ ...value, receipt: { ...value.receipt, requestId: null } });
+        const retained = viggleObservations(this.#store, attempt).find(value => value.observation.kind === observation.kind && state(value.observation) === state(observation));
+        if (retained) {
+          assertViggleH3ExecutionObservation(attempt, mapping, dispatch, this.submission(attempt)!, retained);
+          return retained;
+        }
+      }
+      return this.#store.insert("viggle_h3_execution_observation", id, attempt.projectId, { ...this.identity(attempt), id, mappingDigest: digest(mapping),
+        dispatchDigest: digest(dispatch), observedAt: this.now(), observation });
+    });
   }
   private async replay(attempt: Attempt, signal?: AbortSignal): Promise<ExecutionOutcome> {
     const retained = this.submission(attempt);

@@ -155,6 +155,32 @@ test("single-use dispatch without a completion is actionable and never automatic
   assert.equal(f.engine.attempts(f.projectId)[0].failure.id, "LOCAL_EXECUTION_INTERRUPTED");
 });
 
+test("unchanged local recovery failures stay bounded across restart and record only real changes", async t => {
+  let recoveryCode;
+  const f = fixture(t, {
+    execute: async () => { throw new DomainError("LOCAL_WORK_INTERRUPTED", "Before a completion"); },
+    recover: async () => { if (recoveryCode) throw new DomainError(recoveryCode, "Synthetic local repair needed"); },
+  });
+  await f.engine.runReady(); const id = f.engine.attempts(f.projectId)[0].id;
+  recoveryCode = "MEDIA_MISSING"; f.reopen();
+  assert.equal((await f.engine.reconcile()).blocked[0].code, recoveryCode);
+  const events = () => f.store.readEvents(f.projectId).filter(event => event.kind === "attempt.state_changed" && event.payload.attemptId === id);
+  const before = events().length, records = f.store.db.prepare("SELECT count(*) count FROM entities").get().count;
+  for (let cycle = 0; cycle < 12; cycle++) {
+    if (cycle === 6) f.reopen();
+    assert.equal((await f.engine.reconcile()).blocked[0].code, recoveryCode);
+  }
+  assert.equal(events().length, before, "the same retained repair failure is not a new state transition");
+  assert.equal(f.store.db.prepare("SELECT count(*) count FROM entities").get().count, records);
+  recoveryCode = "MEDIA_CORRUPT"; await f.engine.reconcile();
+  assert.equal(events().length, before + 1, "a changed failure remains observable even in the same phase");
+  recoveryCode = undefined; await f.engine.reconcile();
+  assert.equal(f.engine.attempts(f.projectId)[0].phase, "failed");
+  assert.equal(f.engine.attempts(f.projectId)[0].failure.id, "LOCAL_EXECUTION_INTERRUPTED");
+  assert.equal(events().length, before + 2);
+  assert.equal(f.counts().executes, 1); assert.equal(f.provider.acceptedCount(), 0);
+});
+
 test("another SQLite worker cannot occupy local capacity and a stolen original lease cannot publish", async t => {
   const started = barrier(), release = barrier(); let originalSignal;
   const f = fixture(t, { execute: async (intent, call, complete) => { originalSignal = call.signal; started.resolve(); await release.promise; return complete(intent); } });

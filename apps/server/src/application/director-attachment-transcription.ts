@@ -142,7 +142,7 @@ export async function startDirectorAttachmentTranscription(options: {
   if (recovered) return recovered;
   try {
     await transcriptions.request(projectId, human, input, { ...(signal ? { signal } : {}),
-      requestedAtCursor: requestHoldCutoff(store, projectId, actor), onPublished: receipt => {
+      requestedAtCursor: requestHoldCutoff(store, projectId, actor), retainHolds: true, onPublished: receipt => {
       current();
       const resolved = resolveOwnedTranscriptionApplication(store, projectId, receipt.candidateId), proposal = resolved.proposal;
       invariant(proposal.requestId === actor.requestId && proposal.principalId === actor.principalId

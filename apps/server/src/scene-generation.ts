@@ -618,6 +618,9 @@ export async function generateScene(production: ProductionService, projectId: st
         digest(captured.lock),
         input.kind,
         reviewedNodeIds,
+        // This request may own unfinished edits elsewhere in the film. The
+        // selected holds were already narrowed above; retain the remainder.
+        !!director,
       );
       // Publication needs empty execution slots for fresh grants, but presentation keeps
       // the exact previous take and dependent outputs until replacement success.

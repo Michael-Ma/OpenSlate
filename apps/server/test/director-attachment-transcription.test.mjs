@@ -119,6 +119,26 @@ test('attachment transcription retains the original request cutoff and cannot ig
   assert.equal(f.store.get('hold', laterHold.id).active, true);
 });
 
+test('attachment transcription keeps its own planning holds for the unselected film work', async t => {
+  const f = await fixture(t), holds = rows(f, 'hold').filter(hold => hold.active && hold.ownerId === f.human.requestId);
+  assert.equal(holds.length, 1); assert.equal(holds[0].scopeId, f.project.id);
+  const input = f.input(), result = await f.start(input);
+  for (const hold of holds) assert.deepEqual(f.store.get('hold', hold.id), hold, 'a standalone attached recording must not release the conversation\'s film edit hold');
+  const events = f.store.cursor(f.project.id);
+  assert.deepEqual(await f.start(input), result); assert.equal(f.store.cursor(f.project.id), events);
+  assert.equal(rows(f, 'grant').length, 1); assert.equal(rows(f, 'candidate').length, 1);
+  assert.equal(rows(f, 'attempt').length, 0); assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test('ordinary human audio publication still completes its own application hold', async t => {
+  const f = await ownedTranscriptionFixture(t);
+  const holds = rows(f, 'hold').filter(hold => hold.active && hold.ownerId === f.human.requestId);
+  assert.equal(holds.length, 1);
+  await f.service.request(f.project.id, f.human, f.input());
+  assert.ok(holds.every(hold => f.store.get('hold', hold.id).active === false));
+  assert.equal(rows(f, 'grant').length, 1); assert.equal(rows(f, 'candidate').length, 1);
+});
+
 test('an unknown attachment request outcome is never blindly submitted again', async t => {
   const f = await fixture(t), input = f.input(); let calls = 0;
   f.service.request = async () => { calls++; throw Error('Lost owned-transcription response'); };
