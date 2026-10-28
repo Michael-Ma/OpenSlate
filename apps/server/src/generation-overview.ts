@@ -16,6 +16,7 @@ import { quote, unitQuote } from "./generation-quotes.js";
 import { narrationFitFrames } from "./narration-fit.js";
 import { attemptMediaFailure } from "./media-failure.js";
 import { activeAttemptIngestionIssue } from "./execution/ingestion-issue.js";
+import { readGenerationJobBlockers } from "./application/generation-blockers.js";
 
 /** Existing scenes retain their purpose-derived label until named. */
 export function sceneTitle(purpose: string, title?: string): string {
@@ -76,7 +77,7 @@ export class GenerationOverviewReader {
           sentJobs: snapshot.attempts.filter(a => !["succeeded", "failed"].includes(a.phase)).length, detachedJobs: 0 } : null),
         director: { state: question || turn?.state === "waiting_user" ? "waiting_user" : turn ? "working" : "idle", scopeIds, ...(requestId ? { requestId } : {}) },
         controlAuthorityId: "authorityId" in snapshot.control ? snapshot.control.authorityId : null,
-        scenes: [], shots: {}, restartCasualties: snapshot.attempts.filter(a => a.phase === "submission_unknown" && a.createdAt < this.production.engine.startedAt).map(a => a.id) };
+        scenes: [], shots: {}, restartCasualties: snapshot.attempts.filter(a => !a.released && a.phase === "submission_unknown" && a.createdAt < this.production.engine.startedAt).map(a => a.id) };
       for (const [index, scene] of project.scenes.entries()) {
         const captured = sceneView(this.production, projectId, scene.id, { snapshot, review, tolerateAlternatives: true });
         const view = sceneGenerationView(this.production, projectId, scene.id, this.narration, captured, snapshot);
@@ -185,9 +186,13 @@ export class GenerationOverviewReader {
         // an in-flight attempt moves on its own; review waits still need the person's decision.
         const moving = (slot: Pick<MediaSlot, "state" | "waiting" | "failure">, pending: boolean) => slot.state === "running" || (slot.state === "queued" && !["review", "stopped", "unknown", "timing"].includes(slot.waiting?.code ?? "") && ((slot.failure?.autoRetriesLeft ?? 0) > 0 || pending && !!slot.waiting && ["capacity", "edit_pending", "input_pending", "voice"].includes(slot.waiting.code)));
         const makingVideo = shots.some((s, i) => moving(s.video, rows[i]!.videoPending) || (s.video.replacement && moving(s.video.replacement, rows[i]!.videoPending)));
+        const jobs = readGenerationJobBlockers(this.production, projectId, rows.map(row => row.shotId));
         overview.scenes.push({ sceneId: scene.id, ordinal: index + 1, title: sceneTitle(scene.purpose, scene.title), purpose: scene.purpose,
           state: attention ? "needs_attention" : shots.length && counts.videosReady === shots.length ? "video_saved" : makingVideo ? "making_video" : shots.length && counts.keyframesReady === shots.length ? "keyframes_back" : counts.keyframesReady ? "keyframes_partial" : "not_started",
           shotIds: rows.map(r => r.shotId), counts,
+          blockedBy: jobs?.attempts.map(attempt => ({ attemptId: attempt.attemptId, shotId: attempt.shotId,
+            kind: attempt.kind, phase: attempt.phase, action: attempt.resolution.action })) ?? [],
+          blockedByTotal: jobs?.total ?? 0, blockedByTruncated: jobs?.truncated ?? false,
           videoTargets: generationTargets(rows, "video").map(r => r.shotId), keyframeTargets: generationTargets(rows, "image").map(r => r.shotId),
           quotes: { makeKeyframes: quote(captured.lock, rows, "makeKeyframes"), ...(commonRegenerationQuote ? { regenerateKeyframe: commonRegenerationQuote } : {}), confirmVideo: quote(captured.lock, rows, "confirmVideo"), voice: quote(captured.lock, rows, "voice"), ...(oneClip ? { oneClip } : {}), ...(oneVoice ? { oneVoice } : {}) },
           ...(confirmation ? { confirmation: confirmationView(confirmation) } : {}),

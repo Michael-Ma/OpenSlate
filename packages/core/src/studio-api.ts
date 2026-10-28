@@ -219,6 +219,19 @@ export interface SceneOverview {
   videoTargets: string[];
   /** The shots a "make keyframes" press would make. */
   keyframeTargets: string[];
+  /**
+   * Current image/video attempt liabilities across this scene's shots, including detached and older jobs
+   * hidden by media slots. Uses the generation refusal's predicate and release rules; at most 20, oldest first.
+   * An empty list resolves the attempt-liability part of ATTEMPT_EXISTS only; other generation guards still apply.
+   * For a narrower command, match shotId; a scene-wide total does not imply that an unrelated subset is blocked.
+   * Truncation leaves unmatched subsets unknown until a fresh read exposes their jobs.
+   * Always emitted by current servers. Absent on older servers means unknown, not resolved.
+   */
+  blockedBy?: { attemptId: string; shotId: string; kind: "image" | "video"; phase: string; action: "follow_existing_job" | "human_release" }[];
+  /** Full count before the display cap. Always emitted by current servers, including zero. */
+  blockedByTotal?: number;
+  /** True when more jobs remain beyond blockedBy; reread after resolution rather than relying on historical ids. */
+  blockedByTruncated?: boolean;
   quotes: {
     makeKeyframes?: PriceQuote;
     regenerateKeyframe?: PriceQuote;
@@ -276,7 +289,7 @@ export interface GenerationOverview {
   controlAuthorityId: string | null;
   scenes: SceneOverview[];
   shots: Record<string, ShotOverview>;
-  /** no_answer attempts created before the current server start. */
+  /** Unreleased no_answer attempts created before the current server start. Released jobs remain in history and reconciliation. */
   restartCasualties: string[];
 }
 

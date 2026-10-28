@@ -8,6 +8,7 @@ import { GenerationOverviewReader, sceneTitle, shotNarration } from '../dist/gen
 import { quote } from '../dist/generation-quotes.js';
 import { sourceFor, projectFixture } from './execution-fixture.mjs';
 import { narrationSpeechFixture } from './narration-speech-fixture.mjs';
+import { directorMappedSpeechFixture } from './helpers/director-mapped-speech-fixture.mjs';
 
 async function ok(response) { assert.equal(response.statusCode, 200, response.body); return response.json(); }
 async function make(f, scene = 'scene-0', kind = 'image') { return ok(await f.post(await f.get(scene), kind)); }
@@ -357,6 +358,32 @@ test('current voice attempts project making and failed without dispatching', asy
   assert.equal(unknown.scenes[0].state,'needs_attention');
   assert.ok(unknown.scenes[0].blockers.some(b=>b.code==='no_answer_in_scene' && b.shotId==='shot-0'));
   assert.deepEqual(f.calls,{http:0,credentials:0});
+});
+
+test('giving up a restarted voice line removes its restart casualty while preserving reconciliation and liability', async t => {
+  const f = await directorMappedSpeechFixture(t, { admit: true }), attempt = f.attempt;
+  f.store.put('attempt', attempt.id, f.project.id, { ...attempt, phase: 'submission_unknown',
+    createdAt: '2000-01-01T00:00:00.000Z', leaseExpiresAt: 0 });
+  f.store.appendEvent(f.project.id, 'test.restarted_voice', {});
+  const reader = new GenerationOverviewReader(f.service, f.narration);
+  const before = reader.read(f.project.id);
+  assert.deepEqual(before.restartCasualties, [attempt.id]);
+  assert.equal(before.shots['shot-0'].narration.state, 'no_answer');
+  f.engine.releaseAttempt(f.project.id, attempt.id, 'local-user', true);
+  const cursor = f.store.cursor(f.project.id), released = reader.read(f.project.id);
+  assert.deepEqual(released.restartCasualties, []);
+  assert.notEqual(released.shots['shot-0'].narration.state, 'no_answer');
+  assert.equal(f.store.cursor(f.project.id), cursor, 'the overview only reads the release');
+  assert.equal(f.store.get('attempt', attempt.id).phase, 'submission_unknown');
+  assert.ok(f.store.get('attempt', attempt.id).released);
+  assert.equal(f.store.get('reservation', attempt.reservationId).state, 'reserved');
+  const lookups = [];
+  f.bridge.lookup = async attemptId => { lookups.push(attemptId); return { type: 'unknown' }; };
+  await f.engine.reconcile();
+  assert.deepEqual(lookups, [attempt.id], 'released voice work is still polled');
+  assert.equal(f.engine.attempts(f.project.id).length, 1);
+  assert.deepEqual(reader.read(f.project.id).restartCasualties, []);
+  assert.deepEqual(f.calls, { http: 0, credentials: 0 }, 'release and reads never buy another line');
 });
 
 test('input waits without pending narration never request a human review or claim an unapproved clip is being made', async t => {

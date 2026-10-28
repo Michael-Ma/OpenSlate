@@ -12,6 +12,7 @@ import { startDirectorAttachmentTranscription } from '../dist/application/direct
 import { directorTurnViews } from '../dist/application/director-turn-view.js';
 import { EnvironmentMediaCredentials } from '../dist/application/provider-credentials.js';
 import { Engine } from '../dist/execution/engine.js';
+import { GenerationOverviewReader } from '../dist/generation-overview.js';
 import { ConfiguredExternalAdmission } from '../dist/execution/durable-external-admission.js';
 import { ExecutionOutputStore } from '../dist/execution/output-store.js';
 import { ExecutionIngestionRouter } from '../dist/execution/ingestion-router.js';
@@ -124,6 +125,34 @@ test('Director transcription provider refusal exposes only allowlisted terminal 
   assertReadOnly(f, { state: 'failed', attemptId: attempt.id, failure });
   assert.equal(canonical(f.read()).includes('PRIVATE_RPC_BODY'), false);
   assert.equal(f.calls, 1);
+});
+
+test('giving up a restarted Director transcription clears the restart strip without losing its attempt or polling it twice', async t => {
+  const f = await fixture(t);
+  f.fetch = async () => { throw Error(privateText); };
+  await f.engine.runReady();
+  const attempt = f.attempt();
+  assert.equal(attempt.phase, 'submission_unknown');
+  f.store.put('attempt', attempt.id, f.project.id, { ...attempt, createdAt: '2000-01-01T00:00:00.000Z',
+    leaseExpiresAt: 0, unknownWait: { count: 0, nextEligibleAt: 0 } });
+  f.store.appendEvent(f.project.id, 'test.restarted_transcription', {});
+  const reader = new GenerationOverviewReader(f.production);
+  assert.deepEqual(reader.read(f.project.id).restartCasualties, [attempt.id]);
+  const history = canonical(rows(f, 'director_generation_effect'));
+  f.engine.releaseAttempt(f.project.id, attempt.id, 'local-user', true);
+  assert.deepEqual(reader.read(f.project.id).restartCasualties, []);
+  assert.ok(f.attempt().released);
+  assert.equal(f.attempt().phase, 'submission_unknown');
+  assert.equal(f.store.get('reservation', attempt.reservationId).state, 'reserved');
+  let lookups = 0;
+  const lookup = f.bridge.lookup.bind(f.bridge);
+  f.bridge.lookup = async (...args) => { lookups++; return lookup(...args); };
+  await f.engine.reconcile();
+  assert.equal(lookups, 1, 'the original unknown attempt remains under reconciliation');
+  assert.equal(f.calls, 1, 'there is no second transcription submission');
+  assert.equal(rows(f, 'attempt').length, 1);
+  assert.equal(canonical(rows(f, 'director_generation_effect')), history);
+  assert.deepEqual(reader.read(f.project.id).restartCasualties, []);
 });
 
 test('Director transcription outcome stays tied to the original operation across a recovered alias and later turn', async t => {

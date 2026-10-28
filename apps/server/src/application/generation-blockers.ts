@@ -33,7 +33,7 @@ export class GenerationAttemptBlockedError extends DomainError {
 }
 
 /** Historical, detached work retains liability and must have an inspectable resolution. */
-export function assertGenerationJobsResolved(service: ProductionService, projectId: string, shotIds: readonly string[]): void {
+export function readGenerationJobBlockers(service: ProductionService, projectId: string, shotIds: readonly string[]): GenerationAttemptRecovery | undefined {
   const shots = new Set(shotIds);
   const bindings = new Map(service.store.list<NodeBinding>("node_binding", projectId)
     .filter(binding => binding.node.shotId && shots.has(binding.node.shotId) && ["image", "video"].includes(binding.node.kind))
@@ -58,6 +58,12 @@ export function assertGenerationJobsResolved(service: ProductionService, project
         instruction: "Follow this existing job in Keyframes. The executor reconciles its saved outcome; do not release a known running job or submit it again.",
       } };
   });
-  throw new GenerationAttemptBlockedError({ total: pending.length, truncated: pending.length > attempts.length,
-    instruction: "Open this scene in Keyframes to inspect every existing job. Unanswered jobs offer Give up for the person to acknowledge possible charges; running jobs stay under executor recovery. The Director must not release or resubmit them.", attempts });
+  return { total: pending.length, truncated: pending.length > attempts.length,
+    instruction: "Open this scene in Keyframes to inspect every existing job. Unanswered jobs offer Give up for the person to acknowledge possible charges; running jobs stay under executor recovery. The Director must not release or resubmit them.", attempts };
+}
+
+/** Refusals and read projections share the exact same pending-job predicate and release rules. */
+export function assertGenerationJobsResolved(service: ProductionService, projectId: string, shotIds: readonly string[]): void {
+  const recovery = readGenerationJobBlockers(service, projectId, shotIds);
+  if (recovery) throw new GenerationAttemptBlockedError(recovery);
 }
