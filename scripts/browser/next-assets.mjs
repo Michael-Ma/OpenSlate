@@ -486,7 +486,8 @@ export const scenarios = [
       await page.locator("[data-act='import']").click();
       await chooseFile(page, { name: "low-tide.wav", mimeType: "audio/wav", buffer: wav(1) });
       await page.locator("[data-act='import-go']").click();
-      await expectText(page, ".toast", /Imported low-tide\.wav as music\./, 30000);
+      // The film has no music yet, so imported music becomes its soundtrack.
+      await expectText(page, ".toast", /Imported low-tide\.wav\. It is now the film's music\./, 30000);
       await expectText(page, "aside.detail h3", /^low-tide\.wav$/, 10000);
       await expectText(page, "aside.detail dl", /Music[\s\S]*Not on a shot[\s\S]*Imported/);
       // Selecting it loads nothing yet; Play loads the recording from the narration audio route and plays it.
