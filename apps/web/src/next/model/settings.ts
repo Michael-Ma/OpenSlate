@@ -35,6 +35,21 @@ export interface ProviderCatalogView {
   defaults: string[];
   profiles: ProviderOption[];
   realExecutionEnabled: boolean;
+  /** Gemini song analysis (sections, lyrics, mood); absent on servers without it. The key itself is never sent. */
+  musicListener?: MusicListenerStatus;
+}
+
+export interface MusicListenerStatus {
+  id: "gemini-music";
+  provider: string;
+  model: string;
+  /** The environment variable the key is read from. */
+  variable: string;
+  configured: boolean;
+  backendUnavailable: boolean;
+  audioLeavesMachine: string;
+  /** A typical three-minute song, in USD micros. */
+  typicalSongMicros: number;
 }
 
 export type ModelSelection = Record<MediaKind, string | null>;

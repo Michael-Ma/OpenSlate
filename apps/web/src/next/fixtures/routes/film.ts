@@ -439,5 +439,7 @@ export const filmRoutes: FixtureRoute[] = [
     return { recordings, coverage: { offset, total: all.length, nextOffset: next < all.length ? next : null }, capabilities: { import: true, maxBytes: 128 * MIB, maxSeconds: 360 } };
   } },
   { method: "GET", match: /^\/audio-library\/([^/?]+)\/timing$/, handle: (world, [id]) => songTiming(world, decodeURIComponent(id ?? "")) },
+  // Song analysis sends the song to Google; the sample film never does, so it is unavailable here.
+  { method: "GET", match: /^\/audio-library\/[^/?]+\/song-analysis$/, handle: () => ({ state: "unavailable", code: "SAMPLE_FILM", reason: "The sample film never sends songs anywhere." }) },
   { method: "POST", match: /^\/storyboard$/, handle: (world, _params, body) => storyboard(world, body) },
 ];

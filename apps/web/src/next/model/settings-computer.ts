@@ -2,6 +2,7 @@ import type { MessageId } from "../i18n/messages.ts";
 import { JOB_IN_SENTENCE, isMediaKind, type MediaKind, type ProviderCatalogView } from "./settings.ts";
 import { codexDiagnostic, codexState, type DirectorSetup } from "./settings-director.ts";
 import { msg, type Msg } from "./types.ts";
+import { formatMicros } from "./price.ts";
 
 /**
  * Settings view, "This computer": Codex, FFmpeg and each provider key, from the catalog's read-only readiness
@@ -104,6 +105,19 @@ function keyRows(catalog: ProviderCatalogView): ComputerRow[] {
   });
 }
 
+/**
+ * The Gemini key for song analysis. It is not a model profile, so it has its own row whenever the server offers
+ * song analysis; the detail says the song leaves this computer when the person presses Analyze song.
+ */
+function geminiRow(catalog: ProviderCatalogView): ComputerRow[] {
+  const listener = catalog.musicListener;
+  if (!listener) return [];
+  const tone: ComputerTone = listener.configured ? "ok" : listener.backendUnavailable ? "unknown" : "missing";
+  const status = msg(listener.configured ? "set.computer.set" : listener.backendUnavailable ? "set.computer.unreadable" : "set.computer.not_set");
+  return [{ id: "key-gemini", name: msg("set.computer.key.gemini"), tone, status, jobs: [],
+    detail: msg("set.computer.gemini_detail", { price: formatMicros(listener.typicalSongMicros, "en-US"), variable: listener.variable }) }];
+}
+
 export interface ComputerView {
   rows: ComputerRow[];
   /** No paid model is installed: only the free stand-ins can run. */
@@ -113,7 +127,7 @@ export interface ComputerView {
 export function computerView(catalog: ProviderCatalogView | null, setup: DirectorSetup | null, setupError: string | null, context: CodexContext = {}): ComputerView {
   if (!catalog) return { rows: [codexRow(setup, setupError, context)], demoOnly: false };
   const demoOnly = catalog.profiles.every((option) => option.estimatedCost?.basis === "fixture" || option.profile?.adapter === "fake");
-  return { rows: [codexRow(setup, setupError, context), ffmpegRow(catalog), ...keyRows(catalog)], demoOnly };
+  return { rows: [codexRow(setup, setupError, context), ffmpegRow(catalog), ...keyRows(catalog), ...geminiRow(catalog)], demoOnly };
 }
 
 export type CheckOutcome =

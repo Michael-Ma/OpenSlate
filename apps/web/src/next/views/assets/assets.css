@@ -104,6 +104,10 @@
 .assets-work .detail .acts{display:flex;flex-direction:column;gap:7px;margin-top:auto;padding-top:6px}
 .assets-work .detail .acts .pill{justify-content:center;padding:7px 10px;white-space:normal;text-align:center}
 .assets-work .detail .av-why{text-align:center}
+.assets-work .detail .av-song{display:flex;flex-direction:column;gap:5px;font-size:13px;line-height:1.4;border-top:1px solid var(--hairline);padding-top:8px}
+.assets-work .detail .av-song h4{margin:0;font-size:12px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em}
+.assets-work .detail .av-song p{margin:0}
+.assets-work .detail .av-song .pill{justify-content:center;padding:7px 10px;white-space:normal;text-align:center}
 /* Download keeps focus while its file loads, so it is aria-disabled rather than disabled; it looks the same. */
 .assets-work .acts .pill[aria-disabled="true"],.assets-work .acts .pill.primary[aria-disabled="true"]:hover{background:var(--raised-2);border-color:var(--raised-2);color:var(--muted);cursor:default}
 .assets-work .pill[aria-busy="true"]{cursor:progress}

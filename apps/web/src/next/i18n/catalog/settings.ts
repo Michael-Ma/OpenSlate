@@ -212,6 +212,8 @@ export const settingsMessages = {
   "set.computer.key.minimax": { en: "MiniMax key", zh: "MiniMax 密钥" },
   "set.computer.key.viggle": { en: "Viggle key", zh: "Viggle 密钥" },
   "set.computer.key.fal": { en: "fal key (lip sync)", zh: "fal 密钥（对口型）" },
+  "set.computer.key.gemini": { en: "Gemini key (song analysis)", zh: "Gemini 密钥（歌曲分析）" },
+  "set.computer.gemini_detail": { en: "{variable} · about {price} for a 3-minute song. Analyze song in Assets sends that song to Google.", zh: "{variable} · 3 分钟的歌约 {price}。在素材里按「分析歌曲」会把这首歌发送给 Google。" },
   "set.computer.found": { en: "Found", zh: "已找到" },
   "set.computer.set": { en: "Set", zh: "已设置" },
   "set.computer.not_found": { en: "Not found", zh: "未找到" },

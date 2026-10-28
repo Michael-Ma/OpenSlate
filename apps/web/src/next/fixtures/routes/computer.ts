@@ -101,6 +101,9 @@ export function providerCatalog(world: FixtureWorld): ProviderCatalogView {
     defaults: profiles.filter((row) => row.profile?.adapter === "fake").map((row) => row.id),
     profiles,
     realExecutionEnabled: profiles.some((row) => row.readiness.realExecutionEnabled),
+    // The sample film never sends a song anywhere: song analysis shows its key as not set.
+    musicListener: { id: "gemini-music", provider: "Google Gemini", model: "gemini-3.8-flash", variable: "OPENSLATE_GEMINI_API_KEY", configured: false, backendUnavailable: false,
+      audioLeavesMachine: "Analyze song sends this recording to Google (Gemini API). Tempo, beats and length are measured on this computer and never sent.", typicalSongMicros: 18_495 },
   };
 }
 

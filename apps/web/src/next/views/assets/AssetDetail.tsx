@@ -8,6 +8,7 @@ import { pictureFromAsset } from "../../model/director.ts";
 import { useShowToDirector } from "../../director/ShowDirector.tsx";
 import { AssetFace, AssetPicture, Wave } from "./AssetTile.tsx";
 import { useAssetFile } from "./media.ts";
+import { SongAnalysis } from "./SongAnalysis.tsx";
 
 /** Follows prefers-reduced-motion: the picture stays still and only the scrubber moves. */
 function useReducedMotion(): boolean {
@@ -204,6 +205,9 @@ export function AssetDetail({ detail, tile, headingId, onPoint, onOpen, onShown 
           </div>
         ))}
       </dl>
+      {detail.item.role === "music" && detail.item.artifact.kind === "audio" && (
+        <SongAnalysis key={detail.key} audioId={detail.item.artifact.artifactId} sha256={detail.item.artifact.sha256} />
+      )}
       <div className="acts">
         <DownloadAction key={detail.key} detail={detail} title={title} />
         {/* Two Director actions, each naming what it acts on: the picture joins the message; Point adds its shot. */}

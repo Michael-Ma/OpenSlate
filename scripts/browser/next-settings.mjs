@@ -125,7 +125,8 @@ export const scenarios = [
       }));
       expect(!amber, "Amber appears in the Settings view");
       // The rest of the page, for the side-by-side with the study.
-      await page.locator("#set-computer").scrollIntoViewIfNeeded();
+      // Scroll to the end: centering This computer stops short since the panel has a Gemini key row.
+      await page.locator("main[data-view='settings']").evaluate((main) => { main.scrollTop = main.scrollHeight; });
       // The index follows the scroll: This computer fills the end of the page.
       await page.waitForFunction(() => document.querySelector(".set-index [data-section='set-computer']")?.getAttribute("aria-current") === "true", null, { timeout: 3000 })
         .catch(() => { throw new Error("The index does not mark This computer at the end of the page"); });
@@ -328,7 +329,9 @@ export const scenarios = [
     async run({ page }) {
       await openSettings(page);
       const rows = await page.locator("#set-computer .srow").evaluateAll((els) => els.map((el) => `${el.querySelector("b").textContent}: ${el.querySelector(".ready").textContent}`));
-      expect(rows.join("|") === "Codex: ✓ Found|FFmpeg: ✓ Found|OpenAI key: ✓ Set|MiniMax key: ✓ Set|Viggle key: Not set", `This computer reads ${rows.join("|")}`);
+      expect(rows.join("|") === "Codex: ✓ Found|FFmpeg: ✓ Found|OpenAI key: ✓ Set|MiniMax key: ✓ Set|Viggle key: Not set|Gemini key (song analysis): Not set", `This computer reads ${rows.join("|")}`);
+      // Song analysis says up front that pressing it sends the song to Google.
+      await expectText(page, "#set-computer [data-row='key-gemini']", /OPENSLATE_GEMINI_API_KEY · about \$0\.02 for a 3-minute song\. Analyze song in Assets sends that song to Google\./);
       await expectText(page, "#set-computer [data-row='key-openai']", /Used by keyframes, narration, transcription/);
       await expectText(page, "#set-computer .keys-note", /\.\/start\.sh --restart/);
       await page.click("#set-computer [data-act='recheck']");
