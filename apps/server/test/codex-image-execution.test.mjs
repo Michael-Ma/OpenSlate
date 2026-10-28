@@ -11,7 +11,7 @@ import {CodexImageExecution} from '../dist/execution/codex-image-execution.js';
 import {ExecutionOutputStore} from '../dist/execution/output-store.js';
 import {Store} from '../dist/persistence/store.js';
 import {assertCodexImageSpoolLineage,assertCodexImageRecords} from '../dist/execution/codex-image-lineage.js';
-import {assertCodexImageOperationOptions} from '../dist/execution/codex-image-receipts.js';
+import {assertCodexImageOperationOptions,codexImageTurnCanvas} from '../dist/execution/codex-image-receipts.js';
 import {InstallationRecoveryGuard,installRecoveryQuarantine,releaseRecovery} from '../dist/application/installation-recovery.js';
 import {createInstallationBackup,inspectInstallationBackup} from '../dist/persistence/installation-backup.js';
 import {restoreInstallationBackup} from '../dist/persistence/installation-restore.js';
@@ -24,7 +24,7 @@ async function fixture(t,options={}){
   f.transport.prepare=async input=>options.prepare?options.prepare(input,f):prepare(input);
   f.transport.start=async(prepared,input,context)=>{f.calls.start++;assert.equal(rows(f,'codex_image_execution_dispatch').length,1);return options.start?options.start(prepared,input,context,f):complete(prepared);};
   f.transport.lookup=async(prepared,context)=>{f.calls.lookup++;return options.lookup?options.lookup(prepared,context,f):{kind:'unknown',code:'UNAVAILABLE'};};
-  f.build();f.selected=await f.seed();f.allowance=f.issue(f.selected);f.engine=f.runtime.engine;f.outputs=f.runtime.outputStore;
+  f.build();f.selected=await f.seed({},{filmKind:options.filmKind});f.allowance=f.issue(f.selected);f.engine=f.runtime.engine;f.outputs=f.runtime.outputStore;
   f.bridge=f.engine.registry.resolve({adapter:'codex-image',version:'1'});
   f.attempt=f.engine.admit(f.selected.projectId,f.selected.binding.id,f.engine.resolveInputs(f.selected.projectId,f.selected.binding.node).fingerprint);
   f.request=f.attempt.request;f.context={expectedLease:{owner:f.attempt.leaseOwner,epoch:f.attempt.leaseEpoch}};
@@ -295,4 +295,30 @@ test('backup fails closed for missing native completion or miskeyed native evide
     const f=await fixture(t);await f.bridge.submit(f.request,f.context);damage(f);const destination=f.directory+'-rejected';t.after(()=>rmSync(destination,{recursive:true,force:true}));
     await assert.rejects(createInstallationBackup({sourceRoot:f.directory,destination}));
   }
+});
+
+test('a 9:16 film asks Codex for a 1024x1536 keyframe under codex-image-turn-v2 and reconciles it',async t=>{
+  let seen;const f=await fixture(t,{filmKind:{version:'film-kind@1',kind:'social',format:{platform:'ig_reels',aspect:'9:16'}},
+    start:async(prepared,input,context)=>{seen=input;await context.observeTurn('turn-exact');return complete(prepared);}});
+  assert.deepEqual([f.request.args.width,f.request.args.height,f.request.args.aspect],[1024,1536,'9:16']);
+  assert.equal(f.request.profile.configuration.settings.width,1024,'the pinned profile and its digest are unchanged');
+  const result=await f.bridge.submit(f.request,f.context);assert.equal(result.type,'completed');
+  assert.deepEqual([seen.width,seen.height,seen.aspect],[1024,1536,'9:16']);
+  const mapping=rows(f,'codex_image_execution_mapping')[0];assert.equal(mapping.transport.policy,'codex-image-turn-v2');assert.equal(mapping.transport.version,2);
+  assert.deepEqual([mapping.transport.width,mapping.transport.height,mapping.transport.aspect],[1024,1536,'9:16']);
+  assertCodexImageRecords(f.store,f.store.get("attempt",f.attempt.id));
+  f.expire();await f.engine.reconcile();assert.equal(f.store.get('attempt',f.attempt.id).phase,'succeeded');
+});
+
+test('a film without a format keeps codex-image-turn-v1 at 1024x1024 and refuses a canvas outside its policy',async t=>{
+  const f=await fixture(t);assert.equal(Object.hasOwn(f.request.args,'aspect'),false);
+  assert.equal((await f.bridge.submit(f.request,f.context)).type,'completed');
+  const mapping=rows(f,'codex_image_execution_mapping')[0];assert.equal(mapping.transport.policy,'codex-image-turn-v1');assert.equal(Object.hasOwn(mapping.transport,'aspect'),false);
+  assert.deepEqual([mapping.transport.width,mapping.transport.height],[1024,1024]);
+  const args=f.request.args,profile=f.selected.profile;
+  assert.deepEqual(codexImageTurnCanvas(args),{width:1024,height:1024});
+  for(const changed of [{...args,height:1536},{...args,aspect:'9:16'},{...args,width:1536,aspect:'9:16'},{...args,aspect:'4:5',height:1280}])
+    assert.throws(()=>assertCodexImageOperationOptions(profile,changed),error=>error.code==='CODEX_IMAGE_PREFLIGHT_INVALID');
+  assert.doesNotThrow(()=>assertCodexImageOperationOptions(profile,{...args,height:1536,aspect:'9:16'}));
+  assert.doesNotThrow(()=>assertCodexImageOperationOptions(profile,{...args,width:1536,aspect:'16:9'}));
 });

@@ -14,7 +14,7 @@ import type { Attempt } from './engine.js';
 import { ExecutionOutputStore } from './output-store.js';
 import { assertCodexImageFirstDispatch,assertCodexImageLease,resolveCodexImageAdmission,resolveCodexImageReferences } from './codex-image-authority.js';
 import type { CodexImageAdmission } from './codex-image-authority.js';
-import { assertCodexImageOperationOptions } from './codex-image-receipts.js';
+import { assertCodexImageOperationOptions, codexImageTurnCanvas } from './codex-image-receipts.js';
 import type { CodexImageExecutionMapping,CodexImageExecutionDispatch,CodexImageExecutionRun,CodexImageExecutionResult,CodexImageObservation } from './codex-image-receipts.js';
 import { assertCodexImageRecords,assertCodexImageSpoolLineage } from './codex-image-lineage.js';
 /** Mutable latest-reason row beside the immutable receipts; never part of their lineage. */
@@ -191,6 +191,6 @@ export class CodexImageExecution implements ExecutionProvider {
       }finally{await file.close();}
       stopped(signal);inspectCodexImagePng(bytes);images.push({artifactId:reference.id,sha256:reference.artifact.sha256,byteLength:bytes.byteLength,bytes});
     }
-    return {attemptId:attempt.id,requestDigest:digest(attempt.request),prompt:attempt.request.args.prompt as string,width:1024,height:1024,runtimeVersion:'0.153.4',model:'gpt-6-astra',images};
+    return {attemptId:attempt.id,requestDigest:digest(attempt.request),prompt:attempt.request.args.prompt as string,...codexImageTurnCanvas(attempt.request.args),runtimeVersion:'0.153.4',model:'gpt-6-astra',images};
   }
 }

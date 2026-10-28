@@ -227,3 +227,12 @@ test("close during lazy setup bars every later thread and turn launch",async t=>
  const calls=await f.records();assert.ok(!methods(calls).some(method=>method.startsWith("thread/")||method.startsWith("turn/")));
  for(const row of calls.filter(x=>x.kind==="launch"))assert.throws(()=>process.kill(row.pid,0),error=>error.code==="ESRCH");
 });
+
+test("a codex-image-turn-v2 portrait turn asks for 1024x1536 through the same single native turn",async t=>{
+ const f=await fixture(t),value={...input(),height:1536,aspect:"9:16"};
+ const {prepared,outcome}=await run(f,value);assert.equal(outcome.kind,"completed",outcome.code);
+ const call=(await f.records()).find(x=>x.method==="turn/start"),text=call.params.input[0].text;
+ assert.match(text,/9:16 portrait frame and generate it at 1024x1536/);assert.match(text,/"policy":"codex-image-turn-v2"/);
+ assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
+ const legacy=await fixture(t);assert.notEqual(prepared.session.turnInputDigest,(await run(legacy,input())).prepared.session.turnInputDigest);
+});
