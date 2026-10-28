@@ -1085,7 +1085,7 @@ function release(world: FixtureWorld, attemptId: string, body: ReleaseAttemptInp
     .find(({ shot, slot }) => (shot[slot].state === "no_answer" && shot[slot].attemptId === attemptId)
       || (shot[slot].replacement?.state === "no_answer" && shot[slot].replacement?.attemptId === attemptId));
   // A transcription the service never answered: given up, it stays unanswered (a late reply may still arrive) but
-  // offers no Give up again. The studio's turn view must say the same (see the X1 web fixes report).
+  // offers no Give up again. (The studio's turn view still sends the released attempt's id; it should drop it too.)
   const transcribed = !entry && (world.snapshot.turns ?? []).some((turn) => turn.effects?.generation?.some((effect) => effect.transcription?.state === "no_answer" && effect.transcription.attemptId === attemptId));
   if (transcribed) {
     world.update((w) => {

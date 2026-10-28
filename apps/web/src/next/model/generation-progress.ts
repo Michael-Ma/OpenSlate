@@ -133,7 +133,6 @@ export function generationProgress(effect: DirectorGenerationEffect, overview: G
   };
 }
 
-
 /**
  * A refused part of a Director request (item 2), with what unblocks it. Current while its jobs are still in the way;
  * once they are not, the line says the scene can go ahead.
