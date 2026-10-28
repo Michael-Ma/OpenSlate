@@ -13,6 +13,8 @@ export type Selection = { kind: "shot"; id: string } | { kind: "music" } | null;
 interface Props {
   timeline: FilmTimeline;
   music: FilmMusic | null;
+  /** Shots that keep their clip sound: a small speaker on their block. */
+  clipSound?: ReadonlySet<string>;
   clock: FilmClock;
   selection: Selection;
   /** Phone width: 14 px a second, scrolling sideways inside the timeline. Otherwise the lanes fit the width. */
@@ -56,7 +58,7 @@ const MuteIcon = ({ muted }: { muted: boolean }) => (
  * letter, the narration lane (a line too long for its shot is not placed), and the one music track. Selecting
  * a block or the music changes the tool row below.
  */
-export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: pps, writable, saving, onSelectShot, onSelectMusic, onToggleMute, onChooseMusic, children }: Props) {
+export function Timeline({ timeline, music, clipSound, clock, selection, pixelsPerSecond: pps, writable, saving, onSelectShot, onSelectMusic, onToggleMute, onChooseMusic, children }: Props) {
   const { t, tm, locale } = useI18n();
   const total = Math.max(timeline.total, 0.001);
   const head = useRef<HTMLSpanElement>(null);
@@ -99,7 +101,8 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
     const selected = selectedShot === shot.shotId;
     const lack = shot.lack ? tm(shot.lack) : null;
     const kind = shot.picture === "clip" ? "" : shot.picture === "keyframe" ? " kfonly" : " empty";
-    const label = blockLabel(shot, lack);
+    const kept = !!clipSound?.has(shot.shotId);
+    const label = kept ? `${blockLabel(shot, lack)} · ${t("film.clip_sound.mark")}` : blockLabel(shot, lack);
     // A narrow block drops what cannot fit (the lack's words for its mark, then the length, then the number); the
     // title and the accessible name keep all of it.
     return (
@@ -120,6 +123,7 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
         {shot.letter ? <span className="letter">{shot.letter}</span> : null}
         <span className="blk-foot">
           <span className="dur">{t("film.block.seconds", { seconds: shot.seconds })}</span>
+          {kept ? <span className="csnd" data-act="clip-sound-mark" aria-hidden="true"><MuteIcon muted={false} /></span> : null}
           {lack ? (
             <span className="lack" data-forms={shot.mark ? "words mark" : undefined}>
               <span className="words">{lack}</span>

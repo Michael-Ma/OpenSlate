@@ -448,7 +448,9 @@ export type FilmEdit =
   | { kind: "moveShot"; id: string; sceneId: string; beforeId?: string }
   | { kind: "soundtrack"; field: "audioId" | "startFrame" | "gainMilliDb" | "muted"; value: string }
   /** Several shot lengths as one command with one Undo (Fit to song). */
-  | { kind: "shotTiming"; timings: Array<{ id: string; desiredFrames: number }> };
+  | { kind: "shotTiming"; timings: Array<{ id: string; desiredFrames: number }> }
+  /** Keep or mute a shot's clip sound, or set its level (model/clip-sound.ts). */
+  | { kind: "shotClipAudio"; id: string; field: "keep" | "gainMilliDb"; value: string };
 
 /** A new length in whole seconds, within the limits; null when the step would leave them. */
 export function lengthEdit(shot: ShotOverview, fps: number, step: number): { edit: FilmEdit; seconds: number } | null {

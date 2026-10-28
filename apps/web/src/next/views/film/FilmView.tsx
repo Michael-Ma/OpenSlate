@@ -23,6 +23,8 @@ import { Timeline, type Selection } from "./Timeline.tsx";
 import { MusicTools, ShotTools } from "./Tools.tsx";
 import { useLiveAudio } from "./useLiveAudio.ts";
 import { useMusicLibrary } from "./useMusicLibrary.ts";
+import { ClipSoundControl } from "./ClipSound.tsx";
+import { clipSoundOf, keptClipSound } from "../../model/clip-sound.ts";
 import "./film.css";
 
 /** Phone width: the timeline scrolls sideways inside itself at 14 px a second. */
@@ -84,6 +86,7 @@ function FilmWorkspace() {
 
   const timeline = useMemo(() => filmTimeline(overview, snapshot?.notes), [overview, snapshot?.notes]);
   const soundtrack = soundtrackOf(snapshot);
+  const clipSoundKept = useMemo(() => keptClipSound(snapshot), [snapshot]);
   const recordings = useMusicLibrary();
   // The export read fails on music that is missing or unmeasured: the lane and the player say so too.
   const lost = musicMissing(exportsRes.error);
@@ -291,6 +294,7 @@ function FilmWorkspace() {
   };
 
   const selectedOverview = selectedShot ? overview.shots[selectedShot.shotId] : undefined;
+  const selectedSound = selectedShot ? clipSoundOf(snapshot, selectedShot.shotId) : null;
   const changes = last?.outdatedBy.length ? last.outdatedBy.map((kind) => tm(changeMsg(kind))).join(t("film.list_sep")) : null;
   const when = last ? whenMsg(last.at, new Date(), locale) : null;
 
@@ -339,6 +343,7 @@ function FilmWorkspace() {
       <Timeline
         timeline={timeline}
         music={music}
+        clipSound={clipSoundKept}
         clock={clock}
         selection={selection}
         pixelsPerSecond={narrow ? PHONE_PIXELS_PER_SECOND : null}
@@ -350,15 +355,24 @@ function FilmWorkspace() {
         onChooseMusic={setMenuAnchor}
       >
         {selectedShot && selectedOverview ? (
-          <ShotTools
-            shot={selectedShot}
-            overview={selectedOverview}
-            fps={overview.fps}
-            writable={writable}
-            onLength={changeLength}
-            onMove={move}
-            onOpen={openInKeyframes}
-          />
+          <>
+            <ShotTools
+              shot={selectedShot}
+              overview={selectedOverview}
+              fps={overview.fps}
+              writable={writable}
+              onLength={changeLength}
+              onMove={move}
+              onOpen={openInKeyframes}
+            />
+            {selectedSound ? (
+              <>
+                <span className="sep" aria-hidden="true" />
+                <ClipSoundControl shotId={selectedShot.shotId} label={selectedShot.label} sound={selectedSound} writable={writable} saving={!!editing}
+                  onEdit={(edit, toast) => void runEdit(edit, toast)} />
+              </>
+            ) : null}
+          </>
         ) : selection?.kind === "music" && music ? (
           <MusicTools
             music={music}

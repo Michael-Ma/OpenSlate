@@ -1,5 +1,5 @@
 import type { GenerationOverview, KeyframeSlot, MediaSlot, SceneOverview, ShotOverview } from "@openslate/core/public";
-import { joinPromptParts } from "@openslate/core/public";
+import { clipAudioDefaultFor, isClipAudioGain, joinPromptParts } from "@openslate/core/public";
 import { ApiError } from "../../api/client.ts";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../../model/checks.ts";
 import type { PendingImport } from "../../model/plan-import.ts";
@@ -179,7 +179,7 @@ const KEYFRAMES_FIELDS = new Set(["imagePrompt", "motion", "desiredFrames", "vid
 const DIRECTION_FIELDS = new Set(["purpose", "action", "framing"]);
 
 /** The storyboard kinds the server has (its body schema); the Plan view makes all of them but soundtrack. */
-const SERVER_KINDS = new Set(["treatment", "scene", "sceneTitle", "deleteScene", "moveScene", "addScene", "shot", "shotFields", "addShot", "deleteShot", "moveShot", "narration", "undo", "soundtrack", "shotTiming", "shotPerformance"]);
+const SERVER_KINDS = new Set(["treatment", "scene", "sceneTitle", "deleteScene", "moveScene", "addScene", "shot", "shotFields", "addShot", "deleteShot", "moveShot", "narration", "undo", "soundtrack", "shotTiming", "shotPerformance", "shotClipAudio"]);
 const OTHER_VIEWS_KINDS = new Set(["soundtrack"]);
 /** What the server still takes while a written plan is pending (storyboard.ts, IMPORT_PENDING). */
 const DURING_IMPORT = new Set(["treatment", "scene", "shot", "shotFields", "narration"]);
@@ -505,6 +505,31 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
           }) },
         };
       });
+      break;
+    }
+    case "shotClipAudio": {
+      // Keep or mute a clip's own sound, or set its level. Like the server, a mix choice only: no media changes.
+      const shot = world.overview.shots[typeof body.id === "string" ? body.id : ""];
+      if (!shot) throw new ApiError("NOT_FOUND", 404);
+      const fallback = clipAudioDefaultFor((world.snapshot.project as { filmKind?: { kind?: unknown; tones?: unknown } }).filmKind);
+      const current = world.snapshot.project.shots.find((s) => s.id === shot.shotId)?.clipAudio;
+      let next: { keep: boolean; gainMilliDb?: number } | undefined;
+      if (body.field === "keep") {
+        if (body.value !== "true" && body.value !== "false") throw new ApiError("VALIDATION_ERROR", 400);
+        next = { keep: body.value === "true", ...(current?.gainMilliDb !== undefined ? { gainMilliDb: current.gainMilliDb } : {}) };
+      } else if (body.field === "gainMilliDb") {
+        const gain = Number(body.value);
+        if (typeof body.value !== "string" || !body.value.trim() || !isClipAudioGain(gain)) throw new ApiError("VALIDATION_ERROR", 400);
+        next = { keep: current?.keep ?? fallback.keep, gainMilliDb: gain };
+      } else if (body.field !== "default" || (body.value !== undefined && body.value !== "")) throw new ApiError("VALIDATION_ERROR", 400);
+      change(world, (overview, project) => ({
+        overview,
+        project: { ...project, shots: project.shots.map((s) => {
+          if (s.id !== shot.shotId) return s;
+          const { clipAudio: _clipAudio, ...plain } = s;
+          return next ? { ...plain, clipAudio: next } : plain;
+        }) },
+      }));
       break;
     }
     default:

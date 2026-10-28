@@ -33,7 +33,11 @@ export interface ProjectSnapshot {
       videoPrompt: string;
       /** voice: "stock" follows the film's narrator, a stock voice id ("cedar") pins it, "personal" is the film's personal voice. */
       narration?: { mode: "undecided" | "none" | "generated" | "uploaded"; text: string; voice: string };
+      /** Keep the clip's own sound (model/clip-sound.ts); absent: the film's default. */
+      clipAudio?: { keep: boolean; gainMilliDb?: number };
     }[];
+    /** film-kind@1 record; read only through model/clip-sound.ts here. */
+    filmKind?: unknown;
   };
   conversation?: ConversationEntry[];
   questions?: PendingQuestion[];

@@ -1,7 +1,9 @@
 /**
  * Sound for the Film view's live preview (ideas from the classic timeline playback model, not its code):
  * narration and music placements from GET /api/projects/:projectId/narration/playback, each played on the
- * film clock. Clip audio is always muted. Pure, apart from the media object a caller passes in.
+ * film clock. The clip video elements are always muted: a clip's own sound, when the shot keeps it, comes as a
+ * placement of kind "clip" (the clip's derived audio, ducked under voice by `gainSteps`, the same steps the export
+ * mixes; docs/ai/clip-audio/2026-10-28-clip-audio.md). Pure, apart from the media object a caller passes in.
  */
 
 /** One placed recording, in 48 kHz samples. */
@@ -15,6 +17,10 @@ export interface AudioPlacement {
   gainMilliDb: number;
   fadeOutSamples?: number;
   shotIds: string[];
+  /** "clip": a kept clip's own sound, loaded from the clip-audio route; absent: a recording (narration, music). */
+  kind?: "clip";
+  /** Gain from each film sample on (the first at atSample): kept clip sound drops under narration. Overrides gainMilliDb. */
+  gainSteps?: Array<{ atSample: number; gainMilliDb: number }>;
 }
 
 export interface PlaybackView {
@@ -39,7 +45,9 @@ export function audioAt(placement: AudioPlacement, t: number): { active: boolean
   const offset = sample - placement.atSample;
   const active = offset >= 0 && offset < placement.durationSamples;
   const sourceSeconds = (placement.startSample + Math.max(0, Math.min(offset, placement.durationSamples))) / SAMPLE_RATE;
-  let volume = Math.min(1, Math.max(0, 10 ** (placement.gainMilliDb / 20000)));
+  let gain = placement.gainMilliDb;
+  for (const step of placement.gainSteps ?? []) if (step.atSample <= sample) gain = step.gainMilliDb;
+  let volume = Math.min(1, Math.max(0, 10 ** (gain / 20000)));
   const fade = placement.fadeOutSamples ?? 0;
   if (active && fade > 0) {
     const left = placement.durationSamples - offset;

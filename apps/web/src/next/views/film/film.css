@@ -166,6 +166,8 @@
 .film-work .blk .letter { position: absolute; right: 5px; top: 5px; width: 16px; height: 16px; font-size: 10.5px; z-index: 1; }
 /* The bottom row: the length at the right and what the shot lacks at the left, or above the length when both cannot fit. */
 .film-work .blk .blk-foot { position: absolute; left: 5px; right: 5px; bottom: 4px; display: flex; flex-direction: row-reverse; flex-wrap: wrap-reverse; align-items: center; gap: 3px 4px; z-index: 1; }
+/* Kept clip sound: a small speaker beside the length. */
+.film-work .blk .csnd { flex: none; display: grid; place-items: center; width: 15px; height: 15px; background: rgba(20,21,23,.8); border-radius: 5px; color: var(--text-2); }
 .film-work .blk .dur { flex: none; font-size: 11px; font-weight: 600; background: rgba(20,21,23,.8); border-radius: 5px; padding: 0 5px; white-space: nowrap; }
 .film-work .blk .lack { margin-right: auto; min-width: 0; font-size: 10.5px; font-weight: 600; line-height: 13px; color: var(--text-2); background: rgba(20,21,23,.8); border-radius: 5px; padding: 0 5px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 /*
@@ -183,7 +185,7 @@
   .film-work .blk .lack { padding: 2px; }
   .film-work .blk .lack .mark { display: grid; }
 }
-@container (max-width: 34px) { .film-work .blk .dur { display: none; } }
+@container (max-width: 34px) { .film-work .blk .dur, .film-work .blk .csnd { display: none; } }
 @container (max-width: 24px) { .film-work .blk .badge, .film-work .blk .letter, .film-work .blk .lack { display: none; } }
 /* What a block lacks, as its mark when the words do not fit (data-form, set by the view as it measures). */
 .film-work .blk .lack[data-form="mark"] { padding: 2px; }

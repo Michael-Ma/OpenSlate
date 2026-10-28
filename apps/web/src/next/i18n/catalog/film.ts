@@ -226,4 +226,18 @@ export const filmMessages = {
   "film.toast.fit_song_same": { en: "The shots already fit the song.", zh: "镜头已经与歌曲对齐。" },
   "film.toast.fit_song_failed": { en: "Couldn't read the song's timing ({code}).", zh: "无法读取歌曲的节拍（{code}）。" },
   "film.toast.music_removed": { en: "No music.", zh: "已去掉音乐。" },
+
+  // ---- clip sound (a clip's own effects and ambience)
+  "film.clip_sound.keep": { en: "Keep clip sound", zh: "保留片段原声" },
+  "film.clip_sound.level": { en: "Level", zh: "音量" },
+  "film.clip_sound.level_label": { en: "Clip sound level in dB", zh: "片段原声音量（dB）" },
+  "film.clip_sound.default_social": { en: "on by default for a social film", zh: "社交短视频默认保留" },
+  "film.clip_sound.default_comedy": { en: "on by default for a comedy", zh: "喜剧默认保留" },
+  "film.clip_sound.default_music_video": { en: "off by default: the song is the track", zh: "默认关闭：歌曲就是音轨" },
+  "film.clip_sound.default_none": { en: "off by default", zh: "默认关闭" },
+  "film.clip_sound.ducked": { en: "drops under narration", zh: "旁白时自动压低" },
+  "film.clip_sound.mark": { en: "Clip sound kept", zh: "保留片段原声" },
+  "film.toast.clip_sound_on": { en: "{shot} keeps its clip sound.", zh: "{shot} 保留片段原声。" },
+  "film.toast.clip_sound_off": { en: "{shot}'s clip sound is muted.", zh: "{shot} 的片段原声已静音。" },
+  "film.toast.clip_sound_level": { en: "{shot}'s clip sound is {db} dB.", zh: "{shot} 的片段原声为 {db} dB。" },
 } satisfies Record<string, Entry>;

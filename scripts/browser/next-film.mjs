@@ -372,6 +372,42 @@ export const scenarios = [
     },
   },
   {
+    // Keep clip sound (docs/ai/clip-audio): a switch and a level on the selected shot, a speaker on its block, Undo.
+    name: "next-film-clip-sound",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openFilm(page);
+      const block = `.blk[data-shot='${shot("1.1")}']`;
+      await page.click(block);
+      expect((await page.getAttribute("[data-act='clip-sound-switch']", "aria-checked")) === "false", "The sample film keeps clip sound muted by default");
+      await expectText(page, "[data-act='clip-sound'] .hint", /^off by default$/);
+      expect(await page.locator(`${block} [data-act='clip-sound-mark']`).count() === 0, "A muted shot shows the clip sound mark");
+      await page.click("[data-act='clip-sound-switch']");
+      await toastSays(page, /^1\.1 keeps its clip sound\./);
+      await page.waitForFunction(() => document.querySelector("[data-act='clip-sound-switch']")?.getAttribute("aria-checked") === "true", null, { timeout: 8000 });
+      await page.waitForSelector(`${block} [data-act='clip-sound-mark']`, { timeout: 8000 });
+      expect(/Clip sound kept$/.test(await page.getAttribute(block, "aria-label")), "The block's name does not say its clip sound is kept");
+      await expectText(page, "[data-act='clip-sound'] output", /^-6 dB$/);
+      await expectText(page, "[data-act='clip-sound'] .hint", /^drops under narration$/);
+      // The level: a run of arrow steps is one edit.
+      await page.focus("[data-act='clip-sound-gain']");
+      await page.keyboard.press("ArrowLeft");
+      await page.keyboard.press("ArrowLeft");
+      await page.keyboard.press("ArrowLeft");
+      await toastSays(page, /^1\.1's clip sound is -9 dB\./);
+      await toastClearOfTools(page);
+      await expectText(page, "[data-act='clip-sound'] output", /^-9 dB$/);
+      await undo(page);
+      await expectText(page, "[data-act='clip-sound'] output", /^-6 dB$/);
+      await screenshot(page, "clip-sound-1440");
+      await page.click("[data-act='clip-sound-switch']");
+      await toastSays(page, /^1\.1's clip sound is muted\./);
+      await page.waitForFunction((selector) => !document.querySelector(`${selector} [data-act='clip-sound-mark']`), block, { timeout: 8000 });
+      await noSidewaysScroll(page, 1440);
+    },
+  },
+  {
     name: "next-film-music",
     query,
     viewport: { width: 1440, height: 900 },

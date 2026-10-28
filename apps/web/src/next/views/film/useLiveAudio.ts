@@ -10,7 +10,9 @@ const LIMIT = 80 * 1024 * 1024;
  * and return an object URL. The shared media source covers artifacts only, so recordings load here.
  */
 async function recordingUrl(projectId: string, placement: AudioPlacement, signal: AbortSignal): Promise<string> {
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/narration/audio/${encodeURIComponent(placement.audioId)}/content`, { credentials: "same-origin", redirect: "error", signal });
+  // A kept clip's sound is derived from the clip; recordings come from the narration audio route.
+  const route = placement.kind === "clip" ? "clip-audio" : "narration/audio";
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/${route}/${encodeURIComponent(placement.audioId)}/content`, { credentials: "same-origin", redirect: "error", signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const bytes = await response.arrayBuffer();
   if (bytes.byteLength > LIMIT) throw new Error("too large");
@@ -30,7 +32,7 @@ interface Voice {
  */
 export function useLiveAudio(clock: FilmClock, projectId: string | null, placements: readonly AudioPlacement[], enabled: boolean): void {
   const voices = useRef(new Map<string, Voice>());
-  const key = placements.map((p) => `${p.id}:${p.sha256}:${p.atSample}:${p.durationSamples}:${p.gainMilliDb}`).join("|");
+  const key = placements.map((p) => `${p.id}:${p.kind ?? ""}:${p.sha256}:${p.atSample}:${p.durationSamples}:${p.gainMilliDb}:${(p.gainSteps ?? []).map((step) => `${step.atSample}/${step.gainMilliDb}`).join(",")}`).join("|");
 
   useEffect(() => {
     if (!enabled || !projectId) return;
