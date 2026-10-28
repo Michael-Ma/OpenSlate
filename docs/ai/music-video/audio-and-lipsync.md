@@ -9,10 +9,10 @@
   - 新的 `shotTiming` storyboard 命令一次改多个镜头，只有一个 Undo。
   - Film 视图的音乐工具栏新增「镜头对齐歌曲 / Fit shots to song」。
   - 音乐视频的 Director 规划上下文新增 `musicVideo` 块。
-- **对口型（只做了 seam）**：
-  - 推荐流程：先用 Viggle 生成表演片段，再用「视频 + 音频」lip-sync 做第二遍，输入是人声分轨里这个镜头对应的歌曲片段。
-  - 首选服务：sync.so `lipsync-2-pro`，约 **$4.02–4.98 / 分钟输出**（随订阅档位变化）。
-  - 已实现与服务商无关的 seam（片段切分、尝试状态机、显示规则、fake adapter）。没有真实 adapter，没有凭证，没有网络调用。
+- **对口型（已实现，fal MiniMax H3 Max lip sync，见 §8）**：
+  - 唱歌镜头（`performance: "singing"`）不再走 Viggle，而是用 fal 的 `minimax/h3-max/lip-sync/image-to-video`，直接从**已审的关键帧 + 本镜头的歌曲片段**一步出片。不唱的镜头照旧走 Viggle。
+  - 凭证：环境变量 **`OPENSLATE_FAL_API_KEY`**（fal 的 `id:secret` key）。没有设置时，唱歌镜头诚实地显示「没有对口型模型：按普通片段生成」。
+  - 本节下面的 sync.so「先出片再对口型」方案改为 A/B 备选（v8 计划第 2 条决定）。原来的 seam（§4.5–4.6）保留，切片和显示规则被新执行复用。
 - **需要 catalog / skill 版本升级的仅规格项**：`set_soundtrack` 工具、`read_context` 的 `audio_library` 小节、`filmKind`、镜头 `performance` 字段、lip-sync 执行节点，以及 V8 skill 指南。见 §5。
 
 ---
@@ -336,7 +336,78 @@ shipped package 不可变，所以只能以新版本发布。
 - 文字识别音乐视频有误判的可能，应该由 §5.3 的 `filmKind` 取代。
 - 非音乐视频项目导入 `role=music` 也会被自动选中（-18 dB）。这个行为与 UI 上「影片音乐」的含义一致，但范围略大于任务里只针对音乐视频的描述。如果不希望这样，在 `defaultSoundtrackDecision` 里把非 MV 改为 `adopt:false` 即可。
 
+## 8. fal MiniMax H3 Max lip sync（v8 计划第 4 步，已实现）
+
+分支 `feat/fal-h3-lipsync`（基于 `origin/feature/last-ferry-ui` 59f16e8）。**没有任何真实 fal 调用**：所有测试都用 fake fal transport。
+
+### 8.1 fal 接口（2026-10-28 对照 fal 文档核对）
+
+| 步骤 | 请求 | 说明 |
+|---|---|---|
+| 鉴权 | `Authorization: Key <OPENSLATE_FAL_API_KEY>` | 只在 dispatch / poll 边界从环境变量解析，不写进 plan、receipt 或日志 |
+| 上传文件（免费） | `POST https://rest.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3`，body `{content_type, file_name}` → `{upload_url, file_url}`；再 `PUT upload_url`（**不带 key**） | 与 fal-js `storage.upload` 相同。上传的文件在 fal CDN 上默认公开 |
+| 提交（付费） | `POST https://queue.fal.run/minimax/h3-max/lip-sync/image-to-video`，body `{image_url, audio_url, resolution, enable_transcription:false, enable_safety_checker:true}` → `{request_id, status_url, response_url, ...}` | 只有一次 POST |
+| 状态 | `GET https://queue.fal.run/minimax/h3-max/requests/{id}/status` → `IN_QUEUE` / `IN_PROGRESS` / `COMPLETED`（失败时带 `error`、`error_type`） | 队列 URL 只用 owner/app（`minimax/h3-max`） |
+| 结果 | `GET https://queue.fal.run/minimax/h3-max/requests/{id}` → `{video:{url}, seed, duration}` | 输出 URL 作为 protected locator，经 `ProtectedVideoDownloader`（默认允许 `v3.fal.media`、`v3b.fal.media`、`fal.media`，可用 `OPENSLATE_FAL_DOWNLOAD_HOSTS` 覆盖）下载 |
+
+- **没有 prompt 字段**：任务描述里写了 prompt，但 fal 的 API schema 只有 `image_url`、`audio_url`、`resolution`、`enable_transcription`、`seed`、`enable_safety_checker`。所以不发送 prompt；镜头的 motion prompt 仍然在 plan 节点和审批里，只是不上传。
+- **音频至少 5 秒，输出时长等于音频时长**。所以 lip-sync profile 的 `minFrames` 必须 ≥150（5 s）。
+- `enable_transcription` 关闭：歌词混在伴奏里转写效果差。可以在 A/B 后再打开（会改变 mapping 版本）。
+
+### 8.2 价格与报价
+
+- 公布价（每秒输出）：480P $0.05、768P $0.08、1080P $0.16、2K $0.32；**超过 15 秒 ×1.2**。实现在 `packages/providers/src/fal-h3-lipsync.ts` 的 `falH3LipSyncPriceMicros`。
+- 发送的音频 = 片段时长 + 0.2 s 尾巴（`LIP_SYNC_TAIL_SAMPLES`），防止 fal 返回的视频比要求的帧数略短（`VIDEO_TOO_SHORT`）。尾巴**不会**把 ≤15 s 的片段推过 15 s（15 s 的片段不加尾巴），所以不会触发 1.2 倍。
+- **报价**（`generation-quotes.ts`）：场景「确认视频」报价里，lip-sync 镜头按秒计价，例如 6 s 镜头 768P = 6.2 s × $0.08 = **$0.496**；普通镜头仍按 profile 的单片价。同一次场景确认，没有新的审批关卡。
+- **预留**：engine 的 reservation 仍然是 profile 的 `unitCostMicros`（每片上限）。catalog 校验要求它不低于最长片段的公布价（768P、15 s → `1200000`）。
+
+### 8.3 管线与路由
+
+1. **镜头字段**：`ShotRecord.performance?: "singing"`（`packages/core/src/contracts.ts`，单独一段）。省略即普通镜头，旧 plan 和 `shotIntentDigest` 都不变（标志不进 intent digest）。
+2. **设置方式**：新 storyboard 命令 `shotPerformance`（`value: "singing" | "none"`），可 Undo，**不 detach 任何现有媒体**。Director 工具写入 `performance` 属于 contract-7 的 catalog 版本，本分支没有改工具。只有显式标志会路由到付费 lip sync；`isSingingShot` 的文字识别不会。
+3. **profile 绑定**：lip-sync profile（adapter `fal-h3-lipsync`，kind `video`）**不能被选作视频模型**。新项目在选了真实视频模型（例如 Viggle）且 lip-sync profile 已就绪（启用 + 有 key + 有 FFmpeg）时，自动把它**追加**到 capability lock 末尾，所以所有「第一个 video profile」的查找仍然是 Viggle。demo 项目不会被追加。改模型设置（Settings → Models）不会把 lip-sync 节点换成 Viggle。
+4. **路由**（`execution/lip-sync-routing.ts` + `scene-row.ts`）：唱歌镜头且 lock 里有 lip-sync profile、镜头下有歌 → 视频 profile 换成 lip-sync，`videoSettings = { lipSync: LipSyncSettings }`；否则（没有 profile / 镜头下没有歌）回退到普通视频 profile，并在 overview 里标 `lipSync: {state:"unavailable", reason}`。
+5. **歌曲片段绑定进 plan**：`LipSyncSettings {version, audio:"mix", audioId, sha256, startSample, durationSamples, shotOffsetSamples, clipSamples}` 写进 video 节点的 `settings`（以及 humanReview 成员的 settings）。`SceneOperation` 新增可选 `settings`。所以审批、`specDigest` 和 dispatch 绑定的是同一段歌。移动镜头、改时长、改音乐起点或换歌，这些数字就变了，片段显示为过期，需要重新确认场景。dispatch 前还会再算一次，不一致就在 POST 之前拒绝（`LOCAL_INPUT_INVALID`，不扣费）。
+6. **切片**：从影片时钟切（复用 seam 的 `storyboardAudioCuts` / `songSegmentForShot`），从导入时规范化的 48 kHz 立体声 PCM16 WAV 中只读这一段，下混成单声道 48 kHz PCM16，音乐晚于镜头开始时前面补静音（`media/song-segment.ts`）。
+7. **人声分离：没有做**。没有依赖轻量的本地方案（Demucs 需要 PyTorch 和模型权重）。所以**发送完整混音片段**（`audio: "mix"`），记录在 settings 里；以后加 `vocals@demucs` 派生时把 `audio` 改为 `"vocals"` 即可，旧片段会因 settings 不同而过期。
+8. **原片保留**：标志切换不动媒体；重新确认场景时沿用现有的 retainedTake 规则，lip-sync 成功之前一直显示原片段/关键帧。
+
+### 8.4 执行与结果（`execution/fal-lipsync-execution.ts`、`fal-lipsync-receipts.ts`）
+
+按 MiniMax / Viggle H3 bridge 的模式：
+
+- 记录：`fal_lipsync_execution_mapping`（POST 前，绑定 profile、关键帧、歌曲窗口和 transport 元数据）、`_dispatch`（POST 前写入，存在即视为「可能已到达 fal」）、`_submit`、`_observation`、`fal_lipsync_poll_schedule`。store 写入时校验（`persistence/store.ts`），receipt 不可改写，不含 key、上传 URL 或本地路径。
+- **拒绝不扣费**：上传失败（`LOCAL_UPLOAD_FAILED`）、本地输入无效、没有 key、POST 返回 4xx 且没有 `request_id` → `rejected/not_accepted`，engine 释放 reservation。
+- **接受后失败「可能已扣费」**：`COMPLETED` 带 `error`，或结果是模型错误（422 detail）→ `failed`，reservation 记为 charged，不自动重试，人可以再按一次。（fal FAQ 说 5xx 不计费、422 可能计费；为了诚实统一按「可能已扣费」显示。）
+- **丢失的提交永不重提**：POST 抛错、超时、5xx 或无法解析 → `unknown`，attempt 停在 `submission_unknown` 并保持 reserved；超过跨主机上限 120 s 后变为 `SUBMISSION_RESPONSE_LOST`（charged、需要人按），重启后的 bridge 也不会读 key 或调用 fal。
+- **轮询**：持久化的 cooldown，初始 5 s、上限 20 s 指数退避；429/auth/quota 遵守 `Retry-After`。每次轮询一次 status，`COMPLETED` 后一次 result，再下载、spool、走现有的视频派生（静音 H.264 30 fps）。
+
+### 8.5 Web
+
+- 镜头卡片在标题下多一行（只对唱歌镜头）：`Lip-synced / 已对口型`、`Lip sync / 对口型`（待生成或生成中）、`Lip sync failed / 对口型失败`、或不可用原因。生成中、失败、无回应、是否扣费仍由现有的状态胶囊和失败面板显示。
+- Settings → This computer 多一行「fal key (lip sync) / fal 密钥（对口型）」。
+- 选模型（新建影片、Settings → Models）时过滤掉 lip-sync profile。
+- fixture：`shotPerformance` 命令（不动片段，overview 加 `lipSync: planned`）。
+
+### 8.6 主人第一次真实测试
+
+1. 在本机环境（不要写进仓库）设置 `OPENSLATE_FAL_API_KEY=<fal key>`，以及现有的 Viggle key。可选 `OPENSLATE_ENABLE_FAL_LIPSYNC=1`（有 key 时默认开启）。
+2. 把 `examples/fal-lipsync-provider-profiles.example.json` 里的 lip-sync profile 合并进 `OPENSLATE_PROVIDER_CONFIG` 指向的 catalog（`unitCostMicros` 至少 `1200000`，768P）。
+3. 用新的数据目录启动（不要用 3001 上正在用的实例），**新建**一部影片（旧项目的 lock 里没有 lip-sync profile）。
+4. 导入一首歌（Assets → 音乐），写 1 个场景、1 个 6 s 的唱歌镜头，用 `shotPerformance` 标为 singing（目前 UI 还没有开关，可以用 `POST /api/projects/:id/storyboard {kind:"shotPerformance", id, value:"singing"}`）。
+5. 生成并打开关键帧，确认视频。报价应显示这个镜头约 **$0.50**（768P，6.2 s × $0.08），再加其他普通镜头的 Viggle 价格（约 $0.06 / 6 s）。
+6. 预计花费：1 个 6 s 唱歌镜头 ≈ **$0.50**；如果改为 480P 约 $0.31。建议首测预算上限 $1。
+
+### 8.7 已知限制
+
+- 15 s 的唱歌镜头不加尾巴；如果 fal 返回的视频短于 15 s，会出现 `VIDEO_TOO_SHORT`（已扣费）。首测建议用 ≤14 s 的镜头。
+- 文件上传在 fal CDN 上默认公开，包括关键帧和歌曲片段。
+- 每秒价格来自 fal 模型页；`unitCostMicros` 预留是上限，实际扣费以 fal 账单为准。
+- `isSingingShot` 的文字识别不再用于路由，只保留给 seam 的旧测试。
+
 ## 7. 调研来源（访问日 2026-10-28）
+
+- fal H3 Max lip sync：https://fal.ai/models/minimax/h3-max/lip-sync/image-to-video · https://fal.ai/models/minimax/h3-max/lip-sync/image-to-video/api · 队列：https://fal.ai/docs/model-apis/model-endpoints/queue · 上传：https://fal.ai/docs/model-apis/model-endpoints/file-uploads 与 https://github.com/fal-ai/fal-js/blob/main/libs/client/src/storage.ts · 错误：https://fal.ai/docs/model-apis/errors · 计费 FAQ：https://fal.ai/docs/model-apis/faq
 
 - Viggle：https://viggle.ai/tools/ai-lip-sync · https://docs.viggle.ai/introduction · https://docs.viggle.ai/v1/pricing
 - sync.so：https://sync.so/docs/models/lipsync · https://sync.so/docs/billing · https://sync.so/docs/api-reference · https://support.sync.so/articles/7391977257-sync-support-faq · https://fal.ai/models/fal-ai/sync-lipsync/v3
