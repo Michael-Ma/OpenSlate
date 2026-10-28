@@ -17,3 +17,4 @@ export * from "./planning/narration-rebase.js";
 export * from './planning/scene-composition.js';
 
 export * from "./proposal-preview.js";
+export * from "./characters.js";

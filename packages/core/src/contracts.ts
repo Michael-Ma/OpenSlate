@@ -50,6 +50,38 @@ export interface ShotRecord {
   promptIntent: { image: string; video: string };
   referenceArtifactIds: Id[];
   cueId: Id | null;
+  /** Characters visible in this shot, in reference order. Absent on plans written before character planning. */
+  characterIds?: Id[];
+}
+
+/** One character's outfit for one scene. Clothing only; identity stays on the character. */
+export interface CharacterWardrobe {
+  sceneId: Id;
+  outfit: string;
+  /** Optional continuity note for this scene (wet hair, torn sleeve). */
+  notes?: string;
+}
+
+/** A human-approved character sheet: the exact image every keyframe of this character uses as a reference. */
+export interface CharacterSheetRef {
+  artifactId: Id;
+  sha256: string;
+  /** Digest of the sheet prompt the approved take was generated from. */
+  promptDigest: string;
+  approvedAt: string;
+}
+
+/** Plan-level character. Wardrobe is per scene; the sheet carries identity, never a scene's clothing. */
+export interface CharacterRecord {
+  id: Id;
+  revisionId: Id;
+  name: string;
+  /** Scene-independent look: face, hair, build, age, distinguishing marks. No clothing. */
+  identity: string;
+  /** Neutral outfit worn on the character sheet and used where a scene has no wardrobe entry. */
+  baseOutfit?: string;
+  wardrobe: CharacterWardrobe[];
+  sheet: CharacterSheetRef | null;
 }
 
 export interface CueRecord {
@@ -100,6 +132,8 @@ export interface ProjectRecord {
   brief: string;
   story: string;
   scenes: Array<{ id: Id; revisionId: Id; purpose: string; title?: string }>;
+  /** Planned characters with per-scene wardrobe. Absent on plans written before character planning. */
+  characters?: CharacterRecord[];
   narration: {
     script: string;
     source: "undecided" | "uploaded" | "generated" | "mixed";
