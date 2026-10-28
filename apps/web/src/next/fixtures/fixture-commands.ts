@@ -394,7 +394,10 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
     let next = overview;
     for (const id of images)
       next = withShot(next, id, (shot) => {
-        const previous = shot.keyframe.state === "ready" ? shot.keyframe.artifact : shot.keyframe.previous;
+        // A new take of a keyframe that is back runs as its replacement: the current one stays in use, as in the studio.
+        if (shot.keyframe.state === "ready")
+          return { ...shot, keyframe: { ...shot.keyframe, replacement: { state: "running", phase: "running", attemptId: attempts[id]! } } };
+        const previous = shot.keyframe.previous;
         return {
           ...shot,
           keyframe: { state: "running", phase: "running", startedAt: started, attemptId: attempts[id]!, takeCount: shot.keyframe.takeCount, opened: false, ...(previous ? { previous } : {}) },
@@ -407,10 +410,19 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
     let next = w.overview;
     for (const id of images)
       next = withShot(next, id, (shot) => {
-        if (shot.keyframe.state !== "running" || shot.keyframe.attemptId !== attempts[id]) return shot;
+        const replacing = shot.keyframe.state === "ready" && shot.keyframe.replacement?.state === "running" && shot.keyframe.replacement.attemptId === attempts[id];
+        if (!replacing && (shot.keyframe.state !== "running" || shot.keyframe.attemptId !== attempts[id])) return shot;
         const take = shot.keyframe.takeCount + 1;
         const artifact = takeArtifact(shot.label, take);
-        if (extra(w).failNext.delete(id)) return { ...shot, keyframe: { state: "failed", takeCount: shot.keyframe.takeCount, opened: false,
+        const refused = extra(w).failNext.delete(id);
+        if (replacing) {
+          // A refused new take leaves the current keyframe and clip; a new one becomes current and outdates the clip.
+          if (refused) return { ...shot, keyframe: { ...shot.keyframe, replacement: { state: "failed", attemptId: attempts[id]!,
+            failure: { code: "PROVIDER_REFUSED", technical: false, retryAllowed: false, autoRetriesLeft: 0, charged: false, at: now() } } } };
+          extra(w).madeAt[takeKey(artifact)] = localTime(new Date());
+          return { ...shot, keyframe: { state: "ready", artifact, takeCount: take, opened: false }, video: outdateClip(shot.video, "keyframe") };
+        }
+        if (refused) return { ...shot, keyframe: { state: "failed", takeCount: shot.keyframe.takeCount, opened: false,
           ...(shot.keyframe.previous ? { previous: shot.keyframe.previous } : {}),
           failure: { code: "PROVIDER_REFUSED", technical: false, retryAllowed: false, autoRetriesLeft: 0, charged: false, at: now() } } };
         extra(w).madeAt[takeKey(artifact)] = localTime(new Date());
@@ -1142,7 +1154,9 @@ function useTake(world: FixtureWorld, shotId: string, artifactId: string): UseTa
   const take = shotTakes(world, shotId).keyframes.find((entry) => entry.artifact.artifactId === artifactId);
   if (!take) throw new ApiError("NOT_FOUND", 404);
   if (!take.selectable) throw new ApiError("TAKE_NOT_SELECTABLE", 409);
-  if (isWorking(shot.keyframe) || shot.keyframe.state === "no_answer" || isWorking(shot.video)) throw new ApiError("ATTEMPT_EXISTS", 409);
+  // A new take in progress or unanswered is a job on this keyframe too.
+  const newTake = shot.keyframe.replacement?.state;
+  if (isWorking(shot.keyframe) || shot.keyframe.state === "no_answer" || newTake === "running" || newTake === "queued" || newTake === "no_answer" || isWorking(shot.video)) throw new ApiError("ATTEMPT_EXISTS", 409);
   if (take.current) throw new ApiError("ALREADY_COMPLETE", 409);
   const state = extra(world);
   const commandId = nextId(world, "command");

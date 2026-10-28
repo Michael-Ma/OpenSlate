@@ -162,3 +162,16 @@ test('the queue preset: an unexplained queue is waiting and a given-up keyframe 
   assert.deepEqual(progress.shots.map((s) => [s.label, s.state]), [['3.1', 'waiting'], ['3.2', 'given_up']]);
   assert.deepEqual([progress.done, progress.total, progress.running, progress.next], [0, 2, false, null]);
 });
+
+test('a regenerate keeps the keyframe in use and runs a replacement; a refused one leaves keyframe and clip as they were', async () => {
+  const { fixtureFailNextKeyframe } = await import('../../src/next/fixtures/fixture-commands.ts');
+  const w = world();
+  const before = shot(w, '1.1');
+  fixtureFailNextKeyframe(w, shotId('1.1'));
+  post(w, `/scenes/${sceneId(1)}/generate`, keyframesBody(read(w, sceneId(1)), [shotId('1.1')], true));
+  assert.deepEqual([shot(w, '1.1').keyframe.state, shot(w, '1.1').keyframe.replacement.state, shot(w, '1.1').video.state], ['ready', 'running', 'ready']);
+  w.advance(FIXTURE_TIMING.keyframeMs);
+  const after = shot(w, '1.1');
+  assert.deepEqual([after.keyframe.state, after.keyframe.artifact, after.keyframe.replacement.state, after.keyframe.replacement.failure.charged, after.video.state],
+    ['ready', before.keyframe.artifact, 'failed', false, 'ready']);
+});

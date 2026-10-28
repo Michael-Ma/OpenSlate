@@ -237,7 +237,8 @@ export const scenarios = [
       // Regenerate 2.2 through note a, from the link under its chip on the card.
       await page.click('[data-card="shot-2-2"] [data-act="note-regenerate"]');
       await page.waitForSelector('[data-card="shot-2-2"] .making');
-      await expectText(page, '[data-card="shot-2-2"] .stl', /Making keyframe/);
+      // As in the studio, the new take runs next to the current keyframe, which stays in use.
+      await expectText(page, '[data-card="shot-2-2"] .stl', /Making a new take · current kept/);
       await page.click('.card [data-act="open-shot"][data-shot="shot-2-2"]');
       await page.waitForSelector('.insp [data-row="takes"]', { timeout: 10000 });
       await expectText(page, '.insp [data-row="takes"]', /Takes\s*2/);
@@ -289,8 +290,8 @@ export const scenarios = [
       await openCard(page, "2.2");
       await expectText(page, ".insp", /A new take costs about \$0\.04/);
       await page.click('.insp [data-act="regen"][data-shot="shot-2-2"]');
-      await page.waitForSelector(".preview .making");
-      await expectText(page, '[data-card="shot-2-2"] .stl', /Making keyframe/);
+      // The new take runs next to the current keyframe, which stays in use until it is back.
+      await expectText(page, '[data-card="shot-2-2"] .stl', /Making a new take · current kept/);
       await expectText(page, ".vpanel", /1 of 3\s*frames opened/);
       await screenshot(page, "regenerating-1440");
       await page.waitForSelector('.insp [data-row="takes"]', { timeout: 10000 });

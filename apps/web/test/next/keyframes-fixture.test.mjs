@@ -87,10 +87,10 @@ test('regenerating 2.2 makes a red-coat second take that is not opened', () => {
   const body = { ...keyframesBody(read(w, sceneId(2)), [shotId('2.2')], true), expectedEstimateMicros: '40000' };
   assert.throws(() => post(w, `/scenes/${sceneId(2)}/generate`, { ...body, expectedEstimateMicros: '80000' }), refused('ESTIMATE_CHANGED'));
   post(w, `/scenes/${sceneId(2)}/generate`, body);
+  // As in the studio, the new take runs as a replacement: the current keyframe stays in use until it is back.
   const making = shot(w, '2.2').keyframe;
-  assert.deepEqual([making.state, making.previous.artifactId, making.opened], ['running', 'art-2.2', false]);
-  assert.equal(scene(w, 2).state, 'keyframes_partial');
-  assert.ok(scene(w, 2).blockers.some(b => b.code === 'keyframe_missing' && b.shotId === shotId('2.2')));
+  assert.deepEqual([making.state, making.artifact.artifactId, making.replacement.state, making.opened], ['ready', 'art-2.2', 'running', true]);
+  assert.equal(scene(w, 2).state, 'keyframes_back');
   assert.throws(() => post(w, `/scenes/${sceneId(2)}/generate`, { ...keyframesBody(read(w, sceneId(2)), [shotId('2.2')], true), expectedEstimateMicros: '40000' }), refused('ATTEMPT_EXISTS'));
   w.advance(FIXTURE_TIMING.keyframeMs);
   const back = shot(w, '2.2').keyframe;
@@ -417,12 +417,13 @@ test('the store and the fixture agree on the whole Scene 2 path', async (t) => {
     assert.equal(state().overview.scenes[1].state, 'video_saved');
     await store.regenerateKeyframe(shotId('2.2'));
     await settle();
-    assert.equal(state().overview.shots[shotId('2.2')].keyframe.state, 'running');
-    assert.equal(state().overview.shots[shotId('2.2')].video.state, 'outdated', 'its clip will need redoing');
+    assert.deepEqual([state().overview.shots[shotId('2.2')].keyframe.state, state().overview.shots[shotId('2.2')].keyframe.replacement.state], ['ready', 'running']);
+    assert.equal(state().overview.shots[shotId('2.2')].video.state, 'ready', 'the clip stays until the new take replaces its keyframe');
     t.mock.timers.tick(FIXTURE_TIMING.keyframeMs);
     await settle();
     const take = state().overview.shots[shotId('2.2')].keyframe;
     assert.deepEqual([take.state, take.takeCount, take.opened], ['ready', 2, false]);
+    assert.equal(state().overview.shots[shotId('2.2')].video.state, 'outdated', 'its clip will need redoing');
   } finally {
     store.stop();
     port.close();
