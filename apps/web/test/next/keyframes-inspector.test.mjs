@@ -109,7 +109,45 @@ test('a failed clip offers to make it again only when the scene can be confirmed
   const s21 = overview.shots[shotId('2.1')];
   overview.shots[shotId('2.1')] = { ...s21, video: { state: 'failed', takeCount: 0, failure: { code: 'X', technical: true, retryAllowed: true, autoRetriesLeft: 0, charged: false, at: 'x' } } };
   const blocked = view(overview, '2.1').failure;
-  assert.deepEqual([blocked.slot, en(blocked.message), blocked.retryVideo.enabled, en(blocked.retryVideo.price)], ['video', 'Video failed · not charged', false, 'about $0.50']);
+  // The press confirms the scene, which makes all three clips: the button names and prices that purchase.
+  assert.deepEqual([blocked.slot, en(blocked.message), blocked.retryVideo.enabled, en(blocked.retryVideo.label), en(blocked.retryVideo.price)], ['video', 'Video failed · not charged', false, "Make Scene 2's 3 clips", 'about $1.50']);
+  assert.equal(translateMsg('zh-CN', blocked.retryVideo.label), '生成第 2 场的 3 段视频');
   overview.scenes[1].blockers = [];
   assert.equal(view(overview, '2.1').failure.retryVideo.enabled, true);
+  // When this shot is the only target, it is one clip at one clip's price.
+  overview.scenes[1].videoTargets = [shotId('2.1')];
+  const one = view(overview, '2.1').failure.retryVideo;
+  assert.deepEqual([en(one.label), en(one.price)], ['Make the clip again', 'about $0.50']);
+});
+
+test('retryAllowed is automatic retries left: a technical clip failure is no refusal and is offered for a paid remake', () => {
+  const overview = lastFerryOverview();
+  const s21 = overview.shots[shotId('2.1')];
+  const fail = (failure) => { overview.shots[shotId('2.1')] = { ...s21, video: { state: 'failed', takeCount: 0, failure: { code: 'TIMEOUT', retryAllowed: false, autoRetriesLeft: 0, at: 'x', ...failure } } }; return view(overview, '2.1').failure; };
+  const timeout = fail({ technical: true, charged: true });
+  assert.equal(en(timeout.message), 'Video failed · counted as spent');
+  assert.ok(timeout.retryVideo, 'a terminal technical failure can be made again');
+  const refused = fail({ technical: false, charged: false });
+  assert.match(en(refused.message), /^The service refused this and did not charge/);
+  assert.ok(refused.retryVideo);
+  assert.equal(fail({ technical: true, charged: false, retryAllowed: true, autoRetriesLeft: 1 }).retryVideo, null, 'an automatic retry is still coming');
+});
+
+test('any failed new take says why while the current output stays; a failed new clip is not hidden by "Video saved"', async () => {
+  const { cardStatus } = await import('../../src/next/model/keyframes.ts');
+  const overview = lastFerryOverview();
+  const s11 = overview.shots[shotId('1.1')];
+  const free = { code: 'PROVIDER_REFUSED', technical: false, retryAllowed: false, autoRetriesLeft: 0, charged: false, at: 'x' };
+  overview.shots[shotId('1.1')] = { ...s11, keyframe: { ...s11.keyframe, replacement: { state: 'failed', failure: free } } };
+  assert.equal(en(view(overview, '1.1').failure.message), 'New take failed · not charged · current kept');
+  overview.shots[shotId('1.1')] = { ...s11, keyframe: { ...s11.keyframe, replacement: { state: 'failed', failure: { ...free, technical: true, charged: true } } } };
+  assert.equal(en(view(overview, '1.1').failure.message), 'New take failed · counted as spent · current kept');
+  assert.equal(s11.video.state, 'ready');
+  overview.shots[shotId('1.1')] = { ...s11, video: { ...s11.video, replacement: { state: 'failed', failure: free } } };
+  const clip = view(overview, '1.1');
+  assert.deepEqual([clip.failure.slot, en(clip.failure.message)], ['video', 'The service refused this and did not charge. Change the prompt, then make it again.']);
+  assert.equal(en(cardStatus(overview.shots[shotId('1.1')]).status), 'New take failed · not charged · current kept');
+  overview.shots[shotId('1.1')] = { ...s11, video: { ...s11.video, replacement: { state: 'no_answer', attemptId: 'clip-9' } } };
+  assert.deepEqual(view(overview, '1.1').noAnswer, { slot: 'video', attemptId: 'clip-9' });
+  assert.equal(en(cardStatus(overview.shots[shotId('1.1')]).status), 'New take: no answer from the service · current kept');
 });

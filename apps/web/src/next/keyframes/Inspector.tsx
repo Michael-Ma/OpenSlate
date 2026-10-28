@@ -255,7 +255,7 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
               <p>{tm(view.failure.message)}</p>
               {view.failure.retryVideo ? (
                 <button type="button" className="pill sm" data-act="retry-video" data-shot={shot.shotId} {...run} disabled={!view.failure.retryVideo.enabled || busy.video || run.disabled} onClick={onRetryVideo}>
-                  {t("inspector.retry_video")}{view.failure.retryVideo.price ? ` · ${tm(view.failure.retryVideo.price)}` : ""}
+                  {tm(view.failure.retryVideo.label)}{view.failure.retryVideo.price ? ` · ${tm(view.failure.retryVideo.price)}` : ""}
                 </button>
               ) : null}
               {view.failure.retryVideo && unconfirmed.video && !busy.video ? <p className="lost" data-unconfirmed="true">{t("error.PAID_UNCONFIRMED")}</p> : null}

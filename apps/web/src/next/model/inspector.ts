@@ -80,6 +80,9 @@ export interface RegenerateAction {
   reason: Msg | null;
 }
 
+/** The paid remake of a failed clip: the scene's confirm, named and priced as what the press buys. */
+export interface RetryVideo { enabled: boolean; label: Msg; price: Msg | null }
+
 export interface InspectorView {
   shotId: string;
   sceneId: string;
@@ -93,7 +96,7 @@ export interface InspectorView {
   rows: InspectorRow[];
   regenerate: RegenerateAction;
   /** A failed keyframe or clip, with what was charged. */
-  failure: { slot: "keyframe" | "video"; message: Msg; retryVideo: { enabled: boolean; price: Msg | null } | null } | null;
+  failure: { slot: "keyframe" | "video"; message: Msg; retryVideo: RetryVideo | null } | null;
   /** A job the service never confirmed: offer to give up on it (plan decision D7). */
   noAnswer: { slot: "keyframe" | "video" | "voice"; attemptId: string } | null;
   /** An outdated keyframe or clip, and why. */
@@ -136,18 +139,39 @@ function keyframePrice(overview: GenerationOverview, shot: ShotOverview): { unit
 
 /** The service never replied with a task id, so the job cannot be found again; only a new paid press can replace it. */
 const SUBMISSION_RESPONSE_LOST = "SUBMISSION_RESPONSE_LOST";
-function failureMessage(slot: MediaSlot, kind: "keyframe" | "video"): Msg {
+/**
+ * The server's retryAllowed means "automatic retries left", never "the service refused": a refusal is a failure that
+ * is not technical. `replacement`: a new take failed while the current output stays.
+ */
+function failureMessage(slot: Pick<MediaSlot, "failure">, kind: "keyframe" | "video", replacement = false): Msg {
   const failure = slot.failure;
   const native = kind === "keyframe" && failure ? nativeDiagnosticMsg(failure.nativeDiagnostic, "images", failure.notDispatched === true && !failure.charged) : null;
   if (native) return native;
   if (failure && failure.technical && failure.autoRetriesLeft > 0) return msg("inspector.failed.retrying", { count: failure.autoRetriesLeft });
   if (failure?.code === SUBMISSION_RESPONSE_LOST) return msg("inspector.failed.response_lost");
-  if (kind === "video" && failure && !failure.retryAllowed) return msg(failure.charged ? "inspector.failed.refused_charged" : "inspector.failed.refused");
+  if (kind === "video" && failure && !failure.technical) return msg(failure.charged ? "inspector.failed.refused_charged" : "inspector.failed.refused");
+  if (replacement) return msg(failure?.charged ? "card.replacement.failed_charged" : "card.replacement.failed");
   return msg(`card.${kind}.${failure?.charged ? "failed_charged" : "failed"}`);
 }
 
-const canRetry = (slot: MediaSlot) => !slot.failure || slot.failure.code === SUBMISSION_RESPONSE_LOST
-  || (slot.failure.retryAllowed && !(slot.failure.technical && slot.failure.autoRetriesLeft > 0));
+/** A terminal failure (no automatic retry left, a lost reply included) can be bought again by the person. */
+const canRetry = (slot: Pick<MediaSlot, "failure">) => !slot.failure || slot.failure.autoRetriesLeft === 0;
+
+/**
+ * "Make the clip again" presses the scene's confirm, which buys every clip in videoTargets (and missing voice lines):
+ * the label and price say that whole purchase unless this shot is the only target.
+ */
+function retryVideo(overview: GenerationOverview, shot: ShotOverview, scene: SceneOverview | undefined, locale: string): RetryVideo {
+  const panel = scene ? videoPanel(overview, scene, locale) : null;
+  const enabled = !!scene && scene.blockers.length === 0 && panel?.action === "confirm" && panel.enabled;
+  const targets = scene?.videoTargets ?? [];
+  if (scene && targets.length && !(targets.length === 1 && targets[0] === shot.shotId)) {
+    const quote = scene.quotes.confirmVideo;
+    return { enabled, label: msg("inspector.retry_scene_clips", { scene: scene.ordinal, count: targets.length }), price: priceFrom(quote?.micros, quote?.priceUnknown ?? false, locale) };
+  }
+  const clip = clipUnit(overview, scene);
+  return { enabled, label: msg("inspector.retry_video"), price: priceFrom(clip?.unitMicros, clip?.unknown ?? false, locale) };
+}
 
 function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scene: SceneOverview | undefined, locale: string): RegenerateAction {
   const unit = keyframePrice(overview, shot);
@@ -202,19 +226,17 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
     rows.push({ key: "takes", label: msg("inspector.takes"), value: String(takes), quoted: false, notes: [{ message: msg(shot.keyframe.state === "ready" ? "inspector.takes_shown" : "inspector.takes_kept", { count: takes }), tone: "plain" }] });
 
   let failure: InspectorView["failure"] = null;
+  const keyframeTake = shot.keyframe.state === "ready" && shot.keyframe.replacement?.state === "failed" ? shot.keyframe.replacement : null;
+  const clipTake = shot.video.state === "ready" && shot.video.replacement?.state === "failed" ? shot.video.replacement : null;
   if (shot.keyframe.state === "failed") failure = { slot: "keyframe", message: failureMessage(shot.keyframe, "keyframe"), retryVideo: null };
-  else if (shot.keyframe.state === "ready" && shot.keyframe.replacement?.state === "failed"
-    && (shot.keyframe.replacement.failure?.nativeDiagnostic || shot.keyframe.replacement.failure?.code === SUBMISSION_RESPONSE_LOST))
-    failure = { slot: "keyframe", message: failureMessage({ ...shot.keyframe, failure: shot.keyframe.replacement.failure }, "keyframe"), retryVideo: null };
-  else if (shot.video.state === "failed" && !shot.video.ingestionIssue) {
-    const clip = clipUnit(overview, scene);
-    const panel = scene ? videoPanel(overview, scene, locale) : null;
-    failure = {
-      slot: "video",
-      message: failureMessage(shot.video, "video"),
-      retryVideo: canRetry(shot.video) ? { enabled: !!scene && scene.blockers.length === 0 && panel?.action === "confirm" && panel.enabled, price: priceFrom(clip?.unitMicros, clip?.unknown ?? false, locale) } : null,
-    };
-  }
+  // Any failed new take says why (refused, lost, charged or not) while the current keyframe stays.
+  else if (keyframeTake) failure = { slot: "keyframe", message: failureMessage(keyframeTake, "keyframe", true), retryVideo: null };
+  else if (shot.video.state === "failed" && !shot.video.ingestionIssue)
+    failure = { slot: "video", message: failureMessage(shot.video, "video"), retryVideo: canRetry(shot.video) ? retryVideo(overview, shot, scene, locale) : null };
+  // A failed new clip next to the saved one: "Video saved" alone would hide it. Remade here only when the confirm targets it.
+  else if (clipTake && !shot.video.ingestionIssue)
+    failure = { slot: "video", message: failureMessage(clipTake, "video", true),
+      retryVideo: canRetry(clipTake) && scene?.videoTargets.includes(shot.shotId) ? retryVideo(overview, shot, scene, locale) : null };
   // A replacement take with no answer can be given up too, while the current keyframe stays (card B15).
   const noAnswerSlot = shot.keyframe.state === "no_answer" && shot.keyframe.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.attemptId }
     : shot.keyframe.replacement?.state === "no_answer" && shot.keyframe.replacement.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.replacement.attemptId }

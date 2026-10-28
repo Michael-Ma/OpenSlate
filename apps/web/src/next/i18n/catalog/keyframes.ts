@@ -143,6 +143,7 @@ export const keyframes = {
   "inspector.give_up_ack": { en: "I understand it may still finish and be charged, so a new try may mean paying twice.", zh: "我知道它仍可能完成并计费，重新生成可能要付两次钱。" },
   "inspector.give_up_confirm": { en: "Give up and allow a new try", zh: "放弃并允许重新生成" },
   "inspector.retry_video": { en: "Make the clip again", zh: "重新生成视频" },
+  "inspector.retry_scene_clips": { en: "Make Scene {scene}'s {count, plural, one {# clip} other {# clips}}", zh: "生成第 {scene} 场的 {count} 段视频" },
   "inspector.takes_show": { en: "{count} · Compare", zh: "{count} · 比较" },
   "inspector.takes_show_label": { en: "Compare the {count} takes of {shot}", zh: "比较 {shot} 的 {count} 个版本" },
   "inspector.prompts_show": { en: "Prompts", zh: "描述" },
