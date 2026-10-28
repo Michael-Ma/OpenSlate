@@ -3,3 +3,5 @@
 .give-up .ack input{width:auto;margin:2px 0 0;padding:0;flex:none;accent-color:var(--select)}
 .give-up .two{display:flex;gap:6px;flex-wrap:wrap}
 .give-up .two .pill{flex:1;justify-content:center}
+/* Confirm takes the row; Cancel keeps its own width, in the inspector as well as the Director line. */
+.give-up .two .pill[data-act="give-up-cancel"]{flex:none}

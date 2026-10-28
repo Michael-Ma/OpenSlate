@@ -141,7 +141,7 @@ export const keyframes = {
   "inspector.give_up": { en: "Give up on this job", zh: "放弃这个任务" },
   "inspector.give_up_note": { en: "The service did not confirm this job. It may still arrive and be charged.", zh: "服务没有确认这个任务。它可能稍后仍会返回并计费。" },
   "inspector.give_up_ack": { en: "I understand it may still finish and be charged, so a new try may mean paying twice.", zh: "我知道它仍可能完成并计费，重新生成可能要付两次钱。" },
-  "inspector.give_up_confirm": { en: "Give up and allow a new try", zh: "放弃并允许重新生成" },
+  "inspector.give_up_confirm": { en: "Give up", zh: "确认放弃" },
   "inspector.retry_video": { en: "Make the clip again", zh: "重新生成视频" },
   "inspector.retry_scene_clips": { en: "Make Scene {scene}'s {count, plural, one {# clip} other {# clips}}", zh: "生成第 {scene} 场的 {count} 段视频" },
   "inspector.takes_show": { en: "{count} · Compare", zh: "{count} · 比较" },
