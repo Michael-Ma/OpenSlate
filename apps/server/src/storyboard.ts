@@ -25,6 +25,7 @@ type Edit = {
     | "shotFields"
     | "addShot"
     | "deleteShot"
+    | "deleteShots"
     | "moveShot"
     | "narration"
     | "undo"
@@ -40,7 +41,11 @@ type Edit = {
   withShots?: boolean;
   /** shotTiming: new lengths for several shots as one command (fit to the song), each 3–15 s. */
   timings?: Array<{ id: string; desiredFrames: number }>;
+  /** deleteShots: several shots removed as one command, so one Undo restores them all. */
+  ids?: string[];
 };
+/** Set when a Director tool or a Director confirmation card ran the person's command. Never changes the edit itself. */
+export interface StoryboardEditOrigin { director: { requestId: string; epochId: string; invocationId: string } | { noteId: string } }
 type SavedEdit = {
   id: string;
   before: ProjectRecord;
@@ -56,6 +61,7 @@ export function editStoryboard(
   projectId: string,
   input: Edit,
   key: string,
+  origin?: StoryboardEditOrigin,
 ) {
   s.recovery.assertWritable(projectId);
   return s.store.command(
@@ -220,6 +226,15 @@ export function editStoryboard(
         assertNoRunningAttempts(s, projectId, new Set([row.id]));
         changed.add(row.id);
         next.shots = next.shots.filter((x) => x.id !== row.id);
+        global = true;
+      } else if (input.kind === "deleteShots") {
+        const ids = input.ids;
+        invariant(Array.isArray(ids) && ids.length > 0 && ids.length <= 64 && new Set(ids).size === ids.length && input.id === undefined,
+          "VALIDATION_ERROR", "Choose up to 64 distinct shots to delete.");
+        for (const id of ids) invariant(next.shots.some(x => x.id === id), "NOT_FOUND", "Shot does not belong to this film.");
+        assertNoRunningAttempts(s, projectId, new Set(ids));
+        for (const id of ids) changed.add(id);
+        next.shots = next.shots.filter(x => !ids.includes(x.id));
         global = true;
       } else if (input.kind === "moveShot") {
         const row = shot();
@@ -515,6 +530,7 @@ export function editStoryboard(
         requestId: actor.requestId,
         input,
         undo,
+        ...(origin ? { origin } : {}),
       });
       for (const hold of s.store.list<{ id: string; ownerId: string; active: boolean }>("hold", projectId))
         if (hold.active && hold.ownerId === actor.requestId)
@@ -524,6 +540,7 @@ export function editStoryboard(
         kind: input.kind,
         headVersion: next.headVersion,
         affectedNodeIds: [...affected],
+        ...(origin ? { origin } : {}),
       });
       return {
         commandId: id,
@@ -558,6 +575,7 @@ export function registerStoryboard(
                 "shotFields",
                 "addShot",
                 "deleteShot",
+                "deleteShots",
                 "moveShot",
                 "narration",
                 "undo",
@@ -571,6 +589,7 @@ export function registerStoryboard(
             beforeId: text,
             commandId: text,
             withShots: { type: "boolean" },
+            ids: { type: "array", minItems: 1, maxItems: 64, uniqueItems: true, items: text },
             fields: { type: "object", additionalProperties: false, minProperties: 1, properties: {
               ...Object.fromEntries(["imagePrompt", "motion", "videoPrompt", "framing", "purpose", "action"].map(field => [field, { type: "string", minLength: 1, maxLength: 16000 }])),
               desiredFrames: { type: "integer", minimum: 90, maximum: 450 },

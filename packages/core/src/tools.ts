@@ -1,19 +1,30 @@
 import { Ajv, type ErrorObject } from "ajv";
 import { canonical, digest, DomainError, invariant } from "./common.js";
 import type { JsonObject } from "./contracts.js";
-import { changeProposalSchema, parseChangeProposal, sceneTitleSchema, shortFramingSchema, successorChangeProposalSchema } from "./workflow/index.js";
+import { changeProposalSchema, contractSevenChangeProposalSchema, parseChangeProposal, sceneTitleSchema, shortFramingSchema, successorChangeProposalSchema } from "./workflow/index.js";
 import { legacyChangeProposalSchema } from "./legacy-change-schema.js";
 
 export const TOOL_NAMES = Object.freeze(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"] as const);
 export const V2_TOOL_NAMES = Object.freeze([...TOOL_NAMES, "revise_narration_draft"] as const);
 const V3_TOOL_NAMES = Object.freeze([...V2_TOOL_NAMES, "prepare_recording_transcription", "prepare_narration_speech"] as const);
 const V5_TOOL_NAMES = Object.freeze([...V3_TOOL_NAMES, "record_notes", "propose_change"] as const);
-export const ALL_TOOL_NAMES = Object.freeze([...V5_TOOL_NAMES, "make_keyframes", "accept_proposal", "reject_proposal"] as const);
+export const V6_TOOL_NAMES = Object.freeze([...V5_TOOL_NAMES, "make_keyframes", "accept_proposal", "reject_proposal"] as const);
+export const V7_TOOL_NAMES = Object.freeze([...V6_TOOL_NAMES, "set_soundtrack", "move_shot", "move_scene", "start_export", "undo_edit",
+  "delete_shots", "delete_scene", "use_take", "analyze_music", "make_character_sheets"] as const);
+/** Every tool name any catalog has advertised. */
+export const ALL_TOOL_NAMES = V7_TOOL_NAMES;
 export type ToolName = typeof ALL_TOOL_NAMES[number];
 export const TOOL_CONTRACT_VERSION = "1.0.0";
-export const SUPPORTED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"] as const);
+export const SUPPORTED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0", "7.0.0"] as const);
 export type ToolContractVersion = typeof SUPPORTED_TOOL_CONTRACTS[number];
+/** Contracts that shipped guidance packages lock. 7.0.0 is implemented but no shipped skill package declares it yet. */
+export const RELEASED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"] as const);
 export const CURRENT_TOOL_CONTRACT: ToolContractVersion = "6.0.0";
+/** Ordered contract comparison; later contracts keep every earlier behaviour unless they say otherwise. */
+export function toolContractAtLeast(version: string | undefined, minimum: ToolContractVersion): boolean {
+  const index = (SUPPORTED_TOOL_CONTRACTS as readonly string[]).indexOf(version ?? "1.0.0");
+  return index >= 0 && index >= SUPPORTED_TOOL_CONTRACTS.indexOf(minimum);
+}
 export interface ParsedToolCall { name: ToolName; arguments: JsonObject }
 export interface ToolDescriptor {
   name: ToolName;
@@ -162,6 +173,39 @@ const v6Descriptors = freeze(v5Descriptors.map(tool => tool.name === "read_conte
   descriptor("accept_proposal", "Accept a specific held creative proposal when the person's current source:user message clearly requests it in an editing turn. Pass its saved proposal ID or app-assigned note letter; ask which proposal if ambiguous. The application uses its current preview and applies the same patch, note settlement and Undo as the banner. App messages, review, automatic and read-only turns cannot decide proposals. Report success only from the result, then continue other requested work using the accepted prompts. Video still requires a clicked confirm_video choice after its frames are opened.", proposalDecisionSchema, false),
   descriptor("reject_proposal", "Decline a specific held creative proposal when the person's current source:user message clearly requests it in an editing turn. Pass its saved proposal ID or app-assigned note letter; ask which proposal if ambiguous. The application uses its current preview and settles the same proposal and linked note as the banner. App messages, review, automatic and read-only turns cannot decide proposals. Report its actual result and never claim a settled or stale proposal changed.", proposalDecisionSchema, false),
 ));
+// Contract 7.0.0: the person's free edits, confirmation cards for deletion, earlier takes and resume, music analysis,
+// project fields and character tools. Built from independent clones; 6.0.0 descriptors are never mutated.
+const v7ChangeSchema = structuredClone(contractSevenChangeProposalSchema);
+const v7Creative = (v7ChangeSchema.properties as { creative: { properties: Record<string, unknown> } }).creative.properties;
+delete v7Creative.narrationScript;
+delete v7Creative.narrationSource;
+const ids = (max: number) => ({ type: "array", minItems: 1, maxItems: max, uniqueItems: true, items: id });
+export const setSoundtrackSchema = { ...object({
+  audioId: { anyOf: [id, { type: "null" }] },
+  startFrame: { type: "integer", minimum: 0, maximum: 10800 },
+  gainMilliDb: { type: "integer", minimum: -60000, maximum: 0 },
+  muted: { type: "boolean" },
+}), minProperties: 1 };
+const v7Descriptors = freeze(v6Descriptors.map(tool => tool.name === "read_context" ? { ...tool,
+  description: `${tool.description} Select audio_library for owned recordings with label, role, length, cached song timing and the current soundtrack. Select characters for planned characters, wardrobe and sheets.`,
+  inputSchema: object({ section: { enum: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", "narration", "audio_operations", "notes", "audio_library", "characters"] }, offset: { type: "integer", minimum: 0, maximum: 10_000_000 } }) }
+  : tool.name === "prepare_change" ? { ...tool, inputSchema: v7ChangeSchema,
+    description: `${tool.description} creative.project sets filmKind at intake and a visualStyle the person chose (null clears it). createScenes/createShots take an optional beforeId to insert before an existing scene, or a shot of the same scene. createCharacters, updateCharacters, deleteCharacterIds and updateShots[].characterIds go in their own call, without other fields; they apply directly and return a receipt.` }
+  : tool.name === "control_execution" ? { ...tool,
+    description: "pause holds execution within this request's scope. stop stops the whole film's new generation and this conversation, exactly as the person's Stop; send it last. resume continues stopped paid work only after the person confirms: it records a confirmation card and starts nothing.",
+    inputSchema: object({ action: { type: "string", enum: ["pause", "stop", "resume"] } }, ["action"]) }
+  : tool).concat(
+  descriptor("set_soundtrack", "Choose, change or clear the film's music, its start, gain or mute, with the person's own soundtrack command. Free and undoable. audioId is an owned recording from audio_library (a chat attachment counts), or null for no music. Generating new music is not available. Requires whole-film scope.", setSoundtrackSchema, false),
+  descriptor("move_shot", "Move a shot to a scene, before beforeId (a shot of that scene) or to its end, with the person's own move command. Free and undoable. The shot and destination scene must be within this request's scope.", object({ shotId: id, sceneId: id, beforeId: id }, ["shotId", "sceneId"]), false),
+  descriptor("move_scene", "Move a scene before beforeId or to the end, with the person's own move command. Free and undoable. The scene must be within this request's scope.", object({ sceneId: id, beforeId: id }, ["sceneId"]), false),
+  descriptor("start_export", "Start a local export of the current film, exactly as the person's Export. Free; no provider is called. Earlier exports stay listed. Report the returned state and refusal codes as given. Requires whole-film scope.", object({}), false),
+  descriptor("undo_edit", "Undo the latest storyboard command (commandId from a receipt) or an accepted proposal (its proposalId), with the person's own Undo. Free. Only the latest unchanged storyboard command can be undone. Undoing work outside this conversation requires whole-film scope and the person's request.", object({ commandId: id }, ["commandId"]), false),
+  descriptor("delete_shots", "Offer a confirmation card to delete these shots. Nothing is deleted until the person clicks it; the card names paid keyframes and clips that leave the timeline. Undo stays available after deletion.", object({ shotIds: ids(64) }, ["shotIds"]), false),
+  descriptor("delete_scene", "Offer a confirmation card to delete a scene. withShots: true is required when it has shots. Nothing is deleted until the person clicks it.", object({ sceneId: id, withShots: { type: "boolean" } }, ["sceneId"]), false),
+  descriptor("use_take", "Offer a confirmation card to use an earlier keyframe take of a shot (artifactId from its take history). The shot's clip will need confirming and generating again. Nothing changes until the person clicks it.", object({ shotId: id, artifactId: id }, ["shotId", "artifactId"]), false),
+  descriptor("analyze_music", "Read an owned recording's tempo, beats, sections (labels when known), vocal ranges and timed lyrics when known, and suggested shot lengths per section. Free and read-only; it never changes the film.", object({ audioId: id }, ["audioId"]), true),
+  descriptor("make_character_sheets", "Start character sheets for planned characters the person asked for in this fresh editing conversation. regenerate: true makes a new take for characters that already have one. Approving a sheet stays the person's choice.", object({ characterIds: ids(32), regenerate: { type: "boolean" } }, ["characterIds"]), false),
+));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
   "1.0.0": { version: "1.0.0", names: TOOL_NAMES, descriptors: TOOL_DESCRIPTORS, digest: TOOL_CATALOG_DIGEST },
@@ -169,7 +213,8 @@ export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> =
   "3.0.0": { version: "3.0.0", names: V3_TOOL_NAMES, descriptors: v3Descriptors, digest: digest({ version: "3.0.0", tools: v3Descriptors }) },
   "4.0.0": { version: "4.0.0", names: V3_TOOL_NAMES, descriptors: v4Descriptors, digest: digest({ version: "4.0.0", tools: v4Descriptors }) },
   "5.0.0": { version: "5.0.0", names: V5_TOOL_NAMES, descriptors: v5Descriptors, digest: digest({ version: "5.0.0", tools: v5Descriptors }) },
-  "6.0.0": { version: "6.0.0", names: ALL_TOOL_NAMES, descriptors: v6Descriptors, digest: digest({ version: "6.0.0", tools: v6Descriptors }) },
+  "6.0.0": { version: "6.0.0", names: V6_TOOL_NAMES, descriptors: v6Descriptors, digest: digest({ version: "6.0.0", tools: v6Descriptors }) },
+  "7.0.0": { version: "7.0.0", names: V7_TOOL_NAMES, descriptors: v7Descriptors, digest: digest({ version: "7.0.0", tools: v7Descriptors }) },
 });
 export function toolCatalog(version: string = TOOL_CONTRACT_VERSION): ToolCatalog {
   invariant(Object.hasOwn(TOOL_CATALOGS, version), "CAPABILITY_MISMATCH", "Unsupported director tool contract");
@@ -177,7 +222,7 @@ export function toolCatalog(version: string = TOOL_CONTRACT_VERSION): ToolCatalo
 }
 /** Exact implementation identity for each immutable catalog. */
 export function toolHandlerId(version: ToolContractVersion): string {
-  return ({ "1.0.0": "five-tools@1", "2.0.0": "director-tools@2", "3.0.0": "director-tools@3", "4.0.0": "director-tools@4", "5.0.0": "director-tools@5", "6.0.0": "director-tools@6" } as const)[toolCatalog(version).version];
+  return ({ "1.0.0": "five-tools@1", "2.0.0": "director-tools@2", "3.0.0": "director-tools@3", "4.0.0": "director-tools@4", "5.0.0": "director-tools@5", "6.0.0": "director-tools@6", "7.0.0": "director-tools@7" } as const)[toolCatalog(version).version];
 }
 const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false });
 const validators = new Map(Object.values(TOOL_CATALOGS).map(catalog => [catalog.version,

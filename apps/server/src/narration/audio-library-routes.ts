@@ -6,8 +6,8 @@ import type { NarrationService } from './service.js';
 import type { NarrationAudio, SuppliedNarrationAudio } from './types.js';
 import { ManagedUploadStore } from './managed-upload.js';
 import { defaultSoundtrackDecision, isMusicVideoProject } from './music-video.js';
-import { analyzeSongFile, fitShotsToSong, SONG_TIMING_VERSION, type SongTiming } from '../media/song-timing.js';
-import { storyboardAudioCuts } from './audio-placement.js';
+import { fitShotsToSong } from '../media/song-timing.js';
+import { localSongTiming, songFitShots } from '../media/music-analyzer.js';
 import { editStoryboard } from '../storyboard.js';
 
 const id = { type: 'string', minLength: 1, maxLength: 160 };
@@ -20,17 +20,6 @@ function entry(audio: NarrationAudio, label: string, role: AudioRole): AudioLibr
     'MEDIA_INTEGRITY_ERROR', 'The recording has no verified normalized audio identity');
   return { id: audio.id, label, sha256: audio.media.sha256, durationSeconds: measured.samples / 48000, samples: measured.samples,
     byteLength: audio.media.byteLength, origin: 'originEvidence' in audio ? 'generated' : 'uploaded', role };
-}
-
-interface SongTimingRecord { id: string; projectId: string; sha256: string; timing: SongTiming }
-/** Song timing is derived from the exact normalized bytes, once, and cached beside the recording. */
-async function songTiming(production: ProductionService, narration: NarrationService, audio: NarrationAudio): Promise<SongTiming> {
-  const store = production.store, cached = store.get<SongTimingRecord>('song_timing', audio.id);
-  if (cached?.projectId === audio.projectId && cached.sha256 === audio.media.sha256 && cached.timing.version === SONG_TIMING_VERSION) return cached.timing;
-  const { path } = await narration.media.verifiedSource(audio.media);
-  const timing = await analyzeSongFile(path, 128 * 1024 * 1024);
-  store.put<SongTimingRecord>('song_timing', audio.id, audio.projectId, { id: audio.id, projectId: audio.projectId, sha256: audio.media.sha256, timing });
-  return timing;
 }
 
 /**
@@ -86,13 +75,8 @@ export function registerAudioLibraryRoutes(app: FastifyInstance, options: { prod
     invariant(narration.mediaAvailable, 'NARRATION_MEDIA_UNAVAILABLE', 'Song timing needs local media tools');
     const audio = store.get<NarrationAudio>('narration_audio', audioId);
     invariant(audio?.projectId === projectId && audio.media.kind === 'audio', 'NOT_FOUND', 'Choose a recording owned by this film');
-    const timing = await songTiming(production, narration, audio);
-    const project = store.getProject(projectId), cuts = storyboardAudioCuts(project);
-    const shots = cuts.map(cut => project.shots.find(shot => shot.id === cut.shotId)!).map(shot => {
-      const cue = project.cues.find(cue => cue.id === shot.cueId);
-      return { id: shot.id, sceneId: shot.sceneId, desiredFrames: shot.desiredFrames,
-        ...(shot.narrationTimingMode === 'within_shot' && cue?.accepted ? { minFrames: cue.durationFrames } : {}) };
-    });
+    const timing = await localSongTiming(production, narration, audio);
+    const project = store.getProject(projectId), shots = songFitShots(project);
     const startFrame = project.soundtrack?.audioId === audioId ? project.soundtrack.startFrame ?? 0 : 0;
     return reply.header('Cache-Control', 'private, no-store').send({
       audioId, sha256: audio.media.sha256, headVersion: project.headVersion, musicVideo: isMusicVideoProject(project),
@@ -143,7 +127,7 @@ export function registerAudioLibraryRoutes(app: FastifyInstance, options: { prod
       if (intent.role === 'music') {
         adoptDefaultSoundtrack(production, projectId, audio.id, intent.role, intent.id);
         // Timing is a convenience for planning; an unreadable beat never fails the import.
-        try { await songTiming(production, narration, audio); } catch { /* the timing route reports it */ }
+        try { await localSongTiming(production, narration, audio); } catch { /* the timing route reports it */ }
       }
       const selectedAsMusic = store.getProject(projectId).soundtrack?.audioId === audio.id;
       // Return data so Fastify waits for staging cleanup before publishing a successful response.

@@ -7,8 +7,9 @@ import type { ManagedUploadStore } from "../narration/managed-upload.js";
 import type { MediaApplicationService } from "./application.js";
 import type { MediaRenderJob, OwnedMediaSource } from "./application-types.js";
 import { uploadNameSchema } from "./upload-name.js";
+import { ExportLauncher } from "./export-launcher.js";
 
-interface RouteOptions { production: ProductionService; media: MediaApplicationService; uploads: ManagedUploadStore }
+interface RouteOptions { production: ProductionService; media: MediaApplicationService; uploads: ManagedUploadStore; launcher?: ExportLauncher }
 type ProjectParams = { projectId: string };
 type JobParams = ProjectParams & { jobId: string };
 const text = { type: "string", minLength: 1, maxLength: 160 };
@@ -28,40 +29,16 @@ const summary = (job: MediaRenderJob) => ({ id: job.id, state: job.state, artifa
 export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions): void {
   app.register(async scope => {
     const { production, media, uploads } = options;
-    const tasks = new Map<string, { abort: AbortController; promise: Promise<void> }>();
-    let closing = false;
+    const launcher = options.launcher ?? new ExportLauncher(production, media);
+    launcher.attachLog((details, message) => scope.log.warn(details, message));
+    const tasks = launcher.tasks;
     const currentJob = (projectId: string, jobId: string) => {
       const found = media.workspaceSnapshot(projectId).jobs.find(job => job.id === jobId);
       invariant(found, "NOT_FOUND", "Render does not belong to this project"); return found;
     };
-    const commandActor = (projectId: string, action: string, key: string, context: unknown): ActorContext =>
-      production.beginRequest(projectId, "local-user", action, { source: "app", editing: false, key: `media:${key}`, contextDigest: digest(context) });
-    const launch = (job: MediaRenderJob, actor: ActorContext, action: "run" | "recover") => {
-      invariant(!closing, "SERVICE_UNAVAILABLE", "Renderer is shutting down");
-      if (tasks.has(job.id)) return;
-      const abort = new AbortController();
-      // Defer entry until the registry owns the task, including synchronous port failures.
-      const promise = Promise.resolve().then(async () => {
-        try { if (action === "run") await media.run(job.projectId, actor, job.id, { signal: abort.signal }); else await media.recover(job.projectId, actor, job.id); }
-        catch (error) {
-          // Admission can fail before the running transition. Keep it prepared,
-          // expose a bounded reason, and require an explicit later run request.
-          const code = error instanceof DomainError ? error.code : "MEDIA_RENDER_FAILED";
-          try {
-            production.store.transaction(() => {
-              const current = production.store.get<MediaRenderJob>("media_render", job.id);
-              if (current?.state === "prepared") production.store.put("media_render", job.id, job.projectId, { ...current, errorCode: code });
-            });
-          } catch { /* SQL unavailable: preserve existing durable intent for explicit recovery. */ }
-          scope.log.warn({ renderJobId: job.id, code }, "Local render did not complete");
-        } finally { tasks.delete(job.id); }
-      });
-      tasks.set(job.id, { abort, promise });
-    };
-    scope.addHook("onClose", async () => {
-      closing = true; const owned = [...tasks.values()]; owned.forEach(task => task.abort.abort(new DomainError("MEDIA_INTERRUPTED", "Renderer is shutting down")));
-      await Promise.allSettled(owned.map(task => task.promise));
-    });
+    const commandActor = (projectId: string, action: string, key: string, context: unknown): ActorContext => launcher.commandActor(projectId, action, key, context);
+    const launch = (job: MediaRenderJob, actor: ActorContext, action: "run" | "recover") => launcher.launch(job, actor, action);
+    scope.addHook("onClose", async () => { await launcher.close(); });
     // Stream bodies without buffering or touching files before inherited auth.
     scope.addContentTypeParser("application/octet-stream", (_request, payload, done) => { done(null, payload); });
     scope.get<{ Params: ProjectParams }>("/api/projects/:projectId/media", async request => {
@@ -73,13 +50,7 @@ export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions)
     scope.get<{ Params: ProjectParams }>("/api/projects/:projectId/exports", async request => media.exportView(request.params.projectId));
     scope.post<{ Params: ProjectParams; Body: StartExportInput }>("/api/projects/:projectId/exports", {
       schema: { body: object({ expectedHeadVersion: { type: "integer", minimum: 0 } }, ["expectedHeadVersion"]) },
-    }, async (request, reply) => {
-      const { projectId } = request.params, key = idempotencyKey(request);
-      const actor = commandActor(projectId, "Export the storyboard film", `export:${key}`, request.body);
-      const job = await media.prepareExport(projectId, actor, { ...request.body, key });
-      if (job.state === "prepared" && !job.errorCode && !job.cancelRequested) launch(job, actor, "run");
-      return reply.code(202).send(media.exportRecord(projectId, job.id));
-    });
+    }, async (request, reply) => reply.code(202).send(await launcher.start(request.params.projectId, request.body, idempotencyKey(request))));
     for (const action of ["cancel", "recover"] as const) {
       scope.post<{ Params: ProjectParams & { exportId: string }; Body: Record<string, never> }>(`/api/projects/:projectId/exports/:exportId/${action}`, {
         schema: { body: object({}) },

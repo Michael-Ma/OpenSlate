@@ -1,4 +1,4 @@
-import { applyCreativePatch, DomainError, invariant, shotIntentDigest } from "@openslate/core";
+import { applyCreativePatch, DomainError, invariant, shotIntentDigest, toolContractAtLeast } from "@openslate/core";
 import type { ChangeProposal, DirectorNote, ProjectRecord, ProposalReceipt } from "@openslate/core";
 import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorStartOptions } from "@openslate/director";
 import { DirectorStartRefusal } from "@openslate/director";
@@ -52,7 +52,7 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     // A deliberately bounded typed path for offline tests. Subject matching and
     // other natural language remain the real Director's responsibility; the app
     // resolves IDs/letters and enforces the originating human request's authority.
-    const decision = !command && input.bridge.toolContractVersion === "6.0.0"
+    const decision = !command && toolContractAtLeast(input.bridge.toolContractVersion, "6.0.0")
       ? /^\s*(accept|reject|decline)\s+proposal\s+([a-z0-9-]+)\b/i.exec(request.text) : null;
     if (decision) {
       const action = decision[1]!.toLowerCase() === "accept" ? "accept" : "reject", proposalId = decision[2]!;
@@ -82,7 +82,7 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     // This bounded script only recognizes an explicit request to make video. The
     // application still owns readiness and the later human confirmation press.
     const wantsVideo = /\b(?:make|generate|create|start)\s+(?:(?:a|the|scene)\s+)*(?:videos?|clips?)\b/i.test(request.text);
-    const readyScenes = (!command || command.action === "review") && input.bridge.toolContractVersion === "6.0.0" && wantsVideo
+    const readyScenes = (!command || command.action === "review") && toolContractAtLeast(input.bridge.toolContractVersion, "6.0.0") && wantsVideo
       && (request.editing || isKeyframeReview(this.service, input.requestId))
       ? new GenerationOverviewReader(this.service).read(input.projectId).scenes.filter(scene =>
         (request.scopeIds.includes(input.projectId) || request.scopeIds.includes(scene.sceneId) || scene.shotIds.some(id => request.scopeIds.includes(id)))
@@ -98,7 +98,7 @@ export class FakeWorkflowDirector implements DirectorRuntime {
         choices: [{ kind: "confirm_video", sceneId: scene.sceneId }, { kind: "reply" }],
       })) });
       text = "Scripted demo: video confirmation is ready. Confirm video in the chat or in Keyframes.";
-    } else if ((!command || command.action === "review") && scene && shots.length && ["5.0.0", "6.0.0"].includes(input.bridge.toolContractVersion ?? "1.0.0")) {
+    } else if ((!command || command.action === "review") && scene && shots.length && toolContractAtLeast(input.bridge.toolContractVersion, "5.0.0")) {
       const first = shots[0]!, last = shots.at(-1)!;
       const review = this.service.store.get("keyframe_review_request", input.requestId) || command?.action === "review";
       const proposal = review && last.desiredFrames < 240 ? await invoke("propose_change", { patch: { updateShots: [{ id: last.id, desiredFrames: 240 }] } }) as { proposalId: string } : null;
@@ -114,13 +114,13 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     }
     if (command && command.action !== "review") {
       const project = this.service.store.getProject(input.projectId);
-      if (command.action !== "create" && ["5.0.0", "6.0.0"].includes(input.bridge.toolContractVersion ?? "1.0.0")) {
+      if (command.action !== "create" && toolContractAtLeast(input.bridge.toolContractVersion, "5.0.0")) {
         const shot = project.shots.find(shot => shot.id === command.shotId);
         invariant(shot, "SCOPE_DENIED", "Choose a shot in this project");
         const framing = command.action === "close_up" ? "Extreme close-up" : "Wide";
         // V5 cannot propose a framing field. Keep its catalog immutable and offer
         // the corresponding prompt direction using the same derivation as V6.
-        const update = input.bridge.toolContractVersion === "6.0.0"
+        const update = toolContractAtLeast(input.bridge.toolContractVersion, "6.0.0")
           ? { id: shot.id, framing }
           : { id: shot.id, ...derivedShotPrompts(shot, { framing }) };
         const changed = Object.entries(update).some(([field, value]) => field !== "id" && shot[field as keyof typeof shot] !== value);
@@ -140,7 +140,7 @@ export class FakeWorkflowDirector implements DirectorRuntime {
         const proposal: ChangeProposal = { variant: "workflow", expectedHeadVersion: project.headVersion };
         if (command.action !== "create") {
           invariant(command.shotId && project.shots.some(shot => shot.id === command.shotId), "SCOPE_DENIED", "Choose a shot in this project");
-          const framing = input.bridge.toolContractVersion === "6.0.0"
+          const framing = toolContractAtLeast(input.bridge.toolContractVersion, "6.0.0")
             ? command.action === "close_up" ? "Extreme close-up" : "Wide"
             : command.action === "close_up" ? "Extreme close-up of stitching" : "Wide product view";
           const creative = { updateShots: [{ id: command.shotId, framing,

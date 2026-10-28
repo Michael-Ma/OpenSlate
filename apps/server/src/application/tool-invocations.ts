@@ -23,6 +23,13 @@ import type { PrepareNarrationSpeech } from "../narration/narration-speech-types
 import { resolveNarrationSpeechApplication } from '../narration/narration-speech-authorization.js';
 import { resolveOwnedTranscriptionApplication } from '../narration/owned-transcription-authorization.js';
 import type { Store } from '../persistence/store.js';
+import { toolContractAtLeast, hasCharacterPatchFields } from "@openslate/core";
+import type { ChangeProposal } from "@openslate/core";
+import { moveScene, moveShot, requestDeleteScene, requestDeleteShots, requestResume, requestUseTake, setSoundtrack, startExport, stopFilm, undoEdit,
+  type SetSoundtrackInput } from './director-edits.js';
+import { applyCharacterChange, makeCharacterSheets, readCharacters, type CharacterChangeInput } from './character-tools.js';
+import { analyzeMusic, LocalMusicAnalyzer, type MusicAnalyzers } from '../media/music-analyzer.js';
+import type { ExportLauncher } from '../media/export-launcher.js';
 
 export const TOOL_RESULT_MAX_BYTES = 1024 * 1024;
 export interface ToolInvocation {
@@ -119,8 +126,14 @@ export class ToolInvocationService {
   readonly #ownedTranscription: OwnedTranscriptionService | undefined;
   readonly #narrationSpeech: NarrationSpeechService | undefined;
   readonly #enqueueVoice: EnqueueSceneVoice;
-  constructor(readonly service: ProductionService, options: { ownedTranscription?: OwnedTranscriptionService; narrationSpeech?: NarrationSpeechService; enqueueVoice?: EnqueueSceneVoice } = {}) {
+  readonly #exports: ExportLauncher | undefined;
+  readonly #music: MusicAnalyzers;
+  constructor(readonly service: ProductionService, options: { ownedTranscription?: OwnedTranscriptionService; narrationSpeech?: NarrationSpeechService; enqueueVoice?: EnqueueSceneVoice;
+    /** Media-capable narration for local song analysis. */ mediaNarration?: NarrationService; exports?: ExportLauncher;
+    /** Override the analyzer slots; the default is the local timing analyzer with no enrichment. */ musicAnalyzers?: MusicAnalyzers } = {}) {
     this.narration = new NarrationService(service);
+    this.#exports = options.exports;
+    this.#music = options.musicAnalyzers ?? { local: new LocalMusicAnalyzer(service, options.mediaNarration) };
     this.#ownedTranscription = options.ownedTranscription; this.#narrationSpeech = options.narrationSpeech;
     this.#enqueueVoice = options.enqueueVoice ?? new SceneConfirmationRunner(service, options.narrationSpeech ? {
       narration: this.narration, canonical: new NarrationCanonicalService(this.narration), narrationSpeech: options.narrationSpeech,
@@ -192,7 +205,7 @@ export class ToolInvocationService {
     catch (error) {
       // Preserve the same safe, correctable schema refusal on exact retries (the bridge forwards compatible notes to
       // this authoritative validator). Never retain supplied argument values or create domain work on this path.
-      if ((tool !== 'record_notes' && tool !== 'propose_change' && tool !== 'prepare_change') || !['5.0.0', '6.0.0'].includes(selected.catalog.version) || !(error instanceof DomainError) || error.code !== 'VALIDATION_ERROR') throw error;
+      if ((tool !== 'record_notes' && tool !== 'propose_change' && tool !== 'prepare_change') || !toolContractAtLeast(selected.catalog.version, '5.0.0') || !(error instanceof DomainError) || error.code !== 'VALIDATION_ERROR') throw error;
       const argumentsDigest = digest(input);
       store.transaction(() => {
         this.service.assertActor(projectId, actor);
@@ -258,8 +271,15 @@ export class ToolInvocationService {
           parsed.arguments as unknown as { proposalId: string }, parsed.name === 'accept_proposal' ? 'accept' : 'reject'); break;
         case "propose_change": value = proposeChange(this.service, projectId, actor, id, parsed.arguments as unknown as { patch: ProposalPatch }); break;
         case "record_notes": value = recordNotes(this.service, projectId, actor, id, parsed.arguments as unknown as { notes: NoteInput[] }); break;
-        case "read_context": value = this.service.readContext(projectId, actor, parsed.arguments); break;
+        case "read_context": value = parsed.arguments.section === "characters"
+          ? readCharacters({ service: this.service, projectId, actor, invocationId: id, ...(signal ? { signal } : {}) })
+          : this.service.readContext(projectId, actor, parsed.arguments); break;
         case "prepare_change": {
+          const creative = (parsed.arguments as unknown as ChangeProposal).creative;
+          if (selected.catalog.version === "7.0.0" && hasCharacterPatchFields(creative)) {
+            value = applyCharacterChange({ service: this.service, projectId, actor, invocationId: id, ...(signal ? { signal } : {}) }, characterChange(parsed.arguments as unknown as ChangeProposal));
+            break;
+          }
           let prepared: Awaited<ReturnType<ProductionService["prepare"]>>;
           try { prepared = await this.service.prepare(projectId, actor, parsed.arguments); }
           catch (error) {
@@ -273,7 +293,7 @@ export class ToolInvocationService {
             value = { state: "awaiting_human_generation", preparedId: null, applied: false, generationStarted: false,
               savedProject: { revisionId: saved.revisionId, headVersion: saved.headVersion, activePlanId: saved.activePlanId,
                 sceneCount: saved.scenes.length, shotCount: saved.shots.length },
-              next: selected.catalog.version === "6.0.0"
+              next: toolContractAtLeast(selected.catalog.version, "6.0.0")
                 ? "Previously saved writing is retained. Save any remaining writing with a creative patch without source. For requested keyframes, use make_keyframes within the current human request's scope; for requested video, offer the scene's confirm_video choice after frame review. Only a returned prepared-change ID can be applied; preserve this result's state and use the existing generation actions."
                 : "A human generation press is the expected next step. This call saved no writing or generation plan and returned no prepared-change ID; previously saved writing is retained. Save any remaining writing with a creative patch without source. For visual work, the person uses the scene action to create keyframes, then reviews the returned frames and actual video recipe before the video action. For audio, the person presses the existing audio request action. Do not call apply_change with this result or retry preparation to obtain authorization." };
             break;
@@ -289,11 +309,33 @@ export class ToolInvocationService {
         }
         case "apply_change": value = this.service.apply(projectId, actor, parsed.arguments.preparedId as string); break;
         case "inspect_artifact": value = this.service.inspectArtifact(projectId, actor, parsed.arguments.artifactId as string); break;
-        case "control_execution": value = this.service.holdRequest(projectId, actor, true); break;
+        case "control_execution": {
+          const action = parsed.arguments.action;
+          value = action === "stop" ? stopFilm(this.service, projectId, actor, id)
+            : action === "resume" ? requestResume(this.service, projectId, actor, id)
+            : this.service.holdRequest(projectId, actor, true);
+          break;
+        }
+        case "set_soundtrack": value = setSoundtrack(this.service, projectId, actor, id, parsed.arguments as SetSoundtrackInput); break;
+        case "move_shot": value = moveShot(this.service, projectId, actor, id, parsed.arguments as unknown as { shotId: string; sceneId: string; beforeId?: string }); break;
+        case "move_scene": value = moveScene(this.service, projectId, actor, id, parsed.arguments as unknown as { sceneId: string; beforeId?: string }); break;
+        case "start_export": value = await startExport(this.service, this.#exports, projectId, actor, id); break;
+        case "undo_edit": value = undoEdit(this.service, projectId, actor, id, parsed.arguments as unknown as { commandId: string }); break;
+        case "delete_shots": value = requestDeleteShots(this.service, projectId, actor, id, parsed.arguments as unknown as { shotIds: string[] }); break;
+        case "delete_scene": value = requestDeleteScene(this.service, projectId, actor, id, parsed.arguments as unknown as { sceneId: string; withShots?: boolean }); break;
+        case "use_take": value = requestUseTake(this.service, projectId, actor, id, parsed.arguments as unknown as { shotId: string; artifactId: string }); break;
+        case "analyze_music": {
+          // Read-only: any turn that may read context may analyze, including discuss-only and review turns' scope rules.
+          this.service.assertActor(projectId, actor);
+          value = await analyzeMusic(store, this.#music, projectId, parsed.arguments.audioId as string, signal);
+          break;
+        }
+        case "make_character_sheets": value = makeCharacterSheets({ service: this.service, projectId, actor, invocationId: id, ...(signal ? { signal } : {}) },
+          parsed.arguments as unknown as { characterIds: string[]; regenerate?: boolean }); break;
         case "prepare_recording_transcription": {
           const port = this.#ownedTranscription;
           invariant(port, "TOOL_CAPABILITY_UNAVAILABLE", "Recording proposal preparation is not configured on this server");
-          if (selected.catalog.version === '6.0.0' && hasDirectorAudioAttachment(this.service, projectId, actor, parsed.arguments.audioId as string)) {
+          if (toolContractAtLeast(selected.catalog.version, '6.0.0') && hasDirectorAudioAttachment(this.service, projectId, actor, parsed.arguments.audioId as string)) {
             const result = await startDirectorAttachmentTranscription({ service: this.service, transcriptions: port, projectId, actor,
               key: commandKey, input: proposalInput as unknown as PrepareOwnedTranscription, ...(signal ? { signal } : {}) });
             const resolved = resolveOwnedTranscriptionApplication(store, projectId, result.receipt.candidateId);
@@ -354,7 +396,7 @@ export class ToolInvocationService {
         if (store.get("tool_reconciliation", call.id)) continue;
         let receipt: unknown = null;
         const catalogMatches = this.reconciliationCatalogMatches(projectId, call, epoch);
-        if (call.tool === 'make_keyframes' && call.toolContractVersion === '6.0.0' && catalogMatches) {
+        if (call.tool === 'make_keyframes' && toolContractAtLeast(call.toolContractVersion, '6.0.0') && catalogMatches) {
           const saved = store.get<DirectorKeyframesReceipt>('director_keyframes_receipt', call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) {
             // Effects commit with scene publication; blocks commit with refusal checkpoints.
@@ -367,11 +409,11 @@ export class ToolInvocationService {
               refused: saved.refused, complete: saved.complete };
           }
         }
-        if ((call.tool === "record_notes" || call.tool === "propose_change") && call.toolContractVersion && ["5.0.0", "6.0.0"].includes(call.toolContractVersion) && catalogMatches) {
+        if ((call.tool === "record_notes" || call.tool === "propose_change") && call.toolContractVersion && toolContractAtLeast(call.toolContractVersion, "5.0.0") && catalogMatches) {
           const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; receipt: unknown }>(call.tool === "record_notes" ? "director_notes_receipt" : "director_proposal_receipt", call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) receipt = saved.receipt;
         }
-        if ((call.tool === 'accept_proposal' || call.tool === 'reject_proposal') && call.toolContractVersion === '6.0.0' && catalogMatches) {
+        if ((call.tool === 'accept_proposal' || call.tool === 'reject_proposal') && toolContractAtLeast(call.toolContractVersion, '6.0.0') && catalogMatches) {
           const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; action: string; receipt: unknown }>('director_proposal_decision_receipt', call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest
             && saved.action === (call.tool === 'accept_proposal' ? 'accept' : 'reject')) receipt = saved.receipt;
@@ -400,7 +442,7 @@ export class ToolInvocationService {
             }
           }
         }
-        if (call.tool === 'prepare_recording_transcription' && call.toolContractVersion === '6.0.0' && catalogMatches) {
+        if (call.tool === 'prepare_recording_transcription' && toolContractAtLeast(call.toolContractVersion, '6.0.0') && catalogMatches) {
           const saved = store.list<DirectorAttachmentTranscriptionRecord>('director_attachment_transcription', projectId)
             .find(row => row.requestId === call.requestId && row.epochId === epochId && row.key === `director-tool:${call.id}` && row.state === 'succeeded');
           if (saved) {
@@ -445,6 +487,7 @@ export class ToolInvocationService {
             }
           }
         }
+        if (!receipt && call.toolContractVersion === '7.0.0' && catalogMatches) receipt = contractSevenReceipt(store, projectId, call);
         if (call.state === "started") this.finish(call.id, projectId, "unresolved", null, { code: "TOOL_CALL_UNRESOLVED", message: "Owning turn ended before its tool result was recorded" });
         store.insert("tool_reconciliation", call.id, projectId, { id: call.id, requestId: call.requestId, epochId,
           state: receipt ? "effect_confirmed" : "needs_followup", receipt, receiptDigest: receipt ? digest(receipt) : null });
@@ -461,4 +504,30 @@ export class ToolInvocationService {
       this.service.store.appendEvent(projectId, "tool.finished", { invocationId: id, callId: previous.callId, requestId: previous.requestId, tool: previous.tool, state });
     });
   }
+}
+
+/** Split a 7.0.0 character-only creative patch into the character tools' input. Mixed patches are refused. */
+function characterChange(proposal: ChangeProposal): CharacterChangeInput {
+  const creative = proposal.creative!;
+  const casting = (creative.updateShots ?? []).flatMap(row => row.characterIds !== undefined ? [{ shotId: row.id, characterIds: [...row.characterIds] }] : []);
+  const otherShotFields = (creative.updateShots ?? []).some(row => Object.keys(row).some(field => !["id", "characterIds"].includes(field)));
+  const others = Object.keys(creative).filter(field => !["createCharacters", "updateCharacters", "deleteCharacterIds", "updateShots"].includes(field));
+  invariant(!otherShotFields && !others.length && !proposal.source && !proposal.stages?.length && !proposal.requestNewTakes?.length, "VALIDATION_ERROR",
+    "prepare_change arguments are invalid: send createCharacters, updateCharacters, deleteCharacterIds and updateShots[].characterIds in their own call, without other creative fields");
+  return { ...(creative.createCharacters ? { createCharacters: creative.createCharacters } : {}), ...(creative.updateCharacters ? { updateCharacters: creative.updateCharacters } : {}),
+    ...(creative.deleteCharacterIds ? { deleteCharacterIds: creative.deleteCharacterIds } : {}), ...(casting.length ? { casting } : {}) };
+}
+
+/** A 7.0.0 edit or card commits with its own domain record; a lost transport result is recovered from it only. */
+function contractSevenReceipt(store: Store, projectId: string, call: ToolInvocation): JsonValue | null {
+  if (["set_soundtrack", "move_shot", "move_scene", "undo_edit"].includes(call.tool)) {
+    const edits = store.list<{ id: string; origin?: { director: { invocationId?: string } } }>("storyboard_edit", projectId)
+      .filter(edit => edit.origin?.director.invocationId === call.id);
+    return edits.length ? { commandIds: edits.map(edit => edit.id) } : null;
+  }
+  if (["delete_shots", "delete_scene", "use_take", "control_execution"].includes(call.tool)) {
+    const card = store.get<{ projectId: string; noteId: string; letter: string }>("director_card_receipt", call.id);
+    if (card?.projectId === projectId) return { state: "awaiting_confirmation", noteId: card.noteId, letter: card.letter, applied: false };
+  }
+  return null;
 }

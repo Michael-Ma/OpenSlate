@@ -114,6 +114,42 @@ export interface ProviderConfiguration {
   settings?: JsonObject;
 }
 
+/** Video types the Director recognises at intake (docs/ai/skill-drafts/video-types) plus music video. */
+export const FILM_KINDS = Object.freeze(["narrative_short", "commercial_ad", "product_showcase", "brand_film", "explainer", "tutorial",
+  "mini_doc", "testimonial", "social_vertical", "trailer_teaser", "event_recap", "fashion_lookbook", "place_film",
+  "kids_animated_story", "app_promo", "narrated_story", "tribute", "music_video"] as const);
+export type FilmKind = typeof FILM_KINDS[number];
+
+export interface VisualStyleTraits {
+  palette: string;
+  lighting: string;
+  lensFormat: string;
+  texture: string;
+  composition: string;
+  productionDesign: string;
+}
+/** One look per film (docs/ai/skill-drafts/visual-styles/index.md). */
+export interface VisualStyle {
+  styleId: string;
+  libraryVersion: string;
+  label: string;
+  /** Application-issued; changes whenever any field changes. */
+  revisionId: Id;
+  traits: VisualStyleTraits;
+  imageBlock: string;
+  motionBlock: string;
+  motion: {
+    cameraGrammar: string;
+    frameRateFeel: "24fps-cinematic" | "30fps-video" | "12fps-on-twos" | "8-12fps-stop-motion" | "60fps-smooth";
+    motionScale: "still" | "subtle" | "moderate" | "energetic";
+  };
+  negatives: string[];
+  anchors: { referenceArtifactIds: Id[]; characterSheets: Id[] };
+  variationAxes: Array<"timeOfDay" | "paletteShift" | "lightingKey" | "weather" | "treatment">;
+  overrides?: Partial<VisualStyleTraits>;
+  rationale: string;
+}
+
 export interface ProjectRecord {
   soundtrack?: {
     audioId: string;
@@ -134,6 +170,10 @@ export interface ProjectRecord {
   scenes: Array<{ id: Id; revisionId: Id; purpose: string; title?: string }>;
   /** Planned characters with per-scene wardrobe. Absent on plans written before character planning. */
   characters?: CharacterRecord[];
+  /** Explicit video type, set by the Director at intake. Absent on older plans. */
+  filmKind?: FilmKind;
+  /** The film's single look. Stored only; prompt compilation comes later. Absent on older plans. */
+  visualStyle?: VisualStyle;
   narration: {
     script: string;
     source: "undecided" | "uploaded" | "generated" | "mixed";

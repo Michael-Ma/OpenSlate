@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { canonical, invariant, parseToolArguments, toolCatalog } from "@openslate/core";
+import { canonical, invariant, parseToolArguments, toolCatalog, toolContractAtLeast } from "@openslate/core";
 import type { ToolContractVersion } from "@openslate/core";
 
 export interface BridgeLimits { requestBytes: number; responseBytes: number; timeoutMs: number; concurrency: number }
@@ -54,7 +54,7 @@ export class ToolBridge implements ToolInvoker {
     // validator see the original JSON, including malformed note fields, so a
     // failed review can explain itself to both the Director and the person.
     // This changes transport only: the locked schema still governs writes.
-    const body = name === "record_notes" && ["5.0.0", "6.0.0"].includes(this.toolContractVersion)
+    const body = name === "record_notes" && toolContractAtLeast(this.toolContractVersion, "5.0.0")
       ? canonical(input)
       : JSON.stringify(parseToolArguments(name, input, this.toolContractVersion).arguments);
     invariant(Buffer.byteLength(body) <= this.#limits.requestBytes, "TOOL_ARGUMENTS_TOO_LARGE", "Tool arguments exceed the bridge request limit");

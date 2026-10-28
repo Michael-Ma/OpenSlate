@@ -28,6 +28,8 @@ import { APP_NAME, DomainError, digest, invariant, newId } from "@openslate/core
 import type { ActorContext, HealthResponse } from "@openslate/core";
 import type { ControlInput, DirectorAttachmentRef, InstallationStatus, ReleaseAttemptInput } from "@openslate/core/public";
 import { ToolInvocationService } from "./application/tool-invocations.js";
+import { executionControlCommand } from "./application/execution-controls.js";
+import { ExportLauncher } from "./media/export-launcher.js";
 import { attachmentMessageContext, selectedDirectorAttachments, selectedDirectorImages } from "./application/director-images.js";
 import type { SelectedDirectorImage } from "./application/director-images.js";
 import type { ProductionService } from "./application/service.js";
@@ -149,7 +151,9 @@ export function createApp(options: AppOptions = {}) {
   });
   if (options.service) registerRecoveryRoutes(app, options.service);
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
-  if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
+  // One render registry for the person's Export and the Director's start_export.
+  const exportLauncher = options.mediaRoutes ? options.mediaRoutes.launcher ?? new ExportLauncher(options.mediaRoutes.production, options.mediaRoutes.media) : undefined;
+  if (options.mediaRoutes) registerMediaRoutes(app, { ...options.mediaRoutes, launcher: exportLauncher! });
   if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
   if (options.documentRoutes) registerDocumentRoutes(app, options.documentRoutes);
   registerProjectLibrary(app, service);
@@ -333,12 +337,8 @@ export function createApp(options: AppOptions = {}) {
     schema: { body: { oneOf: [object({ action: { const: "stop" } }, ["action"]),
       object({ action: { const: "resume" }, expectedAuthorityId: { anyOf: [string, { type: "null" }] } }, ["action", "expectedAuthorityId"])] } },
   }, async request => {
-    const key = requiredCommandKey(request);
-    // Continue changes control state only; it never drives a worker or Director tick.
-    return service().store.command(`local-user:${request.params.projectId}:control`, key, digest(request.body), () => {
-      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.action === "stop" ? "Stop the current conversation and new generation." : request.body.action, { source: "app", editing: false, key: `control:${key}` });
-      return service().control(request.params.projectId, actor, request.body.action, request.body.action === "resume" ? request.body.expectedAuthorityId : undefined);
-    });
+    const { requestId: _requestId, ...receipt } = executionControlCommand(service(), request.params.projectId, request.body, requiredCommandKey(request));
+    return receipt;
   });
   app.post<{ Params: { projectId: string; attemptId: string }; Body: ReleaseAttemptInput }>("/api/projects/:projectId/attempts/:attemptId/release", {
     schema: { body: object({ expectedPhase: { const: "submission_unknown" }, acknowledgeDoubleCharge: { type: "boolean" } }, ["expectedPhase"]) },
@@ -363,6 +363,8 @@ export function createApp(options: AppOptions = {}) {
       ...(sceneCommands ? { enqueueVoice: sceneCommands.enqueueKeyframes } : {}),
       ...(ports?.ownedTranscription ? { ownedTranscription: ports.ownedTranscription } : {}),
       ...(ports?.narrationSpeech ? { narrationSpeech: ports.narrationSpeech } : {}),
+      ...(ports?.narration ? { mediaNarration: ports.narration } : {}),
+      ...(exportLauncher ? { exports: exportLauncher } : {}),
     }).invoke(projectId, actor, callId, tool, request.body, { signal: abort.signal }); }
     finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
   });

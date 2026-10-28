@@ -1,4 +1,5 @@
-import { digest, invariant, toolCatalog, toolHandlerId } from '@openslate/core';
+import { digest, invariant, toolCatalog, toolContractAtLeast, toolHandlerId } from '@openslate/core';
+import type { ToolContractVersion } from '@openslate/core';
 import type { ActorContext } from '@openslate/core';
 import type { SkillCapabilityLock } from '@openslate/director';
 import type { ProductionService, RequestRecord } from './service.js';
@@ -19,11 +20,12 @@ export function assertDirectorGenerationAuthority(service: ProductionService, pr
   const binding = store.get<{ projectId: string; requestId: string; lockId: string }>('director_epoch_lock', actor.epochId);
   const record = binding ? store.get<{ projectId: string; lock: SkillCapabilityLock }>('director_skill_lock', binding.lockId) : undefined;
   invariant(binding?.projectId === projectId && binding.requestId === actor.requestId && record?.projectId === projectId
-    && record.lock.id === binding.lockId && record.lock.compatibility.toolContract === '6.0.0',
-  'ORIGIN_NOT_AUTHORIZED', 'This operation requires a locked 6.0.0 Director conversation');
-  const { lockDigest, ...body } = record.lock, catalog = toolCatalog('6.0.0');
+    && record.lock.id === binding.lockId && toolContractAtLeast(record.lock.compatibility.toolContract, '6.0.0'),
+  'ORIGIN_NOT_AUTHORIZED', 'This operation requires a locked 6.0.0 or later Director conversation');
+  const version = record.lock.compatibility.toolContract as ToolContractVersion;
+  const { lockDigest, ...body } = record.lock, catalog = toolCatalog(version);
   invariant(digest(body) === lockDigest && record.lock.bindings.some(item => item.kind === 'handler'
-    && item.id === toolHandlerId('6.0.0') && item.digest === catalog.digest),
+    && item.id === toolHandlerId(version) && item.digest === catalog.digest),
   'CAPABILITY_MISMATCH', 'Director generation differs from its immutable tool lock');
   invariant(!store.get<{ paused: boolean }>('execution_control', projectId)?.paused,
     'EXECUTION_PAUSED', 'Continue the stopped film before starting new work');

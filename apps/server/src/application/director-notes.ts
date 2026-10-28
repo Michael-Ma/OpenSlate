@@ -1,11 +1,12 @@
 import { canonical, digest, DomainError, invariant, newId } from '@openslate/core';
-import type { ActorContext, DirectorNote, ProjectRecord, ResolveNoteInput, ReviewNotesFailure } from '@openslate/core';
+import type { ActorContext, DirectorNote, NoteChoice, ProjectRecord, ResolveNoteInput, ReviewNotesFailure } from '@openslate/core';
 import type { FastifyInstance } from 'fastify';
 import type { Store } from '../persistence/store.js';
 import type { ProductionService, RequestRecord } from './service.js';
 import type { ProposalRecord } from './director-proposals.js';
 import type { SceneConfirmationRecord } from '../scene-confirmations.js';
 import { requiredCommandKey } from './command-key.js';
+import { applyConfirmationCard } from './director-edits.js';
 
 export type NoteInput = Pick<DirectorNote, 'anchor' | 'kind' | 'blocking' | 'text' | 'seenKeyframe' | 'choices'>;
 interface NoteBasis { projectId: string; invocationId: string; argumentsDigest: string; requestId: string; epochId: string; shots: { id: string; revisionId: string; digest?: string }[] }
@@ -96,6 +97,32 @@ export function recordNotes(service: ProductionService, projectId: string, actor
   });
 }
 
+/**
+ * A confirmation card (contract 7.0.0): an application-written note whose first choice the person's click applies.
+ * The Director names the change; the application composes the text from saved data, so a card never claims more.
+ */
+export function recordConfirmationCard(service: ProductionService, projectId: string, actor: ActorContext, invocationId: string,
+  input: { anchor: DirectorNote['anchor']; text: string; choice: Extract<NoteChoice, { kind: 'confirm_delete_shots' | 'confirm_delete_scene' | 'use_take' | 'confirm_resume' }>; keepLabel: string }) {
+  return service.store.transaction(() => {
+    invariant(actor.kind === 'director', 'ACTOR_DENIED', 'Cards require a Director epoch');
+    const store = service.store, project = store.getProject(projectId);
+    const turn = store.list<{ id: string; requestId: string; epochId: string }>('director_turn', projectId).find(t => t.epochId === actor.epochId && t.requestId === actor.requestId);
+    invariant(turn, 'ACTOR_DENIED', 'Cards require their application-owned turn');
+    const start = store.list<DirectorNote>('director_note', projectId).filter(n => n.turnId === turn.id).length;
+    const note: DirectorNote = { noteId: newId(), requestId: actor.requestId, turnId: turn.id, letter: letter(start), anchor: structuredClone(input.anchor),
+      kind: 'recommendation', blocking: false, text: input.text, choices: [structuredClone(input.choice), { kind: 'accept', label: input.keepLabel }],
+      state: 'open', version: 1, createdAt: new Date().toISOString() };
+    store.insert('director_note', note.noteId, projectId, note);
+    store.insert('director_note_basis', note.noteId, projectId, { projectId, invocationId, argumentsDigest: digest(input), requestId: actor.requestId, epochId: actor.epochId,
+      shots: shotsFor(project, note.anchor).map(s => ({ id: s.id, revisionId: s.revisionId, digest: digest(s) })) } satisfies NoteBasis);
+    store.appendEvent(projectId, 'director.note', { noteId: note.noteId, requestId: actor.requestId, turnId: turn.id, letter: note.letter });
+    store.insert('director_card_receipt', invocationId, projectId, { projectId, noteId: note.noteId, letter: note.letter });
+    return note;
+  });
+}
+const CARD_KINDS = new Set(['confirm_delete_shots', 'confirm_delete_scene', 'use_take', 'confirm_resume']);
+export const isConfirmationCardChoice = (choice: NoteChoice): choice is Extract<NoteChoice, { kind: 'confirm_delete_shots' | 'confirm_delete_scene' | 'use_take' | 'confirm_resume' }> => CARD_KINDS.has(choice.kind);
+
 function saveResolution(service: ProductionService, projectId: string, note: DirectorNote, resolution: NonNullable<DirectorNote['resolution']>, requestId: string): DirectorNote {
   const store = service.store;
   const resolved: DirectorNote = { ...note, state: 'resolved', version: note.version + 1, resolution };
@@ -140,6 +167,14 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
       throw new DomainError('NOTE_RESULT_INVALID', 'Accept this note through the exact reviewed proposal first');
     }
     invariant(note.version === input.expectedVersion, 'REVISION_CONFLICT', 'This note has already changed');
+    // A confirmation card applies the person's own command on this click, and only on this click.
+    let resultRef = input.resultRef;
+    const card = isConfirmationCardChoice(choice);
+    if (card) {
+      invariant(note.state === 'open', 'NOTE_STALE', 'This card is no longer current. Ask the Director for a fresh one.');
+      invariant(input.resultRef === undefined, 'NOTE_RESULT_INVALID', 'A confirmation card applies its own change');
+      resultRef = applyConfirmationCard(service, projectId, note.noteId, choice, key);
+    }
     const events = store.readEvents(projectId);
     const noteSequence = events.find(e => e.kind === 'director.note' && e.payload.noteId === noteId)?.sequence ?? Infinity;
     if (choice.kind === 'accept' || choice.kind === 'reply') invariant(note.state === 'open', 'NOTE_STALE', 'This note is no longer current');
@@ -175,8 +210,9 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
       invariant(edit?.before.id === projectId && request?.principalId === 'local-user' && request.source === 'app' && events.some(e => e.kind === 'storyboard.edited' && e.payload.commandId === input.resultRef && e.sequence > noteSequence) && before && after
         && canonical(before[choice.field] ?? null) !== canonical(after[choice.field] ?? null), 'NOTE_RESULT_INVALID', 'Link the human edit of this field');
     }
-    const actor = service.beginRequest(projectId, 'local-user', 'Resolve this Director note.', { source: 'app', concurrency: 'alongside', scopeIds: note.anchor.shotIds?.length ? note.anchor.shotIds : note.anchor.sceneId ? [note.anchor.sceneId] : [projectId], key: `resolve-note:${key}` });
-    const resolved = saveResolution(service, projectId, note, { choiceIndex: input.choiceIndex, at: new Date().toISOString(), ...(input.resultRef ? { resultRef: input.resultRef } : {}) }, actor.requestId);
+    // A card's change may remove its own anchor (deletion), so it settles under whole-film scope.
+    const actor = service.beginRequest(projectId, 'local-user', 'Resolve this Director note.', { source: 'app', concurrency: 'alongside', scopeIds: card ? [projectId] : note.anchor.shotIds?.length ? note.anchor.shotIds : note.anchor.sceneId ? [note.anchor.sceneId] : [projectId], key: `resolve-note:${key}` });
+    const resolved = saveResolution(service, projectId, note, { choiceIndex: input.choiceIndex, at: new Date().toISOString(), ...(resultRef ? { resultRef } : {}) }, actor.requestId);
     service.releaseAlongsideHolds(projectId, actor);
     return resolved;
   });

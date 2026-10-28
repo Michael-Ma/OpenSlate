@@ -1,6 +1,8 @@
 import { directorNotes } from "./director-notes.js";
 import { directorProposals } from "./director-proposals.js";
-import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
+import { SUPPORTED_TOOL_CONTRACTS, toolContractAtLeast } from "@openslate/core";
+import { audioLibraryRole, type AudioLabel } from "../narration/audio-library-role.js";
+import { SONG_TIMING_VERSION, type SongTiming } from "../media/song-timing.js";
 import { projectRequest } from "./request-source.js";
 import type { RequestRecord } from "./service.js";
 import { canonical, digest, invariant, workflowReadiness } from "@openslate/core";
@@ -15,7 +17,7 @@ import { projectApplicationCapabilities } from "./application-capabilities.js";
 import type { DirectorApplicationCapabilities } from "./application-capabilities.js";
 
 export const DIRECTOR_PROJECTION_LIMITS = Object.freeze({ bytes: 512 * 1024, records: 20, sourceCharacters: 64 * 1024, maximumOffset: 10_000_000 });
-export type DirectorContextSection = "overview" | "shots" | "scenes" | "plan" | "aliases" | "grants" | "receipts" | "narration" | "audio_operations" | "notes";
+export type DirectorContextSection = "overview" | "shots" | "scenes" | "plan" | "aliases" | "grants" | "receipts" | "narration" | "audio_operations" | "notes" | "audio_library";
 export interface DirectorContextQuery { section?: DirectorContextSection; offset?: number }
 type Message = RequestRecord;
 interface Hold { id: string; scopeId: string; ownerId: string; active: boolean }
@@ -59,13 +61,14 @@ export interface DirectorContextProjection {
   cues?: ProjectRecord["cues"];
   narrationDraft?: { version: number; revisionId?: string | null; segments: unknown[]; readiness?: unknown; authority: string };
   audioLibrary?: unknown[];
+  soundtrack?: ProjectRecord["soundtrack"] | null;
   coverage: Record<string, unknown>;
   source?: string;
 }
 function query(input: DirectorContextQuery): { section: DirectorContextSection; offset: number } {
   invariant(input && typeof input === "object" && !Array.isArray(input) && Object.keys(input).every(key => ["section", "offset"].includes(key)), "VALIDATION_ERROR", "Context query supports only section and offset");
   const section = input.section ?? "overview"; const offset = input.offset ?? 0;
-  invariant(["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", "narration", "audio_operations", "notes"].includes(section), "VALIDATION_ERROR", "Unknown context section");
+  invariant(["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", "narration", "audio_operations", "notes", "audio_library"].includes(section), "VALIDATION_ERROR", "Unknown context section");
   invariant(Number.isSafeInteger(offset) && offset >= 0 && offset <= DIRECTOR_PROJECTION_LIMITS.maximumOffset, "VALIDATION_ERROR", "Invalid context offset");
   return { section, offset };
 }
@@ -183,15 +186,15 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       page: page(offset, 0, 0), items: [], messages: [], holds: [], toolCalls: [], workflow: null, work: null,
       execution: { globallyPaused: service.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false,
         scopedHoldSemantics: "Director pause creates a request-owned scope hold. Applying a matching plan releases that request's hold. This is separate from the human global pause. Read current context after mutations before describing execution state." },
-      coverage: { notes: { open: notes.filter(n => n.state === "open").length, resolved: notes.filter(n => n.state === "resolved").length, stale: notes.filter(n => n.state === "stale").length }, sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", ...((SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(toolVersion) ? ["audio_operations"] : []), ...(["5.0.0", "6.0.0"].includes(toolVersion) ? ["notes"] : [])], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId, applicationCapabilitiesDigest and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
+      coverage: { notes: { open: notes.filter(n => n.state === "open").length, resolved: notes.filter(n => n.state === "resolved").length, stale: notes.filter(n => n.state === "stale").length }, sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", ...((SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(toolVersion) ? ["audio_operations"] : []), ...(toolContractAtLeast(toolVersion, "5.0.0") ? ["notes"] : []), ...(toolContractAtLeast(toolVersion, "7.0.0") ? ["audio_library", "characters"] : [])], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId, applicationCapabilitiesDigest and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
     };
     const itemsPage = (items: unknown[]): DirectorContextProjection => {
       base.guard.dataDigest = digest(items);
       return adaptive(offset, items.length, count => ({ ...base, items: items.slice(offset, offset + count), page: page(offset, count, items.length) }));
     };
     if (section === "notes") {
-      invariant(["5.0.0", "6.0.0"].includes(toolVersion), "CAPABILITY_MISMATCH", "Notes require the current catalog");
-      if (toolVersion === '6.0.0') {
+      invariant(toolContractAtLeast(toolVersion, "5.0.0"), "CAPABILITY_MISMATCH", "Notes require the current catalog");
+      if (toolContractAtLeast(toolVersion, '6.0.0')) {
         const proposals = directorProposals(service, projectId).proposals;
         base.guard.dataDigest = digest({ notes, proposals });
         return adaptive(offset, Math.max(notes.length, proposals.length), count => ({ ...base,
@@ -202,6 +205,27 @@ export function projectDirectorContext(service: ProductionService, projectId: st
         }));
       }
       return itemsPage(notes);
+    }
+    if (section === "audio_library") {
+      invariant(toolContractAtLeast(toolVersion, "7.0.0"), "CAPABILITY_MISMATCH", "The audio library requires contract 7.0.0");
+      // Same records, labels and roles as GET /audio-library; timing only when already measured (read_context never analyzes).
+      const labels = new Map(service.store.list<AudioLabel>("audio_library_label", projectId).map(label => [label.id, label]));
+      const recordings = service.store.list<NarrationAudio>("narration_audio", projectId).reverse().flatMap(audio => {
+        const measured = audio.media.probe.audio;
+        if (audio.media.kind !== "audio" || !measured?.samples || measured.sampleRate !== 48000) return [];
+        const label = labels.get(audio.id), role = audioLibraryRole(saved, audio, label);
+        const cached = service.store.get<{ projectId: string; sha256: string; timing: SongTiming }>("song_timing", audio.id);
+        const timing = cached?.projectId === projectId && cached.sha256 === audio.media.sha256 && cached.timing.version === SONG_TIMING_VERSION ? cached.timing : null;
+        return [{ audioId: audio.id, label: label?.label ?? ("originEvidence" in audio ? "Generated narration" : "Uploaded recording"), role,
+          origin: "originEvidence" in audio ? "generated" : "uploaded", durationSeconds: measured.samples / 48000, sha256: audio.media.sha256,
+          isSoundtrack: saved.soundtrack?.audioId === audio.id,
+          songTiming: timing ? { bpm: timing.bpm, sectionStartSeconds: timing.sectionStartFrames.map(frame => Math.round(frame / 3) / 10) } : null }];
+      });
+      base.guard.dataDigest = digest({ recordings, soundtrack: saved.soundtrack ?? null });
+      return adaptive(offset, recordings.length, count => ({ ...base, items: recordings.slice(offset, offset + count), page: page(offset, count, recordings.length),
+        soundtrack: saved.soundtrack ?? null,
+        coverage: { ...base.coverage, audioLibrary: { total: recordings.length, returned: recordings.slice(offset, offset + count).length,
+          note: "soundtrack null means the person chose no music; absent (undefined) means music was never chosen. Use analyze_music for timing of a recording without songTiming." } } }));
     }
     if (section === "audio_operations") {
       invariant((SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(toolVersion), "CAPABILITY_MISMATCH", "Audio preparation context requires compatible audio guidance");

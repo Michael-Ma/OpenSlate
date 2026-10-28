@@ -1,4 +1,4 @@
-import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
+import { RELEASED_TOOL_CONTRACTS } from "@openslate/core";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import type { ActorContext, ToolContractVersion } from "@openslate/core";
 import type { SkillCapabilityLock } from "@openslate/director";
@@ -14,7 +14,8 @@ export interface DirectorToolsUpgrade {
 }
 interface UpgradeReceipt { lockId: string; previousLockId: string; toolContract: Exclude<ToolContractVersion, "1.0.0"> }
 
-const upgradeTargets: Readonly<Record<string, readonly string[]>> = Object.fromEntries(SUPPORTED_TOOL_CONTRACTS.map((version, index) => [version, SUPPORTED_TOOL_CONTRACTS.slice(index + 1)]));
+// Only contracts with shipped guidance are upgrade targets; 7.0.0 waits for its guidance packages.
+const upgradeTargets: Readonly<Record<string, readonly string[]>> = Object.fromEntries(RELEASED_TOOL_CONTRACTS.map((version, index) => [version, RELEASED_TOOL_CONTRACTS.slice(index + 1)]));
 
 /** Authenticated local configuration only; never registered as a model tool. */
 export class DirectorToolSettings {
@@ -101,7 +102,7 @@ export class DirectorToolSettings {
     invariant(input && Object.keys(input).every(field => ["expectedLockId", "expectedLockDigest", "targetVersion"].includes(field))
       && typeof input.expectedLockId === "string" && input.expectedLockId.length > 0 && input.expectedLockId.length <= 160
       && typeof input.expectedLockDigest === "string" && /^[a-f0-9]{64}$/.test(input.expectedLockDigest)
-      && (SUPPORTED_TOOL_CONTRACTS.slice(1) as readonly string[]).includes(input.targetVersion), "VALIDATION_ERROR", "Choose the displayed narration tools update");
+      && (RELEASED_TOOL_CONTRACTS.slice(1) as readonly string[]).includes(input.targetVersion), "VALIDATION_ERROR", "Choose the displayed narration tools update");
     invariant(typeof key === "string" && key.length > 0 && key.length <= 160, "VALIDATION_ERROR", "Use one update command identity");
     const payload = structuredClone(input), requestDigest = digest(payload), store = this.service.store;
     const scope = `local-user:${projectId}:director-tools-upgrade`;

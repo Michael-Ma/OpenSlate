@@ -368,7 +368,12 @@ export type NoteChoice =
   | { kind: "edit_field"; shotId: string; field: "narration" | "imagePrompt" | "motion" }
   | { kind: "reply" }
   /** The person's "Confirm frames & generate video" for this scene, offered in the note (contract 6.0.0). */
-  | { kind: "confirm_video"; sceneId: string };
+  | { kind: "confirm_video"; sceneId: string }
+  /** Contract 7.0.0 confirmation cards. The application writes these notes; only the person's click applies them. */
+  | { kind: "confirm_delete_shots"; shotIds: string[] }
+  | { kind: "confirm_delete_scene"; sceneId: string; withShots: boolean }
+  | { kind: "use_take"; shotId: string; artifactId: string }
+  | { kind: "confirm_resume"; expectedAuthorityId: string | null };
 
 export interface DirectorNote {
   noteId: string;
