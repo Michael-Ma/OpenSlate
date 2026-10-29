@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "id": "plan-authoring",
+  "version": "8.1.0",
+  "role": "core",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/example-context.json",
+    "references/grammar.md"
+  ],
+  "compatibility": {
+    "toolContract": "7.0.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "accept_proposal",
+    "apply_change",
+    "control_execution",
+    "inspect_artifact",
+    "make_keyframes",
+    "prepare_change",
+    "prepare_narration_speech",
+    "prepare_recording_transcription",
+    "propose_change",
+    "read_context",
+    "read_guidance",
+    "record_notes",
+    "reject_proposal",
+    "start_export"
+  ],
+  "requires": [],
+  "optional": []
+}

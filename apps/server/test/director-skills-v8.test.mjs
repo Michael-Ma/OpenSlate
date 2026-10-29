@@ -16,7 +16,7 @@ import { createDirectorSkillLock } from '../dist/application/director-capabiliti
 import { DirectorContextService } from '../dist/application/director-context.js';
 import { DirectorToolSettings } from '../dist/application/director-tools-upgrade.js';
 import { ToolInvocationService } from '../dist/application/tool-invocations.js';
-import { SHIPPED_DIRECTOR_RELEASES, createCurrentShippedDirectorSkillLock, currentShippedToolContract, isCurrentShippedDirectorGuidance } from '../dist/application/director-shipped-guidance.js';
+import { SHIPPED_DIRECTOR_RELEASES, currentShippedToolContract, isCurrentShippedDirectorGuidance, isShippedDirectorRelease } from '../dist/application/director-shipped-guidance.js';
 import { projectFixture } from './execution-fixture.mjs';
 import { packageDigest } from '../../../packages/director/test/skill-release-fixture.mjs';
 
@@ -55,18 +55,19 @@ function freshFilm(t) {
 const injected = context => context.references.reduce((sum, ref) => sum + words(ref.content), 0);
 const ref = (context, id, path = 'SKILL.md') => context.references.find(item => item.skillId === id && item.path === path)?.content ?? '';
 
-test('v8 ships pinned: release, handler and package digests match the checkout, and it is the latest shipped identity', t => {
-  const row = SHIPPED_DIRECTOR_RELEASES.at(-1), release = releaseJson();
+test('v8 (8.0.0) stays pinned: release, handler and package digests match the checkout; 8.0.1 succeeds it', t => {
+  const row = SHIPPED_DIRECTOR_RELEASES.find(item => item.guidanceVersion === '8.0.0'), release = releaseJson();
+  assert.equal(SHIPPED_DIRECTOR_RELEASES.indexOf(row), 0, 'the first release row is never replaced');
   assert.deepEqual({ toolContract: row.toolContract, guidanceVersion: row.guidanceVersion }, { toolContract: '7.0.0', guidanceVersion: '8.0.0' });
   assert.equal(row.releaseDigest, digest(release), 'skills/v8/release.json is the pinned release');
   assert.equal(row.handlerDigest, toolCatalog('7.0.0').digest, 'the 7.0.0 catalog is frozen at its shipped digest');
   for (const pin of release.packages) assert.equal(packageDigest(join(shipped, pin.id)), pin.packageDigest, `${pin.id} matches its release pin`);
   assert.equal(currentShippedToolContract(), '7.0.0');
   const root = mkdtempSync(join(tmpdir(), 'openslate-v8-pin-')); t.after(() => { writable(root); rmSync(root, { recursive: true, force: true }); });
-  const { lock } = createCurrentShippedDirectorSkillLock({ repositoryRoot, snapshotRoot: join(root, 'skills') });
+  const { lock } = createDirectorSkillLock({ repositoryRoot, snapshotRoot: join(root, 'skills') }, '7.0.0');
   assert.equal(lock.schemaVersion, 2); assert.deepEqual(lock.release, { version: '8.0.0', releaseDigest: row.releaseDigest });
   assert.equal(lock.skills.length, release.packages.length);
-  assert.ok(isCurrentShippedDirectorGuidance(lock));
+  assert.ok(isShippedDirectorRelease(lock)); assert.ok(!isCurrentShippedDirectorGuidance(lock), 'a saved 8.0.0 lock upgrades to the latest release');
   // Every application film kind is routed; only undecided and other fall back.
   assert.deepEqual(Object.keys(release.routes).sort(), ['general', ...FILM_KIND_KINDS].sort());
   assert.deepEqual(Object.entries(release.routes).filter(([, owner]) => owner === 'fallback').map(([kind]) => kind).sort(), ['general', 'other', 'undecided']);
@@ -80,7 +81,7 @@ test('a new film locks v8 on contract 7.0.0 and routes the IG skit to type-socia
   const turn = f.turn('a 20 s funny social video to post on IG, to make people laugh');
   assert.equal(turn.input.bridge.toolContractVersion, '7.0.0');
   const lock = f.store.list('director_skill_lock', f.project.id).at(-1).lock;
-  assert.equal(lock.schemaVersion, 2); assert.equal(lock.release.version, '8.0.0');
+  assert.equal(lock.schemaVersion, 2); assert.equal(lock.release.version, SHIPPED_DIRECTOR_RELEASES.at(-1).guidanceVersion);
   assert.deepEqual(turn.context.guidance.routing.selected, ['production', 'plan-authoring', 'type-social', 'format-social-vertical', 'craft-story', 'craft-comedy', 'craft-visual-style', 'craft-shot-prompting']);
   assert.equal(turn.context.guidance.routing.reasons['type-social'], 'route:type');
   assert.equal(turn.context.guidance.routing.reasons['format-social-vertical'], 'route:format');

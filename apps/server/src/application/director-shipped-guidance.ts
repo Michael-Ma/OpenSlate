@@ -43,9 +43,12 @@ export interface ShippedReleaseGuidance {
   releaseDigest: string;
 }
 // The latest row is the fresh-turn upgrade target and the identity new projects lock. Never replace a pin; any change to
-// skills/v8 ships as a new package minor, a new release version and a new row.
+// a shipped release ships as a new package minor, a new release version (a new skills/v<version> directory, see
+// releaseDirectory) and a new row.
+// 8.0.1: propose, wait for acceptance, then make keyframes; intake references consolidated (fewer read_guidance calls).
 export const SHIPPED_DIRECTOR_RELEASES: readonly ShippedReleaseGuidance[] = [
   { toolContract: "7.0.0", guidanceVersion: "8.0.0", handlerDigest: "e99bf5bd4b04cff07732a2997fb25fe0e052b8efbc893514a307ec163871dc92", releaseDigest: "da01dfb4cb255b5f5de38c097da5c9a9a3c95bc0a0a1809ce0f5126b39dab3b2" },
+  { toolContract: "7.0.0", guidanceVersion: "8.0.1", handlerDigest: "e99bf5bd4b04cff07732a2997fb25fe0e052b8efbc893514a307ec163871dc92", releaseDigest: "8663b6a96e5cfa5b40c5a616ae316d4c64f72dc0750bdc6627cfc2c89a0935e0" },
 ];
 for (const identity of SHIPPED_DIRECTOR_RELEASES) Object.freeze(identity);
 Object.freeze(SHIPPED_DIRECTOR_RELEASES);
@@ -79,7 +82,7 @@ export function createCurrentShippedDirectorSkillLock(configuration: DirectorSki
   try {
     const release = releases.at(-1);
     const pin = SHIPPED_DIRECTOR_GUIDANCE.filter(row => row.toolContract === "6.0.0").at(-1)!;
-    const current = release ? createDirectorReleaseLock(configuration, release.toolContract, release.guidanceVersion.split(".")[0]!, release.releaseDigest)
+    const current = release ? createDirectorReleaseLock(configuration, release.toolContract, release.guidanceVersion, release.releaseDigest)
       : createDirectorSkillLock(configuration, "6.0.0", "7", { production: pin.productionDigest, "plan-authoring": pin.planAuthoringDigest });
     verifyShippedDirectorGuidance(current.lock, configuration, releases);
     return current;

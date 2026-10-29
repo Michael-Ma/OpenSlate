@@ -2,6 +2,10 @@
 
 Reconciled October 16, 2026 (feature branch after the B18 merge, including B1–B18). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
+## October 28 acceptance fixes — Director guidance 8.0.1, export holds and vertical fit
+
+From the 20 s IG Reels acceptance run (`~/openslate-ig-test`, read-only evidence): `make_keyframes` refuses shots an open proposal would re-prompt (`PROPOSAL_PENDING`, with a `next` step) and release `8.0.1` (`skills/v8.0.1`, a new `SHIPPED_DIRECTOR_RELEASES` row) says propose, wait, then make; the Director's own `start_export` is no longer refused by its own conversation's edit hold (`MEDIA_HELD` still applies to every other hold); a film with a chosen format crops near-shape clips to fill the frame in the export and the Film preview (`clipFit`, 1.25×), legacy films stay `contain`; `read_guidance` is bounded per turn at 32 distinct files and 192 KiB with free repeats, and 8.0.1 merges four intake references (13 distinct reads for the IG first turn instead of 21 counted). Offline only; port 3001 was not used.
+
 ## October 28 Director guidance release v8 — shipped on contract 7.0.0
 
 `skills/v8` ships 22 schema 2 packages pinned by one `release.json` (core production and plan-authoring, ten craft, nine type, one format package). Every film-kind@1 kind routes to its type package; only `undecided` and `other` fall back. `SHIPPED_DIRECTOR_RELEASES` now holds the v8 row, so new films lock v8/7.0.0 and saved V7 films upgrade on their next eligible fresh native turn; already-bound epochs keep their lock. Contract 7.0.0 gained `propose_visual_style` (a style card whose chosen option saves `project.visualStyle` with an undoable command) before its digest was frozen. Tests that pin 6.0.0-era transitions now pass the release list `[]` explicitly. Offline only: no provider, model or Codex call, and port 3001 was not used. Worst-case injection is 7,318 of 10,000 words.
