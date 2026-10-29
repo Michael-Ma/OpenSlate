@@ -1,9 +1,10 @@
 import type { DirectorProposal, GenerationOverview, ProposalPreview, ShotOverview } from "@openslate/core/public";
 import type { TimelineSegment } from "./checks.ts";
 import { isWorking, shotHasNoAnswer, unresolvedQueue, videoPanel, waitingMsg } from "./keyframes.ts";
-import { regenerationState, regenerationSummary, type NoteAction, type NoteView } from "./notes.ts";
+import { clipRemakeSummary, regenerationState, regenerationSummary, type NoteAction, type NoteView } from "./notes.ts";
 import { pendingAutomaticRetry } from "./media-state.ts";
-import { formatMicros, keyframeEstimate, priceMsg } from "./price.ts";
+import { clipRemakeEstimate, formatMicros, keyframeEstimate, priceMsg } from "./price.ts";
+import { errorMsg } from "../i18n/translate.ts";
 import { msg, type Msg } from "./types.ts";
 import type { MessageId } from "../i18n/messages.ts";
 
@@ -173,6 +174,17 @@ function choiceAction(note: NoteView, index: number, overview: GenerationOvervie
       // A stale note can still be carried out by a regenerate (the server accepts it); only an in-flight job stops it.
       return { ...base, price: regeneratePrice(action.shotIds, overview, locale), enabled: (note.state !== "resolved" || note.regeneration === "failed") && !busy && keyframeEstimate(action.shotIds, overview) !== null };
     }
+    case "remake_clip": {
+      const shots = action.shotIds.map((id) => overview.shots[id]);
+      const quote = clipRemakeEstimate(action.shotIds, overview);
+      // The server says per shot whether a new clip can be made now (a saved clip, an opened current frame, no job
+      // in flight); a job running on one of the shots names itself first.
+      const wait = shots.map((shot) => (shot ? regenerationBlock(shot) : null)).find((reason) => !!reason) ?? null;
+      const refusal = shots.map((shot) => (!shot ? "VALIDATION_ERROR" : shot.remakeClip?.available ? null : shot.remakeClip?.code ?? "CLIP_NOT_SAVED")).find((code) => !!code) ?? null;
+      const enabled = base.enabled && !wait && !refusal && !!quote;
+      const reason = !base.enabled ? null : wait ?? (refusal ? errorMsg(refusal) : null);
+      return { ...base, price: quote ? priceMsg({ ...quote, units: 1, unitMicros: "0" }, locale) : msg("price.unknown"), enabled, reason };
+    }
     case "edit": return { ...base, enabled: note.state !== "resolved" };
     case "confirm_video": {
       // The same check as the scene's own button: one confirm, wherever it is pressed.
@@ -238,6 +250,7 @@ export function settledMsg(action: NoteAction, label: Label, overview: Generatio
     case "accept": return msg("note.settled.accepted", { choice: "text" in label ? label.text : "" });
     // Not "regenerated" while the new keyframe is still being made.
     case "regenerate": return regenerationSummary(overview, action.shotIds);
+    case "remake_clip": return clipRemakeSummary(overview, action.shotIds);
     case "edit": return msg("note.settled.edited", { shot: labels([action.shotId]) });
     case "proposal": return msg("note.settled.applied");
     case "confirm_video": return msg("note.settled.video_confirmed", { scene: overview.scenes.find((s) => s.sceneId === action.sceneId)?.ordinal ?? "?" });

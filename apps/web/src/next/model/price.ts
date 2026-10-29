@@ -28,6 +28,20 @@ export function priceMsg(quote: PriceQuote, locale: string): Msg {
 }
 
 /** The same selected-shot total for a regeneration label and its expected-price fence. */
+/** A new clip for saved shots: the sum of each shot's own remake quote (exact; the voice lines are reused). */
+export function clipRemakeEstimate(shotIds: readonly string[], overview: GenerationOverview): Pick<PriceQuote, "micros" | "priceUnknown"> | null {
+  if (!shotIds.length) return null;
+  let total = 0n;
+  let priceUnknown = false;
+  for (const id of new Set(shotIds)) {
+    const quote = overview.shots[id]?.quotes?.remakeClip;
+    if (!quote || !/^\d+$/.test(quote.micros)) return null;
+    total += BigInt(quote.micros);
+    priceUnknown ||= quote.priceUnknown || BigInt(quote.micros) === 0n;
+  }
+  return { micros: String(total), priceUnknown };
+}
+
 export function keyframeEstimate(shotIds: readonly string[], overview: GenerationOverview): Pick<PriceQuote, "micros" | "priceUnknown" | "subscription"> | null {
   if (!shotIds.length) return null;
   let total = 0n;

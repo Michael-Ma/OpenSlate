@@ -1,4 +1,5 @@
-import type { ConfirmSceneInput, GenerationOverview, SceneOverview } from "@openslate/core/public";
+import type { ConfirmSceneInput, GenerationOverview, RemakeClipsInput, SceneOverview } from "@openslate/core/public";
+import { clipRemakeEstimate } from "./price.ts";
 
 /** GET /api/projects/:projectId/scenes/:sceneId/generation: the freshness tokens the generate command echoes. */
 export interface SceneGenerationRead {
@@ -79,6 +80,23 @@ export function confirmBody(overview: GenerationOverview, scene: SceneOverview):
   if (!reviewedFrames.length) throw new CommandRefused("ALREADY_COMPLETE");
   const quote = scene.quotes.confirmVideo;
   return { confirmationDigest: scene.confirmationDigest, reviewedFrames, ...(quote && !quote.priceUnknown ? { expectedEstimateMicros: quote.micros } : {}) };
+}
+
+/**
+ * A new clip for saved shots from their current, opened keyframes (contract 7.1.0). It echoes the scene's review
+ * token and sums the shots' own remake quotes; the saved voice lines are reused, so nothing else is bought.
+ */
+export function remakeClipsBody(overview: GenerationOverview, scene: SceneOverview, shotIds: readonly string[]): RemakeClipsInput {
+  if (!scene.confirmationDigest) throw new CommandRefused("SCENE_REVIEW_STALE");
+  const reviewedFrames = shotIds.map((shotId) => {
+    const keyframe = overview.shots[shotId]?.keyframe;
+    if (!keyframe || keyframe.state !== "ready" || !keyframe.artifact) throw new CommandRefused("SCENE_REVIEW_STALE");
+    if (!keyframe.opened) throw new CommandRefused("FRAME_NOT_OPENED");
+    return { shotId, artifactId: keyframe.artifact.artifactId, sha256: keyframe.artifact.sha256 };
+  });
+  if (!reviewedFrames.length) throw new CommandRefused("VALIDATION_ERROR");
+  const quote = clipRemakeEstimate(shotIds, overview);
+  return { confirmationDigest: scene.confirmationDigest, reviewedFrames, targetShotIds: [...shotIds], ...(quote && !quote.priceUnknown ? { expectedEstimateMicros: quote.micros } : {}) };
 }
 
 /** Storyboard edits (POST /api/projects/:projectId/storyboard). */

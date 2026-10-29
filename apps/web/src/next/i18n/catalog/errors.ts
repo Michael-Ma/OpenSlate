@@ -46,6 +46,8 @@ export const errors = {
   "error.OUTPUT_DOWNLOAD_EXPIRED": { en: "the download link expired", zh: "下载链接已过期" },
   "error.OUTPUT_DOWNLOAD_ADDRESS": { en: "the download address was refused", zh: "下载地址被拒绝" },
   "error.OUTPUT_DOWNLOAD_FAILED": { en: "the download failed; the studio keeps trying", zh: "下载失败，studio 会继续尝试" },
+  "error.CLIP_NOT_SAVED": { en: "This shot has no saved clip yet. Use the scene's Confirm to make it.", zh: "这个镜头还没有保存的视频，请用这一场的「确认」来生成。" },
+  "error.SCENE_VIDEO_SAVED": { en: "Every clip in this scene is already saved. Ask for a new clip of a shot instead.", zh: "这一场的视频都已保存，请改为重做某个镜头的视频。" },
   "error.ALREADY_COMPLETE": { en: "Everything in this scene is already made.", zh: "这一场的内容都已经生成了。" },
   "error.RETRY_NOT_AUTHORIZED": { en: "This job needs a new press after the stop.", zh: "停止之后，这个任务需要重新确认。" },
   "error.EXECUTION_HELD": { en: "An edit is still being saved. Try again in a moment.", zh: "还有修改正在保存，请稍后再试。" },

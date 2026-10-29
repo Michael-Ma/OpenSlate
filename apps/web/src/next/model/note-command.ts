@@ -5,7 +5,7 @@ import { wordsOf } from "./narration.ts";
 import { msg } from "./types.ts";
 
 type NoteStore = Pick<StudioStore, "getState" | "regenerateKeyframe" | "makeKeyframes" | "resolveNote" | "setEdit" | "dispatch" | "refresh">;
-type ChoiceStore = NoteStore & Pick<StudioStore, "confirmVideo" | "acceptProposal" | "pointAt" | "setDirectorOpen">;
+type ChoiceStore = NoteStore & Pick<StudioStore, "confirmVideo" | "remakeClips" | "acceptProposal" | "pointAt" | "setDirectorOpen">;
 export interface NoteCommandOwner { projectId: string; projectEpoch: number }
 
 /** A callback belongs to one opening of one film, including leaving and reopening that same film. */
@@ -79,6 +79,18 @@ export async function runNoteVideoConfirm(store: ChoiceStore, overview: Generati
   return !!resolved && noteCommandCurrent(store, owner);
 }
 
+/** A pressed new clip and its free note resolution: the studio settles the note itself when the remake starts. */
+export async function runNoteClipRemake(store: ChoiceStore, overview: GenerationOverview, action: Extract<NoteAction, { kind: "remake_clip" }>): Promise<boolean> {
+  const owner = noteCommandOwner(store, overview);
+  if (!owner || !action.shotIds.length) return false;
+  const receipt = await store.remakeClips(action.shotIds);
+  const confirmationId = (receipt as { confirmationId?: string } | undefined)?.confirmationId;
+  if (!confirmationId || !noteCommandCurrent(store, owner)) return false;
+  if (await settledByPress(store, action.noteId, owner)) return noteCommandCurrent(store, owner);
+  const resolved = await store.resolveNote(action.noteId, action.choiceIndex, confirmationId);
+  return !!resolved && noteCommandCurrent(store, owner);
+}
+
 /** An "edit" choice waits for its field to be saved; the note then resolves with that edit (Keyframes or the chat). */
 export interface PendingNoteEdit extends NoteCommandOwner {
   noteId: string;
@@ -115,6 +127,7 @@ export async function runNoteChoice(store: ChoiceStore, overview: GenerationOver
     case "accept": case "card": return (await store.resolveNote(action.noteId, action.choiceIndex)) ? { kind: "settled", undo: null } : null;
     case "regenerate": return (await runNoteRegeneration(store, overview, action)) ? { kind: "settled", undo: null } : null;
     case "confirm_video": return (await runNoteVideoConfirm(store, overview, action)) ? { kind: "settled", undo: null } : null;
+    case "remake_clip": return (await runNoteClipRemake(store, overview, action)) ? { kind: "settled", undo: null } : null;
     case "edit": {
       if (!openNoteEditor(store, overview, action, openShot)) return null;
       setPendingNoteEdit(store, { ...owner, noteId: action.noteId, choiceIndex: action.choiceIndex, shotId: action.shotId, field: action.field });

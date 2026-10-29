@@ -283,7 +283,7 @@ function Workspace() {
       {notes.banner ? (
         <NoteBanner
           view={notes.banner}
-          busy={notes.busy || Object.keys(pending).some((key) => key.startsWith("regenerate:"))}
+          busy={notes.busy || Object.keys(pending).some((key) => key.startsWith("regenerate:") || key.startsWith("remake:"))}
           nextLetter={notes.nextLetter}
           canUndo={notes.canUndo}
           onChoose={notes.choose}

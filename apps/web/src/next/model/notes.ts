@@ -13,6 +13,8 @@ export type NoteAction =
   /** Opens the inline editor; the note resolves with the edit's command id once it is saved. */
   | { kind: "edit"; noteId: string; choiceIndex: number; shotId: string; field: "narration" | "imagePrompt" | "motion" }
   | { kind: "proposal"; noteId: string; choiceIndex: number; proposalId: string }
+  /** A priced press: new clips for saved shots from their current keyframes (contract 7.1.0). */
+  | { kind: "remake_clip"; noteId: string; choiceIndex: number; shotIds: string[] }
   /** The scene's "Confirm frames & generate video", pressed from the note; it resolves with the confirmation. */
   | { kind: "confirm_video"; noteId: string; choiceIndex: number; sceneId: string }
   /** Points the composer at the note's anchor so the person can answer in words. */
@@ -60,6 +62,7 @@ function choiceLabel(choice: NoteChoice, overview: GenerationOverview, proposals
   switch (choice.kind) {
     case "accept": return { text: choice.label };
     case "regenerate_keyframe": return msg("note.choice.regenerate", { shots: labels(overview, choice.shotIds) });
+    case "remake_clip": return msg("note.choice.remake_clip", { shots: labels(overview, choice.shotIds) });
     case "edit_field": return msg(`note.choice.edit.${choice.field}`, { shot: labels(overview, [choice.shotId]) });
     case "reply": return msg("note.choice.reply");
     case "confirm_video": return msg("note.choice.confirm_video", { scene: ordinalOf(overview, choice.sceneId) });
@@ -108,6 +111,24 @@ export function regenerationSummary(overview: GenerationOverview, shotIds: reado
   return msg(state === "making" ? "note.settled.regenerating" : state === "complete" ? "note.settled.regenerated" : "note.settled.waiting", { shots: names });
 }
 
+const failedClip = (shot: GenerationOverview["shots"][string]) => (shot.video.replacement ?? shot.video).state === "failed";
+
+/**
+ * How a new-clip press stands: the old clip stays current until the new one is saved, so "made" needs the clip slot
+ * ready with no replacement left in flight, and a failed replacement says so (the old clip is still there).
+ */
+export function clipRemakeSummary(overview: GenerationOverview, shotIds: readonly string[]): Msg {
+  const shots = shotIds.map((id) => overview.shots[id]).filter((shot) => !!shot);
+  const names = labels(overview, shotIds);
+  const unanswered = shots.filter(shotHasNoAnswer);
+  if (unanswered.length) return msg("scene.unknown_outcome", { shots: unanswered.map((shot) => shot.label).join(", ") });
+  const failed = shots.filter(failedClip);
+  if (failed.length) return msg("note.settled.clip_failed", { shots: failed.map((shot) => shot.label).join(", ") });
+  if (shots.some((shot) => isWorking(shot.video) || (shot.video.replacement?.state === "queued" || shot.video.replacement?.state === "running"))) return msg("note.settled.clip_making", { shots: names });
+  const done = shots.length === shotIds.length && shots.every((shot) => shot.video.state === "ready" && !shot.video.replacement);
+  return msg(done ? "note.settled.clip_made" : "note.settled.waiting", { shots: names });
+}
+
 function fromMessage(choice: NoteChoice | undefined, proposals: readonly DirectorProposal[]): DirectorProposal | undefined {
   if (choice?.kind !== "proposal") return undefined;
   const proposal = proposals.find((p) => p.proposalId === choice.proposalId);
@@ -119,6 +140,7 @@ function settledMsg(choice: NoteChoice, overview: GenerationOverview, proposals:
     case "confirm_video": return msg("note.settled.video_confirmed", { scene: ordinalOf(overview, choice.sceneId) });
     case "accept": return msg("note.settled.accepted", { choice: choice.label });
     case "regenerate_keyframe": return regenerationSummary(overview, choice.shotIds);
+    case "remake_clip": return clipRemakeSummary(overview, choice.shotIds);
     case "edit_field": return msg("note.settled.edited", { shot: labels(overview, [choice.shotId]) });
     case "proposal": return msg(fromMessage(choice, proposals) ? "note.settled.applied_from_message" : "note.settled.applied");
     case "reply": return msg("note.settled.replied");
@@ -132,6 +154,7 @@ function action(note: DirectorNote, choice: NoteChoice, choiceIndex: number): No
   switch (choice.kind) {
     case "accept": return { kind: "accept", ...base };
     case "regenerate_keyframe": return { kind: "regenerate", ...base, shotIds: choice.shotIds };
+    case "remake_clip": return { kind: "remake_clip", ...base, shotIds: choice.shotIds };
     case "edit_field": return { kind: "edit", ...base, shotId: choice.shotId, field: choice.field };
     case "proposal": return { kind: "proposal", ...base, proposalId: choice.proposalId };
     case "confirm_video": return { kind: "confirm_video", ...base, sceneId: choice.sceneId };

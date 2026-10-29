@@ -31,8 +31,10 @@ import type {
   ShotTakes,
   StudioArtifactRef,
   UseTakeReceipt,
+  RemakeClipsInput,
 } from "@openslate/core/public";
 import { joinPromptParts } from "@openslate/core/public";
+import { clipRemakeAvailability } from "./clip-remake.ts";
 import { ApiError } from "../api/client.ts";
 import { estimateNarrationSeconds, narrationPace } from "../model/checks.ts";
 import type { GenerateBody, SceneGenerationRead, StoryboardEdit } from "../model/commands.ts";
@@ -168,7 +170,8 @@ function recomputeScene(overview: GenerationOverview, scene: SceneOverview, note
       ...(keyframeTargets.length ? { makeKeyframes: generationQuote(keyframeTargets.filter((id) => overview.shots[id]!.keyframe.state !== "ready").length, keyframeTargets.filter((id) => needsVoice(overview.shots[id]!, projectShots)).length) } : {}),
     },
     blockers,
-    confirmationDigest: videoTargets.length ? DIGEST : null,
+    // The studio reports the review token for a saved scene too: a new clip of a saved shot echoes it.
+    confirmationDigest: videoTargets.length || shots.some((shot) => shot.video.state === "ready") ? DIGEST : null,
   };
 }
 
@@ -180,7 +183,9 @@ export function recompute(overview: GenerationOverview, notes: readonly Director
   const shots: Record<string, ShotOverview> = {};
   for (const [id, shot] of Object.entries(overview.shots)) {
     const keyframe: KeyframeSlot = shot.keyframe.state === "ready" ? shot.keyframe : { ...shot.keyframe, opened: false };
-    shots[id] = { ...shot, keyframe, narration: narrationFits(shot.narration, shot.durationFrames, overview.fps), quotes: { ...shot.quotes, regenerateKeyframe: generationQuote(1, needsVoice(shot, projectShots) ? 1 : 0) } };
+    shots[id] = { ...shot, keyframe, narration: narrationFits(shot.narration, shot.durationFrames, overview.fps),
+      quotes: { ...shot.quotes, regenerateKeyframe: generationQuote(1, needsVoice(shot, projectShots) ? 1 : 0), remakeClip: quote(1, FIXTURE_PRICES.clip) },
+      remakeClip: clipRemakeAvailability({ ...shot, keyframe }) };
   }
   const withShots = { ...overview, shots };
   return { ...withShots, scenes: overview.scenes.map((scene) => recomputeScene(withShots, scene, notes, projectShots)) };
@@ -533,6 +538,26 @@ function confirmScene(world: FixtureWorld, sceneId: string, body: ConfirmSceneIn
     : { confirmationId: startClips(world, scene, targets), state: "running", currentShotId: targets[0]!, currentStep: "video" };
   settleNotesElsewhere(world, (choice) => choice.kind === "confirm_video" && choice.sceneId === sceneId, view.confirmationId);
   return view;
+}
+
+/** A new clip for saved shots from their current, opened keyframes (contract 7.1.0); the voice lines are reused. */
+function remakeClips(world: FixtureWorld, sceneId: string, body: RemakeClipsInput): SceneConfirmationView {
+  const scene = findScene(world, sceneId);
+  if (world.overview.stopped) throw new ApiError("EXECUTION_PAUSED", 409);
+  if (!body?.confirmationDigest || body.confirmationDigest !== scene.confirmationDigest) throw new ApiError("SCENE_REVIEW_STALE", 409);
+  const targets = body.targetShotIds ?? [];
+  if (!targets.length || targets.length > 4 || new Set(targets).size !== targets.length || targets.some((id) => !scene.shotIds.includes(id))) throw new ApiError("VALIDATION_ERROR", 400);
+  for (const id of targets) {
+    const shot = world.overview.shots[id]!;
+    const refusal = shot.remakeClip?.available ? null : shot.remakeClip?.code ?? "CLIP_NOT_SAVED";
+    if (refusal) throw new ApiError(refusal, 409);
+    const reviewed = body.reviewedFrames.find((frame) => frame.shotId === id);
+    if (!reviewed || reviewed.artifactId !== shot.keyframe.artifact?.artifactId || reviewed.sha256 !== shot.keyframe.artifact?.sha256) throw new ApiError("SCENE_REVIEW_STALE", 409);
+  }
+  if (body.expectedEstimateMicros !== undefined && body.expectedEstimateMicros !== quote(targets.length, FIXTURE_PRICES.clip).micros) throw new ApiError("ESTIMATE_CHANGED", 409);
+  const confirmationId = startClips(world, scene, targets);
+  settleNotesElsewhere(world, (choice) => choice.kind === "remake_clip" && choice.shotIds.every((id) => targets.includes(id)), confirmationId);
+  return { confirmationId, state: "running", currentShotId: targets[0]!, currentStep: "video" };
 }
 
 /** One confirm's voice steps: its clips, the lines to voice first, and the frames it was confirmed with. */
@@ -966,6 +991,11 @@ function resolveNote(world: FixtureWorld, noteId: string, body: ResolveNoteInput
       if (!request?.regenerate || !choice.shotIds.every((id) => request.shotIds.includes(id))) throw new ApiError("NOTE_RESULT_INVALID", 409);
       break;
     }
+    case "remake_clip": {
+      const scene = world.overview.scenes.find((s) => choice.shotIds.every((id) => s.shotIds.includes(id)));
+      if (!body.resultRef || scene?.confirmation?.confirmationId !== body.resultRef) throw new ApiError("NOTE_RESULT_INVALID", 409);
+      break;
+    }
     case "confirm_video":
       if (!body.resultRef || findScene(world, choice.sceneId).confirmation?.confirmationId !== body.resultRef) throw new ApiError("NOTE_RESULT_INVALID", 409);
       break;
@@ -1243,6 +1273,7 @@ export function fixtureCommand(world: FixtureWorld, method: "GET" | "POST", path
     if ((id = match(/^\/shots\/([^/]+)\/frame-views$/))) return frameView(world, id, body as FrameViewInput);
     if ((id = match(/^\/scenes\/([^/]+)\/generate$/))) return generate(world, id, body as GenerateInput);
     if ((id = match(/^\/scenes\/([^/]+)\/confirm$/))) return confirmScene(world, id, body as ConfirmSceneInput);
+    if ((id = match(/^\/scenes\/([^/]+)\/remake-clips$/))) return remakeClips(world, id, body as RemakeClipsInput);
     if ((id = match(/^\/shots\/([^/]+)\/narration-fit$/))) return narrationFit(world, id, body as NarrationFitInput);
     if (path === "/storyboard") return storyboard(world, body as StoryboardBody);
     if (path === "/controls") return control(world, body as ControlInput);

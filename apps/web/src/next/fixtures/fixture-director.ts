@@ -37,6 +37,9 @@ const DECLINES_PROPOSAL = /\b(?:decline|reject)\s+proposal\s+([a-z])\b|(?:拒绝
 /** Asking for video ("make the video for Scene 2", "生成视频"): the scripted Director asks for the scene's confirm in the chat. */
 const ASKS_FOR_VIDEO = /(make|generate|create|start)\b[^.?!]*\b(video|clips?)\b|(生成|做|出)[^。？！]*视频/i;
 
+/** Asking for a new clip of named saved shots ("remake the clip for 1.1", "重做 1.1 的视频"): a new-clip choice, keeping the frame. */
+const ASKS_FOR_CLIP_REMAKE = /\b(remake|redo|regenerate|new)\b[^.?!]*\b(videos?|clips?)\b|\b(videos?|clips?)\b[^.?!]*\b(remake|redo|again)\b|(重做|重新生成|再做)[^。？！]*视频/i;
+
 /** Asking for a look ("suggest visual styles", "推荐视觉风格"): the scripted Director proposes three (decision 7). */
 const ASKS_FOR_STYLE = /\bvisual styles?\b|\b(suggest|propose|choose|pick)\b[^.?!]*\blooks?\b|视觉风格|推荐[^。？！]*风格/i;
 
@@ -67,6 +70,21 @@ function fixtureVideoAsks(world: FixtureWorld, requestId: string, scope: readonl
       choices: [{ kind: "confirm_video", sceneId: scene.sceneId }, { kind: "reply" }],
       state: "open", version: 1, createdAt: at,
     }));
+}
+
+/** The saved shots a remake message names by label ("1.1"), or points at; one scene, at most four. */
+function fixtureClipRemake(world: FixtureWorld, requestId: string, text: string, scope: readonly string[]): DirectorNote[] {
+  const shots = Object.values(world.overview.shots).filter((shot) => shot.video.state === "ready"
+    && (scope.includes(shot.shotId) || new RegExp(`(?:^|[^\\d.])${shot.label.replace(".", "\\.")}(?![\\d.])`).test(text)));
+  if (!shots.length || shots.length > 4 || new Set(shots.map((shot) => shot.sceneId)).size !== 1) return [];
+  const shotIds = shots.map((shot) => shot.shotId);
+  return [{
+    noteId: `${requestId}-note-1`, requestId, turnId: `${requestId}-turn`, letter: nextLetter(world.snapshot.notes ?? [], 0),
+    anchor: { shotIds }, kind: "recommendation", blocking: false,
+    text: `A new clip for ${shots.map((shot) => shot.label).join(", ")} from the same keyframe. The current clip stays until the new one is saved.`,
+    choices: [{ kind: "remake_clip", shotIds }, { kind: "reply" }],
+    state: "open", version: 1, createdAt: new Date().toISOString(),
+  }];
 }
 
 /**
@@ -178,12 +196,14 @@ export function fixtureMessage(world: FixtureWorld, body: unknown): unknown {
     const declined = declineNamed ? fixtureDeclineOnWord(w, (declineNamed[1] ?? declineNamed[2])!, requestId) : null;
     // Asked for keyframes: the scripted Director starts them as the person's press would, and says what and the price.
     const started = !questionId && ASKS_FOR_KEYFRAMES.test(text) ? fixtureDirectorKeyframes(w) : null;
-    const videoAsks = !questionId && !started && ASKS_FOR_VIDEO.test(text) ? fixtureVideoAsks(w, requestId, filmScope) : [];
+    const remakes = !questionId && !started && ASKS_FOR_CLIP_REMAKE.test(text) ? fixtureClipRemake(w, requestId, text, filmScope) : [];
+    const videoAsks = remakes.length ? remakes : !questionId && !started && ASKS_FOR_VIDEO.test(text) ? fixtureVideoAsks(w, requestId, filmScope) : [];
     // Asked for a look ("suggest visual styles", "推荐风格"): three looks on a card, nothing applied (decision 7).
     const styleAsk = !questionId && !started && !videoAsks.length && ASKS_FOR_STYLE.test(text) ? [fixtureStyleNote(requestId, nextLetter(w.snapshot.notes ?? [], 0))] : [];
     const asks: DirectorNote[] = [...videoAsks, ...styleAsk];
-    const askNames = videoAsks.map((note) => `Scene ${w.overview.scenes.find((scene) => scene.sceneId === note.anchor.sceneId)?.ordinal}`);
-    const replyText = styleAsk.length ? "Here are three looks that suit the brief. Choose one and I'll use it for every keyframe."
+    const askNames = remakes.length ? [] : videoAsks.map((note) => `Scene ${w.overview.scenes.find((scene) => scene.sceneId === note.anchor.sceneId)?.ordinal}`);
+    const replyText = remakes.length ? "Press New clip below, in this chat or in Keyframes. It keeps the keyframe and the voice line, and the current clip stays until the new one is saved."
+      : styleAsk.length ? "Here are three looks that suit the brief. Choose one and I'll use it for every keyframe."
       : scriptedReply(names, !!questionId, pictures, attachments.length, !!started?.started.length, askNames);
     const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: acceptedReply(named, accepted) + acceptedReply(declineNamed, declined, true) + replyText, requestId, at: new Date().toISOString(), runtime: "scripted" };
     const at = new Date().toISOString();

@@ -3,13 +3,13 @@ import { ProjectSubscription } from "../../shared/project-subscription.ts";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
 import { errorMsg } from "../i18n/translate.ts";
 import type { RoleFilter } from "../model/assets.ts";
-import { CommandRefused, confirmBody, keyframesBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
+import { CommandRefused, confirmBody, keyframesBody, remakeClipsBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
 import {
   isQuarantined, NO_RECOVERY, parseRecoveryStatus, parseSavedRelease, RECOVERY_LOCK, RECOVERY_PATH, recoveryReadOnly, RELEASE_PATH, RELEASE_PRESS, RELEASE_STORAGE_KEY,
   recoveryChange, releaseBody, releaseOutcome, unconfirmedStillApplies, type ReleaseOutcome, type SavedRelease,
 } from "../model/recovery.ts";
 import { addPicture, messageBody, pictureKey, type Draft, type PictureCandidate } from "../model/director.ts";
-import { confirmPress, keyframesPress, PAID_PRESS } from "../model/keyframes-press.ts";
+import { confirmPress, keyframesPress, PAID_PRESS, remakePress } from "../model/keyframes-press.ts";
 import { msg, type DirectorStatus, type Msg, type ProjectSnapshot, type ProjectSummary, type Target, type ViewName } from "../model/types.ts";
 import { editConflict, editValues, motionForm, sameEditForm } from "../model/edit-conflict.ts";
 import { displayedHead } from "../model/displayed-baseline.ts";
@@ -313,6 +313,18 @@ export class StudioStore {
     return this.#press(pressId, logical, async () => ({
       path: path(this.#state.projectId!, `/scenes/${encodeURIComponent(sceneId)}/confirm`),
       body: confirmBody(overview, scene),
+    }));
+  }
+
+  /** A new clip for saved shots of one scene from their current keyframes; old clips stay until the new ones are saved. */
+  remakeClips(shotIds: readonly string[]): Promise<unknown> {
+    const overview = this.#state.overview;
+    const scene = overview?.scenes.find((s) => s.sceneId === overview.shots[shotIds[0] ?? ""]?.sceneId);
+    if (!overview || !scene) return Promise.resolve(undefined);
+    const { pressId, logical } = remakePress(overview, scene, shotIds);
+    return this.#press(pressId, logical, async () => ({
+      path: path(this.#state.projectId!, `/scenes/${encodeURIComponent(scene.sceneId)}/remake-clips`),
+      body: remakeClipsBody(overview, scene, shotIds),
     }));
   }
 

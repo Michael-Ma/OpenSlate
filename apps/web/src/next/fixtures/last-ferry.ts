@@ -1,6 +1,7 @@
 import type { DirectorNote, DirectorProposal, GenerationOverview, KeyframeSlot, MediaSlot, SceneOverview, ShotNarration, ShotOverview } from "@openslate/core/public";
 import type { DirectorStatus, ProjectSnapshot } from "../model/types.ts";
 import { fixtureFitSeconds } from "./narration-fit.ts";
+import { clipRemakeAvailability } from "./clip-remake.ts";
 
 /**
  * The Last Ferry: the fictional film from the chosen design (docs/ai/prototypes/last-ferry).
@@ -83,8 +84,12 @@ export function lastFerryOverview(): GenerationOverview {
       keyframe: keyframe(row),
       video: video(row),
       narration: narration(row),
-      quotes: { regenerateKeyframe: { micros: row.narration && row.keyframe === "none" ? "50000" : "40000", units: row.narration && row.keyframe === "none" ? 2 : 1, unitMicros: row.narration && row.keyframe === "none" ? "0" : "40000", priceUnknown: false } },
+      quotes: {
+        regenerateKeyframe: { micros: row.narration && row.keyframe === "none" ? "50000" : "40000", units: row.narration && row.keyframe === "none" ? 2 : 1, unitMicros: row.narration && row.keyframe === "none" ? "0" : "40000", priceUnknown: false },
+        remakeClip: { micros: "500000", units: 1, unitMicros: "500000", priceUnknown: false },
+      },
     };
+  for (const shot of Object.values(shots)) shot.remakeClip = clipRemakeAvailability(shot);
   const scenes: SceneOverview[] = [1, 2, 3].map((ordinal) => {
     const inScene = rows.filter((row) => row.scene === ordinal);
     const ids = inScene.map((row) => shotId(row.id));
@@ -123,7 +128,8 @@ export function lastFerryOverview(): GenerationOverview {
             ...(ordinal === 2 ? [{ code: "recommendation_open" as const, shotId: shotId("2.3") }] : []),
           ]
         : [],
-      confirmationDigest: state === "keyframes_back" ? "f".repeat(64) : null,
+      // A saved scene keeps its review token: a new clip of one of its shots echoes it.
+      confirmationDigest: state === "keyframes_back" || state === "video_saved" ? "f".repeat(64) : null,
     };
     return scene;
   });

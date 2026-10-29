@@ -60,7 +60,7 @@ export function NoteCards({ notes }: { notes: ThreadNote[] }) {
         }
         const banner = overview && tone === "open" ? noteBanner(view, overview, proposals, locale) : null;
         const choices = banner?.state === "open" ? banner : null;
-        const video = choices?.actions.find((action) => action.action.kind === "confirm_video");
+        const video = choices?.actions.find((action) => action.action.kind === "confirm_video" || action.action.kind === "remake_clip");
         return (
           <article key={view.noteId} className={`note${tone === "open" ? "" : " done"}`} data-note={view.letter} data-note-id={view.noteId} data-state={view.state} data-tone={tone}>
             <span className="letter" aria-hidden="true">{view.letter}</span>
@@ -68,6 +68,7 @@ export function NoteCards({ notes }: { notes: ThreadNote[] }) {
             <div className="note-text">{keepTogether(view.text)}</div>
             {choices && choices.changes.length > 0 && <Changes rows={choices.changes} label={(value) => ("text" in value ? value.text : tm(value))} />}
             {choices && video?.action.kind === "confirm_video" && overview && <SceneFrames overview={overview} sceneId={video.action.sceneId} />}
+            {choices && video?.action.kind === "remake_clip" && overview && <SceneFrames overview={overview} sceneId={overview.shots[video.action.shotIds[0] ?? ""]?.sceneId ?? ""} shotIds={video.action.shotIds} />}
             {(() => {
               const pills = opens.map((target) => (
                 <button type="button" key={`${target.kind}:${target.id}`} className="pill sm" data-act="note-open" data-target={`${target.kind}:${target.id}`} onClick={() => open(target)}>
@@ -107,7 +108,7 @@ function Choices({ noteId, actions, overview, note, onUndoable, children }: {
   const store = useStore();
   const server = useGuarded("server");
   const run = useGuarded("run");
-  const busy = useStudio((s) => Object.keys(s.pending).some((key) => key.startsWith("note:") || key.startsWith("proposal:") || key.startsWith("confirm:")));
+  const busy = useStudio((s) => Object.keys(s.pending).some((key) => key.startsWith("note:") || key.startsWith("proposal:") || key.startsWith("confirm:") || key.startsWith("remake:")));
   const label = (value: Label) => ("text" in value ? value.text : tm(value));
   // An edit chosen here opens its field in Keyframes; saving it there settles the note.
   const openShot = useCallback((shotId: string) => {
@@ -122,7 +123,7 @@ function Choices({ noteId, actions, overview, note, onUndoable, children }: {
     <>
       <div className="row note-choices">
         {actions.map((action, index) => {
-          const paid = action.action.kind === "regenerate" || action.action.kind === "confirm_video";
+          const paid = action.action.kind === "regenerate" || action.action.kind === "confirm_video" || action.action.kind === "remake_clip";
           const guard = paid ? run : action.action.kind === "reply" ? null : server;
           const style = action.style === "chosen" ? "pill sm chosen" : action.style === "ghost" ? "pill sm ghost" : "pill sm";
           return (
@@ -134,7 +135,7 @@ function Choices({ noteId, actions, overview, note, onUndoable, children }: {
         })}
         {children}
       </div>
-      {reasons.map((reason, index) => <p key={index} className="note-why" data-why="confirm_video">{tm(reason)}</p>)}
+      {reasons.map((reason, index) => <p key={index} className="note-why" data-why="choice">{tm(reason)}</p>)}
     </>
   );
 }
@@ -143,11 +144,12 @@ function Choices({ noteId, actions, overview, note, onUndoable, children }: {
  * The frames a video confirm will use, small, in story order. Opening one shows it large in the card; once it has
  * really been shown (decoded and on screen) it counts as opened, as in Keyframes (WA-9). A thumbnail alone does not.
  */
-function SceneFrames({ overview, sceneId }: { overview: GenerationOverview; sceneId: string }) {
+function SceneFrames({ overview, sceneId, shotIds }: { overview: GenerationOverview; sceneId: string; shotIds?: readonly string[] }) {
   const { t } = useI18n();
   const [shown, setShown] = useState<string | null>(null);
   const scene = overview.scenes.find((s) => s.sceneId === sceneId);
-  const shots = (scene?.videoTargets ?? []).map((id) => overview.shots[id]).filter((shot) => !!shot);
+  // A new clip uses the named shots' current frames; a confirm uses the scene's video targets.
+  const shots = (shotIds ?? scene?.videoTargets ?? []).map((id) => overview.shots[id]).filter((shot) => !!shot);
   if (!shots.length) return null;
   const current = shots.find((shot) => shot.shotId === shown) ?? null;
   return (

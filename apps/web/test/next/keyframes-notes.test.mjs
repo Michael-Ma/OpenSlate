@@ -168,6 +168,50 @@ test('a video confirm offered for a scene whose clips are all saved says why it 
   };
   const action = noteBanner(note, overview, proposals, 'en-US').actions[0];
   assert.equal(action.enabled, false);
-  assert.equal(en(action.reason), `Every clip in Scene ${saved.ordinal} is already saved. To redo one, ask the Director for a new clip of that shot.`);
-  assert.equal(zh(action.reason), `第 ${saved.ordinal} 场的视频都已保存。要重做某个镜头，请让导演为那个镜头生成新视频。`);
+  assert.equal(en(action.reason), `Every clip in Scene ${saved.ordinal} is already saved. To redo one, ask the Director for a new clip of that shot; its keyframe is kept.`);
+  assert.equal(zh(action.reason), `第 ${saved.ordinal} 场的视频都已保存。要重做某个镜头，请让导演为那个镜头重做视频，关键帧会保留。`);
+});
+
+const remakeNote = (shotIds) => ({
+  noteId: 'n-clip', letter: 'd', kind: 'recommendation', state: 'open', text: 'A new clip for 1.1.', anchor: { text: '1.1' }, blocking: false,
+  sceneId: null, regeneration: null, settled: null,
+  choices: [{ label: { text: 'New clip' }, chosen: false, action: { kind: 'remake_clip', noteId: 'n-clip', choiceIndex: 0, shotIds } }],
+});
+
+test('a new-clip choice is priced from the shots’ own remake quotes and runs only when the server says it can', () => {
+  const { overview, proposals } = golden();
+  const saved = overview.scenes.find(s => s.state === 'video_saved');
+  const id = saved.shotIds[0], shot = overview.shots[id];
+  shot.quotes = { ...shot.quotes, remakeClip: { micros: '100000', priceUnknown: false, units: 1, unitMicros: '100000' } };
+  shot.remakeClip = { available: true };
+  const on = noteBanner(remakeNote([id]), overview, proposals, 'en-US').actions[0];
+  assert.deepEqual([on.enabled, en(on.price), on.reason, on.style], [true, 'about $0.10', null, 'chosen']);
+  // The label comes from the typed choice, never the model.
+  const raw = { noteId: 'r1', letter: 'd', kind: 'recommendation', state: 'open', text: 'New clip?', anchor: { shotIds: [id] }, blocking: false,
+    createdAt: '2026-10-29T00:00:00.000Z', choices: [{ kind: 'remake_clip', shotIds: [id] }, { kind: 'reply' }] };
+  const viewed = noteViews([raw], overview, proposals).find(v => v.noteId === 'r1');
+  assert.equal(en(viewed.choices[0].label), `New clip for ${shot.label}`);
+  assert.equal(zh(viewed.choices[0].label), `为 ${shot.label} 重做视频`);
+  assert.deepEqual(viewed.choices[0].action, { kind: 'remake_clip', noteId: 'r1', choiceIndex: 0, shotIds: [id] });
+
+  shot.remakeClip = { available: false, code: 'CLIP_NOT_SAVED' };
+  const off = noteBanner(remakeNote([id]), overview, proposals, 'en-US').actions[0];
+  assert.equal(off.enabled, false);
+  assert.equal(en(off.reason), "This shot has no saved clip yet. Use the scene's Confirm to make it.");
+
+  // No remake quote from the server: the press is not offered with a guessed price.
+  shot.remakeClip = { available: true };
+  delete shot.quotes.remakeClip;
+  assert.equal(noteBanner(remakeNote([id]), overview, proposals, 'en-US').actions[0].enabled, false);
+});
+
+test('a settled new-clip note says the clip is being made, failed (old clip kept) or saved', () => {
+  const { overview } = golden();
+  const id = overview.scenes.find(s => s.state === 'video_saved').shotIds[0], shot = overview.shots[id];
+  const said = () => en(settledMsg({ kind: 'remake_clip', noteId: 'n', choiceIndex: 0, shotIds: [id] }, { text: '' }, overview));
+  assert.equal(said(), `Settled: new clip for ${shot.label} saved`);
+  shot.video = { ...shot.video, replacement: { state: 'running' } };
+  assert.equal(said(), `Making a new clip for ${shot.label}…`);
+  shot.video = { ...shot.video, replacement: { state: 'failed' } };
+  assert.equal(said(), `The new clip failed for ${shot.label}. The earlier clip is kept.`);
 });

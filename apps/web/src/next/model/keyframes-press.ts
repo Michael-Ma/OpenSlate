@@ -50,8 +50,26 @@ export function confirmPress(overview: GenerationOverview, scene: SceneOverview)
   return { pressId: `confirm:${scene.sceneId}`, logical: { kind: "confirm", sceneId: scene.sceneId, frames, after: scene.confirmation?.confirmationId ?? null } };
 }
 
+/** What the studio last did for a shot's clip: a new clip press after a finished or failed one is a new request. */
+function clipJob(overview: GenerationOverview, shotId: string) {
+  const slot = overview.shots[shotId]?.video;
+  if (!slot) return null;
+  return {
+    state: slot.state, attemptId: slot.attemptId ?? null, failedAt: slot.failure?.at ?? null, artifactId: slot.artifact?.artifactId ?? null,
+    replacement: slot.replacement ? { state: slot.replacement.state, attemptId: slot.replacement.attemptId ?? null, failedAt: slot.replacement.failure?.at ?? null } : null,
+  };
+}
+
+/** A new clip for saved shots, keeping their keyframes (contract 7.1.0). */
+export function remakePress(overview: GenerationOverview, scene: SceneOverview, shotIds: readonly string[]): PressIdentity {
+  return {
+    pressId: `remake:${shotIds.join(",")}`,
+    logical: { kind: "remake", sceneId: scene.sceneId, frames: shotIds.map((id) => ({ shotId: id, artifactId: overview.shots[id]?.keyframe.artifact?.artifactId ?? null })), jobs: shotIds.map((id) => clipJob(overview, id)) },
+  };
+}
+
 /** Presses that buy something; a lost reply on one says that pressing again checks and never charges twice. */
-export const PAID_PRESS = /^(keyframes|regenerate|confirm):/;
+export const PAID_PRESS = /^(keyframes|regenerate|confirm|remake):/;
 
 /**
  * The press a saved paid press id stands for, as it would be sent from the film as it is now (null for another id,
@@ -67,9 +85,10 @@ export function pressFromId(overview: GenerationOverview, pressId: string): Pres
     const scene = overview.scenes.find((s) => s.sceneId === rest);
     return scene ? (kind === "confirm" ? confirmPress(overview, scene) : keyframesPress(overview, scene)) : null;
   }
-  if (kind !== "regenerate") return null;
+  if (kind !== "regenerate" && kind !== "remake") return null;
   const shotIds = rest.split(",");
   const scene = overview.scenes.find((s) => s.sceneId === overview.shots[shotIds[0] ?? ""]?.sceneId);
+  if (kind === "remake") return scene && shotIds.every((id) => overview.shots[id]) ? remakePress(overview, scene, shotIds) : null;
   return scene && shotIds.every((id) => overview.shots[id]) ? keyframesPress(overview, scene, shotIds, true) : null;
 }
 

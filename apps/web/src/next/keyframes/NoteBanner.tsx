@@ -25,7 +25,7 @@ export function NoteBanner({ view, busy, nextLetter, canUndo, onChoose, onNext, 
   const { t, tm } = useI18n();
   const server = useGuarded("server");
   const run = useGuarded("run");
-  const guardOf = (action: NoteBannerAction) => (action.action.kind === "regenerate" || action.action.kind === "confirm_video" ? run : action.action.kind === "reply" ? null : server);
+  const guardOf = (action: NoteBannerAction) => (action.action.kind === "regenerate" || action.action.kind === "confirm_video" || action.action.kind === "remake_clip" ? run : action.action.kind === "reply" ? null : server);
   const label = (value: Label) => ("text" in value ? value.text : tm(value));
   // Why a choice is off (a video confirm with frames still to make, or a scene already saved), under the choices' text.
   const reasons = view.state === "open" ? view.actions.flatMap((action) => (action.reason && !action.enabled ? [action.reason] : [])) : [];
@@ -42,7 +42,7 @@ export function NoteBanner({ view, busy, nextLetter, canUndo, onChoose, onNext, 
       extra={view.changes.length || reasons.length ? (
         <>
           {view.changes.length ? <Changes rows={view.changes} label={label} /> : null}
-          {reasons.map((reason, index) => <p key={index} className="note-why" data-why="confirm_video">{tm(reason)}</p>)}
+          {reasons.map((reason, index) => <p key={index} className="note-why" data-why="choice">{tm(reason)}</p>)}
         </>
       ) : null}
       anchor={{ attribute: "data-note", value: view.noteId }}
