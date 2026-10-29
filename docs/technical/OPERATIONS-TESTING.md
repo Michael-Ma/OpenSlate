@@ -29,14 +29,14 @@ Tests bind loopback and use temporary databases/media. Optional native probes ar
 
 ## Recovery and evidence
 
-A database schema upgrade snapshots recognized older state before writing. Complete installation backups include owned media/receipts/locked skills and restore only to the original empty canonical data path. Recovery installs quarantine and unused-authority fences; human release keeps projects paused.
+Only the current database schema opens; data directories from earlier prototype builds need a new `OPENSLATE_DATA_DIR`. Complete installation backups include owned media/receipts/locked skills and restore only to the original empty canonical data path. Recovery installs quarantine and unused-authority fences; human release keeps projects paused.
 
 The [October 3 refinement record](../implementation/OCTOBER-3-REFINEMENT-REVIEW.md) has the 2,207-test full gate, actual React against disposable fixtures and rapid synthetic SSE; final integrated verification and the repaired bounded native guidance rerun passed. Record actual commands/results and limitations. Keep offline tests, bounded native turns, real media and subjective human acceptance separate. Do not carry old test totals forward as a current run or treat a read-only model list as media access. Sanitized evidence excludes credentials/private project content; backups are private.
 
 ## Source and guides
 
 - [Setup](../implementation/LOCAL-SETUP.md), [launcher](../implementation/LOCAL-LAUNCHER.md), [live testing](../implementation/MANUAL-LIVE-PRODUCTION.md)
-- [Migration](../implementation/DATABASE-MIGRATIONS.md), [backup/recovery](../implementation/INSTALLATION-RECOVERY.md), [evidence index](../implementation/VALIDATION-EVIDENCE.md)
+- [Schema](DATA-PERSISTENCE.md#schema), [backup/recovery](../implementation/INSTALLATION-RECOVERY.md), [evidence index](../implementation/VALIDATION-EVIDENCE.md)
 - `scripts/start-local.mjs`, `scripts/setup-readiness.mjs`, `apps/server/src/index.ts`, studio/installation CLIs, and corresponding script/server tests.
 
 Installer packaging, broader clean-machine/OS verification, portable relocation and complete real conversation-to-film acceptance remain outstanding.

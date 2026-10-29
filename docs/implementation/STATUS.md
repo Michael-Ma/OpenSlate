@@ -221,7 +221,7 @@ Pinned Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 passed preflight. Fin
 | Audio/takes | Generated voice with keyframes, free fit, measured recording, eligible prior-frame selection and owned library | Real speech/transcription acceptance and richer mixing |
 | Film/export | Synchronized preview, storyboard order/plan timing/music, readiness/history and local FFmpeg export, Demo stamp | Source trimming, transitions, waveforms and streaming |
 | Personal voice | Consent/revocation registry and existing eligible OpenAI custom-ID dispatch | **Creating a new clone from a recording is not implemented** |
-| Local operation | Source launcher, pairing, diagnostics, migrations and media-inclusive same-root recovery | Installer/bundled runtime, more OS/clean-machine checks and relocation |
+| Local operation | Source launcher, pairing, diagnostics, single current schema (old installs need a new data directory) and media-inclusive same-root recovery | Installer/bundled runtime, more OS/clean-machine checks and relocation |
 
 Requested workflow items 1–5 are implemented. Item 6 remains partial because existing provider voice-ID synthesis does not create a new clone. Item 7 has local setup tooling; broader packaging remains separate. The [October 1 review](V1-COMPLETION-REVIEW.md) retains its original scope.
 

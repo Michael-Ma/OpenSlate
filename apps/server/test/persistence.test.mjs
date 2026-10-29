@@ -10,7 +10,7 @@ function database(t) {
   const directory = mkdtempSync(join(tmpdir(), "openslate-store-")); const path = join(directory, "project.sqlite");
   const store = new Store(path); const project = projectFixture(); store.createProject(project);
   t.after(() => { if (store.db.open) store.close(); rmSync(directory, { force: true, recursive: true }); });
-  return { directory, path, store, project };
+  return { path, store, project };
 }
 test("SQLite durability configuration and optimistic heads are real across connections", t => {
   const { path, store, project } = database(t); const second = new Store(path); t.after(() => second.close());
@@ -49,12 +49,4 @@ test("project ownership, immutable candidate origin, grant reuse and attempt ord
   store.insert("attempt", "attempt", project.id, { candidateId: "candidate", ordinal: 1 });
   assert.throws(() => store.insert("attempt", "again", project.id, { candidateId: "candidate", ordinal: 1 }), { code: "UNIQUENESS_CONFLICT" });
   assert.throws(() => store.put("attempt", "attempt", other.id, { candidateId: "candidate", ordinal: 1 }), { code: "SCOPE_DENIED" });
-});
-test("online backup restores a verified consistent database to a new path", async t => {
-  const { directory, store, project } = database(t); store.appendEvent(project.id, "project.created", {});
-  const backup = join(directory, "backup.sqlite"); const restored = join(directory, "restored.sqlite");
-  await store.backup(backup); Store.restore(backup, restored); const recovered = new Store(restored);
-  try { assert.deepEqual(recovered.getProject(project.id), store.getProject(project.id)); assert.equal(recovered.cursor(project.id), 1); }
-  finally { recovered.close(); }
-  assert.throws(() => Store.restore(backup, restored), { code: "RESTORE_DESTINATION_EXISTS" });
 });

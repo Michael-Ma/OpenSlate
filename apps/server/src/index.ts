@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FakeProvider } from "@openslate/providers";
-import { invariant } from "@openslate/core";
+import { DomainError, invariant } from "@openslate/core";
 import { createApp } from "./app.js";
 import { ProductionService } from "./application/service.js";
 import { Store } from "./persistence/store.js";
@@ -57,7 +57,12 @@ if (!localToken) {
   }
 }
 invariant(/^[A-Za-z0-9_-]{20,256}$/.test(localToken), "CONFIGURATION_ERROR", "Local session token must contain 20–256 URL-safe characters");
-const store = new Store(join(directory, "openslate.sqlite"));
+let store: Store;
+try { store = new Store(join(directory, "openslate.sqlite")); }
+catch (error) {
+  if (!(error instanceof DomainError) || !["DATABASE_VERSION_UNSUPPORTED", "DATABASE_SCHEMA_MISMATCH"].includes(error.code)) throw error;
+  process.stderr.write("This data directory was created by an earlier OpenSlate prototype and cannot be opened. Start with a new OPENSLATE_DATA_DIR.\n"); process.exit(1);
+}
 const recovery = new InstallationRecoveryGuard(store);
 const recoveryPending = recovery.isQuarantined();
 const provider = new FakeProvider(join(directory, "fake-provider.sqlite"));

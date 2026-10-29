@@ -7,15 +7,13 @@ import type { RecoveryReceipt } from "../application/installation-recovery.js";
 import { Store } from "./store.js";
 import { acquireInstallationOwner } from "./installation-owner.js";
 import { verifyDatabase } from "./database-snapshot.js";
-import { CURRENT_SCHEMA_VERSION } from "./schema.js";
-import { inspectInstallationBackup, installationBackupFileKind, installationBackupIO as io } from "./installation-backup.js";
+import { inspectInstallationBackup, installationBackupIO as io } from "./installation-backup.js";
 import type { BackupFile, InstallationBackupLimits, InstallationBackupManifest, VerifiedInstallationBackup } from "./installation-backup.js";
 import { INSTALLATION_RESTORE_STATE, RESTORE_STATE_MAX_BYTES, parseInstallationRestoreState, readInstallationRestoreState, restoredDatabaseReceipt } from "./installation-restore-state.js";
 import type { InstallationRestoreState } from "./installation-restore-state.js";
 
 export interface RestoreProgress { phase: "copying" | "copied_file" | "publishing" | "published_namespace" | "complete"; completed: number; total: number }
 export interface RestoredInstallation { directory: string; status: "restored" | "already_restored"; receipt: RecoveryReceipt }
-const MIGRATION = /^openslate\.sqlite\.migration-backups\/v[1-9][0-9]*-to-v[1-9][0-9]*-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\.sqlite$/;
 const OWNER = "installation-owner.sqlite";
 const OWNER_FILES = [OWNER, `${OWNER}-journal`];
 const stopped = (signal?: AbortSignal) => invariant(!signal?.aborted, "BACKUP_CANCELLED", "Installation restore was cancelled; run the same restore to resume");
@@ -79,10 +77,9 @@ function verifyPublicationInventory(state: Exclude<InstallationRestoreState, { s
     const original = source.get(file.path);
     invariant(file.path.split("/").length <= bound.depth && file.byteLength <= bound.fileBytes, "BACKUP_LIMIT_EXCEEDED", "Restored file exceeds its bounds");
     total += file.byteLength;
-    if (original) {
-      invariant(file.path === "openslate.sqlite" ? file.kind === original.kind && file.mode === original.mode : canonical(file) === canonical(original),
-        "RESTORE_STATE_INVALID", "Restored content differs from the exact backup"); source.delete(file.path);
-    } else invariant(MIGRATION.test(file.path) && file.kind === "application_db" && file.mode === 0o600, "RESTORE_STATE_INVALID", "Unrecognized migration diagnostic");
+    invariant(original, "RESTORE_STATE_INVALID", "Restored content is absent from the exact backup");
+    invariant(file.path === "openslate.sqlite" ? file.kind === original.kind && file.mode === original.mode : canonical(file) === canonical(original),
+      "RESTORE_STATE_INVALID", "Restored content differs from the exact backup"); source.delete(file.path);
   }
   invariant(source.size === 0 && total <= bound.totalBytes, "RESTORE_STATE_INVALID", "Restore publication omits source files or exceeds its limit");
 }
@@ -101,7 +98,6 @@ async function verifyExisting(root: string, state: Exclude<InstallationRestoreSt
     const directories = expectedDirectories.get(location) ?? new Set<string>();
     for (let path = dirname(file.path); path !== "."; path = dirname(path)) directories.add(path);
     expectedDirectories.set(location, directories);
-    if (MIGRATION.test(file.path)) verifyDatabase(join(location, file.path));
   }
   // Reject extras inside every owned namespace before any additional publication.
   const walk = async (location: string, path: string): Promise<void> => {
@@ -116,7 +112,7 @@ async function verifyExisting(root: string, state: Exclude<InstallationRestoreSt
     "RESTORE_STATE_INVALID", "Unlisted staged restore namespace");
   for (const location of new Set(locations.values())) await io.skillDirectories(location, state.files.filter(file => locations.get(top(file.path)) === location), false);
   const databaseRoot = locations.get("openslate.sqlite")!;
-  invariant(verifyDatabase(join(databaseRoot, "openslate.sqlite")) === CURRENT_SCHEMA_VERSION, "RESTORE_STATE_INVALID", "Restored database is not at the supported schema");
+  verifyDatabase(join(databaseRoot, "openslate.sqlite"));
   restoredDatabaseReceipt(root, state, databaseRoot);
 }
 
@@ -148,7 +144,7 @@ export async function restoreInstallationBackup(options: { directory: string; de
     if (state.state === "copying") {
       await validateStagingTree(root, state.stageName, bound); if (!(await io.missing(stage))) await io.discard(stage);
       const disk = await statfs(root), bytes = backup.manifest.files.reduce((sum, file) => sum + file.byteLength, 0);
-      invariant(disk.bavail * disk.bsize >= bytes * 2 + 16 * 1024 ** 2, "BACKUP_DISK_SPACE", "Insufficient space to stage and migrate the restore");
+      invariant(disk.bavail * disk.bsize >= bytes * 2 + 16 * 1024 ** 2, "BACKUP_DISK_SPACE", "Insufficient space to stage the restore");
       stopped(signal); await mkdir(stage, { mode: 0o700 }); onProgress?.({ phase: "copying", completed: 0, total: backup.manifest.files.length });
       let count = 0;
       for (const file of backup.manifest.files) {
@@ -169,11 +165,6 @@ export async function restoreInstallationBackup(options: { directory: string; de
       } finally { store.close(); }
       const files: BackupFile[] = [];
       for (const file of backup.manifest.files) files.push(await io.transfer(stage, file.path, bound, signal));
-      const diagnostics = "openslate.sqlite.migration-backups";
-      if (!(await io.missing(join(stage, diagnostics)))) for (const name of await readdir(join(stage, diagnostics))) {
-        const path = `${diagnostics}/${name}`; invariant(MIGRATION.test(path), "RESTORE_STATE_INVALID", "Unexpected staged migration file");
-        verifyDatabase(join(stage, path)); files.push(await io.transfer(stage, path, bound, signal, undefined, "application_db"));
-      }
       files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
       state = { ...state, state: "publishing", files, receiptDigest: digest(receipt!) };
       verifyPublicationInventory(state, backup, bound); await io.flushTree(stage, files); await saveState(root, state);
@@ -190,8 +181,7 @@ export async function restoreInstallationBackup(options: { directory: string; de
       onProgress?.({ phase: "published_namespace", completed: ++count, total: namespaces.length });
     }
     await verifyExisting(root, state, bound, signal);
-    const currentManifest: InstallationBackupManifest = { ...backup.manifest, applicationSchemaVersion: CURRENT_SCHEMA_VERSION,
-      files: state.files.filter(file => !MIGRATION.test(file.path)) };
+    const currentManifest: InstallationBackupManifest = { ...backup.manifest, files: state.files };
     await io.validateContent(root, currentManifest, bound, signal); await io.flushTree(root, state.files); stopped(signal);
     if (!(await io.missing(stage))) await rmdir(stage);
     state = { ...state, state: "complete" }; await saveState(root, state); await io.syncDirectory(dirname(root));

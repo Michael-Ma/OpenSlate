@@ -15,7 +15,14 @@ OpenSlate's local database owns production state. Conversation history and brows
 | Director/tool records | Runtime selection, locked instructions, turns, questions, output and idempotent tool receipts |
 | Events/commands | Monotonic per-project event cursors and replay-safe command results |
 
-The current relational schema stores project heads, generic versioned entities, command receipts and events; migrations add a ledger and installation recovery records. Domain entity kinds encode the component records rather than one SQL table per proposed type. See [schema](../../apps/server/src/persistence/schema.ts) and [store](../../apps/server/src/persistence/store.ts).
+The current relational schema stores project heads, generic versioned entities, command receipts, events and installation recovery records. Domain entity kinds encode the component records rather than one SQL table per proposed type. See [schema](../../apps/server/src/persistence/schema.ts) and [store](../../apps/server/src/persistence/store.ts).
+
+## Schema
+
+The current schema is version **4**, created once in an empty database.
+Any other database version is rejected; no migration or backward compatibility is supported.
+Earlier prototype installations need a new `OPENSLATE_DATA_DIR`.
+Installation backup and restore require the same current schema version.
 
 ## Transactions and files
 
@@ -29,13 +36,13 @@ The root `pnpm start` default is `<repository>/.openslate`; development/filtered
 
 The installation includes SQLite, owned artifacts, raw execution outputs, normalized media/receipts and locked skill snapshots. Provider keys/configuration and external Codex authentication are separate local setup. Backups can contain protected result locators and private project content.
 
-Current schema version is 3. Recognized older databases receive verified database snapshots before migration. A metadata snapshot excludes referenced media; use [media-inclusive installation backup](../implementation/INSTALLATION-RECOVERY.md) for complete same-root recovery. Restore preserves identities, installs quarantine/fences and leaves projects paused after human release.
+Use [media-inclusive installation backup](../implementation/INSTALLATION-RECOVERY.md) for complete same-root recovery. Restore preserves identities, installs quarantine/fences and leaves projects paused after human release.
 
 ## Source and checks
 
-- [Migration/snapshot contract](../implementation/DATABASE-MIGRATIONS.md)
+- [Schema initialization](../../apps/server/src/persistence/schema.ts)
 - [Installation owner](../../apps/server/src/persistence/installation-owner.ts)
 - [Backup](../../apps/server/src/persistence/installation-backup.ts) and [restore](../../apps/server/src/persistence/installation-restore.ts)
-- Tests: `apps/server/test/persistence.test.mjs`, `migrations.test.mjs`, `installation-recovery.test.mjs`, `installation-audio-backup.test.mjs`.
+- Tests: `apps/server/test/persistence.test.mjs`, `schema.test.mjs`, `installation-recovery.test.mjs`, `installation-audio-backup.test.mjs`.
 
 Portable relocation, project-sharing export and multi-host shared databases are not implemented.

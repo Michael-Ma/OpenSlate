@@ -7,7 +7,7 @@ import { canonical, DomainError, invariant } from "@openslate/core";
 import { verifyPublishedSkillSnapshot } from "@openslate/director";
 import { acquireInstallationOwner } from "./installation-owner.js";
 import { snapshotDatabase, verifyDatabase } from "./database-snapshot.js";
-import { verifySchema } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, verifySchema } from "./schema.js";
 import { FIXTURE_SCHEMA, snapshotFixtureDatabase, verifyFixtureDatabase, verifyFixtureSchema } from "./fixture-database.js";
 import { verifyBackupClosure } from "./installation-backup-closure.js";
 import { assertInstallationRestoreComplete } from "./installation-restore-state.js";
@@ -186,7 +186,7 @@ async function validateContent(root: string, manifest: InstallationBackupManifes
   stopped(signal);
 }
 
-/** Offline only: acquires the real installation owner; it never starts or migrates services. */
+/** Offline only: acquires the real installation owner; it never starts services. */
 export async function createInstallationBackup(options: { sourceRoot: string; destination: string; signal?: AbortSignal; limits?: Partial<InstallationBackupLimits> }): Promise<VerifiedInstallationBackup> {
   const signal = options.signal, bound = limits(options.limits), sourceInput = options.sourceRoot, destinationInput = options.destination;
   stopped(signal); const source = await directory(sourceInput);
@@ -236,7 +236,7 @@ export async function createInstallationBackup(options: { sourceRoot: string; de
   finally { fixture?.close(); app?.close(); owner.close(); }
 }
 
-/** Full read-only verification; no migrations, media processes, auth setup or network. */
+/** Full read-only verification; no media processes, auth setup or network. */
 export async function inspectInstallationBackup(options: { directory: string; expectedSourceRoot?: string; signal?: AbortSignal; limits?: Partial<InstallationBackupLimits> }): Promise<VerifiedInstallationBackup> {
   const signal = options.signal, bound = limits(options.limits), input = options.directory, expectedRoot = options.expectedSourceRoot;
   stopped(signal); const root = await directory(input), bytes = await readBounded(root, INSTALLATION_BACKUP_MANIFEST, bound.manifestBytes, signal);
@@ -245,7 +245,8 @@ export async function inspectInstallationBackup(options: { directory: string; ex
   invariant(manifest?.version === 1 && /^[a-f0-9-]{36}$/.test(manifest.backupId) && typeof manifest.createdAt === "string"
     && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(manifest.createdAt) && Number.isFinite(Date.parse(manifest.createdAt))
     && typeof manifest.originalDataRoot === "string" && isAbsolute(manifest.originalDataRoot) && resolve(manifest.originalDataRoot) === manifest.originalDataRoot && manifest.originalDataRoot !== "/"
-    && canonical(manifest.fixtureSchema) === canonical(FIXTURE_SCHEMA) && Array.isArray(manifest.files) && manifest.files.length <= bound.files
+    && manifest.applicationSchemaVersion === CURRENT_SCHEMA_VERSION && canonical(manifest.fixtureSchema) === canonical(FIXTURE_SCHEMA)
+    && Array.isArray(manifest.files) && manifest.files.length <= bound.files
     && Object.keys(manifest).sort().join() === ["version", "backupId", "createdAt", "originalDataRoot", "applicationSchemaVersion", "fixtureSchema", "files"].sort().join()
     && canonical(manifest) === bytes.toString("utf8"), "BACKUP_MANIFEST_INVALID", "Unsupported or noncanonical backup manifest");
   if (expectedRoot !== undefined) invariant(resolve(expectedRoot) === manifest.originalDataRoot, "BACKUP_ROOT_MISMATCH", "This backup can only restore to its original local data directory");
