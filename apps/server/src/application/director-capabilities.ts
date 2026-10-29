@@ -1,6 +1,6 @@
-import { digest, invariant, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, STAGES, toolCatalog, toolHandlerId } from "@openslate/core";
+import { digest, FILM_KIND_KINDS, invariant, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, STAGES, toolCatalog, toolContractAtLeast, toolHandlerId } from "@openslate/core";
 import type { ToolContractVersion } from "@openslate/core";
-import { createSkillLock, loadSkillCatalog } from "@openslate/director";
+import { createSkillLock, createSkillReleaseLock, loadSkillCatalog, loadSkillRelease, skillReleaseDirectory, SKILL_RELEASE_MIN_MAJOR } from "@openslate/director";
 import type { SkillCapabilityLock, SkillEnvironment } from "@openslate/director";
 import { join } from "node:path";
 
@@ -17,11 +17,36 @@ export function directorSkillEnvironment(options: DirectorSkillConfiguration, ve
 }
 
 /** Trusted configuration helper. Creates/verifies snapshots but does not install or upgrade a project lock. */
-export function createDirectorSkillLock(options: DirectorSkillConfiguration, version: ToolContractVersion = "4.0.0", guidanceVersion = version === "4.0.0" ? "5" : version.split(".")[0]): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
+export function createDirectorSkillLock(options: DirectorSkillConfiguration, version: ToolContractVersion = "6.0.0", guidanceVersion = toolContractAtLeast(version, "7.1.0") ? "8.1.0" : version === "7.0.0" ? "8" : version === "6.0.0" ? "7" : version === "5.0.0" ? "6" : version === "4.0.0" ? "5" : version.split(".")[0], expectedPackageDigests?: Readonly<Record<string, string>>): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
   const environment = directorSkillEnvironment(options, version);
-  invariant([version.split(".")[0], ...(version === "4.0.0" ? ["5"] : [])].includes(guidanceVersion), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported guidance package");
+  if (Number((guidanceVersion ?? '').split('.')[0]) >= SKILL_RELEASE_MIN_MAJOR) return createDirectorReleaseLock(options, version, guidanceVersion!);
+  invariant([version.split(".")[0], ...(version === "4.0.0" ? ["5"] : version === "5.0.0" ? ["6"] : version === "6.0.0" ? ["7"] : version === "7.0.0" ? ["8"] : [])].includes(guidanceVersion), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported guidance package");
   const root = version === "1.0.0" ? join(options.repositoryRoot, "skills") : join(options.repositoryRoot, `skills/v${guidanceVersion}`);
-  const catalog = loadSkillCatalog({ ...environment, packageRoots: [join(root, "production"), join(root, "plan-authoring")] });
+  const catalog = loadSkillCatalog({ ...environment, packageRoots: [join(root, "production"), join(root, "plan-authoring")], ...(expectedPackageDigests ? { expectedPackageDigests } : {}) });
   return { environment, lock: createSkillLock(catalog, { selectedSkillIds: ["production", "plan-authoring"], bindings: environment.bindings!,
     prompts: STAGES.map(stage => ({ id: `production/${stage}@1`, skillId: "production", path: `references/stages/${stage}.md` })) }) };
+}
+
+const stagePrompts = () => STAGES.map(stage => ({ id: `production/${stage}@1`, skillId: "production", path: `references/stages/${stage}.md` }));
+
+/**
+ * The checkout directory of a guidance release. A major release "N.0.0" (or just "N") lives in skills/vN; every later
+ * release of that major is a new, complete directory named by its full version (skills/v8.0.1), because a shipped
+ * release directory is never edited in place.
+ */
+export const releaseDirectory = skillReleaseDirectory;
+
+/**
+ * Trusted configuration helper for multi-package releases (guidance v8 and later): every release package is locked,
+ * routing selects the injected subset per request. Stage prompt identities stay production/<stage>@1. `guidanceVersion`
+ * is a release major ("8", meaning skills/v8) or an exact release version ("8.0.1").
+ */
+export function createDirectorReleaseLock(options: DirectorSkillConfiguration, version: ToolContractVersion, guidanceVersion: string, expectedReleaseDigest?: string): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
+  invariant(Number(guidanceVersion.split(".")[0]) >= SKILL_RELEASE_MIN_MAJOR && toolContractAtLeast(version, "7.0.0"), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported guidance release");
+  const environment = directorSkillEnvironment(options, version);
+  const release = loadSkillRelease({ ...environment, releaseRoot: join(options.repositoryRoot, releaseDirectory(guidanceVersion)), routeKinds: FILM_KIND_KINDS,
+    ...(expectedReleaseDigest ? { expectedReleaseDigest } : {}) });
+  invariant(release.release.core.includes("production"), "DIRECTOR_GUIDANCE_UNSUPPORTED", "A guidance release needs the production core package");
+  invariant(!guidanceVersion.includes(".") || release.release.release === guidanceVersion, "DIRECTOR_GUIDANCE_UNSUPPORTED", "The release directory holds another release version");
+  return { environment, lock: createSkillReleaseLock(release, { bindings: environment.bindings!, prompts: stagePrompts() }) };
 }

@@ -1,9 +1,11 @@
 import { canonical, digest, invariant, newId } from "@openslate/core";
-import type { ActorContext } from "@openslate/core";
+import type { ActorContext, NativeDiagnostic } from "@openslate/core";
 import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent } from "@openslate/director";
+import { DirectorStartRefusal } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 import { ToolInvocationService } from "./tool-invocations.js";
 import { directorInputDigest } from "./director-input-identity.js";
+import { safeNativeDiagnostic } from "./native-diagnostics.js";
 
 export type TurnState = "queued" | "running" | "completed" | "waiting_user" | "interrupted" | "unknown" | "failed";
 export interface DirectorTurn {
@@ -11,7 +13,9 @@ export interface DirectorTurn {
   createdAt: string; updatedAt: string; owner: string | null; leaseExpiresAt: number;
   epochId: string | null; nativeThreadId: string | null; nativeTurnId: string | null;
   dispatched: boolean; errorCode: string | null;
+  nativeDiagnostic?: NativeDiagnostic;
 }
+export interface StructuredAnswer { questionId: string; optionIndex?: number; optionLabel?: string; text?: string }
 interface Request { id: string; projectId: string; principalId: string; text: string; state: string; editing: boolean }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; state: string }
 export interface DirectorOutput { id: string; projectId: string; requestId: string; turnId: string; text: string; phase: string }
@@ -20,6 +24,8 @@ export interface SupervisorOptions {
   /** Local controllers may share one store while owning disjoint project sets. */
   projectFilter?: (projectId: string) => boolean;
   prepareInput?: (turn: DirectorTurn, human: ActorContext, bridge: { actor: ActorContext; token: string }, preparation?: { signal: AbortSignal }) => Promise<DirectorRunInput> | DirectorRunInput;
+  /** Host-only preflight; refusals happen before dispatch intent and cannot become unknown submissions. */
+  prepareRuntime?: (input: DirectorRunInput) => Promise<DirectorRuntime> | DirectorRuntime;
   now?: () => number; leaseMs?: number; owner?: string;
 }
 
@@ -53,17 +59,31 @@ export class DirectorSupervisor {
   }
 
   turns(projectId: string): DirectorTurn[] { return this.service.store.list<DirectorTurn>("director_turn", projectId); }
-  answerQuestion(projectId: string, principalId: string, questionId: string, text: string, key: string): ActorContext {
+  answerQuestion(projectId: string, principalId: string, questionId: string, answer: string | { text?: string; answers: StructuredAnswer[] }, key: string): ActorContext {
     this.service.recovery.assertWritable(projectId);
-    const actor = this.service.store.command<ActorContext>(`${principalId}:${projectId}:question`, key, digest({ questionId, text }), () => {
-      const question = this.service.store.get<{ id: string; projectId: string; requestId: string; state: string }>("director_question", questionId);
+    const actor = this.service.store.command<ActorContext>(`${principalId}:${projectId}:question`, key, digest({ questionId, ...(typeof answer === "string" ? { text: answer } : { answer }) }), () => {
+      const question = this.service.store.get<{ id: string; projectId: string; requestId: string; state: string; questions: import("@openslate/director").DirectorQuestion[] }>("director_question", questionId);
       invariant(question?.projectId === projectId && question.state === "pending", "QUESTION_STALE", "This question is no longer waiting for a reply");
       this.service.recovery.assertFreshAuthority(projectId, "message", question.requestId);
       const original = this.service.store.get<Request & { scopeIds: string[] }>("message", question.requestId);
       invariant(original?.principalId === principalId && original.state === "active", "QUESTION_STALE", "A newer request has replaced this question");
+      invariant(typeof answer === "string" || answer && Array.isArray(answer.answers), "VALIDATION_ERROR", "Use a text answer or structured answers");
+      const answers = typeof answer === "string" ? undefined : answer.answers.map(item => {
+        invariant(Object.keys(item).every(k => ["questionId", "optionIndex", "optionLabel", "text"].includes(k)), "VALIDATION_ERROR", "Unknown answer fields");
+        const asked = question.questions.find(q => q.id === item.questionId);
+        invariant(asked, "VALIDATION_ERROR", "Answer a stored question");
+        const optionIndex = item.optionIndex ?? (item.optionLabel === undefined ? undefined : asked.options.findIndex(o => o.label === item.optionLabel));
+        invariant(optionIndex === undefined || Number.isSafeInteger(optionIndex) && optionIndex >= 0 && optionIndex < asked.options.length, "VALIDATION_ERROR", "Choose a stored option");
+        invariant(item.optionLabel === undefined || asked.options[optionIndex!]?.label === item.optionLabel, "VALIDATION_ERROR", "Option label does not match its index");
+        invariant(item.text === undefined || typeof item.text === "string" && item.text.trim().length > 0 && item.text.length <= 16000, "VALIDATION_ERROR", "Answer text is empty or too long");
+        invariant(optionIndex !== undefined || item.text, "VALIDATION_ERROR", "Select an option or write an answer");
+        return { questionId: item.questionId, ...(optionIndex !== undefined ? { optionIndex, optionLabel: asked.options[optionIndex]!.label } : {}), ...(item.text ? { text: item.text } : {}) };
+      });
+      invariant(!answers || answers.length > 0 && answers.length <= 8 && new Set(answers.map(a => a.questionId)).size === answers.length, "VALIDATION_ERROR", "Answer each question once");
+      const text = typeof answer === "string" ? answer : answer.text?.trim() || answers!.map(a => `${a.questionId}: ${a.optionLabel ?? a.text}`).join("\n");
       const actor = this.service.beginRequest(projectId, principalId, text, { scopeIds: original.scopeIds,
-        editing: original.editing, ...(original.editing ? { continuationRequestId: original.id } : {}), contextDigest: digest({ questionId }), key: `question:${key}` });
-      this.service.store.put("director_question", question.id, projectId, { ...question, state: "answered", answerRequestId: actor.requestId, answer: text });
+        editing: original.editing, ...(original.editing ? { continuationRequestId: original.id } : {}), contextDigest: digest({ questionId, ...(answers ? { answers } : {}) }), key: `question:${key}` });
+      this.service.store.put("director_question", question.id, projectId, { ...question, state: "answered", answerRequestId: actor.requestId, answer: text, ...(answers ? { answers } : {}) });
       this.service.store.appendEvent(projectId, "director.question_answered", { questionId, requestId: actor.requestId });
       this.enqueue(projectId, actor);
       return actor;
@@ -71,10 +91,14 @@ export class DirectorSupervisor {
     this.service.recovery.assertFreshAuthority(projectId, "message", actor.requestId); return actor;
   }
   status(projectId: string) {
-    const turns = this.turns(projectId), current = turns.find(turn => turn.state === "running") ?? turns.find(turn => turn.state === "queued") ?? turns.at(-1);
+    const turns = this.turns(projectId).filter(turn => this.service.store.get<Request>("message", turn.requestId)?.state === "active");
+    const current = turns.find(turn => turn.state === "running") ?? turns.find(turn => turn.state === "queued") ?? turns.at(-1);
     const status = !current ? "idle" : ["running", "queued"].includes(current.state) ? "running"
       : current.state === "waiting_user" ? "waiting_user" : ["failed", "unknown"].includes(current.state) ? "error" : "idle";
-    return { mode: this.options.mode, status, activeRequestId: current?.requestId ?? null, turn: current ?? null,
+    const { nativeDiagnostic: privateDiagnostic, ...publicTurn } = current ?? {};
+    const nativeDiagnostic = safeNativeDiagnostic(privateDiagnostic);
+    return { mode: this.options.mode, status, activeRequestId: current?.requestId ?? null,
+      turn: current ? { ...publicTurn, ...(nativeDiagnostic ? { nativeDiagnostic } : {}) } as DirectorTurn : null,
       message: current?.state === "unknown" ? "The previous turn ended without a confirmed result. Saved changes are retained; send a follow-up to continue." : null };
   }
 
@@ -90,6 +114,7 @@ export class DirectorSupervisor {
     this.revoke(turn);
     this.save({ ...turn, state, errorCode, leaseExpiresAt: 0 });
     this.service.store.appendEvent(turn.projectId, "director.finished", { turnId: turn.id, requestId: turn.requestId, state, errorCode });
+    this.service.releaseFinishedRequestHolds(turn.projectId, turn.requestId);
   }
 
   /** Called on startup and periodically. A foreign owner retains its lease until expiry. */
@@ -102,7 +127,11 @@ export class DirectorSupervisor {
         for (const turn of this.turns(project.id)) {
           const request = this.service.store.get<Request>("message", turn.requestId)!;
           if (turn.state === "queued" && request.state === "superseded") this.terminal(turn, "interrupted", "REQUEST_SUPERSEDED");
-          if (turn.state !== "running") continue;
+          if (turn.state !== "running") {
+            // Reconcile saved terminal requests after restart or after a held proposal becomes stale.
+            this.service.releaseFinishedRequestHolds(project.id, turn.requestId);
+            continue;
+          }
           const local = this.active.get(project.id);
           const epoch = turn.epochId ? this.service.store.get<Epoch>("epoch", turn.epochId) : null;
           if (turn.owner === this.owner && local?.turnId === turn.id) {
@@ -111,7 +140,7 @@ export class DirectorSupervisor {
             }
             this.save({ ...turn, leaseExpiresAt: this.now() + this.leaseMs });
           } else if (turn.leaseExpiresAt <= this.now()) {
-            this.terminal(turn, "unknown", "OWNER_LOST");
+            this.terminal(turn, turn.dispatched ? "unknown" : "failed", "OWNER_LOST");
             if (turn.epochId) new ToolInvocationService(this.service).reconcileEpoch(project.id, turn.epochId);
           }
         }
@@ -170,11 +199,15 @@ export class DirectorSupervisor {
       invariant(Object.entries(identity).every(([key, value]) => input[key as keyof typeof identity] === value), "RUNTIME_IDENTITY_MISMATCH", "Runtime input belongs to another request");
       if (abort.signal.aborted) throw new Error("Interrupted before dispatch");
       service.assertActor(claimed.projectId, bridge.actor);
+      const runtime = this.options.prepareRuntime ? await this.options.prepareRuntime(input) : this.runtime;
+      invariant(runtime.id === this.runtime.id, "RUNTIME_MISMATCH", "Prepared runtime differs from the queued Director");
+      if (abort.signal.aborted) throw new Error("Interrupted before dispatch");
       // Persist intent before the adapter may write turn/start. No credentials are persisted.
       service.store.transaction(() => {
         const turn = service.store.get<DirectorTurn>("director_turn", claimed.id)!;
         service.recovery.assertWritable(claimed.projectId, claimed.requestId);
         service.recovery.assertFreshAuthority(claimed.projectId, "director_turn", claimed.id);
+        service.assertActor(claimed.projectId, bridge.actor);
         invariant(turn.owner === this.owner && turn.state === "running", "DIRECTOR_LEASE_LOST", "Director turn ownership changed");
         this.save({ ...turn, dispatched: true });
         service.store.appendEvent(claimed.projectId, "director.dispatch_intent", { turnId: claimed.id, requestId: claimed.requestId, contextDigest: digest(input.context), inputDigest: directorInputDigest(input) });
@@ -189,7 +222,18 @@ export class DirectorSupervisor {
           if (event.kind === "runtime_started") this.save({ ...turn, nativeThreadId: event.nativeThreadId });
           if (event.kind === "turn_started") this.save({ ...turn, nativeThreadId: event.nativeThreadId, nativeTurnId: event.nativeTurnId });
           if (event.kind === "assistant_message") this.output(turn, event.text.replaceAll(bridge.token, "[redacted]"), event.phase);
+          if (event.kind === "activity") {
+            invariant(["reasoning", "tool"].includes(event.phase) && ["started", "completed"].includes(event.state), "RUNTIME_PROTOCOL_INVALID", "Invalid Director activity");
+            const activity = { phase: event.phase, state: event.state, at: new Date(this.now()).toISOString() };
+            service.store.put("director_activity", turn.id, turn.projectId, { id: turn.id, turnId: turn.id, ...activity });
+            service.store.appendEvent(turn.projectId, "director.activity", { turnId: turn.id, ...activity });
+          }
+          if (event.kind === "diagnostic" && /^[A-Z][A-Z0-9_]{0,99}$/.test(event.code)) {
+            // Native stderr can contain private context. Retain only the bounded diagnostic code.
+            service.store.appendEvent(turn.projectId, "director.diagnostic", { turnId: turn.id, code: event.code });
+          }
           if (event.kind === "pending_input") {
+            invariant(!service.store.get("keyframe_review_request", turn.requestId), "ACTOR_DENIED", "Application frame reviews cannot ask blocking questions");
             invariant(canonical(event.questions).length <= 32_000 && event.questions.length <= 8, "DIRECTOR_OUTPUT_LIMIT", "Too many pending questions");
             pending = true;
             const id = digest({ turnId: turn.id, nativeRequestId: event.nativeRequestId });
@@ -199,7 +243,7 @@ export class DirectorSupervisor {
           }
         });
       };
-      const result: DirectorRunResult = await this.runtime.start(input, { signal: abort.signal, onEvent });
+      const result: DirectorRunResult = await runtime.start(input, { signal: abort.signal, onEvent });
       invariant(Object.entries(identity).every(([key, value]) => result[key as keyof typeof identity] === value), "RUNTIME_IDENTITY_MISMATCH", "Runtime result belongs to another request");
       service.store.transaction(() => {
         const turn = service.store.get<DirectorTurn>("director_turn", claimed.id)!;
@@ -214,15 +258,17 @@ export class DirectorSupervisor {
           const assembled = (finals.length ? finals : delivered).map(output => output.text).join("\n");
           if (text !== assembled) this.output(turn, text, "final");
         }
-        this.terminal({ ...turn, dispatched: result.dispatched, nativeThreadId: result.nativeThreadId ?? turn.nativeThreadId, nativeTurnId: result.nativeTurnId ?? turn.nativeTurnId },
-          result.status === "unknown" ? "unknown" : stale ? "interrupted" : pending ? "waiting_user" : result.status, result.error?.code ?? null);
+        const nativeDiagnostic = safeNativeDiagnostic(result.error?.nativeDiagnostic);
+        this.terminal({ ...turn, ...(nativeDiagnostic ? { nativeDiagnostic } : {}), dispatched: result.dispatched, nativeThreadId: result.nativeThreadId ?? turn.nativeThreadId, nativeTurnId: result.nativeTurnId ?? turn.nativeTurnId },
+          result.status === "unknown" ? "unknown" : stale ? "interrupted" : pending ? "waiting_user" : result.status, result.error?.code ?? (stale ? "REQUEST_SUPERSEDED" : null));
         new ToolInvocationService(service).reconcileEpoch(claimed.projectId, turn.epochId!);
       });
     } catch (error) {
       service.store.transaction(() => {
         const turn = service.store.get<DirectorTurn>("director_turn", claimed.id)!;
         if (turn.state !== "running" || turn.owner !== this.owner) return;
-        this.terminal(turn, attempted ? "unknown" : abort.signal.aborted ? "interrupted" : "failed",
+        const refused = error instanceof DirectorStartRefusal;
+        this.terminal(refused ? { ...turn, dispatched: false } : turn, refused ? "failed" : attempted ? "unknown" : abort.signal.aborted ? "interrupted" : "failed",
           error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "DIRECTOR_RUN_FAILED");
         if (turn.epochId) new ToolInvocationService(service).reconcileEpoch(claimed.projectId, turn.epochId);
       });

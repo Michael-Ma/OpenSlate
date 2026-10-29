@@ -117,13 +117,14 @@ function create(input: unknown): LocalTimelineDocument {
   const totalFrames = clips.reduce((sum, clip) => sum + clip.durationFrames, 0); integer(totalFrames, 1, MAX_FRAMES);
   const audioSources = new Set<string>();
   const audio = value.audio.map(raw => {
-    const placement = object(raw, ["source", "startSample", "durationSamples", "atSample"], ["gainMilliDb"]), media = remember(source(placement.source, "audio"));
+    const placement = object(raw, ["source", "startSample", "durationSamples", "atSample"], ["gainMilliDb", "fadeOutSamples"]), media = remember(source(placement.source, "audio"));
     integer(placement.startSample, 0, MAX_SAMPLES); integer(placement.durationSamples, 1, MAX_SAMPLES); integer(placement.atSample, 0, totalFrames * 1600);
     const gainMilliDb = Object.hasOwn(placement, "gainMilliDb") ? placement.gainMilliDb : 0; integer(gainMilliDb, -60000, 12000);
     invalid(placement.startSample + placement.durationSamples <= media.probe.audio!.samples!, "Audio exceeds measured source samples");
     invalid(placement.atSample + placement.durationSamples <= totalFrames * 1600, "Audio extends beyond the timeline");
+    if (placement.fadeOutSamples !== undefined) integer(placement.fadeOutSamples, 1, Math.min(4800, placement.durationSamples));
     audioSources.add(media.sha256); invalid(audioSources.size <= 65, "Too many distinct audio sources");
-    return { source: media, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb };
+    return { source: media, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb, ...(placement.fadeOutSamples !== undefined ? { fadeOutSamples: placement.fadeOutSamples } : {}) };
   });
   const ends: number[] = [];
   for (const placement of [...audio].sort((a, b) => a.atSample - b.atSample)) {

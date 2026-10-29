@@ -7,9 +7,14 @@ import { runDemo } from "../dist/demo.js";
 import { Store } from "../dist/persistence/store.js";
 import { FakeProvider } from "@openslate/providers";
 
-test("fake two-shot workflow reviews exact frames, edits one shot and recovers without duplicate accepts", async () => {
+test("fake two-shot workflow reviews exact frames, edits one shot and recovers its retained vendor task id without duplicate accepts", async t => {
   const directory = mkdtempSync(join(tmpdir(), "openslate-demo-test-"));
   const savedFetch = globalThis.fetch;
+  let lookups = 0;
+  t.mock.method(FakeProvider.prototype, "lookup", async () => {
+    lookups++;
+    throw new Error("The demo must recover its known vendor task without attempt-id lookup");
+  });
   globalThis.fetch = () => { throw new Error("The fake demo must not make network calls"); };
   try {
     const summary = await runDemo(directory);
@@ -37,6 +42,12 @@ test("fake two-shot workflow reviews exact frames, edits one shot and recovers w
       assert.equal(attempts.filter(attempt => attempt.candidateId === preserved.id).length, 1);
       const recovered = attempts.find(attempt => attempt.id === summary.recoveredAttemptId);
       assert.equal(recovered.phase, "succeeded");
+      assert.equal(typeof recovered.taskId, "string");
+      assert.ok(provider.jobs().some(job => job.id === recovered.taskId && job.attemptId === recovered.id));
+      const evidence = store.list("execution_evidence", summary.projectId).filter(item => item.attemptId === recovered.id);
+      assert.ok(evidence.some(item => item.outcome.type === "accepted" && item.outcome.taskId === recovered.taskId), "the POST response's real vendor task id was saved");
+      assert.ok(evidence.some(item => item.outcome.type === "unknown" && item.outcome.taskId === recovered.taskId), "the temporary status outage retained the exact task id");
+      assert.equal(lookups, 0);
       assert.equal(provider.acceptedCount(recovered.id), 1);
       assert.equal(provider.acceptedCount(), 6);
       const approvals = store.list("approval", summary.projectId);

@@ -83,14 +83,20 @@ test('legacy assembly prevents incompatible pending H3 rewrite but still permits
   const f=await fixture(t,{local:false});await assert.rejects(f.preview({profileIds:[video.id]}),code('LOCAL_EXECUTION_UPGRADE_REQUIRED'));
   const empty=await fixture(t,{local:false,plan:false});const result=await empty.apply(await empty.preview({profileIds:[video.id]}));assert.equal(result.status.selected.video,video.id);
 });
-for(const mode of ['pending','unknown_after_accept'])test(`preserved ${mode} attempt recovers after another node changes without resubmission`,async t=>{
+for(const mode of ['pending','unknown_after_accept'])test(`preserved ${mode} attempt ${mode==='pending'?'recovers':'settles as a charged lost reply'} after another node changes without resubmission`,async t=>{
   const f=await fixture(t);f.provider.setMode(f.binding('image-0').id,mode);f.provider.setMode(f.binding('image-1').id,'reject_before_accept');await f.engine.runReady();
   const original=rows(f,'attempt').find(row=>row.nodeId===f.binding('image-0').id),count=f.provider.acceptedCount(),request=structuredClone(original.request),old=f.binding('image-0');
   const preview=await f.preview();assert.equal(preview.preserved.find(row=>row.nodeId===old.id).reason,'in_flight');await f.apply(preview);
   assert.equal(f.binding('image-0').candidateId,old.candidateId);assert.notEqual(f.binding('image-0').planId,old.planId);
   assert.deepEqual(f.store.get('attempt',original.id).request,request);if(mode==='pending')f.provider.complete(original.taskId);
-  await f.engine.reconcile();assert.equal(f.store.get('attempt',original.id).phase,'succeeded');assert.equal(f.provider.acceptedCount(),count);
-  assert.equal(f.store.get('reservation',original.reservationId).state,'charged');assert.equal(f.binding('image-0').outputs.image.artifactId,f.store.get('attempt',original.id).outputs.image.artifactId);
+  await f.engine.reconcile();const settled=f.store.get('attempt',original.id);assert.equal(settled.phase,mode==='pending'?'succeeded':'failed');assert.equal(f.provider.acceptedCount(),count);
+  assert.equal(f.store.get('reservation',original.reservationId).state,'charged');
+  if(mode==='pending')assert.equal(f.binding('image-0').outputs.image.artifactId,settled.outputs.image.artifactId);
+  else{
+    assert.equal(settled.failure.id,'SUBMISSION_RESPONSE_LOST');assert.equal(settled.failure.retryAllowed,false);assert.deepEqual(settled.outputs,{});assert.deepEqual(f.binding('image-0').outputs,{});
+    for(let cycle=0;cycle<3;cycle++){await f.engine.reconcile();await f.engine.runReady();}
+    assert.equal(f.provider.acceptedCount(),count);assert.equal(rows(f,'attempt').filter(row=>row.candidateId===original.candidateId).length,1);
+  }
 });
 test('completed downstream video protects its unfinished dependency ancestor',async t=>{
   const f=await fixture(t),imageBinding=f.binding('image-0'),videoBinding=f.binding('video-0');

@@ -9,7 +9,7 @@ export type { ImportedAuthorityKind, RecoveryFence, RecoveryReceipt, RecoveryRel
 export interface RecoverySnapshot {
   state: "ordinary" | "quarantined" | "released";
   receipt: RecoveryReceipt | null; receiptDigest: string | null; summaryDigest: string | null;
-  counts: { projects: number; knownJobs: number; unknownJobs: number; nativeRequests: number; unusedAllowances: number; preparingJobs?: number };
+  counts: { projects: number; knownJobs: number; unknownJobs: number; nativeRequests: number; unusedAllowances: number; preparingJobs: number };
 }
 const terminal = new Set(["succeeded", "failed"]);
 const fenceKey = (projectId: string, kind: ImportedAuthorityKind, id: string) => `${projectId}\0${kind}\0${id}`;
@@ -67,7 +67,7 @@ export class InstallationRecoveryGuard {
     return (!current || !!current.release) && !this.isImported(projectId, "director_turn", turnId) && !this.isImported(projectId, "message", requestId);
   }
   snapshot(): RecoverySnapshot {
-    const current = this.current(), counts: RecoverySnapshot["counts"] = { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, unusedAllowances: 0 };
+    const current = this.current(), counts: RecoverySnapshot["counts"] = { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, unusedAllowances: 0, preparingJobs: 0 };
     if (!current) return { state: "ordinary", receipt: null, receiptDigest: null, summaryDigest: null, counts };
     counts.projects = current.receipt.projectIds.length;
     const imported = (projectId: string, kind: ImportedAuthorityKind, id: string) => this.imported.has(fenceKey(projectId, kind, id));
@@ -90,7 +90,7 @@ export class InstallationRecoveryGuard {
           catch { /* Damaged evidence remains uncertain; this read never repairs or authorizes it. */ }
         }
         const known = taskIds.size === 1 && attempt.phase !== "preparing";
-        if (preparing) counts.preparingJobs = (counts.preparingJobs ?? 0) + 1;
+        if (preparing) counts.preparingJobs++;
         else if (known) counts.knownJobs++; else counts.unknownJobs++;
         work.push({ projectId, attemptId: attempt.id, phase: attempt.phase, task: attempt.taskId ? digest(attempt.taskId) : null,
           accepted: accepted.map(row => row.outcomeDigest).sort(), reservation: attempt.reservationId ? this.store.get("reservation", attempt.reservationId) ?? null : null });

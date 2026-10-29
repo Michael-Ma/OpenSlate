@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile, realpath, rm, readdir, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, realpath, rm, readdir, symlink, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { CodexImageWorkerTransport } from "../dist/index.js";
+import { CodexImageWorkerTransport, classifyNativeDiagnostic } from "../dist/index.js";
 import { ImageRpc } from "../dist/media/image-rpc.js";
 import { CODEX_RUNTIME_LIMITS } from "../dist/runtime/policy.js";
 const entry=fileURLToPath(new URL("codex-image-fixture.mjs",import.meta.url));
@@ -14,12 +14,15 @@ const input=()=>({attemptId:"attempt-1",requestDigest:"a".repeat(64),prompt:"A s
 async function fixture(t,scenario="inline",timeoutMs=2000) {
  const root=await realpath(await mkdtemp(join(tmpdir(),"openslate-codex-image-"))),nativeHome=join(root,"home"),codexHome=join(nativeHome,".codex");
  await mkdir(codexHome,{recursive:true});
+ await writeFile(join(codexHome,"auth.json"),"FAKE_AUTH_NEVER_READ");
+ const setPersonalServers=servers=>writeFile(join(codexHome,"fixture-mcp-servers.json"),JSON.stringify(servers));
+ await setPersonalServers({inherited:{enabled:true,command:"FAKE_MCP_MUST_NOT_RUN"},already_disabled:{enabled:false}});
  const options={command:{file:process.execPath,args:[entry]},nativeHome,codexHome,directory:join(root,"images"),timeoutMs,
-  env:{SETUP_FIXTURE_LOG:join(root,"calls.jsonl"),SETUP_FIXTURE_SKILL:join(codexHome,"skills/private/SKILL.md"),SETUP_FIXTURE_MODEL:"gpt-6-astra",IMAGE_FIXTURE_SCENARIO:scenario,IMAGE_FIXTURE_CONTROL:join(root,"control")}};
+  env:{SETUP_FIXTURE_LOG:join(root,"calls.jsonl"),SETUP_FIXTURE_SKILL:join(codexHome,"skills/private/SKILL.md"),SETUP_FIXTURE_MODEL:"gpt-6-astra",IMAGE_FIXTURE_SCENARIO:scenario,IMAGE_FIXTURE_CONTROL:join(root,"control"),IMAGE_FIXTURE_PERSONAL_HOME:codexHome}};
  const workers=[],make=()=>{const worker=new CodexImageWorkerTransport(options);workers.push(worker);return worker;};
  const worker=make();t.after(async()=>{await Promise.all(workers.map(w=>w.close()));await rm(root,{recursive:true,force:true});});
  const records=async()=>{try{return(await readFile(options.env.SETUP_FIXTURE_LOG,"utf8")).trim().split("\n").filter(Boolean).map(JSON.parse);}catch(e){if(e.code==="ENOENT")return[];throw e;}};
- return{root,options,worker,make,records,set:scenario=>writeFile(options.env.IMAGE_FIXTURE_CONTROL,scenario)};
+ return{root,options,worker,make,records,setPersonalServers,privateHome:join(options.directory,"runtime/director-home"),set:scenario=>writeFile(options.env.IMAGE_FIXTURE_CONTROL,scenario)};
 }
 async function run(f,supplied=input(),options={}){const prepared=await f.worker.prepare(supplied);let turns=[];const outcome=await f.worker.start(prepared,supplied,{observeTurn:async id=>turns.push(id),...options});return{prepared,outcome,turns};}
 const methods=rows=>rows.filter(x=>x.method).map(x=>x.method);
@@ -33,8 +36,73 @@ test("construction is lazy; readiness has no threads, turns, credentials or inhe
  assert.ok(!JSON.stringify(readiness).includes(f.root));assert.ok(!JSON.stringify(readiness).includes("PRIVATE"));
  assert.ok(calls.filter(x=>x.kind==="launch").every(x=>x.parentSecretAbsent&&x.apiEnvironmentAbsent));
 });
-for(const scenario of ["api-key","capability"])test(`new work blocks ${scenario} without starting any turn`,async t=>{
- const f=await fixture(t,scenario);const ready=await f.worker.checkReadiness();assert.equal(ready.status,"blocked");assert.ok(!methods(await f.records()).includes("turn/start"));
+test("readiness and preparation use setup's private home despite enabled personal MCP servers",async t=>{
+ const f=await fixture(t),personal=await readFile(join(f.options.codexHome,"fixture-mcp-servers.json"),"utf8");
+ assert.equal(JSON.parse(personal).inherited.enabled,true);
+ const ready=await f.worker.checkReadiness();assert.equal(ready.status,"ready",ready.code);
+ const checked=await f.records();assert.ok(!methods(checked).some(method=>method.startsWith("thread/")||method.startsWith("turn/")));
+ const prepared=await f.worker.prepare(input());
+ const config=JSON.parse(await readFile(join(f.options.directory,"configurations",prepared.runtime.configurationDigest+".json"),"utf8"));
+ assert.equal(config.version,2);assert.equal(config.codexHome,f.privateHome);
+ const launches=(await f.records()).filter(row=>row.kind==="launch");
+ assert.ok(launches.some(row=>!row.imageProcess),"fixture must observe native setup discovery");
+ assert.equal(launches.filter(row=>row.imageProcess).length,2,"readiness and preparation each launch a checked image process");
+ for(const launch of launches){assert.equal(launch.codexHome,f.privateHome);assert.equal(launch.home,f.options.nativeHome);assert.equal(launch.strictConfig,true);assert.deepEqual(launch.mcpServers,[]);}
+ assert.equal(await readFile(join(f.options.codexHome,"fixture-mcp-servers.json"),"utf8"),personal);
+ assert.equal(methods(await f.records()).filter(method=>method==="thread/start").length,1);
+ assert.ok(!methods(await f.records()).includes("turn/start"));
+});
+test("personal MCP changes after cached setup cannot alter preparation or its sole image turn",async t=>{
+ const f=await fixture(t),ready=await f.worker.checkReadiness();assert.equal(ready.status,"ready",ready.code);
+ const before=await f.records();
+ await f.setPersonalServers({newly_added:{enabled:true,command:"FAKE_NEW_SERVER_MUST_NOT_RUN"},inherited:{enabled:true}});
+ const {outcome}=await run(f);assert.equal(outcome.kind,"completed",outcome.code);
+ const extra=(await f.records()).slice(before.length),launches=extra.filter(row=>row.kind==="launch");
+ assert.equal(launches.length,1,"prepare must use the cached verified setup without new discovery");
+ assert.equal(launches[0].imageProcess,true);assert.equal(launches[0].codexHome,f.privateHome);assert.deepEqual(launches[0].mcpServers,[]);
+ assert.equal(methods(extra).filter(method=>method==="turn/start").length,1);
+});
+for(const boundary of ["checkReadiness","prepare","start","lookup"])for(const drift of ["config.toml","AGENTS.md","home-alias"])test(`${boundary} refuses private ${drift} drift without launching or dispatching`,async t=>{
+ const f=await fixture(t);let prepared;
+ if(boundary==="lookup")prepared=(await run(f)).prepared;
+ else if(boundary==="start")prepared=await f.worker.prepare(input());
+ else {const ready=await f.worker.checkReadiness();assert.equal(ready.status,"ready",ready.code);}
+ if(drift==="home-alias"){await rename(f.privateHome,f.privateHome+".original");await symlink(f.privateHome+".original",f.privateHome);}
+ else await writeFile(join(f.privateHome,drift),"SYNTHETIC_UNTRUSTED_CONFIGURATION");
+ const before=(await f.records()).length;
+ if(boundary==="checkReadiness")assert.equal((await f.worker.checkReadiness()).status,"blocked");
+ else if(boundary==="prepare")await assert.rejects(f.worker.prepare(input()));
+ else if(boundary==="start")assert.equal((await f.worker.start(prepared,input(),{observeTurn:async()=>{}})).kind,"unknown");
+ else assert.equal((await f.make().lookup(prepared,{turnId:"turn-1"})).kind,"unknown");
+ const extra=(await f.records()).slice(before);assert.ok(!extra.some(row=>row.kind==="launch"));assert.ok(!methods(extra).includes("turn/start"));
+});
+for(const scenario of ["api-key","capability","mcp-drift"])test(`new work blocks ${scenario} without starting any turn`,async t=>{
+ const f=await fixture(t,scenario);const ready=await f.worker.checkReadiness();assert.equal(ready.status,"blocked");assert.deepEqual(ready.nativeDiagnostic,{category:scenario==="api-key"?"native_auth_required":"native_protocol"});assert.ok(!methods(await f.records()).includes("turn/start"));
+ if(scenario==="mcp-drift")assert.equal(ready.code,"CODEX_IMAGE_MCP_UNEXPECTED");
+});
+for(const operation of ["prepare","checkReadiness"])test(`${operation} preserves its primary native start reason when cleanup also fails`,async t=>{
+ const f=await fixture(t,"api-key"),close=ImageRpc.prototype.close;
+ ImageRpc.prototype.close=async function(){await close.call(this);throw Error("PRIVATE_CLEANUP_ERROR");};
+ try {
+  if(operation==="prepare")await assert.rejects(f.worker.prepare(input()),error=>{
+   assert.equal(error.code,"CODEX_IMAGE_CHATGPT_REQUIRED");assert.deepEqual(classifyNativeDiagnostic(error),{category:"native_auth_required"});return true;
+  });
+  else {const ready=await f.worker.checkReadiness();assert.equal(ready.status,"blocked");assert.deepEqual(ready.nativeDiagnostic,{category:"native_auth_required"});}
+ } finally {ImageRpc.prototype.close=close;}
+ assert.ok(!methods(await f.records()).includes("turn/start"));
+});
+test("successful native checks with failed cleanup return blocked readiness without private errors",async t=>{
+ const f=await fixture(t),close=ImageRpc.prototype.close;
+ ImageRpc.prototype.close=async function(){await close.call(this);throw Error("PRIVATE_CLEANUP_ERROR");};
+ let ready;try {ready=await f.worker.checkReadiness();}finally{ImageRpc.prototype.close=close;}
+ assert.equal(ready.status,"blocked");assert.deepEqual(ready.nativeDiagnostic,{category:"native_unknown"});
+ assert.ok(!JSON.stringify(ready).includes("PRIVATE"));assert.ok(!methods(await f.records()).includes("turn/start"));
+});
+test("image startup settings are bounded independently of its turn execution deadline",async t=>{
+ const f=await fixture(t);
+ for(const startupTimeoutMs of [0,-1,120001,Infinity,1.5])assert.throws(()=>new CodexImageWorkerTransport({...f.options,startupTimeoutMs}),error=>error.code==="CODEX_IMAGE_LIMIT_INVALID");
+ for(const startupTimeoutMs of [15000,60000,120000])assert.doesNotThrow(()=>new CodexImageWorkerTransport({...f.options,startupTimeoutMs}));
+ assert.deepEqual(await f.records(),[]);
 });
 test("one exact turn yields a unique structured image and preserves model/canvas preference distinction",async t=>{
  const f=await fixture(t),value=input();value.images=[{artifactId:"ref-1",sha256:createHash("sha256").update(png).digest("hex"),byteLength:png.length,bytes:png}];
@@ -48,16 +116,68 @@ test("large inline PNG exceeds the director line budget without exceeding the se
  // This tests the image payload limit, not a two-second CPU budget under parallel FFmpeg load.
  const f=await fixture(t,"large",10000),{outcome}=await run(f);assert.equal(outcome.kind,"completed",outcome.code);assert.ok(outcome.bytes.length>4*1024*1024);
 });
-test("native default generated_images path is read exactly and survives worker reconstruction without authentication",async t=>{
+test("private generated_images path is read exactly and survives worker reconstruction without authentication",async t=>{
  const f=await fixture(t,"path"),{prepared,outcome}=await run(f);assert.equal(outcome.kind,"completed",outcome.code);
+ const path=join(f.privateHome,"generated_images",prepared.session.threadId,"result.png");assert.deepEqual(await readFile(path),png);
+ assert.ok(!(await readdir(f.options.codexHome)).includes("generated_images"));
+ await f.setPersonalServers({changed_before_recovery:{enabled:true,command:"FAKE_RECOVERY_MUST_NOT_RUN"}});
+ await rm(join(f.options.codexHome,"auth.json"));
  await f.set("api-key");const before=await f.records(),recovered=await f.make().lookup(prepared,{turnId:"turn-1"});assert.equal(recovered.kind,"completed",recovered.code);assert.deepEqual(recovered.bytes,outcome.bytes);
- const extra=methods((await f.records()).slice(before.length));assert.deepEqual(extra,["initialize","initialized","thread/read"]);
+ const rows=(await f.records()).slice(before.length);assert.deepEqual(methods(rows),["initialize","initialized","thread/read"]);
+ assert.equal(rows.filter(row=>row.kind==="launch").length,1);assert.equal(rows.find(row=>row.kind==="launch").codexHome,f.privateHome);
+ assert.equal(methods(await f.records()).filter(method=>method==="turn/start").length,1);
 });
-for(const scenario of ["symlink","outside","no-bytes","no-image","multiple","conflicting-item","wrong-event"])test(`no image is selected from ${scenario}`,async t=>{
+test("new private-home turns never adopt a savedPath under the personal Codex home",async t=>{
+ const f=await fixture(t,"personal-path"),{prepared,outcome}=await run(f);assert.equal(outcome.kind,"unknown");
+ assert.deepEqual(await readFile(join(f.options.codexHome,"generated_images",prepared.session.threadId,"result.png")),png);
+ assert.equal((await f.make().lookup(prepared,{turnId:"turn-1"})).kind,"unknown");
+ assert.equal(methods(await f.records()).filter(method=>method==="turn/start").length,1);
+});
+for(const scenario of ["symlink","outside","no-bytes","multiple","conflicting-item","wrong-event"])test(`no image is selected from ${scenario}`,async t=>{
  const f=await fixture(t,scenario),{outcome}=await run(f);assert.equal(outcome.kind,"unknown");assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
 });
-for(const [scenario,code]of [["usage","USAGE_LIMIT"],["image-failed","IMAGE_FAILED"]])test(`${scenario} remains a typed observed terminal result, without retry`,async t=>{
- const f=await fixture(t,scenario),{outcome}=await run(f);assert.equal(outcome.kind,"failed");assert.equal(outcome.code,code);assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
+for(const [scenario,code]of [["usage","USAGE_LIMIT"],["image-failed","IMAGE_FAILED"],["image-refusal","IMAGE_FAILED"],["turn-failed","TURN_FAILED"],["turn-interrupted","TURN_INTERRUPTED"],["no-image","NO_IMAGE"]])test(`${scenario} remains a typed observed terminal result, without retry`,async t=>{
+ const f=await fixture(t,scenario),{prepared,outcome}=await run(f);assert.deepEqual(outcome,{kind:"failed",threadId:prepared.session.threadId,turnId:"turn-1",code});
+ assert.deepEqual(await f.make().lookup(prepared,{turnId:"turn-1"}),outcome);
+ const calls=methods(await f.records());assert.equal(calls.filter(x=>x==="turn/start").length,1);assert.ok(!calls.includes("thread/resume"));assert.ok(!JSON.stringify(outcome).includes("PRIVATE"));
+});
+test("worker deadline settles only an interrupt proven terminal in exact native history",async t=>{
+ const f=await fixture(t,"deadline-interrupted"),{prepared,outcome}=await run(f);
+ assert.deepEqual(outcome,{kind:"failed",threadId:prepared.session.threadId,turnId:"turn-1",code:"TURN_INTERRUPTED"});
+ assert.deepEqual(await f.make().lookup(prepared,{turnId:"turn-1"}),outcome);
+ const calls=methods(await f.records());assert.equal(calls.filter(x=>x==="turn/start").length,1);assert.equal(calls.filter(x=>x==="turn/interrupt").length,1);assert.equal(calls.filter(x=>x==="thread/read").length,2);
+});
+for(const scenario of ["deadline-no-evidence","interrupt-lost-reply"])test(`worker deadline with ${scenario} stays unknown without terminal native evidence`,async t=>{
+ const f=await fixture(t,scenario),{prepared,outcome}=await run(f);assert.deepEqual(outcome,{kind:"unknown",code:"CODEX_IMAGE_TIMEOUT"});
+ assert.equal((await f.make().lookup(prepared,{turnId:"turn-1"})).kind,"pending");
+ const calls=methods(await f.records());assert.equal(calls.filter(x=>x==="turn/start").length,1);assert.equal(calls.filter(x=>x==="turn/interrupt").length,1);
+});
+for(const operation of ["start","lookup"])for(const boundary of ["cleanup-error","late-abort"])test(`${operation} preserves saved native failure through ${boundary}`,async t=>{
+ const f=await fixture(t,"usage"),value=input(),controller=new AbortController();
+ const prepared=operation==="start"?await f.worker.prepare(value):(await run(f,value)).prepared;
+ const close=ImageRpc.prototype.close;
+ ImageRpc.prototype.close=async function(){if(boundary==="late-abort")controller.abort();await close.call(this);if(boundary==="cleanup-error")throw Error("PRIVATE_CLEANUP_ERROR");};
+ let outcome;try{outcome=operation==="start"?await f.worker.start(prepared,value,{signal:controller.signal,observeTurn:async()=>{}}):await f.make().lookup(prepared,{turnId:"turn-1",signal:controller.signal});}
+ finally{ImageRpc.prototype.close=close;}
+ assert.deepEqual(outcome,{kind:"failed",threadId:prepared.session.threadId,turnId:"turn-1",code:"USAGE_LIMIT"});assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
+});
+test("observed terminal failure stays definite when the observation sink reaches the worker deadline",async t=>{
+ const f=await fixture(t,"usage"),{prepared,outcome}=await run(f,input(),{observeTurn:()=>new Promise(()=>{})});
+ assert.deepEqual(outcome,{kind:"failed",threadId:prepared.session.threadId,turnId:"turn-1",code:"USAGE_LIMIT"});assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
+});
+test("saved terminal history stays definite when cancellation follows the native read",async t=>{
+ const f=await fixture(t,"usage"),{prepared}=await run(f),controller=new AbortController(),request=ImageRpc.prototype.request;
+ ImageRpc.prototype.request=async function(method,...args){const result=await request.call(this,method,...args);if(method==="thread/read")controller.abort();return result;};
+ let outcome;try{outcome=await f.make().lookup(prepared,{turnId:"turn-1",signal:controller.signal});}finally{ImageRpc.prototype.request=request;}
+ assert.deepEqual(outcome,{kind:"failed",threadId:prepared.session.threadId,turnId:"turn-1",code:"USAGE_LIMIT"});assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
+});
+test("terminal usage failure stays definite when its observation callback cancels the worker",async t=>{
+ const f=await fixture(t,"usage"),controller=new AbortController(),setHandler=ImageRpc.prototype.setMessageHandler;let completed;
+ const completion=new Promise(resolve=>{completed=resolve;});
+ ImageRpc.prototype.setMessageHandler=function(receive){return setHandler.call(this,message=>{receive(message);if(message.method==="turn/completed")completed();});};
+ let result;try{result=await run(f,input(),{signal:controller.signal,observeTurn:async()=>{await completion;controller.abort();}});}finally{ImageRpc.prototype.setMessageHandler=setHandler;}
+ assert.deepEqual(result.outcome,{kind:"failed",threadId:result.prepared.session.threadId,turnId:"turn-1",code:"USAGE_LIMIT"});
+ const calls=methods(await f.records());assert.equal(calls.filter(x=>x==="turn/start").length,1);assert.ok(!calls.includes("turn/interrupt"));
 });
 test("lost turn acknowledgement recovers exact recorded result via history with no new prepare or turn",async t=>{
  const f=await fixture(t,"lost-ack"),{prepared,outcome,turns}=await run(f);assert.equal(outcome.kind,"unknown");assert.deepEqual(turns,["turn-1"]);
@@ -106,4 +226,13 @@ test("close during lazy setup bars every later thread and turn launch",async t=>
  await assert.rejects(pending,error=>error.code==="CODEX_IMAGE_CLOSED");
  const calls=await f.records();assert.ok(!methods(calls).some(method=>method.startsWith("thread/")||method.startsWith("turn/")));
  for(const row of calls.filter(x=>x.kind==="launch"))assert.throws(()=>process.kill(row.pid,0),error=>error.code==="ESRCH");
+});
+
+test("a codex-image-turn-v2 portrait turn asks for 1024x1536 through the same single native turn",async t=>{
+ const f=await fixture(t),value={...input(),height:1536,aspect:"9:16"};
+ const {prepared,outcome}=await run(f,value);assert.equal(outcome.kind,"completed",outcome.code);
+ const call=(await f.records()).find(x=>x.method==="turn/start"),text=call.params.input[0].text;
+ assert.match(text,/9:16 portrait frame and generate it at 1024x1536/);assert.match(text,/"policy":"codex-image-turn-v2"/);
+ assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
+ const legacy=await fixture(t);assert.notEqual(prepared.session.turnInputDigest,(await run(legacy,input())).prepared.session.turnInputDigest);
 });

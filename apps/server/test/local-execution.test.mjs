@@ -155,6 +155,77 @@ test("single-use dispatch without a completion is actionable and never automatic
   assert.equal(f.engine.attempts(f.projectId)[0].failure.id, "LOCAL_EXECUTION_INTERRUPTED");
 });
 
+// Rule-drift review section 3, decision R4: a person may ask an interrupted local render to run again.
+async function interrupted(t) {
+  let first = true;
+  const f = fixture(t, { execute: async (intent, call, complete) => {
+    if (first) { first = false; throw new DomainError("LOCAL_WORK_INTERRUPTED", "Before a completion"); }
+    return complete(intent);
+  } });
+  await f.engine.runReady(); f.reopen(); await f.engine.reconcile();
+  const old = f.engine.attempts(f.projectId)[0];
+  assert.equal(old.failure.id, "LOCAL_EXECUTION_INTERRUPTED");
+  return { f, old };
+}
+
+test("an interrupted local render runs again only under a person's new retry identity, keeping the old dispatch evidence", async t => {
+  const { f, old } = await interrupted(t);
+  await f.engine.runReady(); assert.equal(f.counts().executes, 1, "identical content still never rerenders on its own");
+  assert.deepEqual(f.engine.interruptedLocalWork(f.projectId).map(row => row.attemptId), [old.id]);
+  await assert.rejects(f.engine.retryLocalAttempt(f.projectId, old.id, "local-user", false), { code: "RERENDER_NOT_ACKNOWLEDGED" });
+  const receipt = await f.engine.retryLocalAttempt(f.projectId, old.id, "local-user", true);
+  assert.equal(receipt.attemptId, old.id); assert.equal(receipt.nodeId, f.nodeId); assert.ok(Date.parse(receipt.retriedAt));
+  assert.deepEqual(f.engine.interruptedLocalWork(f.projectId), []);
+  // The retry itself starts nothing; the next ordinary run admits one fresh attempt with the same content.
+  assert.equal(f.engine.attempts(f.projectId).length, 1);
+  assert.equal((await f.engine.runReady()).dispatched, 1); assert.equal(f.counts().executes, 2);
+  const attempts = f.engine.attempts(f.projectId).sort((a, b) => a.ordinal - b.ordinal), fresh = attempts[1];
+  assert.equal(attempts.length, 2); assert.equal(fresh.ordinal, old.ordinal + 1); assert.equal(fresh.fingerprint, old.fingerprint);
+  assert.notEqual(fresh.workKey, old.workKey); assert.equal(fresh.phase, "succeeded"); assert.equal(f.engine.outputs(f.projectId).length, 1);
+  assert.deepEqual(f.store.get("attempt", old.id), old, "the interrupted attempt is not rewritten");
+  assert.ok(f.store.get("local_execution_dispatch", old.id), "its dispatch evidence stays");
+  assert.equal(f.store.get("local_execution_retry", old.id).by, "local-user");
+  await assert.rejects(f.engine.retryLocalAttempt(f.projectId, old.id, "local-user", true), { code: "ATTEMPT_NOT_RETRYABLE" });
+  await f.engine.runReady(); assert.equal(f.counts().executes, 2);
+});
+
+test("a local retry refuses work that was not interrupted or that has a late receipt", async t => {
+  const done = fixture(t); await done.engine.runReady();
+  await assert.rejects(done.engine.retryLocalAttempt(done.projectId, done.engine.attempts(done.projectId)[0].id, "local-user", true), { code: "ATTEMPT_NOT_RETRYABLE" });
+  const { f, old } = await interrupted(t);
+  // The final receipt check: a completion that appeared meanwhile is never rendered over.
+  f.complete(f.store.get("local_execution_intent", old.id));
+  await assert.rejects(f.engine.retryLocalAttempt(f.projectId, old.id, "local-user", true), { code: "LOCAL_EXECUTION_RECOVERABLE" });
+  assert.equal(f.store.get("local_execution_retry", old.id), undefined);
+  await f.engine.runReady(); assert.equal(f.counts().executes, 1);
+});
+
+test("unchanged local recovery failures stay bounded across restart and record only real changes", async t => {
+  let recoveryCode;
+  const f = fixture(t, {
+    execute: async () => { throw new DomainError("LOCAL_WORK_INTERRUPTED", "Before a completion"); },
+    recover: async () => { if (recoveryCode) throw new DomainError(recoveryCode, "Synthetic local repair needed"); },
+  });
+  await f.engine.runReady(); const id = f.engine.attempts(f.projectId)[0].id;
+  recoveryCode = "MEDIA_MISSING"; f.reopen();
+  assert.equal((await f.engine.reconcile()).blocked[0].code, recoveryCode);
+  const events = () => f.store.readEvents(f.projectId).filter(event => event.kind === "attempt.state_changed" && event.payload.attemptId === id);
+  const before = events().length, records = f.store.db.prepare("SELECT count(*) count FROM entities").get().count;
+  for (let cycle = 0; cycle < 12; cycle++) {
+    if (cycle === 6) f.reopen();
+    assert.equal((await f.engine.reconcile()).blocked[0].code, recoveryCode);
+  }
+  assert.equal(events().length, before, "the same retained repair failure is not a new state transition");
+  assert.equal(f.store.db.prepare("SELECT count(*) count FROM entities").get().count, records);
+  recoveryCode = "MEDIA_CORRUPT"; await f.engine.reconcile();
+  assert.equal(events().length, before + 1, "a changed failure remains observable even in the same phase");
+  recoveryCode = undefined; await f.engine.reconcile();
+  assert.equal(f.engine.attempts(f.projectId)[0].phase, "failed");
+  assert.equal(f.engine.attempts(f.projectId)[0].failure.id, "LOCAL_EXECUTION_INTERRUPTED");
+  assert.equal(events().length, before + 2);
+  assert.equal(f.counts().executes, 1); assert.equal(f.provider.acceptedCount(), 0);
+});
+
 test("another SQLite worker cannot occupy local capacity and a stolen original lease cannot publish", async t => {
   const started = barrier(), release = barrier(); let originalSignal;
   const f = fixture(t, { execute: async (intent, call, complete) => { originalSignal = call.signal; started.resolve(); await release.promise; return complete(intent); } });

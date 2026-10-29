@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "result": {
+    "readiness": {
+      "ready": false,
+      "demo": false,
+      "seconds": 12,
+      "blockers": [
+        {
+          "code": "no_clip",
+          "shotId": "dbc685ff-bcb4-420e-a637-6bca21298557"
+        },
+        {
+          "code": "no_clip",
+          "shotId": "28758bf4-f2fb-46ed-8a33-cbfbb97fe119"
+        }
+      ]
+    },
+    "current": null,
+    "history": []
+  }
+}

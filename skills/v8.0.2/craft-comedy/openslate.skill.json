@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "id": "craft-comedy",
+  "version": "8.0.0",
+  "role": "craft",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/comedy.md",
+    "references/premises-and-beats.md",
+    "references/review-checklist.md",
+    "references/short-form.md"
+  ],
+  "compatibility": {
+    "toolContract": "7.0.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "read_guidance"
+  ],
+  "requires": [
+    "craft-story"
+  ],
+  "optional": []
+}

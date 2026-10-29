@@ -47,7 +47,7 @@ test("previous preview metadata follows each exact saved render output without i
   for (const row of rows) assert.equal(row.fixture, service.artifactFixture(f.projectId, row.artifact));
 });
 
-test("review HTTP projects saved frame fixture metadata without changing review or approval authority", async t => {
+test("review HTTP is read-only across repeated reads and cursor changes while projecting exact fixture metadata", async t => {
   const f = setup(t, { count: 3 }), service = new ProductionService(f.store, f.engine);
   await f.engine.runReady(); await f.engine.reconcile();
   await f.engine.runReady(); await f.engine.reconcile();
@@ -64,18 +64,32 @@ test("review HTTP projects saved frame fixture metadata without changing review 
   const localToken = "offline_fixture_metadata_session_0123456789";
   const app = createApp({ service, localToken }); t.after(() => app.close());
   const request = () => app.inject({ method: "GET", url: `/api/projects/${f.projectId}/review`, headers: { host: "127.0.0.1", authorization: `Bearer ${localToken}` } });
-  const projectBefore = f.store.getProject(f.projectId), evidenceBefore = f.store.list("evidence", f.projectId);
+  const rows = () => Object.fromEntries(["projects", "entities", "events", "commands"].map(table => [table, f.store.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
+  const before = rows();
+  const inspected = f.engine.inspectReview(f.projectId);
   const response = await request(); assert.equal(response.statusCode, 200, response.body);
   const review = response.json(); assert.equal(review.members.length, 3);
   assert.deepEqual(review.members.map(member => member.keyframeFixture), [true, false, null]);
-  const saved = f.store.get("review_snapshot", review.id);
-  assert.ok(saved); assert.equal(saved.members.some(member => Object.hasOwn(member, "keyframeFixture")), false);
+  assert.equal(review.id, null);
+  assert.deepEqual(f.store.list("review_snapshot", f.projectId), []);
   for (const member of review.members) {
-    const original = saved.members.find(value => value.videoNodeId === member.videoNodeId);
+    const original = inspected.members.find(value => value.videoNodeId === member.videoNodeId);
     assert.deepEqual(member.keyframe, original.keyframe); assert.equal(member.approvalDigest, original.approvalDigest);
     assert.equal(member.approved, false);
   }
-  assert.deepEqual((await request()).json(), review); assert.deepEqual(f.store.get("review_snapshot", review.id), saved);
-  assert.deepEqual(f.store.getProject(f.projectId), projectBefore); assert.deepEqual(f.store.list("evidence", f.projectId), evidenceBefore);
+  assert.deepEqual((await request()).json(), review);
+  assert.deepEqual(rows(), before);
+  f.store.appendEvent(f.projectId, "test.unrelated-progress", {});
+  const afterProgress = rows();
+  assert.deepEqual((await request()).json(), review);
+  assert.deepEqual(rows(), afterProgress);
+  // Do not cache inspection across cursor changes or rely on a persisted receipt.
+  const ref = outputRefs[0], row = f.store.get("artifact", ref.artifactId);
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(row.path, "changed frame bytes");
+  const afterCorruption = rows(), changed = (await request()).json();
+  assert.equal(changed.members[0].ready, false);
+  assert.equal(changed.members[0].keyframe, null);
+  assert.deepEqual(rows(), afterCorruption);
   for (const kind of ["approval", "message", "hold"]) assert.equal(f.store.list(kind, f.projectId).length, 0);
 });

@@ -1,0 +1,50 @@
+[
+  {
+    "at": "2026-10-17T00:17:02.059000+00:00",
+    "requestId": "req-11",
+    "method": "POST",
+    "path": "/api/projects/c92bc45e-7df2-4b8f-98d5-47ee8e8aa271/director/setup",
+    "status": 409,
+    "responseMs": 15372.24
+  },
+  {
+    "at": "2026-10-17T00:17:48.805000+00:00",
+    "requestId": "req-2u",
+    "method": "POST",
+    "path": "/api/projects/c7ac8aaf-bdd7-47c1-9048-c82d6de7687d/director/setup",
+    "status": 409,
+    "responseMs": 15459.855
+  },
+  {
+    "at": "2026-10-17T00:19:05.935000+00:00",
+    "requestId": "req-47",
+    "method": "POST",
+    "path": "/api/projects/c7ac8aaf-bdd7-47c1-9048-c82d6de7687d/director/setup",
+    "status": 200,
+    "responseMs": 734.806
+  },
+  {
+    "at": "2026-10-17T00:20:42.939000+00:00",
+    "requestId": "req-4r",
+    "method": "POST",
+    "path": "/api/projects/c7ac8aaf-bdd7-47c1-9048-c82d6de7687d/scenes/d6985775-ec43-43bb-8ea3-c4213946ea8f/generate",
+    "status": 200,
+    "responseMs": 85.372
+  },
+  {
+    "at": "2026-10-17T00:21:28.356000+00:00",
+    "requestId": "req-du",
+    "method": "POST",
+    "path": "/internal/projects/c7ac8aaf-bdd7-47c1-9048-c82d6de7687d/tools/record_notes",
+    "status": 200,
+    "responseMs": 5.761
+  },
+  {
+    "at": "2026-10-17T00:22:03.146000+00:00",
+    "requestId": "req-f6",
+    "method": "POST",
+    "path": "/api/projects/c7ac8aaf-bdd7-47c1-9048-c82d6de7687d/scenes/d6985775-ec43-43bb-8ea3-c4213946ea8f/generate",
+    "status": 200,
+    "responseMs": 84.617
+  }
+]

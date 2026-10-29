@@ -1,3 +1,4 @@
+import { characterSheetJobNode } from "./character-sheet-execution.js";
 import { canonical, digest, DomainError, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { ProjectRecord, ProviderProfile } from "@openslate/core";
 import { isLegacyExecution, profileExecutionIdentity } from "@openslate/providers";
@@ -13,10 +14,12 @@ export function currentExternalSelection(store: Store, projectId: string, select
   const project = store.getProject(projectId), binding = store.get<NodeBinding>("node_binding", selection.nodeId);
   const candidate = store.get<Candidate>("candidate", selection.candidateId);
   const plan = project.activePlanId ? store.get<PlanRecord>("plan", project.activePlanId) : undefined;
-  const node = plan?.compiled.nodes.find(node => node.id === selection.nodeId);
+  // A character sheet runs outside the shot plan; its recorded job node stands in for the compiled plan node.
+  const sheetNode = binding?.projectId === projectId ? characterSheetJobNode(store, binding) : undefined;
+  const node = sheetNode ?? plan?.compiled.nodes.find(node => node.id === selection.nodeId);
   const lock = store.get<{ projectId: string; profiles: ProviderProfile[] }>("capability_lock", project.capabilityLockId);
   const profile = lock?.projectId === projectId && Array.isArray(lock.profiles) ? lock.profiles.find(profile => profile.id === node?.profileId) : undefined;
-  invariant(binding?.projectId === projectId && binding.state === "active" && binding.planId === project.activePlanId
+  invariant(binding?.projectId === projectId && binding.state === "active" && (sheetNode !== undefined || binding.planId === project.activePlanId)
     && binding.candidateId === selection.candidateId && binding.node.specDigest === selection.specDigest && node
     && Object.keys(binding.outputs).length === 0 && canonical(node) === canonical(binding.node)
     && candidate?.projectId === projectId && candidate.nodeId === selection.nodeId && profile?.kind === node.kind,

@@ -1,0 +1,17 @@
+/* A character's face: the fourth (face) panel of their approved four-view sheet, or their initial on a dashed ring. */
+.cast-av{position:relative;display:inline-grid;place-items:center;flex:none;border-radius:50%;overflow:hidden;background:var(--raised-2);color:var(--text-2);font-weight:700;border:1.5px solid var(--green-line)}
+.cast-av.xs{width:18px;height:18px;font-size:9.5px;border-width:1px}
+.cast-av.sm{width:24px;height:24px;font-size:11px}
+.cast-av.md{width:32px;height:32px;font-size:13px}
+.cast-av.unapproved{border:1.5px dashed var(--track)}
+.cast-av.xs.unapproved{border-width:1px}
+.cast-av .pic-img,.cast-av .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+/* The sheet's face panel sits in its right quarter, a little above the middle (docs/ai/characters §2.2). */
+.cast-av.crop .pic-img{width:340%;height:340%;max-width:none;inset:auto;left:-245%;top:-110%;object-fit:fill}
+.cast-stack{display:inline-flex;align-items:center}
+.cast-stack .cast-av + .cast-av{margin-left:-5px}
+.cast-stack .cast-av{box-shadow:0 0 0 1.5px var(--surface)}
+.cast-more{margin-left:3px;font-size:10.5px;font-weight:700;color:var(--text-2)}
+.card .ttl .ttl-end{display:inline-flex;align-items:center;gap:7px}
+/* The cast check's faces sit under its title, like a Director note's swatches. */
+.cast-check-faces{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:12.5px;color:var(--text-2)}

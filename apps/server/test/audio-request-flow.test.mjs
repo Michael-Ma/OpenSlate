@@ -49,62 +49,56 @@ test('one transcription request retains exact owned source and publishes once wi
  assert.equal(f.store.list('owned_transcription_application',f.project.id).length,1);assert.equal(f.store.list('external_allowance',f.project.id).length,0);
  assert.deepEqual(f.narration.workspaceSnapshot(f.project.id),before);assert.equal(f.provider.acceptedCount(),0);
 });
-test('v5 speech tool requests execution while frozen v4 remains preparation-only',async t=>{
- for(const version of ['4.0.0','5.0.0']) {
-  const f=await narrationSpeechFixture(t);bind(t,f,version);const tools=new ToolInvocationService(f.production,{narrationSpeech:f.service});
-  const {key:_key,...input}=f.input(),result=await tools.invoke(f.project.id,f.actor,'speech-request','prepare_narration_speech',input);
-  assert.equal(result.state,version==='5.0.0'?'requested':'ungranted');
-  assert.equal(rows(f,'narration_speech_application').length,version==='5.0.0'?1:0);assert.equal(rows(f,'external_allowance').length,0);
-  if(version==='5.0.0') {assert.ok(result.candidateId);assert.ok(result.operationId);assert.equal(rows(f,'narration_speech_review')[0].epochId,f.actor.epochId);}
-  assert.deepEqual(f.calls,{http:0,credentials:0});
- }
+for (const version of ['4.0.0', '5.0.0']) for (const kind of ['speech', 'transcription']) test(`${version} ${kind} tool saves a pending suggestion and a human request alone publishes`, async t => {
+ const f = kind === 'speech' ? await narrationSpeechFixture(t) : await ownedTranscriptionFixture(t);
+ bind(t, f, version);
+ const tools = new ToolInvocationService(f.production, kind === 'speech' ? { narrationSpeech: f.service } : { ownedTranscription: f.service });
+ const { key: _key, ...input } = f.input(), name = kind === 'speech' ? 'prepare_narration_speech' : 'prepare_recording_transcription';
+ const before = Object.fromEntries(['attempt','grant','reservation','candidate'].map(k => [k, rows(f,k)]));
+ const result = await tools.invoke(f.project.id, f.actor, 'suggest', name, input);
+ assert.equal(result.state, 'ungranted'); assert.ok(result.pendingRequestId);
+ assert.deepEqual(await tools.invoke(f.project.id, f.actor, 'suggest', name, input), result);
+ assert.equal(rows(f,'director_audio_request').length, 1);
+ assert.deepEqual(Object.fromEntries(Object.keys(before).map(k => [k, rows(f,k)])), before);
+ await assert.rejects(f.service.request(f.project.id, f.actor, f.input()), { code: 'ACTOR_DENIED' });
+ const commit=kind==='speech' ? f.production.commitNarrationSpeechReview.bind(f.production) : f.production.commitOwnedTranscriptionReview.bind(f.production);
+ assert.throws(()=>commit(f.project.id,f.actor,{key:key(),proposalId:result.proposalId,proposalDigest:result.proposalDigest},{requested:true,requestedAtCursor:f.store.cursor(f.project.id)}),{code:'ACTOR_DENIED'});
+ const request = await f.service.request(f.project.id, f.human, f.input()); assert.ok(request.receipt.candidateId);
+ assert.equal(rows(f,kind === 'speech' ? 'narration_speech_application' : 'owned_transcription_application').length, 1);
 });
-test('v5 lost publication response reconciles exact application and candidate without replaying the audio request',async t=>{
- const f=await narrationSpeechFixture(t);bind(t,f,'5.0.0');const original=f.service.request.bind(f.service);let calls=0;
- f.service.request=async(...args)=>{calls++;await original(...args);throw Error('lost publication response');};
- const tools=new ToolInvocationService(f.production,{narrationSpeech:f.service}),{key:_key,...input}=f.input();
- await assert.rejects(tools.invoke(f.project.id,f.actor,'lost-request','prepare_narration_speech',input),{code:'TOOL_CALL_UNRESOLVED'});
- const application=rows(f,'narration_speech_application')[0];f.production.beginRequest(f.project.id,f.human.principalId,'Continue from saved results');
- tools.reconcileEpoch(f.project.id,f.actor.epochId);const reconciled=rows(f,'tool_reconciliation')[0];
- assert.equal(reconciled.state,'effect_confirmed');assert.equal(reconciled.receipt.state,'requested');assert.equal(reconciled.receipt.candidateId,application.id);
- assert.equal(reconciled.receiptDigest,digest(reconciled.receipt));assert.equal(calls,1);assert.equal(rows(f,'narration_speech_application').length,1);
- assert.deepEqual(f.calls,{http:0,credentials:0});
+test('lost suggestion response reconciles the saved proposal and never publishes paid work', async t => {
+ const f = await narrationSpeechFixture(t); bind(t,f,'5.0.0');
+ const prepare = f.service.prepareRequest.bind(f.service); let calls = 0;
+ f.service.prepareRequest = async (...args) => { calls++; await prepare(...args); throw Error('lost preparation response'); };
+ const tools = new ToolInvocationService(f.production,{narrationSpeech:f.service}), {key:_key,...input}=f.input();
+ await assert.rejects(tools.invoke(f.project.id,f.actor,'lost-suggestion','prepare_narration_speech',input),{code:'TOOL_CALL_UNRESOLVED'});
+ f.production.beginRequest(f.project.id,f.human.principalId,'Continue from saved suggestions');
+ tools.reconcileEpoch(f.project.id,f.actor.epochId);
+ const reconciled=rows(f,'tool_reconciliation')[0];assert.equal(reconciled.state,'effect_confirmed');
+ assert.equal(reconciled.receipt.state,'ungranted'); assert.ok(reconciled.receipt.pendingRequestId);
+ assert.equal(rows(f,'narration_speech_application').length,0);assert.equal(rows(f,'attempt').length,0);assert.equal(calls,1);
 });
-test('v5 chat requests all saved shot scripts without pre-existing narration sections or human actor substitution',async t=>{
+test('v5 saved shot script suggestions materialize sections without publishing execution', async t => {
  const f=await narrationSpeechFixture(t),saved=virtualShots(f);bind(t,f,'5.0.0');const tools=new ToolInvocationService(f.production,{narrationSpeech:f.service});
- assert.equal(f.narration.workspaceSnapshot(saved.id).segments.length,0);
- for(const [index,shot] of saved.shots.entries()){
-  let offset=0,choice;
-  do { const context=f.production.readContext(saved.id,f.actor,{section:'audio_operations',offset});choice=context.items[0].savedShotScripts.find(row=>row.shotId===shot.id);offset=context.page.nextOffset; } while(!choice&&offset!==null);
-  assert.ok(choice);assert.equal(choice.segmentId,shot.id);assert.equal(choice.segmentRevisionId,digest({shotId:shot.id,narration:shot.narration}));
-  const result=await tools.invoke(saved.id,f.actor,`shot-voice-${index}`,'prepare_narration_speech',{expectedHeadVersion:f.store.getProject(saved.id).headVersion,
-   segmentId:choice.segmentId,segmentRevisionId:choice.segmentRevisionId,profileId:f.profile.id,voice:'cedar',instructions:''});
-  assert.equal(result.state,'requested');assert.ok(result.operationId);
+ for (const [index,shot] of saved.shots.entries()) {
+  const result=await tools.invoke(saved.id,f.actor,`shot-${index}`,'prepare_narration_speech',{
+   expectedHeadVersion:f.store.getProject(saved.id).headVersion,segmentId:shot.id,
+   segmentRevisionId:digest({shotId:shot.id,narration:shot.narration}),profileId:f.profile.id,voice:'cedar',instructions:''});
+  assert.equal(result.state,'ungranted');assert.ok(result.pendingRequestId);
  }
- assert.equal(f.narration.workspaceSnapshot(saved.id).segments.length,3);assert.equal(rows(f,'narration_speech_application').length,3);
- assert.equal(rows(f,'narration_requested_shot_scope').length,3);assert.ok(rows(f,'narration_speech_review').every(row=>row.epochId===f.actor.epochId));
- assert.equal(rows(f,'narration_acceptance').length,0);assert.equal(rows(f,'external_allowance').length,0);assert.deepEqual(f.calls,{http:0,credentials:0});
+ assert.equal(f.narration.workspaceSnapshot(saved.id).segments.length,3);
+ for(const kind of ['attempt','grant','candidate','reservation','narration_speech_application']) assert.equal(rows(f,kind).length,0,kind);
+ assert.equal(rows(f,'director_audio_request').length,3);
 });
-for(const scope of ['shot','scene','multiple_shots'])test(`virtual materialization respects ${scope} scope and never grants generic narration write access`,async t=>{
+for(const scope of ['shot','scene','multiple_shots'])test(`human virtual materialization respects ${scope} scope and never grants unrelated narration writes`,async t=>{
  const f=await narrationSpeechFixture(t),saved=virtualShots(f),allowed=saved.shots[0];
  const scopeIds=scope==='shot'?[allowed.id]:scope==='scene'?[allowed.sceneId]:[allowed.id,saved.shots[2].id];
- const human=f.production.beginRequest(saved.id,'human','Generate only this requested voice',{scopeIds}),actor=f.production.openEpoch(saved.id,human).actor;
+ const actor=f.production.beginRequest(saved.id,'human','Generate only this requested voice',{scopeIds});
  const input={key:key(),expectedHeadVersion:saved.headVersion,segmentId:allowed.id,segmentRevisionId:digest({shotId:allowed.id,narration:allowed.narration}),profileId:f.profile.id,voice:'cedar',instructions:''};
- const result=await f.service.request(saved.id,actor,input);assert.ok(result.receipt.candidateId);assert.equal(f.narration.workspaceSnapshot(saved.id).segments.length,1);
- assert.throws(()=>f.narration.reviseSegments(saved.id,actor,f.narration.workspaceSnapshot(saved.id).state.version,key(),{add:[{text:'unrelated',textKind:'draft',language:'en',meaning:'unrelated',source:{kind:'undecided'}}]}),{code:'SCOPE_DENIED'});
+ const result=await f.service.request(saved.id,actor,input);assert.ok(result.receipt.candidateId);
  const foreign=saved.shots[1],before=f.narration.workspaceSnapshot(saved.id);
  await assert.rejects(f.service.request(saved.id,actor,{...input,key:key(),expectedHeadVersion:f.store.getProject(saved.id).headVersion,segmentId:foreign.id,segmentRevisionId:digest({shotId:foreign.id,narration:foreign.narration})}),{code:'SCOPE_DENIED'});
  assert.deepEqual(f.narration.workspaceSnapshot(saved.id),before);
-});
-test('lost virtual-shot publication reconciles its normalized exact section and never materializes a second draft',async t=>{
- const f=await narrationSpeechFixture(t),saved=virtualShots(f);bind(t,f,'5.0.0');const original=f.service.request.bind(f.service);let calls=0;
- f.service.request=async(...args)=>{calls++;await original(...args);throw Error('lost mapped speech publication');};
- const tools=new ToolInvocationService(f.production,{narrationSpeech:f.service}),shot=saved.shots[0],input={expectedHeadVersion:saved.headVersion,
-  segmentId:shot.id,segmentRevisionId:digest({shotId:shot.id,narration:shot.narration}),profileId:f.profile.id,voice:'cedar',instructions:''};
- await assert.rejects(tools.invoke(saved.id,f.actor,'mapped-lost','prepare_narration_speech',input),{code:'TOOL_CALL_UNRESOLVED'});
- f.production.beginRequest(saved.id,f.human.principalId,'Continue from saved mapped narration');tools.reconcileEpoch(saved.id,f.actor.epochId);
- const reconciliation=rows(f,'tool_reconciliation')[0];assert.equal(reconciliation.state,'effect_confirmed');assert.equal(reconciliation.receipt.state,'requested');
- assert.equal(f.narration.workspaceSnapshot(saved.id).segments.length,1);assert.equal(rows(f,'narration_speech_application').length,1);assert.equal(calls,1);
 });
 for(const kind of ['speech','transcription'])test(`${kind} request captures original actor/key/signal across asynchronous preparation`,async t=>{
  const f=kind==='speech'?await narrationSpeechFixture(t):await ownedTranscriptionFixture(t),actor=structuredClone(f.human),input=f.input(),originalInput=structuredClone(input);
@@ -121,20 +115,20 @@ for(const kind of ['speech','transcription'])test(`${kind} original cancellation
  const pending=f.service.request(f.project.id,f.human,f.input(),options);await entered;options.signal=new AbortController().signal;controller.abort();release();
  await assert.rejects(pending,error=>error.code.endsWith('CANCELLED'));assert.equal(f.store.list(kind==='speech'?'narration_speech_application':'owned_transcription_application',f.project.id).length,0);
 });
-for(const scope of ['project','scene','shot'])test(`requested ${scope} narration dispatches through its exact scope without releasing an earlier picture hold or resubmitting unknown work`,async t=>{
+for(const scope of ['project','scene','shot'])test(`requested ${scope} narration dispatches alongside its exact scope without releasing an earlier picture hold or resubmitting unknown work`,async t=>{
  const f=await narrationSpeechFixture(t,{realSpeech:true,configuredAdmission:true,fetch:async()=>{throw Error('injected unconfirmed speech response');}}),saved=virtualShots(f),shot=saved.shots[0];
  const previous=rows(f,'hold').find(hold=>hold.active&&hold.ownerId===f.human.requestId);
- const human=f.production.beginRequest(saved.id,'human','Generate this saved shot narration',{scopeIds:[scope==='project'?saved.id:scope==='scene'?shot.sceneId:shot.id]}),actor=f.production.openEpoch(saved.id,human).actor;
+ const human=f.production.beginRequest(saved.id,'human','Generate this saved shot narration',{concurrency:'alongside',scopeIds:[scope==='project'?saved.id:scope==='scene'?shot.sceneId:shot.id]}),actor=human;
  const result=await f.service.request(saved.id,actor,{key:key(),expectedHeadVersion:saved.headVersion,segmentId:shot.id,
   segmentRevisionId:digest({shotId:shot.id,narration:shot.narration}),profileId:f.profile.id,voice:'cedar',instructions:''});
  const ready=await f.engine.runReady();assert.equal(ready.dispatched,1);assert.equal(f.calls.http,1);
  const attempt=rows(f,'attempt').find(attempt=>attempt.candidateId===result.receipt.candidateId);assert.equal(attempt.phase,'submission_unknown');assert.equal(attempt.request.providerUse.kind,'configured');
- assert.equal(attempt.request.externalAllowanceId,undefined);assert.equal(rows(f,'external_allowance').length,0);assert.deepEqual(f.store.get('hold',previous.id),previous);
+ assert.equal(attempt.request.externalAllowanceId,undefined);assert.equal(rows(f,'external_allowance').length,0);assert.deepEqual(f.store.get('hold',previous.id),previous);assert.equal(f.store.get('message',f.human.requestId).state,'active');
  await f.engine.reconcile();assert.equal(f.calls.http,1);assert.equal(rows(f,'attempt').filter(attempt=>attempt.candidateId===result.receipt.candidateId).length,1);
 });
 for(const change of ['new_pause','global_stop','text','voice','mode'])test(`requested speech cannot bypass ${change} after its input was captured`,async t=>{
  const f=await narrationSpeechFixture(t,{realSpeech:true,configuredAdmission:true,fetch:async()=>{throw Error('unexpected injected POST');}}),saved=virtualShots(f),shot=saved.shots[0];
- const result=await f.service.request(saved.id,f.actor,{key:key(),expectedHeadVersion:saved.headVersion,segmentId:shot.id,segmentRevisionId:digest({shotId:shot.id,narration:shot.narration}),profileId:f.profile.id,voice:'cedar',instructions:''});
+ const result=await f.service.request(saved.id,f.human,{key:key(),expectedHeadVersion:saved.headVersion,segmentId:shot.id,segmentRevisionId:digest({shotId:shot.id,narration:shot.narration}),profileId:f.profile.id,voice:'cedar',instructions:''});
  if(change==='new_pause')f.production.holdRequest(saved.id,f.actor,true);
  else if(change==='global_stop')f.engine.setPaused(saved.id,true,f.human.requestId);
  else {const current=f.store.getProject(saved.id);current.shots[0].narration[change]=change==='text'?'New words.':change==='voice'?'personal':'none';current.revisionId=key();f.store.saveProject(current,current.headVersion);}
@@ -152,18 +146,18 @@ for(const change of ['earlier_hold','new_pause','global_stop'])test(`configured 
  const bridge=new OpenAITranscriptionExecution({store:f.store,outputStore:outputs,preparation,credentials,fetch:async()=>{calls.http++;throw Error('injected unknown ASR outcome');}});
  const engine=new Engine(f.store,bridge,{artifactDir:f.artifactDir,profiles:f.profiles,outputStore:outputs,externalAdmission:{authorize:()=>({})},submissionPreparation:bridge});
  const production=new ProductionService(f.store,engine,f.profiles),narration=new NarrationService(production,f.media),service=new OwnedTranscriptionService(narration,f.artifactDir);
- const earlier=rows(f,'hold').find(hold=>hold.active&&hold.ownerId===f.human.requestId),human=production.beginRequest(f.project.id,'human','Transcribe this owned recording');
+ const earlier=rows(f,'hold').find(hold=>hold.active&&hold.ownerId===f.human.requestId),human=production.beginRequest(f.project.id,'human','Transcribe this owned recording',{concurrency:'alongside'});
  const result=await service.request(f.project.id,human,f.input());
  if(change==='new_pause')production.holdRequest(f.project.id,human,true);if(change==='global_stop')engine.setPaused(f.project.id,true,human.requestId);
  const ready=await engine.runReady();
- if(change!=='earlier_hold'){assert.equal(ready.dispatched,0);assert.equal(calls.http,0);assert.deepEqual(f.store.get('hold',earlier.id),earlier);return;}
+ if(change!=='earlier_hold'){assert.equal(ready.dispatched,0);assert.equal(calls.http,0);assert.deepEqual(f.store.get('hold',earlier.id),earlier);assert.equal(f.store.get('message',f.human.requestId).state,'active');return;}
  assert.equal(ready.dispatched,1);assert.equal(calls.http,1);
- assert.deepEqual(f.store.get('hold',earlier.id),earlier);assert.equal(rows(f,'external_allowance').length,0);
+ assert.deepEqual(f.store.get('hold',earlier.id),earlier);assert.equal(f.store.get('message',f.human.requestId).state,'active');assert.equal(rows(f,'external_allowance').length,0);
  const attempt=rows(f,'attempt').find(attempt=>attempt.candidateId===result.receipt.candidateId);assert.equal(attempt.phase,'submission_unknown');assert.equal(attempt.request.providerUse.kind,'configured');
  await engine.reconcile();assert.equal(calls.http,1);assert.equal(rows(f,'attempt').filter(attempt=>attempt.candidateId===result.receipt.candidateId).length,1);
 });
 
-test('current narration contexts consistently group acceptance into one scene confirmation without altering frozen legacy guidance or authority',async t=>{
+test('current narration contexts group acceptance into one scene confirmation across legacy and current skill locks',async t=>{
  for(const version of ['4.0.0','5.0.0']) {
   const f=await narrationSpeechFixture(t),lock=bind(t,f,version),before=canonicalState();
   function canonicalState(){return JSON.stringify({project:f.store.getProject(f.project.id),lock:f.store.get('director_skill_lock',lock?.id),narration:f.narration.workspaceSnapshot(f.project.id),grants:rows(f,'grant'),acceptances:rows(f,'narration_acceptance')});}
@@ -178,10 +172,27 @@ test('current narration contexts consistently group acceptance into one scene co
    assert.ok(audio.sections.every(section=>section.generationNeedsReview===false));
   }else{
    assert.match(overview.narrationDraft.authority,/required in narration review/);assert.match(narration.narrationDraft.authority,/canonical application remain separate/);
-   assert.match(audio.authority,/human reviews the proposal and spending separately/i);assert.ok(audio.sections.every(section=>section.generationNeedsReview===true));
+   assert.match(audio.authority,/human presses the existing audio request action/i);assert.ok(audio.sections.every(section=>section.generationNeedsReview===true));
    for(const authority of [overview.narrationDraft.authority,narration.narrationDraft.authority,audio.authority])assert.doesNotMatch(authority,/one (?:studio )?scene confirmation/i);
   }
   assert.equal(canonicalState(),before);assert.equal(f.store.db.prepare('SELECT total_changes() n').get().n,changes);assert.deepEqual(f.calls,{http:0,credentials:0});
   assert.ok(f.narration.workspaceSnapshot(f.project.id).segments.every(row=>!row.accepted.script&&!row.accepted.audio&&!row.accepted.timing));
+ }
+});
+
+test('a Director plan cannot mint a paid speech grant while the human publication path remains available',async t=>{
+ const f=await narrationSpeechFixture(t);bind(t,f,'5.0.0');
+ const saved=f.store.getProject(f.project.id),before=Object.fromEntries(['grant','candidate','attempt','reservation','prepared'].map(k=>[k,rows(f,k)]));
+ const proposal={variant:'plan',expectedHeadVersion:saved.headVersion,source:`definePlan({baseRevision:${JSON.stringify(saved.revisionId)}},p=>{return p.speech("director-paid-voice",{profile:${JSON.stringify(f.profile.id)},text:"Suggested words",voice:"cedar",instructions:"Warm and clear."});});`};
+ await assert.rejects(f.production.prepare(saved.id,f.actor,proposal),{code:'ORIGIN_NOT_AUTHORIZED'});
+ assert.deepEqual(Object.fromEntries(Object.keys(before).map(k=>[k,rows(f,k)])),before);
+});
+
+test('current application audio guidance overrides frozen spending instructions for legacy and current epochs',async t=>{
+ for (const version of ['4.0.0','5.0.0']) {
+  const f=await narrationSpeechFixture(t);bind(t,f,version);
+  const context=f.production.readContext(f.project.id,f.actor,{section:'audio_operations'});
+  assert.match(context.items[0].authority,/Only an explicit human press|human presses the existing audio request/);
+  assert.doesNotMatch(JSON.stringify(context.applicationCapabilities),/then separately approves finite spending|finite spending approval/);
  }
 });

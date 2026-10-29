@@ -11,17 +11,20 @@ import {CodexImageExecution} from '../dist/execution/codex-image-execution.js';
 import {ExecutionOutputStore} from '../dist/execution/output-store.js';
 import {Store} from '../dist/persistence/store.js';
 import {assertCodexImageSpoolLineage,assertCodexImageRecords} from '../dist/execution/codex-image-lineage.js';
-import {assertCodexImageOperationOptions} from '../dist/execution/codex-image-receipts.js';
+import {assertCodexImageOperationOptions,codexImageTurnCanvas} from '../dist/execution/codex-image-receipts.js';
 import {InstallationRecoveryGuard,installRecoveryQuarantine,releaseRecovery} from '../dist/application/installation-recovery.js';
 import {createInstallationBackup,inspectInstallationBackup} from '../dist/persistence/installation-backup.js';
 import {restoreInstallationBackup} from '../dist/persistence/installation-restore.js';
+import {editStoryboard} from '../dist/storyboard.js';
+import {GenerationOverviewReader} from '../dist/generation-overview.js';
+import {generateScene,sceneView} from '../dist/scene-generation.js';
 const bytes=pngBytes(),rows=(f,kind)=>f.store.list(kind,f.selected.projectId),complete=(prepared)=>({kind:'completed',threadId:prepared.session.threadId,turnId:'turn-exact',itemId:'image-exact',bytes,revisedPrompt:'Native revised prompt'});
 async function fixture(t,options={}){
   const f=codexImageFixture(t),prepare=f.transport.prepare;
   f.transport.prepare=async input=>options.prepare?options.prepare(input,f):prepare(input);
   f.transport.start=async(prepared,input,context)=>{f.calls.start++;assert.equal(rows(f,'codex_image_execution_dispatch').length,1);return options.start?options.start(prepared,input,context,f):complete(prepared);};
   f.transport.lookup=async(prepared,context)=>{f.calls.lookup++;return options.lookup?options.lookup(prepared,context,f):{kind:'unknown',code:'UNAVAILABLE'};};
-  f.build();f.selected=await f.seed();f.allowance=f.issue(f.selected);f.engine=f.runtime.engine;f.outputs=f.runtime.outputStore;
+  f.build();f.selected=await f.seed({},{filmKind:options.filmKind});f.allowance=f.issue(f.selected);f.engine=f.runtime.engine;f.outputs=f.runtime.outputStore;
   f.bridge=f.engine.registry.resolve({adapter:'codex-image',version:'1'});
   f.attempt=f.engine.admit(f.selected.projectId,f.selected.binding.id,f.engine.resolveInputs(f.selected.projectId,f.selected.binding.node).fingerprint);
   f.request=f.attempt.request;f.context={expectedLease:{owner:f.attempt.leaseOwner,epoch:f.attempt.leaseEpoch}};
@@ -50,6 +53,23 @@ test('ChatGPT auth failure closes only owned premarker preparation and never sta
   assert.equal(rows(f,'codex_image_execution_result')[0].observation.code,'LOCAL_NATIVE_UNAVAILABLE');assert.equal(f.calls.api,0);
 });
 
+test('legacy pre-dispatch receipts remain valid and diagnostics cannot smuggle raw fields',async t=>{
+  t.mock.method(console,'warn',()=>{});
+  const f=await fixture(t,{prepare:async()=>{throw Error('private native details');}});
+  await f.bridge.submit(f.request,f.context);
+  const saved=rows(f,'codex_image_execution_result')[0],{nativeDiagnostic:_,...legacy}=saved.observation;
+  const replace=value=>f.store.db.prepare("UPDATE entities SET body=? WHERE kind='codex_image_execution_result' AND id=?").run(JSON.stringify(value),saved.id);
+  replace({...saved,observation:legacy});
+  assert.equal((await f.bridge.lookup(f.attempt.id)).type,'rejected');assertCodexImageRecords(f.store,f.attempt);
+  for(const nativeDiagnostic of [{category:'native_timeout',limitMs:60000,message:'private native details'},
+    {category:'native_unknown',path:'/private/account/token'},{category:'native_timeout',limitMs:Infinity},{category:'untrusted'}]){
+    // Non-JSON numbers cannot be stored; an out-of-bounds integer covers persisted limit validation.
+    if(nativeDiagnostic.limitMs===Infinity)nativeDiagnostic.limitMs=600001;
+    replace({...saved,observation:{...legacy,nativeDiagnostic}});
+    assert.throws(()=>assertCodexImageRecords(f.store,f.attempt),{code:'CODEX_IMAGE_EXECUTION_CONFLICT'});
+  }
+});
+
 test('forged API-auth prepared identity cannot receive a native marker',async t=>{
   const f=await fixture(t,{prepare:async input=>({runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'api'},session:{threadId:'wrong-auth',turnInputDigest:describeCodexImageInput(input).turnInputDigest}})});
   assert.equal((await f.bridge.submit(f.request,f.context)).type,'rejected');assert.equal(f.calls.start,0);assert.equal(rows(f,'codex_image_execution_mapping').length,0);
@@ -63,7 +83,117 @@ for(const mode of ['lease','pause','hold','shot'])test(`original ${mode} fence i
     if(mode==='shot'){const p=f.store.getProject(f.selected.projectId);f.store.saveProject({...p,shots:p.shots.map(shot=>({...shot,imagePrompt:'changed'}))},p.headVersion);}
     return {runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},session:{threadId:'prepared-before-race',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};
   }});
-  assert.equal((await f.bridge.submit(f.request,f.context)).type,'unknown');assert.equal(f.calls.start,0);assert.equal(rows(f,'codex_image_execution_dispatch').length,0);assert.equal(rows(f,'codex_image_execution_result').length,0);
+  assert.equal((await f.bridge.submit(f.request,f.context)).type,mode==='lease'?'unknown':'rejected');assert.equal(f.calls.start,0);assert.equal(rows(f,'codex_image_execution_dispatch').length,0);
+  assert.equal(rows(f,'codex_image_execution_result').length,mode==='lease'?0:1);
+  if(mode!=='lease')assert.equal(rows(f,'codex_image_execution_result')[0].observation.code,'SELECTION_CHANGED');
+});
+
+for(const mode of ['stop','prompt edit','Director message'])test(`${mode} during native preparation proves no start and permits a fresh human press`,async t=>{
+  let changed=false,actor;
+  const f=await fixture(t,{prepare:async(input,f)=>{
+    if(!changed){
+      changed=true;
+      if(mode==='stop'){
+        actor=f.production.beginRequest(f.selected.projectId,'local-user','Stop',{editing:false});
+        f.production.control(f.selected.projectId,actor,'stop');
+      }else if(mode==='prompt edit'){
+        const project=f.store.getProject(f.selected.projectId);
+        editStoryboard(f.production,project.id,{kind:'shot',id:project.shots[0].id,field:'imagePrompt',value:'A new human direction',expectedHeadVersion:project.headVersion},randomUUID());
+      }else actor=f.production.beginRequest(f.selected.projectId,'local-user','Discuss another direction',{editing:true});
+    }
+    return {runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
+      session:{threadId:'prepared-before-human-change',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};
+  }});
+  assert.equal((await f.bridge.submit(f.request,f.context)).type,'rejected');
+  assert.equal(f.calls.start,0);assert.equal(rows(f,'codex_image_execution_dispatch').length,0);
+  assert.equal(rows(f,'codex_image_execution_result')[0].observation.kind,'not_dispatched');
+  f.expire();await f.engine.reconcile();
+  const attempt=f.store.get('attempt',f.attempt.id);
+  assert.equal(attempt.phase,'failed');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');
+  assert.equal(attempt.failure.retryAllowed,false);
+  assert.equal(new GenerationOverviewReader(f.production).read(attempt.projectId).scenes[0].blockers.some(b=>b.code==='no_answer_in_scene'),false);
+  if(mode==='stop'){
+    actor=f.production.beginRequest(attempt.projectId,'local-user','Continue',{editing:false});
+    f.production.control(attempt.projectId,actor,'resume');
+  }else if(mode==='Director message')f.production.releaseRequestHolds(attempt.projectId,actor.requestId,randomUUID());
+  assert.equal((await f.engine.runReady()).dispatched,0,'a no-start result never retries automatically');
+  const project=f.store.getProject(attempt.projectId),view=sceneView(f.production,project.id,project.scenes[0].id).view;
+  await generateScene(f.production,project.id,view.sceneId,{kind:'image',headVersion:view.headVersion,revisionId:view.revisionId,
+    reviewedFrames:[],reviewedHoldDigest:view.reviewedHoldDigest,reviewedControlAuthorityId:view.reviewedControlAuthorityId},randomUUID());
+  assert.equal((await f.engine.runReady()).dispatched,1,'a new reviewed human press can create fresh work');
+  assert.equal(f.calls.start,1);assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');
+  assert.equal(f.engine.attempts(project.id).length,2);assert.equal(f.engine.attempts(project.id).find(a=>a.id!==attempt.id).phase,'succeeded');
+});
+
+test('claim transaction failure records a no-start receipt without rechecking changed selection',async t=>{
+  const f=await fixture(t),insert=f.store.insert.bind(f.store);
+  f.store.insert=(kind,...args)=>{if(kind==='codex_image_execution_dispatch')throw Error('Synthetic marker transaction failure');return insert(kind,...args);};
+  assert.equal((await f.bridge.submit(f.request,f.context)).type,'rejected');f.store.insert=insert;
+  assert.equal(rows(f,'codex_image_execution_mapping').length,1);assert.equal(rows(f,'codex_image_execution_dispatch').length,0);
+  assert.equal(rows(f,'codex_image_execution_result')[0].observation.code,'LOCAL_CANCELLED');assert.equal(f.calls.start,0);
+  f.expire();await f.engine.reconcile();assert.equal(f.store.get('attempt',f.attempt.id).phase,'failed');
+  assert.equal(f.store.get('reservation',f.attempt.reservationId).state,'released');
+});
+
+test('a pause between the mapping and marker transactions remains a proven no-start',async t=>{
+  const f=await fixture(t),insert=f.store.insert.bind(f.store);
+  f.store.insert=(kind,...args)=>{
+    const row=insert(kind,...args);
+    if(kind==='codex_image_execution_mapping')f.engine.setPaused(f.selected.projectId,true,'human-stop-between-transactions');
+    return row;
+  };
+  assert.equal((await f.bridge.submit(f.request,f.context)).type,'rejected');f.store.insert=insert;
+  assert.equal(rows(f,'codex_image_execution_mapping').length,1);assert.equal(rows(f,'codex_image_execution_dispatch').length,0);
+  assert.equal(rows(f,'codex_image_execution_result')[0].observation.code,'SELECTION_CHANGED');
+  f.expire();await f.engine.reconcile();assert.equal(f.store.get('reservation',f.attempt.reservationId).state,'released');assert.equal(f.calls.start,0);
+});
+
+test('a reconciler fences an old worker still awaiting native preparation before recording no-start',async t=>{
+  let ready,finish;const preparing=new Promise(resolve=>{ready=resolve;}),resume=new Promise(resolve=>{finish=resolve;});
+  const f=await fixture(t,{prepare:async input=>{
+    ready();await resume;
+    return {runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
+      session:{threadId:'late-preparation',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};
+  }});
+  const submission=f.bridge.submit(f.request,f.context);await preparing;
+  f.expire();await f.engine.reconcile();
+  assert.equal(f.store.get('reservation',f.attempt.reservationId).state,'released');
+  finish();assert.equal((await submission).type,'rejected');
+  assert.equal(f.calls.start,0);assert.equal(rows(f,'codex_image_execution_dispatch').length,0);assert.equal(rows(f,'codex_image_execution_mapping').length,0);
+  assert.equal(rows(f,'codex_image_execution_result')[0].observation.kind,'not_dispatched');
+});
+
+for(const prepared of [false,true])test(`a new lease reconciles ${prepared?'prepared':'unprepared'} work with no marker as a provable no-start`,async t=>{
+  const f=await fixture(t);
+  if(prepared){
+    const insert=f.store.insert.bind(f.store);
+    f.store.insert=(kind,...args)=>{
+      if(kind==='codex_image_execution_mapping'){
+        const mapping=insert(kind,...args),a=f.store.get('attempt',f.attempt.id);
+        f.store.put('attempt',a.id,a.projectId,{...a,leaseEpoch:a.leaseEpoch+1});return mapping;
+      }
+      return insert(kind,...args);
+    };
+    assert.equal((await f.bridge.submit(f.request,f.context)).type,'unknown');f.store.insert=insert;
+  }
+  assert.equal((await f.bridge.lookup(f.attempt.id)).type,'unknown','a read without lease authority cannot settle an old worker');
+  assert.equal(rows(f,'codex_image_execution_result').length,0);
+  f.expire();await f.engine.reconcile();
+  const attempt=f.store.get('attempt',f.attempt.id);
+  assert.equal(attempt.phase,'failed');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');
+  assert.equal(rows(f,'codex_image_execution_result')[0].observation.kind,'not_dispatched');
+  assert.equal((await f.bridge.submit(f.request,f.context)).type,'rejected','the stale original worker cannot dispatch after reconciliation');
+  assert.equal(f.calls.start,0);assert.equal(f.calls.lookup,0);await f.engine.reconcile();assert.equal(f.calls.start,0);
+});
+
+test('an expired preparation lease cannot record no-start until a reconciler owns a fresh lease',async t=>{
+  const f=await fixture(t,{prepare:async(input,f)=>{
+    f.expire();
+    return {runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
+      session:{threadId:'expired-preparation',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};
+  }});
+  assert.equal((await f.bridge.submit(f.request,f.context)).type,'unknown');assert.equal(rows(f,'codex_image_execution_result').length,0);
+  await f.engine.reconcile();assert.equal(f.store.get('reservation',f.attempt.reservationId).state,'released');assert.equal(f.calls.start,0);
 });
 
 test('caller request and original cancellation are captured before any awaited native work',async t=>{
@@ -84,9 +214,9 @@ test('unknown native observations never create terminal evidence or retry the tu
   assert.equal(f.calls.start,1);assert.equal(rows(f,'codex_image_execution_result').length,0);assert.equal(f.store.get('reservation',f.attempt.reservationId).state,'reserved');
 });
 
-test('native terminal usage failure remains observed evidence without releasing consumed usage as no-start',async t=>{
+test('native terminal usage failure is definite without releasing consumed usage as no-start',async t=>{
   const f=await fixture(t,{start:async prepared=>({kind:'failed',threadId:prepared.session.threadId,turnId:'turn-failed',code:'USAGE_LIMIT'})});
-  assert.equal((await f.bridge.submit(f.request,f.context)).type,'unknown');assert.equal(rows(f,'codex_image_execution_result')[0].observation.code,'USAGE_LIMIT');
+  assert.deepEqual(await f.bridge.submit(f.request,f.context),{type:'failed',taskId:null,failureId:'USAGE_LIMIT',technical:false,retryAllowed:false});assert.equal(rows(f,'codex_image_execution_result')[0].observation.code,'USAGE_LIMIT');
   await f.bridge.lookup(f.attempt.id);assert.equal(f.calls.lookup,0);assert.equal(f.calls.start,1);assert.equal(f.store.get('reservation',f.attempt.reservationId).state,'reserved');
 });
 
@@ -165,4 +295,30 @@ test('backup fails closed for missing native completion or miskeyed native evide
     const f=await fixture(t);await f.bridge.submit(f.request,f.context);damage(f);const destination=f.directory+'-rejected';t.after(()=>rmSync(destination,{recursive:true,force:true}));
     await assert.rejects(createInstallationBackup({sourceRoot:f.directory,destination}));
   }
+});
+
+test('a 9:16 film asks Codex for a 1024x1536 keyframe under codex-image-turn-v2 and reconciles it',async t=>{
+  let seen;const f=await fixture(t,{filmKind:{version:'film-kind@1',kind:'social',format:{platform:'ig_reels',aspect:'9:16'}},
+    start:async(prepared,input,context)=>{seen=input;await context.observeTurn('turn-exact');return complete(prepared);}});
+  assert.deepEqual([f.request.args.width,f.request.args.height,f.request.args.aspect],[1024,1536,'9:16']);
+  assert.equal(f.request.profile.configuration.settings.width,1024,'the pinned profile and its digest are unchanged');
+  const result=await f.bridge.submit(f.request,f.context);assert.equal(result.type,'completed');
+  assert.deepEqual([seen.width,seen.height,seen.aspect],[1024,1536,'9:16']);
+  const mapping=rows(f,'codex_image_execution_mapping')[0];assert.equal(mapping.transport.policy,'codex-image-turn-v2');assert.equal(mapping.transport.version,2);
+  assert.deepEqual([mapping.transport.width,mapping.transport.height,mapping.transport.aspect],[1024,1536,'9:16']);
+  assertCodexImageRecords(f.store,f.store.get("attempt",f.attempt.id));
+  f.expire();await f.engine.reconcile();assert.equal(f.store.get('attempt',f.attempt.id).phase,'succeeded');
+});
+
+test('a film without a format keeps codex-image-turn-v1 at 1024x1024 and refuses a canvas outside its policy',async t=>{
+  const f=await fixture(t);assert.equal(Object.hasOwn(f.request.args,'aspect'),false);
+  assert.equal((await f.bridge.submit(f.request,f.context)).type,'completed');
+  const mapping=rows(f,'codex_image_execution_mapping')[0];assert.equal(mapping.transport.policy,'codex-image-turn-v1');assert.equal(Object.hasOwn(mapping.transport,'aspect'),false);
+  assert.deepEqual([mapping.transport.width,mapping.transport.height],[1024,1024]);
+  const args=f.request.args,profile=f.selected.profile;
+  assert.deepEqual(codexImageTurnCanvas(args),{width:1024,height:1024});
+  for(const changed of [{...args,height:1536},{...args,aspect:'9:16'},{...args,width:1536,aspect:'9:16'},{...args,aspect:'4:5',height:1280}])
+    assert.throws(()=>assertCodexImageOperationOptions(profile,changed),error=>error.code==='CODEX_IMAGE_PREFLIGHT_INVALID');
+  assert.doesNotThrow(()=>assertCodexImageOperationOptions(profile,{...args,height:1536,aspect:'9:16'}));
+  assert.doesNotThrow(()=>assertCodexImageOperationOptions(profile,{...args,width:1536,aspect:'16:9'}));
 });

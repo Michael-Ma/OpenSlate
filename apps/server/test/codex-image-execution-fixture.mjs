@@ -32,9 +32,9 @@ export function codexImageFixture(t,changes={}) {
     transport:{codexImage:transport,imageFetch:async()=>{calls.api++;throw Error('Unexpected API fallback');}},...changes};
   const f={directory,store,fakeProvider,calls,transport,options};
   f.build=()=>{f.runtime=createMediaExecutionRuntime(options);f.production=new ProductionService(store,f.runtime.engine,DEFAULT_PROFILES,f.runtime.productionOptions);return f.runtime;};
-  f.seed=async(settings={}, {unscoped=false}={})=>{
+  f.seed=async(settings={}, {unscoped=false,filmKind}={})=>{
     const selection=f.runtime.providerCatalog.select(f.runtime.providerCatalog.digest,[codex.id]),created=f.production.createProject('Codex runtime test',selection);
-    const project=store.saveProject({...projectFixture(created.id,1),capabilityLockId:created.capabilityLockId},created.headVersion);
+    const project=store.saveProject({...projectFixture(created.id,1),capabilityLockId:created.capabilityLockId,...(filmKind===undefined?{}:{filmKind})},created.headVersion);
     const human=f.production.beginRequest(project.id,'local-user','Create the exact requested keyframe');
     f.production.authorize(project.id,human,[{scopeId:unscoped?project.id:project.shots[0].id,kind:'image'}],newId(),'initial_slot');
     const source=`definePlan({baseRevision:${JSON.stringify(project.revisionId)}},p=>{return p.image("frame",{${unscoped?'':`intent:p.shot(${JSON.stringify(project.shots[0].id)}),`}profile:${JSON.stringify(codex.id)},prompt:${JSON.stringify(project.shots[0].imagePrompt)}${Object.entries(settings).map(([key,value])=>`,${key}:${JSON.stringify(value)}`).join('')}});});`;

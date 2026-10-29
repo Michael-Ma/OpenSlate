@@ -4,12 +4,14 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { dirname } from "node:path";
+import { chmodSync, cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { PassThrough, Writable } from "node:stream";
 import { TOOL_NAMES, TOOL_DESCRIPTORS, TOOL_CATALOG_DIGEST, TOOL_CONTRACT_VERSION, parseToolArguments, changeProposalSchema, digest, toolCatalog, toolHandlerId } from "@openslate/core";
 import { ToolBridge, runStdioToolBridge, STDIO_LIMITS } from "../dist/tools/index.js";
+import { loadSkillCatalog } from "../dist/skills/index.js";
 
 const entry = fileURLToPath(new URL("../dist/tools/mcp.js", import.meta.url));
 const code = expected => error => error.code === expected;
@@ -325,6 +327,8 @@ test("actual V4 stdio child advertises the saved catalog and forwards compact wr
 
 test("every shipped tool catalog has an immutable complete catalog and handler digest", () => {
   const hashes = {
+    "6.0.0": ["857fcfc65113b20272eba548c5e1eceff7b79c34b8391934b7043b3ff838fd3c", "d1891b9f92dcb62401e91a1ac71b4aab54a7722db50559136fbbeed9cf4de198"],
+    "5.0.0": ["271ad801bf43075bcb1ed0188fd8ca5822f3845f903a9ee2d4cca92fb910530c", "e696fa1999ff0d088ba7ef9a6b64d42af111fb0e5af7a927973999e843f8914e"],
     "1.0.0": ["b205f7ba3a89eca36a44f9997673b02e4ccc62777766b78db53a0e234286b1fa", "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec"],
     "2.0.0": ["c4e9ae02f5e9154e5efed3b20d1eef5562c1d0da6f2a7c8c870d9f62b13325df", "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e"],
     "3.0.0": ["81199e4880e2e3e4412ae8828abfb9c6a3f7dbbce9f5434ac9d5c345bf716a4b", "f6ecf84a8d5cd48b8114b4055171fba9b21682deccd7adc45b09b7ab9e45789d"],
@@ -334,4 +338,192 @@ test("every shipped tool catalog has an immutable complete catalog and handler d
     assert.equal(digest(toolCatalog(version)), wholeCatalog, `${version} complete saved catalog`);
     assert.equal(toolCatalog(version).digest, handlerSchema, `${version} schema handler binding`);
   }
+});
+
+const shippedPackages = {
+  '1': ['f0284e141496a4b2ee6e19be5903e78c03c412df1614958ba3257f295347378a', 'a0ee6a6b355eb340ea18de2e4adcdeb9ab1cb5102d7cda6eac0209442c2197b2'],
+  '2': ['5c1eb0c1e4cd7aa80b9ef381cc78132b9f5780e78373ccdac86001299798c888', 'eb9f48f8678f87843ee1da6a15f89e20c8310956f58b6b692dd6fa37e9afea43'],
+  '3': ['4fa616046fe7c2e0a05b8a9dc81ae215ae7ba5e396667f57ab1f8bbcc2570f06', '25189e7debe84a82877515a39cd092ac3bee34abadd84489779783032f7416e8'],
+  '4': ['25f6c9e86417c128a69c39586bab717edcf6148144947d1c31ba14f0fa463981', '6b67cf6e4252c79d9d97fb1906fdfee88ed6f192b4487dbb5e7e0a7a49a353cc'],
+  '5': ['206b5110da0b22965e89a4c30ab1ce3866ad913a2b6fae0ebe1db43f345c45c7', 'd61e3c6581a23bb6c46419d10a7a9d26979edacd6ab5885bd1c551d7ede53a20'],
+  '6': ['b1747d2be71665532b92a3cf2827b860c354cbf59a66911aacc46f83edbeaa3e', '828e671fb1eb191c8c668fcc946d273e5c22c60ff6b948029a348122f9214c4d'],
+  '7': ['16cb63a6398eaa11c2b474f05fe0cd52f12e46d603a6544e3aa2076b954d16cf', '6d86d6772bbaeadbf967f3d7d73b2e8531e56501096c8703acd226b339b439f5'],
+};
+function writableSkillDirectories(root) {
+  chmodSync(root, 0o700);
+  for (const entry of readdirSync(root, { withFileTypes: true })) if (entry.isDirectory()) writableSkillDirectories(join(root, entry.name));
+}
+function packageIdentity(source, snapshotRoot) {
+  const manifest = JSON.parse(readFileSync(join(source, 'openslate.skill.json'), 'utf8'));
+  return loadSkillCatalog({ snapshotRoot, compatibility: manifest.compatibility, availableToolIds: toolCatalog(manifest.compatibility.toolContract).names, packageRoots: [source] }).skills[0].packageDigest;
+}
+test('every shipped skill package has an immutable packageDigest', t => {
+  const temporary = mkdtempSync(join(tmpdir(), 'openslate-package-pins-'));
+  t.after(() => { writableSkillDirectories(temporary); rmSync(temporary, { recursive: true, force: true }); });
+  for (const [version, pins] of Object.entries(shippedPackages)) for (const [index, name] of ['plan-authoring', 'production'].entries()) {
+    const source = fileURLToPath(new URL(`../../../skills/${version === '1' ? '' : `v${version}/`}${name}`, import.meta.url));
+    assert.equal(packageIdentity(source, join(temporary, 'snapshots')), pins[index], `${version}/${name} shipped package bytes`);
+  }
+});
+test('the historical package pin detects an instruction edit', t => {
+  const temporary = mkdtempSync(join(tmpdir(), 'openslate-package-pin-edit-'));
+  t.after(() => { writableSkillDirectories(temporary); rmSync(temporary, { recursive: true, force: true }); });
+  const source = join(temporary, 'production');
+  cpSync(fileURLToPath(new URL('../../../skills/v4/production', import.meta.url)), source, { recursive: true });
+  const entry = join(source, 'SKILL.md');
+  writeFileSync(entry, `${readFileSync(entry, 'utf8')}\nChanged historical guidance.\n`);
+  assert.throws(() => assert.equal(packageIdentity(source, join(temporary, 'snapshots')), shippedPackages['4'][1]), { code: 'ERR_ASSERTION' });
+});
+
+test('V5 stdio advertises notes/proposals and truthful audio suggestions, forwarding each once', async t => {
+  const f = await fixture(t), c = await childFixture(t, { ...f.options, toolContractVersion: '5.0.0' });
+  assert.equal((await c.initialize()).result.serverInfo.version, '5.0.0');
+  const catalog = toolCatalog('5.0.0');
+  assert.deepEqual((await c.request('tools/list', {}).response).result.tools, catalog.descriptors);
+  for (const name of ['prepare_narration_speech', 'prepare_recording_transcription']) {
+    assert.match(catalog.descriptors.find(t => t.name === name).description, /person's press/);
+    assert.doesNotMatch(catalog.descriptors.find(t => t.name === name).description, /finite spending approval/);
+  }
+  const input = { notes: [{ anchor: { shotIds: ['shot'] }, kind: 'observation', blocking: false, text: 'Inspect the opening direction.', choices: [{ kind: 'accept', label: 'Keep it' }] }] };
+  const reply = await c.request('tools/call', { name: 'record_notes', arguments: input }).response;
+  assert.equal(reply.result.isError, false); assert.equal(f.calls.length, 1); assert.deepEqual(f.calls[0].body, input);
+  const proposal = { patch: { updateShots: [{ id: 'shot', desiredFrames: 240 }] } };
+  const held = await c.request('tools/call', { name: 'propose_change', arguments: proposal }).response;
+  assert.equal(held.result.isError, false); assert.equal(f.calls.length, 2); assert.deepEqual(f.calls[1].body, proposal);
+  assert.equal(toolHandlerId('5.0.0'), 'director-tools@5');
+});
+
+// LIVE-3 made this exact two-note shape, including the singular anchor.shotId.
+// Creative text and the film/media identities are replaced with fixture values.
+const liveReviewNotes = () => ({ notes: ['shot-one', 'shot-two'].map((shotId, index) => ({
+  anchor: { shotId }, blocking: false, kind: 'observation', text: '[redacted visual observation]',
+  seenKeyframe: { artifactId: `frame-${index}`, sha256: String(index + 1).repeat(64), shotId },
+  choices: [{ kind: 'accept', label: 'Keep this frame' }, { kind: 'reply' }],
+})) });
+
+for (const version of ['5.0.0', '6.0.0']) test(`${version} stdio forwards the LIVE-3 invalid note shape and its precise refusal, then accepts a corrected new call`, async t => {
+  const refusal = { error: { code: 'VALIDATION_ERROR',
+    message: 'record_notes /notes/0/anchor: replace shotId with shotIds: [shotId]. No notes were saved; correct the payload and call record_notes again.' } };
+  const f = await fixture(t, (_req, res, call) => {
+    res.setHeader('content-type', 'application/json');
+    if ('shotId' in call.body.notes[0].anchor) { res.statusCode = 400; res.end(JSON.stringify(refusal)); }
+    else { parseToolArguments('record_notes', call.body, version); res.end(JSON.stringify({ notes: [{ noteId: 'note-one', letter: 'a' }, { noteId: 'note-two', letter: 'b' }] })); }
+  });
+  const c = await childFixture(t, { ...f.options, toolContractVersion: version }); await c.initialize();
+  const invalid = liveReviewNotes();
+  const denied = await c.request('tools/call', { name: 'record_notes', arguments: invalid }).response;
+  assert.equal(denied.result.isError, true);
+  assert.deepEqual(JSON.parse(denied.result.content[0].text), refusal);
+  assert.equal(f.calls.length, 1); assert.deepEqual(f.calls[0].body, invalid);
+  const rejectedCallId = denied.result._meta['openslate/callId'];
+  assert.equal(rejectedCallId, f.calls[0].headers['x-openslate-tool-call-id']);
+  const corrected = liveReviewNotes();
+  for (const note of corrected.notes) note.anchor = { shotIds: [note.anchor.shotId] };
+  const saved = await c.request('tools/call', { name: 'record_notes', arguments: corrected }).response;
+  assert.equal(saved.result.isError, false); assert.equal(f.calls.length, 2);
+  assert.deepEqual(JSON.parse(saved.result.content[0].text).notes.map(n => n.letter), ['a', 'b']);
+  assert.deepEqual(f.calls[1].body, corrected);
+  assert.notEqual(saved.result._meta['openslate/callId'], rejectedCallId, 'corrected payload receives a fresh application invocation identity');
+});
+
+for (const version of ['5.0.0', '6.0.0']) test(`${version} server note validation is limited to record_notes; other schemas and tools still refuse locally`, async t => {
+  const f = await fixture(t), bridge = new ToolBridge({ ...f.options, toolContractVersion: version });
+  await assert.rejects(bridge.call('unknown_notes', liveReviewNotes()), code('NOT_FOUND'));
+  await assert.rejects(bridge.call('read_context', { actor: 'human' }), code('VALIDATION_ERROR'));
+  await assert.rejects(bridge.call('propose_change', { patch: {} }), code('VALIDATION_ERROR'));
+  for (const version of ['1.0.0', '2.0.0', '3.0.0', '4.0.0']) {
+    await assert.rejects(new ToolBridge({ ...f.options, toolContractVersion: version }).call('record_notes', liveReviewNotes()), code('NOT_FOUND'));
+  }
+  assert.equal(f.calls.length, 0);
+});
+
+for (const version of ['5.0.0', '6.0.0']) test(`${version} notes retain JSON, request-size, cancellation and concurrency guards before dispatch`, async t => {
+  const f = await fixture(t, () => {}), options = { ...f.options, toolContractVersion: version };
+  const bridge = new ToolBridge({ ...options, limits: { timeoutMs: 150, concurrency: 1 } });
+  for (const value of [undefined, () => {}, 1n, NaN, Infinity, new Date()]) {
+    await assert.rejects(bridge.call('record_notes', { notes: [], extra: value }), code('VALIDATION_ERROR'));
+  }
+  const cyclic = liveReviewNotes(); cyclic.extra = cyclic;
+  await assert.rejects(bridge.call('record_notes', cyclic));
+  const small = new ToolBridge({ ...options, limits: { requestBytes: 32 } });
+  await assert.rejects(small.call('record_notes', liveReviewNotes()), code('TOOL_ARGUMENTS_TOO_LARGE'));
+  await assert.rejects(bridge.call('record_notes', liveReviewNotes(), AbortSignal.abort()), code('TOOL_CALL_CANCELLED'));
+  assert.equal(f.calls.length, 0, 'non-JSON, oversized and cancelled notes never reach HTTP');
+  const pending = bridge.call('record_notes', liveReviewNotes()); await bounded(f.arrived.promise);
+  await assert.rejects(bridge.call('record_notes', liveReviewNotes()), code('BRIDGE_BUSY'));
+  const unresolved = await bounded(pending);
+  assert.equal(unresolved.value.error.code, 'TOOL_CALL_UNRESOLVED');
+  assert.equal(unresolved.value.error.outcome, 'unknown');
+  assert.equal(f.calls.length, 1, 'an unknown note result never causes an automatic retry');
+});
+
+
+test('contract 6 alone accepts scoped keyframes and explicit-shot regeneration without authority fields', () => {
+  for (const input of [{ sceneIds: ['scene-one', 'scene-two'] }, { shotIds: ['shot-one'] }, { shotIds: ['shot-one'], regenerate: true }, { sceneIds: ['scene-one'], regenerate: false }]) {
+    assert.deepEqual(parseToolArguments('make_keyframes', input, '6.0.0').arguments, input);
+    for (const version of ['1.0.0', '2.0.0', '3.0.0', '4.0.0', '5.0.0']) assert.throws(() => parseToolArguments('make_keyframes', input, version), code('NOT_FOUND'));
+  }
+  for (const input of [{}, { sceneIds: [], shotIds: ['shot'] }, { sceneIds: ['scene'], shotIds: ['shot'] }, { sceneIds: ['scene'], regenerate: true },
+    { shotIds: ['shot', 'shot'] }, { shotIds: [1] }, { shotIds: ['shot'], regenerate: 'true' }, { shotIds: ['shot'], actor: 'human' },
+    { shotIds: ['shot'], requestId: 'forged' }, { shotIds: ['shot'], kind: 'video' }, { shotIds: ['shot'], quote: { amountMicros: '0' } }]) {
+    assert.throws(() => parseToolArguments('make_keyframes', input, '6.0.0'), code('VALIDATION_ERROR'));
+  }
+  const descriptor = toolCatalog('6.0.0').descriptors.find(tool => tool.name === 'make_keyframes');
+  assert.equal(descriptor.annotations.readOnlyHint, false);
+  assert.match(descriptor.description, /person's fresh editing conversation/);
+  assert.match(descriptor.description, /confirm_video note choices in chat or Keyframes; only a human click confirms/);
+  assert.match(descriptor.description, /explicit shotIds/);
+});
+
+test('contract 6 stdio advertises make_keyframes and forwards one scoped call with returned scene quotes', async t => {
+  const outcome = { scenes: [{ sceneId: 'scene-one', keyframes: ['shot-one'], voiceLines: ['shot-one'], quote: { currency: 'USD', amountMicros: '125000' } },
+    { sceneId: 'scene-two', code: 'direction_required' }] };
+  const f = await fixture(t, (_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(outcome)); });
+  const c = await childFixture(t, { ...f.options, toolContractVersion: '6.0.0' });
+  await c.initialize();
+  assert.deepEqual((await c.request('tools/list', {}).response).result.tools, toolCatalog('6.0.0').descriptors);
+  const input = { sceneIds: ['scene-one', 'scene-two'] };
+  const reply = await c.request('tools/call', { name: 'make_keyframes', arguments: input }).response;
+  assert.equal(reply.result.isError, false); assert.deepEqual(JSON.parse(reply.result.content[0].text), outcome);
+  assert.equal(f.calls.length, 1); assert.deepEqual(f.calls[0].body, input);
+  assert.match(f.calls[0].url, /\/tools\/make_keyframes$/);
+  assert.equal(reply.result._meta['openslate/callId'], f.calls[0].headers['x-openslate-tool-call-id']);
+  const invalid = await c.request('tools/call', { name: 'make_keyframes', arguments: { sceneIds: ['scene-one'], regenerate: true } }).response;
+  assert.equal(JSON.parse(invalid.result.content[0].text).error.code, 'VALIDATION_ERROR');
+  assert.equal(f.calls.length, 1, 'invalid regeneration never reaches the application');
+});
+
+test('a lost make_keyframes response retains its exact unresolved call identity and never resubmits', async t => {
+  const f = await fixture(t, (_req, res) => res.destroy());
+  const bridge = new ToolBridge({ ...f.options, toolContractVersion: '6.0.0' });
+  const result = await bridge.call('make_keyframes', { shotIds: ['shot-one'] });
+  assert.equal(result.isError, true); assert.equal(result.value.error.code, 'TOOL_CALL_UNRESOLVED');
+  assert.equal(result.value.error.callId, result.callId); assert.equal(result.value.error.outcome, 'unknown');
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].headers['x-openslate-tool-call-id'], result.callId);
+});
+
+for (const version of ['5.0.0', '6.0.0']) test(`${version} stdio ${version === '6.0.0' ? 'forwards' : 'refuses'} typed proposal decisions with no model-authored preview or actor`, async t => {
+  const f = await fixture(t), c = await childFixture(t, { ...f.options, toolContractVersion: version });
+  await c.initialize();
+  const listed = (await c.request('tools/list', {}).response).result.tools;
+  for (const name of ['accept_proposal', 'reject_proposal']) {
+    assert.equal(listed.some(tool => tool.name === name), version === '6.0.0');
+    const input = { proposalId: name === 'accept_proposal' ? 'c' : 'proposal-id' };
+    const response = (await c.request('tools/call', { name, arguments: input }).response).result;
+    if (version === '5.0.0') {
+      assert.equal(response.isError, true);
+      assert.equal(JSON.parse(response.content[0].text).error.code, 'NOT_FOUND');
+      continue;
+    }
+    assert.equal(response.isError, false);
+    assert.deepEqual(JSON.parse(response.content[0].text), { ok: true, args: input });
+    assert.deepEqual(f.calls.at(-1).body, input);
+    assert.match(f.calls.at(-1).url, new RegExp(`/tools/${name}$`));
+    for (const extra of [{ previewDigest: 'a'.repeat(64) }, { requestId: 'forged' }, { actor: 'human' }]) {
+      const refused = (await c.request('tools/call', { name, arguments: { ...input, ...extra } }).response).result;
+      assert.equal(refused.isError, true);
+      assert.equal(JSON.parse(refused.content[0].text).error.code, 'VALIDATION_ERROR');
+    }
+  }
+  assert.equal(f.calls.length, version === '6.0.0' ? 2 : 0, 'only the two exact current-contract inputs reach the application');
 });

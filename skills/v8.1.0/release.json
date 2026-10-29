@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "release": "8.1.0",
+  "toolContract": "7.1.0",
+  "core": [
+    "production",
+    "plan-authoring"
+  ],
+  "packages": [
+    {
+      "id": "production",
+      "version": "8.1.0",
+      "packageDigest": "e638ca01f676421bb12c90141b52835da0f8be4d5b8e0cddcedc1bdb11968ebf"
+    },
+    {
+      "id": "plan-authoring",
+      "version": "8.1.0",
+      "packageDigest": "2a893cad26f9eba26b6de814c2721497e3c26f797c033ce22c57cb6b575e04a7"
+    },
+    {
+      "id": "craft-story",
+      "version": "8.1.0",
+      "packageDigest": "4d75c8cc419898247574218243e78ab35b650d1e396bce2d599e615f89088109"
+    },
+    {
+      "id": "craft-comedy",
+      "version": "8.1.0",
+      "packageDigest": "269dc20ed96c7c785809cd5fa8ad3e2f279cb8b9943afb35e9ef55a88070fe66"
+    },
+    {
+      "id": "craft-visual-style",
+      "version": "8.1.0",
+      "packageDigest": "93e71247d2a9b0fcfb8130cfc743eade51f1aa908fa3c45c18bb59fb82861e21"
+    },
+    {
+      "id": "craft-style-prompting",
+      "version": "8.1.0",
+      "packageDigest": "f468d71e85baa756884ce6a85e3e2bddb795beeeecf48e8f53180ac6f468ff83"
+    },
+    {
+      "id": "craft-shot-prompting",
+      "version": "8.1.0",
+      "packageDigest": "aea1db30150a23f508fc946c7a9dce22d1461f48f67b520175a282b0661fce16"
+    },
+    {
+      "id": "craft-characters",
+      "version": "8.1.0",
+      "packageDigest": "ecebe8dd0ad091317c620ececd6af57093b51296de98091b26b79a00eb8e5183"
+    },
+    {
+      "id": "craft-continuity-review",
+      "version": "8.1.0",
+      "packageDigest": "998d45d07ef011ef778bdcf26ea0cd367b56e2592b9717f4f297fade3eb4f4bf"
+    },
+    {
+      "id": "craft-narration",
+      "version": "8.1.0",
+      "packageDigest": "7fa80224a9713fc2f6ebc80e562906b4f097508da2b73b3ee50978789f2ab167"
+    },
+    {
+      "id": "craft-music-timing",
+      "version": "8.1.0",
+      "packageDigest": "dcab0f2b6cbc56095656f7ef2936057a6ef8f718dd775061872181dd47a8394c"
+    },
+    {
+      "id": "craft-performance",
+      "version": "8.1.0",
+      "packageDigest": "1b4c386865de4d3ad63a7e66b77d7edba551c6a2748246bba587f595c4cfeb73"
+    },
+    {
+      "id": "type-social",
+      "version": "8.1.0",
+      "packageDigest": "ba6c8d92c7c603d355c7618b1d3cc3be8fc6821dddf1159ff94230bf549e5c2a"
+    },
+    {
+      "id": "type-music-video",
+      "version": "8.1.0",
+      "packageDigest": "ee1aa08a2afbe007b6e44f7998a322a59736237ec34c05ab8729f3e0de3fdf60"
+    },
+    {
+      "id": "type-commercial",
+      "version": "8.1.0",
+      "packageDigest": "465566a91a9c5bc9b0c385b6a7c66c904f9ca66191233d47bb1a628393bfd4de"
+    },
+    {
+      "id": "type-explainer",
+      "version": "8.1.0",
+      "packageDigest": "3baf3df1b3dad74834700a7d58927bed6ce8a8496e3e62fca761673204a7c679"
+    },
+    {
+      "id": "type-narrative",
+      "version": "8.1.0",
+      "packageDigest": "adb365e02386b3d9be02d5a6f9d9f44c2b67bc4ed734c5ff612622758e3c03ca"
+    },
+    {
+      "id": "type-narrated-story",
+      "version": "8.1.0",
+      "packageDigest": "b9319144935478f77821fe4a8045d88dc554dfa10866bcea4c927c8d0d97a4e4"
+    },
+    {
+      "id": "type-showcase",
+      "version": "8.1.0",
+      "packageDigest": "04e497f9311950f5ca566f6d473a27288f133096c0a7ae22ed5dfa695dcbeb81"
+    },
+    {
+      "id": "type-documentary",
+      "version": "8.1.0",
+      "packageDigest": "78292acc9fab8a02b5338b91333f6f13030365d037186df13ca7fd16ae06c0b9"
+    },
+    {
+      "id": "type-trailer",
+      "version": "8.1.0",
+      "packageDigest": "57741e045ca003e7e02a194d96b0d524a884d436962686db45f8476ed981f140"
+    },
+    {
+      "id": "format-social-vertical",
+      "version": "8.1.0",
+      "packageDigest": "4acf46d88ea4724e8839c61d4ae223ec5a6a952de6b331fe6d7f23bb10d5c935"
+    }
+  ],
+  "routes": {
+    "commercial": "type-commercial",
+    "documentary": "type-documentary",
+    "explainer": "type-explainer",
+    "general": "fallback",
+    "music_video": "type-music-video",
+    "narrated_story": "type-narrated-story",
+    "narrative": "type-narrative",
+    "other": "fallback",
+    "showcase": "type-showcase",
+    "social": "type-social",
+    "trailer": "type-trailer",
+    "undecided": "fallback"
+  },
+  "fallback": {
+    "kind": "general",
+    "inject": [
+      "craft-story",
+      "craft-visual-style",
+      "craft-shot-prompting"
+    ]
+  },
+  "inject": [
+    {
+      "package": "production",
+      "path": "references/current-contract.md"
+    },
+    {
+      "package": "production",
+      "path": "references/notes.md"
+    }
+  ],
+  "budget": {
+    "injectedWords": 10000,
+    "entryWords": {
+      "core": 1600,
+      "type": 1100,
+      "craft": 600,
+      "format": 700
+    },
+    "referenceWords": 2500
+  }
+}

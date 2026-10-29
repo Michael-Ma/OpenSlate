@@ -10,7 +10,7 @@ import type { NarrationSpeechReview } from "../narration/narration-speech-types.
 import Database from "better-sqlite3";
 import { mkdirSync, existsSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { canonical, digest, DomainError, invariant, newId } from "@openslate/core";
+import { canonical, digest, DomainError, invariant, newId, normalizeStoredFilmKind } from "@openslate/core";
 import type { JsonObject, ProjectEvent, ProjectRecord } from "@openslate/core";
 import { verifySchema } from "./schema.js";
 import { initializeDatabase } from "./migrations.js";
@@ -24,6 +24,8 @@ import type { TranscriptionAudioIntent, TranscriptionAudioReceipt, Transcription
 import { assertSpeechMappingAdmission, resolveSpeechAdmission } from "../execution/audio-execution-authority.js";
 import { assertSpeechSpoolLineage } from "../execution/audio-execution-lineage.js";
 import { assertViggleSpoolLineage } from "../execution/viggle-h3-lineage.js";
+import { assertFalLipSyncDispatch, assertFalLipSyncMapping, assertFalLipSyncObservation, assertFalLipSyncPollSchedule, assertFalLipSyncSubmit, FAL_LIPSYNC_KINDS } from "../execution/fal-lipsync-receipts.js";
+import type { FalLipSyncDispatch, FalLipSyncMapping, FalLipSyncObservation, FalLipSyncPollSchedule, FalLipSyncSubmit } from "../execution/fal-lipsync-receipts.js";
 import { resolveViggleAdmission, assertViggleMappingAdmission } from "../execution/viggle-h3-authority.js";
 import { assertViggleH3ExecutionMapping, assertViggleH3ExecutionDispatch, assertViggleH3ExecutionSubmit, assertViggleH3ExecutionObservation, assertViggleH3PollSchedule } from "../execution/viggle-h3-receipts.js";
 import type { ViggleH3ExecutionMapping, ViggleH3ExecutionDispatch, ViggleH3ExecutionSubmit, ViggleH3ExecutionObservation, ViggleH3PollSchedule } from "../execution/viggle-h3-receipts.js";
@@ -113,11 +115,12 @@ export class Store {
   getProject(id: string): ProjectRecord {
     const row = this.db.prepare("SELECT body,head_version FROM projects WHERE id=?").get(id) as ProjectRow | undefined;
     invariant(row, "NOT_FOUND", "Project not found");
-    return JSON.parse(row.body) as ProjectRecord;
+    // Unshipped 7.0.0 stored filmKind as a flat string; read it as the structured film-kind@1 record.
+    return normalizeStoredFilmKind(JSON.parse(row.body) as ProjectRecord);
   }
 
   listProjects(): ProjectRecord[] {
-    return (this.db.prepare("SELECT body FROM projects ORDER BY rowid DESC").all() as ProjectRow[]).map(row => JSON.parse(row.body) as ProjectRecord);
+    return (this.db.prepare("SELECT body FROM projects ORDER BY rowid DESC").all() as ProjectRow[]).map(row => normalizeStoredFilmKind(JSON.parse(row.body) as ProjectRecord));
   }
 
   saveProject(project: ProjectRecord, expectedHeadVersion: number): ProjectRecord {
@@ -315,7 +318,7 @@ export class Store {
     }
     if (kind === "request_image_selection") {
       reference("message", id);
-      invariant(body.requestId === id && Array.isArray(body.images) && body.images.length >= 1 && body.images.length <= 4 && body.selectionDigest === digest(body.images), "IDENTITY_MISMATCH", "Image selection must bind a bounded ordered request payload");
+      invariant(body.requestId === id && Array.isArray(body.images) && body.images.length >= 1 && body.images.length <= 8 && body.selectionDigest === digest(body.images), "IDENTITY_MISMATCH", "Image selection must bind a bounded ordered request payload");
       const images = body.images as Array<{ artifactId: string; sha256: string }>;
       invariant(new Set(images.map(image => image.artifactId)).size === images.length, "IDENTITY_MISMATCH", "Image selections must be unique");
       for (const image of images) {
@@ -334,6 +337,55 @@ export class Store {
       const images = body.images as Array<{ artifactId: string; sha256: string; thumbnailSha256: string; byteLength: number; mediaType: string }>;
       invariant(canonical(images.map(({ artifactId, sha256 }) => ({ artifactId, sha256 }))) === canonical(selection.images), "IDENTITY_MISMATCH", "Image projection must preserve selected reference order and identity");
       invariant(images.every(image => /^[a-f0-9]{64}$/.test(image.thumbnailSha256) && Number.isSafeInteger(image.byteLength) && image.byteLength > 0 && image.byteLength <= 128 * 1024 && image.mediaType === "image/jpeg"), "VALIDATION_ERROR", "Image projection requires bounded JPEG content receipts");
+    }
+    if (kind === "request_attachment_selection") {
+      reference("message", id);
+      type Ref = { artifactId: string; sha256: string };
+      invariant(body.requestId === id && Array.isArray(body.attachments) && body.attachments.length >= 1 && body.attachments.length <= 8 &&
+        (body.legacyImages === undefined || Array.isArray(body.legacyImages)), "IDENTITY_MISMATCH", "Attachments must bind a bounded ordered message selection");
+      const attachments = body.attachments as Ref[], images = body.legacyImages as Ref[] | undefined;
+      const refs = [...(images ?? []), ...attachments];
+      invariant(refs.length <= 8 && new Set(refs.map(ref => ref.artifactId)).size === refs.length &&
+        body.selectionDigest === digest({ attachments, ...(images ? { legacyImages: images } : {}) }), "IDENTITY_MISMATCH", "Attachment selection must preserve unique identities and order");
+      for (const ref of refs) {
+        invariant(ref && typeof ref.artifactId === "string" && ref.artifactId.length > 0 && ref.artifactId.length <= 160 && /^[a-f0-9]{64}$/.test(ref.sha256), "VALIDATION_ERROR", "Select an owned artifact identity and SHA-256");
+        const artifact = this.get<{ projectId: string; artifact: { artifactId: string; sha256: string; kind: string } }>("artifact", ref.artifactId);
+        if (artifact) {
+          reference("artifact", ref.artifactId);
+          invariant(artifact.artifact.artifactId === ref.artifactId && artifact.artifact.sha256 === ref.sha256 && ["image", "video", "audio", "document"].includes(artifact.artifact.kind), "IDENTITY_MISMATCH", "Attachment selection must bind exact owned content");
+        } else {
+          reference("narration_audio", ref.artifactId);
+          const audio = this.get<{ media: { sha256: string; artifactId: string; kind: string } }>("narration_audio", ref.artifactId)!;
+          invariant(audio.media.sha256 === ref.sha256 && audio.media.artifactId === ref.artifactId && audio.media.kind === "audio", "IDENTITY_MISMATCH", "Attachment selection must bind exact owned audio content");
+        }
+      }
+      const request = this.get<{ contextDigest: string }>("message", id)!;
+      invariant(request.contextDigest === digest({ replyToReviewId: body.replyToReviewId ?? null, ...(images ? { images } : {}), attachments }), "IDENTITY_MISMATCH", "Attachments must match their message context identity");
+    }
+    if (kind === "request_attachment_projection") {
+      reference("request_attachment_selection", id);
+      const selection = this.get<{ selectionDigest: string; attachments: Array<{ artifactId: string; sha256: string }>; legacyImages?: Array<{ artifactId: string; sha256: string }> }>("request_attachment_selection", id)!;
+      const refs = [...(selection.legacyImages ?? []), ...selection.attachments];
+      invariant(body.requestId === id && body.selectionDigest === selection.selectionDigest && Array.isArray(body.attachments) && body.attachments.length === refs.length &&
+        Array.isArray(body.images) && body.images.length <= 8 && [body.recipeDigest, body.toolchainDigest].every(value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)), "IDENTITY_MISMATCH", "Attachment projection must bind its message, recipe and toolchain");
+      const materials = body.attachments as Array<{ artifact: { artifactId: string; sha256: string }; name: string; readable: boolean; text?: string; characters?: number; truncated?: boolean }>;
+      invariant(materials.every((material, index) => material.artifact?.artifactId === refs[index]!.artifactId && material.artifact.sha256 === refs[index]!.sha256 &&
+        typeof material.name === "string" && typeof material.readable === "boolean" && (material.text === undefined || typeof material.text === "string" && material.text.length <= 200_000 && material.characters === material.text.length && typeof material.truncated === "boolean")), "IDENTITY_MISMATCH", "Attached material must preserve its selected identity and bounded text");
+      let totalBytes = 0;
+      for (const image of body.images as Array<{ artifactId: string; sha256: string; attachmentIndex: number; thumbnailSha256: string; byteLength: number; mediaType: string }>) {
+        invariant(Number.isSafeInteger(image.attachmentIndex) && refs[image.attachmentIndex]?.artifactId === image.artifactId && refs[image.attachmentIndex]?.sha256 === image.sha256 &&
+          /^[a-f0-9]{64}$/.test(image.thumbnailSha256) && Number.isSafeInteger(image.byteLength) && image.byteLength > 0 && image.byteLength <= 128 * 1024 && image.mediaType === "image/jpeg", "VALIDATION_ERROR", "Attachment pictures require exact bounded JPEG receipts");
+        totalBytes += image.byteLength;
+      }
+      invariant(totalBytes <= 1024 * 1024, "VALIDATION_ERROR", "Attachment picture bytes exceed their message limit");
+    }
+    if (kind === "document_import") reference("message", body.requestId);
+    if (kind === "document_import_receipt") {
+      reference("document_import", id);
+      const artifact = body.artifact as { artifactId?: unknown; sha256?: unknown; kind?: unknown } | undefined;
+      reference("artifact", artifact?.artifactId);
+      const imported = this.get<{ artifactId: string; sha256: string }>("document_import", id)!;
+      invariant(imported.artifactId === artifact?.artifactId && imported.sha256 === artifact?.sha256 && artifact?.kind === "document", "IDENTITY_MISMATCH", "Document receipt must match its import artifact identity");
     }
     if (kind === "image_import") reference("message", body.requestId);
     if (kind === "image_import_receipt") {
@@ -531,6 +583,37 @@ export class Store {
         }
       }
     }
+    if ((FAL_LIPSYNC_KINDS as readonly string[]).includes(kind)) {
+      // fal lip-sync receipts: same write-time proofs as the H3 receipts above.
+      reference("attempt", body.attemptId);
+      const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
+      assertConfiguredProviderAdmission(this, attempt);
+      const mapping = this.get<FalLipSyncMapping>("fal_lipsync_execution_mapping", attempt.id), dispatch = this.get<FalLipSyncDispatch>("fal_lipsync_execution_dispatch", attempt.id);
+      const submit = this.get<FalLipSyncSubmit>("fal_lipsync_execution_submit", attempt.id), value = { ...body, id, projectId };
+      if (kind === "fal_lipsync_execution_mapping") {
+        invariant(!submit || !!mapping, "FAL_LIPSYNC_EXECUTION_CONFLICT", "Closed lip-sync preparation cannot acquire a mapping");
+        assertFalLipSyncMapping(attempt, value as unknown as FalLipSyncMapping); reference("artifact", body.firstFrameArtifactId);
+      } else if (kind === "fal_lipsync_execution_dispatch") {
+        reference("fal_lipsync_execution_mapping", attempt.id);
+        invariant(!submit || !!dispatch, "FAL_LIPSYNC_EXECUTION_CONFLICT", "Closed lip-sync preparation cannot acquire a dispatch");
+        assertFalLipSyncDispatch(attempt, mapping!, value as unknown as FalLipSyncDispatch);
+      } else if (kind === "fal_lipsync_execution_submit") assertFalLipSyncSubmit(attempt, mapping, dispatch, value as unknown as FalLipSyncSubmit);
+      else {
+        reference("fal_lipsync_execution_mapping", attempt.id); reference("fal_lipsync_execution_dispatch", attempt.id); reference("fal_lipsync_execution_submit", attempt.id);
+        if (kind === "fal_lipsync_execution_observation") {
+          const observation = value as unknown as FalLipSyncObservation, outputId = observation.observation?.kind === "completed" ? observation.observation.outputReceiptId : undefined;
+          if (outputId !== undefined) reference("execution_output_receipt", outputId);
+          assertFalLipSyncObservation(attempt, mapping!, dispatch!, submit!, observation, outputId ? this.get("execution_output_receipt", outputId) : undefined);
+        } else {
+          const schedule = value as unknown as FalLipSyncPollSchedule; assertFalLipSyncPollSchedule(attempt, submit!, schedule);
+          if (schedule.lastObservationId !== null) {
+            reference("fal_lipsync_execution_observation", schedule.lastObservationId);
+            invariant(this.get<FalLipSyncObservation>("fal_lipsync_execution_observation", schedule.lastObservationId)!.attemptId === attempt.id,
+              "FAL_LIPSYNC_EXECUTION_CONFLICT", "Polling schedule cannot adopt another attempt's observation");
+          }
+        }
+      }
+    }
     if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule"].includes(kind)) {
       reference("attempt", body.attemptId);
       const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
@@ -661,6 +744,19 @@ export class Store {
       const epoch = this.get<{ requestId: string }>("epoch", String(body.epochId));
       invariant(epoch?.requestId === body.requestId, "SCOPE_DENIED", "Director record request does not match its epoch");
     }
+    if (["director_generation_effect", "director_generation_block", "director_keyframes_receipt", "director_attachment_transcription"].includes(kind)) {
+      reference("message", body.requestId); reference("epoch", body.epochId);
+      const epoch = this.get<{ requestId: string }>("epoch", String(body.epochId));
+      invariant(epoch?.requestId === body.requestId, "SCOPE_DENIED", "Generation evidence must belong to its original epoch request");
+    }
+    if (kind === "scene_confirmation_candidate") {
+      invariant(body.candidateId === id, "IDENTITY_MISMATCH", "Scene run mapping must retain its candidate identity");
+      reference("candidate", id); reference("scene_confirmation", body.confirmationId);
+      const candidate = this.get<{ grantId: string }>("candidate", id)!;
+      const grant = this.get<{ authorityId: string }>("grant", candidate.grantId);
+      const run = this.get<{ actor: { requestId: string } }>("scene_confirmation", String(body.confirmationId));
+      invariant(grant?.authorityId === run?.actor.requestId, "SCOPE_DENIED", "Scene run must retain the candidate's original human request");
+    }
     if (kind === "tool_invocation") {
       reference("message", body.requestId);
       reference("epoch", body.epochId);
@@ -676,6 +772,8 @@ export class Store {
       const encoded = this.checkedBody(kind, id, projectId, body);
       try { this.db.prepare("INSERT INTO entities(kind,id,project_id,body) VALUES(?,?,?,?)").run(kind, id, projectId, encoded); }
       catch (error) { this.constraint(error); }
+      if (kind === "artifact" || kind === "narration_audio")
+        this.insert("asset_metadata", `${kind}:${id}`, projectId, { createdAt: new Date().toISOString() });
       return JSON.parse(encoded) as T;
     });
   }
@@ -699,6 +797,14 @@ export class Store {
           invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Viggle poll identity and host policy are immutable");
         invariant(Number(next.count) >= Number(previous.count), "VIGGLE_H3_EXECUTION_CONFLICT", "Viggle polling cannot rewind");
       }
+      if (["fal_lipsync_execution_mapping", "fal_lipsync_execution_dispatch", "fal_lipsync_execution_submit", "fal_lipsync_execution_observation"].includes(kind))
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", "Lip-sync execution receipts are immutable");
+      if (kind === "fal_lipsync_poll_schedule") {
+        const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
+        for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Lip-sync poll identity and host policy are immutable");
+        invariant(Number(next.count) >= Number(previous.count), "FAL_LIPSYNC_EXECUTION_CONFLICT", "Lip-sync polling cannot rewind");
+      }
       if (kind === "h3_poll_schedule") {
         const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
         for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])
@@ -713,8 +819,26 @@ export class Store {
         "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result",
         "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcription_preparation_intent", "transcript_candidate", "narration_transcript_selection", "owned_transcription_source", "owned_transcription_proposal", "owned_transcription_review", "owned_transcription_application", "narration_speech_proposal", "narration_speech_review", "narration_speech_application"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
-      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt", "personal_voice", "personal_voice_revocation"].includes(kind))
+      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "request_attachment_selection", "request_attachment_projection", "document_import", "document_import_receipt", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt", "personal_voice", "personal_voice_revocation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
+      if (["director_generation_effect", "director_generation_block", "scene_confirmation_candidate"].includes(kind))
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", "Generation and scene run evidence is immutable");
+      if (kind === "director_attachment_transcription") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        for (const field of ["requestId", "epochId", "key", "inputDigest", "audioId", "operationDigest"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Attachment transcription identity is immutable");
+        if (previous.state !== "started") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Completed attachment transcription is immutable");
+      }
+      if (kind === "director_keyframes_receipt") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        for (const field of ["requestId", "epochId", "argumentsDigest"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Director generation identity is immutable");
+        if (previous.complete) invariant(old.body === encoded, "IMMUTABLE_RECORD", "Completed keyframe receipts are immutable");
+      }
+      if (kind === "message") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        invariant(canonical(previous.attachments ?? []) === canonical(next.attachments ?? []), "IMMUTABLE_RECORD", "Message attachments are immutable");
+      }
       if (kind === "epoch") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
         const next = JSON.parse(encoded) as Record<string, unknown>;
@@ -741,6 +865,22 @@ export class Store {
       if (kind === "attempt") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
         const next = JSON.parse(encoded) as Record<string, unknown>;
+        if (previous.released) invariant(canonical(previous.released) === canonical(next.released ?? null), "IMMUTABLE_RECORD", "Attempt release evidence is immutable");
+        else if (next.released) {
+          const released = next.released as Attempt["released"];
+          // remote_pending: a job the provider still reports as running, detached by the person (decision R3).
+          invariant((previous.phase === "submission_unknown" || previous.phase === "remote_pending") && next.phase === previous.phase
+            && released && typeof released.by === "string" && released.by.length > 0
+            && typeof released.at === "string" && Number.isFinite(Date.parse(released.at)),
+          "ATTEMPT_NOT_RELEASABLE", "Release requires a retained unknown or running submission and human audit evidence");
+        }
+        if (previous.discarded) invariant(canonical(previous.discarded) === canonical(next.discarded ?? null), "IMMUTABLE_RECORD", "Attempt discard evidence is immutable");
+        else if (next.discarded) {
+          const discarded = next.discarded as NonNullable<Attempt["discarded"]>;
+          invariant(previous.phase === "ingesting" && next.phase === "failed" && typeof discarded.by === "string" && discarded.by.length > 0
+            && typeof discarded.at === "string" && Number.isFinite(Date.parse(discarded.at)) && typeof discarded.code === "string",
+          "ATTEMPT_NOT_DISCARDABLE", "Discard requires a finished ingesting job and human audit evidence");
+        }
         invariant(Object.hasOwn(previous, "narrationSpeech") === Object.hasOwn(next, "narrationSpeech")
           && (!Object.hasOwn(previous, "narrationSpeech") || canonical(previous.narrationSpeech) === canonical(next.narrationSpeech)),
           "IMMUTABLE_RECORD", "Attempt speech review evidence is immutable");

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { Engine } from "../dist/execution/index.js";
 import { fixtureOutputs, registerExecutionProvider } from "../../../packages/providers/dist/index.js";
 import { digest } from "../../../packages/core/dist/index.js";
-import { setup } from "./execution-fixture.mjs";
+import { elapseUnknownBackoff, setup } from "./execution-fixture.mjs";
 
 const wrap = provider => ({ submit: request => provider.submit(request), poll: taskId => provider.poll(taskId), lookup: attemptId => provider.lookup(attemptId) });
 const register = provider => registerExecutionProvider(provider, { adapter: "fake", version: "1" });
@@ -97,6 +97,7 @@ test("contradictory task receipts are retained without replacing the accepted ta
   assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
   assert.equal(f.engine.attempts(f.projectId)[0].taskId, accepted.taskId);
   f.provider.poll = originalPoll; f.provider.complete(accepted.taskId);
+  elapseUnknownBackoff(f.store, accepted.id);
   await f.engine.reconcile(); current = f.engine.attempts(f.projectId)[0];
   assert.equal(current.phase, "succeeded"); assert.equal(current.taskId, accepted.taskId);
   assert.equal(f.provider.acceptedCount(), 1); assert.equal(f.engine.outputs(f.projectId).length, 1);

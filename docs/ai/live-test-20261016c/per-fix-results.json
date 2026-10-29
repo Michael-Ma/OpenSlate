@@ -1,0 +1,83 @@
+[
+  {
+    "id": 1,
+    "fix": "Whole square Keyframes preview at both sizes",
+    "result": "pass",
+    "screenshots": [
+      "17-keyframe-one-1440.png",
+      "18-keyframe-one-1366.png",
+      "19-keyframe-two-1440.png",
+      "20-keyframe-two-1366.png"
+    ],
+    "evidence": "Both 1254 x 1254 frames use contain, with side bars. Caption and scrubber are below the image at 1440 x 900 and 1366 x 768."
+  },
+  {
+    "id": 2,
+    "fix": "Panel while making keyframes",
+    "result": "pass",
+    "screenshots": [
+      "16-keyframes-progress.png",
+      "17-keyframe-one-1440.png"
+    ],
+    "evidence": "Making-keyframes wording with 0/2 and 1/2 ready; confirmation disabled. No premature Every frame is opened."
+  },
+  {
+    "id": 3,
+    "fix": "Director after saving the plan",
+    "result": "pass",
+    "screenshots": [
+      "10-plan-saved-labels.png"
+    ],
+    "evidence": "Final planning reply confirms the saved story, scene, shots and prompts, then directs the human to the keyframe button. No saving-blocked claim."
+  },
+  {
+    "id": 4,
+    "fix": "Short framing labels and scene title",
+    "result": "pass",
+    "screenshots": [
+      "10-plan-saved-labels.png",
+      "19-keyframe-two-1440.png"
+    ],
+    "evidence": "Close-up; Wide; Paper Boat at Dusk."
+  },
+  {
+    "id": 5,
+    "fix": "Film poster before playing",
+    "result": "pass",
+    "screenshots": [
+      "26-film-poster-before-play.png",
+      "export-shot-1.png"
+    ],
+    "evidence": "First-shot frame shown whole with side bars at time zero before the first play press, matching export composition."
+  },
+  {
+    "id": 6,
+    "fix": "Assets explains used clip duration",
+    "result": "pass",
+    "screenshots": [
+      "36-assets-clip-one-used-duration.png",
+      "37-assets-clip-two-used-duration.png"
+    ],
+    "evidence": "Each 6.6-second source clip detail says the film uses 6 seconds, the shot length."
+  },
+  {
+    "id": 7,
+    "fix": "One-interrupt shutdown and immediate same-command restart",
+    "result": "pass",
+    "screenshots": [
+      "32-before-shutdown.png",
+      "33-studio-stopped.png",
+      "34-restart-film-export.png"
+    ],
+    "evidence": "Browser/SSE left open. One SIGINT; launcher exited in 204 ms. Same-command relaunch succeeded without INSTALLATION_IN_USE; exact saved identities and counts preserved."
+  },
+  {
+    "id": 8,
+    "fix": "Settings retains last successful Director check",
+    "result": "pass",
+    "screenshots": [
+      "42-settings-retained-check-visible.png"
+    ],
+    "evidence": "Checked, Codex 0.153.4, original 2026-10-16T23:36:13.369Z timestamp. No Check again press; API metadata unchanged."
+  }
+]

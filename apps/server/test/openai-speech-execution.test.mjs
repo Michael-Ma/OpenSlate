@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { digest } from "../../../packages/core/dist/index.js";
+import { digest, DomainError } from "../../../packages/core/dist/index.js";
 import { Store } from "../dist/persistence/store.js";
 import { OpenAISpeechExecution } from "../dist/execution/openai-speech-execution.js";
 import { ExecutionOutputStore } from "../dist/execution/output-store.js";
 import { speechFixture, context, rows, key, bytes, wave, hash, response, restart, restoreSpeechFixture, revoke } from "./speech-execution-fixture.mjs";
+import { narrationSpeechFixture } from "./narration-speech-fixture.mjs";
 
 function replaceLease(f) {
   const attempt = f.store.get("attempt", f.attempt.id);
@@ -50,6 +51,40 @@ test("real consumed admission precedes exact single speech POST, then raw owned 
   assert.deepEqual(await restart(f).bridge.lookup(f.attempt.id), completed);
 });
 
+test("a charged speech response waits for busy writers and remains recoverable without another POST", async t => {
+  const f = speechFixture(t), controllers = [new AbortController(), new AbortController()], ready = Promise.withResolvers(); let opened = 0;
+  const blockers = controllers.map((controller, index) => {
+    const receipt = f.outputs.recordReceipt(f.project.id, { attemptId: f.attempt.id, expectedRequestDigest: digest(f.request),
+      port: "audio", kind: "audio", mimeType: "audio/wav", vendorTaskId: null, diagnosticRequestId: `writer-${index}`,
+      source: { kind: "returned_bytes", sha256: hash(bytes), byteLength: bytes.length } });
+    return f.outputs.spool(f.project.id, receipt.id, async function* () { if (++opened === 2) ready.resolve(); await new Promise(() => {}); }, { signal: controller.signal });
+  });
+  const blocked = Promise.allSettled(blockers); await ready.promise;
+  const queued = Promise.withResolvers(), spool = f.outputs.spool.bind(f.outputs); let settled = false;
+  f.outputs.spool = (...args) => { queued.resolve(); return spool(...args); };
+  const pending = f.bridge.submit(f.request, context(f)).then(result => { settled = true; return result; }); await queued.promise;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false); assert.equal(f.calls.http, 1); assert.equal(rows(f, "speech_execution_result")[0].observation.kind, "completed");
+  assert.equal(rows(f, "execution_output_spool").length, 0);
+  controllers.forEach(controller => controller.abort()); await blocked;
+  const completed = await pending; assert.equal(completed.type, "completed");
+  assert.deepEqual(readFileSync((await f.outputs.resolveOwned(f.project.id, completed.receiptId)).path), bytes);
+  assert.deepEqual(await restart(f).bridge.lookup(f.attempt.id), completed); assert.equal(f.calls.http, 1);
+});
+
+for (const code of ["OUTPUT_STORE_BUSY", "ENOSPC", "EMFILE", "ENFILE"]) test(`local ${code} retains charged speech bytes for the next lookup`, async t => {
+  const f = speechFixture(t), spool = f.outputs.spool.bind(f.outputs); let busy = true;
+  f.outputs.spool = (...args) => {
+    if (busy) { busy = false; throw code === "OUTPUT_STORE_BUSY" ? new DomainError(code, "synthetic local writer pressure")
+      : Object.assign(new Error("synthetic local filesystem pressure"), { code }); }
+    return spool(...args);
+  };
+  await assert.rejects(f.bridge.submit(f.request, context(f)), { code });
+  assert.equal(rows(f, "speech_execution_result")[0].observation.kind, "completed"); assert.equal(rows(f, "execution_output_spool").length, 0);
+  const completed = await f.bridge.lookup(f.attempt.id); assert.equal(completed.type, "completed");
+  assert.deepEqual(readFileSync((await f.outputs.resolveOwned(f.project.id, completed.receiptId)).path), bytes); assert.equal(f.calls.http, 1);
+});
+
 test("registered speech does not substitute an allowance correlation for actual consumption", async t => {
   for (const kind of ["external_allowance_consumption", "external_allowance", "candidate", "grant", "reservation"]) {
     const f = speechFixture(t); f.store.db.prepare("DELETE FROM entities WHERE kind=?").run(kind);
@@ -78,6 +113,16 @@ test("first dispatch requires the captured original unexpired submitting lease",
   const g = speechFixture(t); g.store.put("attempt", g.attempt.id, g.project.id, { ...g.attempt, leaseExpiresAt: Date.now() - 1 });
   await assert.rejects(g.bridge.submit(g.request, context(g)), { code: "SPEECH_EXECUTION_NOT_DISPATCHABLE" });
   assert.equal(rows(g, "speech_execution_mapping").length, 0);
+});
+
+test("a Stop fence installed during speech preparation refuses the first irreversible dispatch", async t => {
+  let f;
+  f = speechFixture(t, { credential: () => {
+    f.store.insert("candidate_stop", f.attempt.candidateId, f.project.id, { stopId: "stop-before-speech-marker" }); return key;
+  } });
+  await assert.rejects(f.bridge.submit(f.request, context(f)), { code: "SPEECH_EXECUTION_NOT_DISPATCHABLE" });
+  assert.equal(f.calls.http, 0); assert.equal(rows(f, "speech_execution_dispatch").length, 0);
+  assert.equal(rows(f, "speech_execution_result").length, 0);
 });
 
 test("a stale local credential failure cannot preempt the replacement owner's first dispatch", async t => {
@@ -271,4 +316,86 @@ test("changed admitted request, profile estimate and foreign request cannot reus
   }
   f.store.db.prepare("UPDATE entities SET body=json_set(body,'$.micros','200') WHERE kind='reservation' AND id=?").run(f.attempt.reservationId);
   await assert.rejects(f.bridge.submit(f.request, context(f))); assert.deepEqual(f.calls, { http: 0, credentials: 0 });
+});
+
+const speechLostReply = { type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false };
+function expireSpeechDispatch(f, age, t) {
+  const marker = f.store.get("speech_execution_dispatch", f.attempt.id);
+  t.mock.timers.setTime(Date.parse(marker.createdAt) + age);
+}
+function dueSpeech(f) {
+  const attempt = f.store.get("attempt", f.attempt.id);
+  f.store.put("attempt", attempt.id, f.project.id, { ...attempt, leaseExpiresAt: 0, unknownWait: { count: 0, nextEligibleAt: 0 } });
+}
+for (const receipt of [false, true]) test(`L1 speech ${receipt ? "unknown receipt" : "missing reply"} waits the host-wide deadline, charges once and releases capacity`, async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = speechFixture(t, { fetch: async () => { throw Error("offline lost response"); }, timeoutMs: 1 });
+  assert.equal((await f.bridge.submit(f.request, context(f))).type, "unknown");
+  if (!receipt) f.store.db.prepare("DELETE FROM entities WHERE kind='speech_execution_result' AND id=?").run(f.attempt.id);
+  expireSpeechDispatch(f, 119000, t);
+  assert.equal((await f.bridge.lookup(f.attempt.id)).type, "unknown", "a different host may still have its maximum 120s POST in flight");
+  expireSpeechDispatch(f, 120001, t);
+  assert.deepEqual(await f.bridge.lookup(f.attempt.id), speechLostReply);
+  dueSpeech(f); await f.engine.reconcile();
+  const settled = f.store.get("attempt", f.attempt.id);
+  assert.equal(settled.phase, "failed"); assert.equal(settled.failure.id, "SUBMISSION_RESPONSE_LOST"); assert.equal(settled.failure.retryAllowed, false);
+  assert.equal(f.store.get("reservation", settled.reservationId).state, "charged");
+  for (let i = 0; i < 4; i++) { await f.engine.reconcile(); assert.equal((await f.engine.runReady()).dispatched, 0); }
+  assert.equal(f.calls.http, 1); assert.equal(rows(f, "attempt").length, 1);
+  assert.equal(rows(f, "attempt").filter(item => ["submitting", "submission_unknown", "remote_pending", "preparing"].includes(item.phase)).length, 0, "the failed attempt no longer occupies a provider concurrency slot");
+  assert.deepEqual(await f.bridge.submit(f.request), speechLostReply);
+
+  const saved = speechFixture(t); assert.equal((await saved.bridge.submit(saved.request, context(saved))).type, "completed");
+  expireSpeechDispatch(saved, 120001, t);
+  assert.equal((await restart(saved).bridge.lookup(saved.attempt.id)).type, "completed", "saved paid bytes survive the lost-reply deadline");
+  assert.equal(saved.calls.http, 1);
+});
+
+test("L1 speech absent dispatch requires a live fenced reconciliation lease and releases the uncharged reservation", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = speechFixture(t);
+  assert.equal((await f.bridge.lookup(f.attempt.id, f.request, context(f))).type, "unknown", "a submitting owner may still dispatch");
+  const stale = context(f), replacement = replaceLease(f);
+  f.store.put("attempt", replacement.id, f.project.id, { ...replacement, phase: "submission_unknown" });
+  assert.equal((await f.bridge.lookup(f.attempt.id, f.request, stale)).type, "unknown");
+  assert.equal(rows(f, "speech_execution_result").length, 0);
+  dueSpeech(f); await f.engine.reconcile();
+  const settled = f.store.get("attempt", f.attempt.id);
+  assert.equal(settled.phase, "failed"); assert.equal(f.store.get("reservation", settled.reservationId).state, "released");
+  assert.equal(rows(f, "speech_execution_result")[0].observation.kind, "not_dispatched");
+  assert.equal((await f.bridge.submit(f.request, stale)).type, "rejected");
+  for (let i = 0; i < 3; i++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.equal(f.calls.http, 0); assert.equal(f.calls.credentials, 0);
+});
+
+test("L1 human-reviewed narration keeps its paid lost reply terminal and its fenced no-dispatch uncharged", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = await narrationSpeechFixture(t, { realSpeech: true, fetch: async () => { throw Error("offline narration response lost"); } });
+  const proposal = await f.prepare(), application = await f.review(proposal); f.issue(application); f.attempt = f.admit(application); f.request = f.attempt.request;
+  for (const hold of rows(f, "hold")) if (hold.active) f.engine.releaseHold(f.project.id, hold.id, hold.ownerId);
+  assert.equal((await f.bridge.submit(f.request, context(f))).type, "unknown");
+  expireSpeechDispatch(f, 119000, t); dueSpeech(f); await f.engine.reconcile();
+  assert.equal(f.store.get("attempt", f.attempt.id).phase, "submission_unknown");
+  expireSpeechDispatch(f, 120001, t); dueSpeech(f); await f.engine.reconcile();
+  const settled = f.store.get("attempt", f.attempt.id);
+  assert.equal(settled.phase, "failed"); assert.equal(settled.failure.id, "SUBMISSION_RESPONSE_LOST");
+  assert.equal(f.store.get("reservation", settled.reservationId).state, "charged");
+  for (let i = 0; i < 4; i++) { await f.engine.reconcile(); assert.equal((await f.engine.runReady()).dispatched, 0); }
+  assert.equal(f.calls.http, 1); assert.equal(rows(f, "attempt").length, 1);
+  assert.equal(rows(f, "attempt").filter(item => item.phase !== "failed" && item.phase !== "succeeded").length, 0);
+
+  const g = await narrationSpeechFixture(t, { realSpeech: true });
+  const nextProposal = await g.prepare(), nextApplication = await g.review(nextProposal); g.issue(nextApplication); g.attempt = g.admit(nextApplication);
+  dueSpeech(g); await g.engine.reconcile();
+  const rejected = g.store.get("attempt", g.attempt.id);
+  assert.equal(rejected.phase, "failed"); assert.equal(g.store.get("reservation", rejected.reservationId).state, "released");
+  assert.equal(g.calls.http, 0); assert.equal(g.calls.credentials, 0);
+  assert.equal((await g.bridge.submit(g.attempt.request)).type, "rejected");
+
+  const saved = await narrationSpeechFixture(t, { realSpeech: true });
+  const savedProposal = await saved.prepare(), savedApplication = await saved.review(savedProposal); saved.issue(savedApplication); saved.attempt = saved.admit(savedApplication);
+  for (const hold of rows(saved, "hold")) if (hold.active) saved.engine.releaseHold(saved.project.id, hold.id, hold.ownerId);
+  assert.equal((await saved.bridge.submit(saved.attempt.request, context(saved))).type, "completed");
+  expireSpeechDispatch(saved, 120001, t);
+  assert.equal((await saved.bridge.lookup(saved.attempt.id)).type, "completed"); assert.equal(saved.calls.http, 1);
 });

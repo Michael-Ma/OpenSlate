@@ -1,0 +1,44 @@
+{
+  "selection": {
+    "binaryPath": "/Users/michael/.local/share/openslate-codex/node_modules/@openai/codex/bin/codex.js",
+    "mode": "native",
+    "model": "gpt-6-astra"
+  },
+  "selectionDigest": "378565db95db9688ed5087dd094a693dad18c4d03563c42dd55f7429471c5025",
+  "busy": false,
+  "changeAvailable": true,
+  "changeAppliesTo": "next_turn",
+  "defaults": {
+    "binaryPath": "/Users/michael/.local/share/openslate-codex/node_modules/@openai/codex/bin/codex.js",
+    "model": "gpt-6-astra"
+  },
+  "locked": true,
+  "modelCalls": 3,
+  "modelChoices": [
+    {
+      "id": "gpt-6-astra",
+      "label": "GPT-6-Astra"
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "label": "GPT-5.6-Sol"
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "label": "GPT-5.6-Terra"
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "label": "GPT-5.6-Luna"
+    }
+  ],
+  "modelCatalogStatus": "ready",
+  "modelCatalogCheckedAt": "2026-10-17T00:19:43.480Z",
+  "lastSuccessfulCheck": {
+    "binaryPath": "/Users/michael/.local/share/openslate-codex/node_modules/@openai/codex/bin/codex.js",
+    "checkedAt": "2026-10-17T00:19:43.480Z",
+    "version": "0.153.4"
+  },
+  "codexDiagnostic": null,
+  "codexVersion": "0.153.4"
+}

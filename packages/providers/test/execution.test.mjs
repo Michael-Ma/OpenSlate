@@ -25,6 +25,35 @@ test("synchronous spool completion preserves a null remote task and snapshots it
   const async = { ...completed("video"), vendorTaskId: "remote-video" };
   assert.equal(executionTaskId(normalizeExecutionOutcome(async, { kind: "video" })), "remote-video");
 });
+test("ordinary taskless failures remain scoped to terminal native Codex image failures", () => {
+  const request = { kind: "image", execution: { adapter: "codex-image", version: "1" } };
+  const failure = { type: "failed", taskId: null, failureId: "IMAGE_FAILED", technical: false, retryAllowed: false };
+  const normalized = normalizeExecutionOutcome(failure, request);
+  assert.deepEqual(normalized, failure);
+  assert.equal(executionTaskId(normalized), null);
+  failure.failureId = "changed";
+  assert.equal(normalized.failureId, "IMAGE_FAILED");
+  for (const other of [undefined, { kind: "image" }, { ...request, kind: "video" },
+    { ...request, execution: { adapter: "openai-image", version: "1" } },
+    { ...request, execution: { adapter: "codex-image", version: "2" } }])
+    assert.equal(normalizeExecutionOutcome(failure, other).type, "unknown");
+  for (const change of [{ technical: true }, { retryAllowed: true }, { retryAllowed: undefined },
+    { taskId: undefined }, { taskId: "" }, { nativeProse: "private native details" }])
+    assert.equal(normalizeExecutionOutcome({ ...failure, ...change }, request).type, "unknown");
+});
+for (const [adapter, kind] of [["fake", "image"], ["viggle-h3", "video"], ["minimax-h3", "video"],
+  ["openai-image", "image"], ["openai-speech", "speech"], ["openai-transcription", "transcription"],
+  ["codex-image", "image"], ["future-adapter", "image"]]) {
+  test(`${adapter}: only explicit nonretryable lost replies generalize taskless failure`, () => {
+    const request = { kind, execution: { adapter, version: "1" } };
+    const lost = { type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false };
+    assert.deepEqual(normalizeExecutionOutcome(lost, request), lost);
+    assert.equal(executionTaskId(normalizeExecutionOutcome(lost, request)), null);
+    for (const change of [{ failureId: "OTHER_FAILURE" }, { retryAllowed: true }, { retryAllowed: undefined },
+      { taskId: undefined }, { taskId: "" }, { technical: "true" }, { unexpected: true }])
+      assert.equal(normalizeExecutionOutcome({ ...lost, ...change }, request).type, "unknown");
+  });
+}
 test("spool sizes are per media kind and do not raise the legacy inline limit", () => {
   assert.equal(normalizeExecutionOutcome(completed("video", 65 * 1024 * 1024)).type, "completed");
   assert.equal(normalizeExecutionOutcome(completed("video", EXECUTION_SPOOL_LIMITS.video)).type, "completed");

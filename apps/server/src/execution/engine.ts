@@ -1,3 +1,4 @@
+import { sceneConfirmationGuard, confirmationFramesCurrent, type ConfirmationFramePin } from "../scene-confirmation-state.js";
 import { activeAttemptIngestionIssue, reportableIngestionIssue, sanitizedIngestionIssueCode, INGESTION_ISSUE_MESSAGE } from './ingestion-issue.js';
 import type { AttemptIngestionIssue } from './ingestion-issue.js';
 import { requestedTranscriptionHoldIds } from '../narration/request-holds.js';
@@ -12,7 +13,8 @@ import { ExecutionRegistry, executionFailureSource, executionIdentity, execution
 import type { ExecutionCallOptions, ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
-import { ExecutionOutputStore } from "./output-store.js";
+import { ExecutionOutputStore, isOutputStoreCapacityError } from "./output-store.js";
+import { ViggleDownloadPending, viggleHasCompletedObservation } from "./viggle-h3-execution.js";
 import { materializeFixtureOutput } from "./fixture-ingester.js";
 import { assertNormalizedVideoIngestion } from "./video-derivation.js";
 import { assertViggleSpoolLineage } from "./viggle-h3-lineage.js";
@@ -31,13 +33,32 @@ import type { NarrationSpeechAttemptInput } from "../narration/narration-speech-
 import type { OwnedTranscriptionAttemptInput } from "../narration/owned-transcription-types.js";
 import { assertPersonalVoiceCurrent } from '../narration/personal-voices.js';
 import { narrationSpeechHoldExemption, narrationSpeechShotScopes } from '../narration/narration-scope.js';
+import { automaticRetriesLeft, sceneConfirmationIdForCandidate } from "./retry-eligibility.js";
+import { assertCharacterSheetIntent, CHARACTER_SHEET_JOB_KIND, isCharacterSheetBinding } from "./character-sheet-execution.js";
+import type { CharacterSheetJob } from "./character-sheet-execution.js";
+import { recordCharacterSheetTake } from "../character-sheets.js";
 
 export interface Grant { id: string; projectId: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
 export interface Candidate { id: string; projectId: string; nodeId: string; grantId: string; origin: Grant["origin"] }
 export interface PlanRecord { id: string; projectId: string; compiled: CompiledPlan }
 export interface NodeBinding {
   id: string; projectId: string; planId: string; node: PlanNode;
+  outdated?: { at: string; fields: string[]; previous: ArtifactRef };
   candidateId: string | null; state: "active" | "retired"; outputs: Record<string, ArtifactRef>;
+  outdatedReason?: "stopped" | "released" | "confirmation_stale";
+  /** Display-only current take while its replacement candidate runs. Never execution input. */
+  retainedTake?: { candidateId: string | null; outputs: Record<string, ArtifactRef> };
+}
+/** A new current output resolves the edit metadata; historical artifacts stay immutable. */
+function bindingWithOutputs(binding: NodeBinding, outputs: NodeBinding["outputs"]): NodeBinding {
+  const { outdated: _outdated, retainedTake: _retained, ...current } = binding;
+  return { ...current, outputs };
+}
+/** A replacement that has ended cannot leave its selected take display-only. */
+function restoreRetainedTake(binding: NodeBinding): NodeBinding | null {
+  if (!binding.retainedTake || Object.keys(binding.outputs).length || !Object.keys(binding.retainedTake.outputs).length) return null;
+  const { retainedTake, outdated: _outdated, outdatedReason: _reason, ...current } = binding;
+  return { ...current, candidateId: retainedTake.candidateId, outputs: retainedTake.outputs };
 }
 export type AttemptPhase = "submitting" | "preparing" | "remote_pending" | "submission_unknown" | "ingesting" | "succeeded" | "failed";
 export interface Attempt {
@@ -47,18 +68,29 @@ export interface Attempt {
   taskId: string | null; reservationId: string | null;
   failure: { id: string; technical: boolean; source: string; retryAllowed: boolean } | null;
   preparation?: { intentId: string; intentDigest: string; waitCount: number; nextEligibleAt: number };
+  /** Mutable backoff for repeated identical unknown observations; never evidence. */
+  unknownWait?: { count: number; nextEligibleAt: number };
+  /** Mutable local contention marker; repeated waits are not new history. */
+  ingestionDeferred?: "local_media_busy";
   applicationInput?: OwnedTranscriptionAttemptInput;
   narrationSpeech?: NarrationSpeechAttemptInput;
   outputs: Record<string, ArtifactRef>; createdAt: string;
+  /** Human release removes blocking/publication authority, never reconciliation or liability. */
+  released?: { by: string; at: string };
+  /** Human discard of a finished job's unusable output (decision R2): it stays charged; `code` is the issue the person saw. */
+  discarded?: { by: string; at: string; code: string };
 }
+/** A person's single-use authority to render interrupted local work again under a fresh attempt (decision R4). */
+export interface LocalExecutionRetry { id: string; projectId: string; version: 1; attemptId: string; intentDigest: string; dispatchDigest: string; by: string; at: string }
 export interface ArtifactRecord {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: string;
   fixture: boolean; attemptId: string | null; physicalDurationSeconds: number | null;
-  origin?: "supplied_video" | "supplied_image" | "local_render" | "narration_audio" | "generated_video" | "generated_audio" | "transcription_response";
+  origin?: "supplied_video" | "supplied_image" | "supplied_document" | "local_render" | "narration_audio" | "generated_video" | "generated_audio" | "transcription_response";
   outputReceiptId?: string; outputSpoolId?: string; byteLength?: number;
   width?: number; height?: number; validationDigest?: string;
   derivationId?: string; sourceDescriptorId?: string;
   transcriptCandidateId?: string;
+  name?: string;
 }
 interface Reservation { id: string; projectId: string; attemptId: string; micros: string; state: "reserved" | "charged" | "released" }
 interface Hold { id: string; projectId: string; scopeId: string; ownerId: string; active: boolean }
@@ -83,9 +115,17 @@ export interface ExternalExecutionAdmission {
 }
 const GENERATED = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
 const TERMINAL = new Set<AttemptPhase>(["succeeded", "failed"]);
+export const UNKNOWN_BACKOFF_BASE_MS = 1000, UNKNOWN_BACKOFF_MAX_MS = 60_000;
+/** Re-observation never resubmits; an unchanged unknown answer only waits longer before the next look. */
+function unknownBackoff(previousCount: number, now = Date.now()): { count: number; nextEligibleAt: number } {
+  const count = Math.min(1_000_000, previousCount + 1);
+  return { count, nextEligibleAt: now + Math.min(UNKNOWN_BACKOFF_MAX_MS, UNKNOWN_BACKOFF_BASE_MS * 2 ** Math.min(count - 1, 6)) };
+}
+const WAIT_CODES = new Set(["CAPACITY_EXCEEDED", "LOCAL_EXECUTION_BUSY", "EXECUTION_HELD", "HUMAN_REVIEW_REQUIRED", "INPUT_PENDING", "TIMING_REQUIRED"]);
 
 /** Durable executor over registered ports. The shipped launcher enables only fake execution. */
 export class Engine {
+  readonly startedAt = new Date(performance.timeOrigin).toISOString();
   readonly recovery: InstallationRecoveryGuard;
   readonly registry: ExecutionRegistry;
   private readonly externalAdmission: ExternalExecutionAdmission | undefined;
@@ -99,6 +139,8 @@ export class Engine {
   readonly outputIngestor: ExecutionOutputIngestor | undefined;
   readonly outputStore: ExecutionOutputStore | undefined;
   readonly localExecutor: LocalExecutionPort | undefined;
+  private stopping = false;
+  private readonly operations = new Set<AbortController>();
   constructor(readonly store: Store, readonly provider: ExecutionProvider | ExecutionRegistry, options: {
     artifactDir: string; profiles?: ProviderProfile[]; budgetMicros?: string; workerId?: string; leaseMs?: number;
     outputIngestor?: ExecutionOutputIngestor;
@@ -143,6 +185,18 @@ export class Engine {
     moneyMicros(this.defaultBudgetMicros);
     mkdirSync(this.artifactDir, { recursive: true });
   }
+
+  /** Host shutdown only. Preserve durable intent/liability and never turn it into a retry. */
+  stop(): void {
+    this.stopping = true;
+    for (const controller of this.operations) controller.abort();
+  }
+  private operationController(): AbortController {
+    const controller = new AbortController();
+    if (this.stopping) controller.abort(); else this.operations.add(controller);
+    return controller;
+  }
+  private finishOperation(controller: AbortController): void { this.operations.delete(controller); controller.abort(); }
 
   createGrant(projectId: string, scopeId: string, kind: OperationKind, authorityId: string, origin: Grant["origin"] = "user_change"): Grant {
     this.recovery.assertWritable(projectId, authorityId);
@@ -190,10 +244,11 @@ export class Engine {
         }
         const reuse = same && !grantId && !deferred.has(node.id) && !Object.hasOwn(node.args, "localExecution");
         if (!reuse) replaced.add(node.id);
-        const binding: NodeBinding = { id: node.id, projectId, planId, node, candidateId, state: "active", outputs: reuse ? old.outputs : {} };
+        const binding: NodeBinding = { id: node.id, projectId, planId, node, candidateId, state: "active", outputs: reuse ? old.outputs : {}, ...(reuse && old.retainedTake ? { retainedTake: old.retainedTake } : {}), ...(old?.outdated && old.node.shotId === node.shotId && old.node.kind === node.kind && !(reuse && Object.keys(old.outputs).length) ? { outdated: old.outdated } : {}) };
         this.store.put("node_binding", node.id, projectId, binding); nodes.push(binding);
       }
-      for (const binding of previous.values()) if (!seen.has(binding.id)) this.store.put("node_binding", binding.id, projectId, { ...binding, state: "retired" });
+      // Character sheets are not part of any shot plan; a plan install neither owns nor retires them.
+      for (const binding of previous.values()) if (!seen.has(binding.id) && !isCharacterSheetBinding(binding)) this.store.put("node_binding", binding.id, projectId, { ...binding, state: "retired" });
       this.store.insert("plan", planId, projectId, { id: planId, projectId, compiled });
       this.store.appendEvent(projectId, "execution.plan_installed", { planId });
       return { planId, nodes };
@@ -331,6 +386,169 @@ export class Engine {
 
   attempts(projectId: string): Attempt[] { return this.store.list<Attempt>("attempt", projectId); }
 
+  /** Called in the Stop transaction. Only possibly dispatched intents keep monitoring authority. */
+  detachUnsent(projectId: string, stopId: string): { sentJobs: number; detachedJobs: number } {
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      const pending = this.attempts(projectId).filter(attempt => !TERMINAL.has(attempt.phase));
+      const cancelled = new Set<string>();
+      for (const attempt of pending) {
+        if (attempt.candidateId && !this.store.get("candidate_stop", attempt.candidateId))
+          this.store.insert("candidate_stop", attempt.candidateId, projectId, { stopId });
+        // A preparing intent is positive evidence that the irreversible marker
+        // has not been crossed. Unknown ordinary submissions remain liabilities.
+        if (attempt.phase !== "preparing" || this.preparationObserved(attempt)) continue;
+        resolveTranscriptionPreparationIntent(this.store, attempt);
+        this.store.put("attempt", attempt.id, projectId, { ...attempt, phase: "failed", leaseExpiresAt: 0,
+          failure: { id: "PREPARATION_OBSOLETE", technical: false, source: "application:submission-preparation/1", retryAllowed: false } });
+        this.setReservation(attempt, "released"); cancelled.add(attempt.id);
+        this.store.appendEvent(projectId, "attempt.state_changed", { attemptId: attempt.id, phase: "failed", reason: "stopped_before_dispatch", stopId });
+      }
+      let detachedJobs = 0;
+      for (const binding of this.store.list<NodeBinding>("node_binding", projectId)) {
+        if (binding.state !== "active" || !binding.candidateId || Object.keys(binding.outputs).length) continue;
+        if (pending.some(attempt => !cancelled.has(attempt.id) && attempt.candidateId === binding.candidateId)) {
+          // Reconciliation may finish this intent, but a failure after Stop must
+          // not turn Continue into permission to buy a technical retry.
+          if (!this.store.get("candidate_stop", binding.candidateId))
+            this.store.insert("candidate_stop", binding.candidateId, projectId, { stopId });
+          continue;
+        }
+        this.store.put("node_binding", binding.id, projectId, restoreRetainedTake(binding) ?? { ...binding, candidateId: null, outdatedReason: "stopped" });
+        this.clearNodeWait(projectId, binding.id);
+        detachedJobs++;
+      }
+      for (const row of this.store.list<import("../scene-confirmations.js").SceneConfirmationRecord>("scene_confirmation", projectId)) {
+        if (!["running", "blocked"].includes(row.state)) continue;
+        this.store.put("scene_confirmation", row.id, projectId, { ...row, state: "cancelled" });
+        for (const hold of this.store.list<Hold>("hold", projectId).filter(h => h.active && h.ownerId === row.id))
+          this.releaseHold(projectId, hold.id, row.id);
+        this.store.appendEvent(projectId, "scene.confirmation_changed", { confirmationId: row.id, state: "cancelled", stopId });
+      }
+      return { sentJobs: pending.length - cancelled.size, detachedJobs };
+    });
+  }
+
+  /**
+   * submission_unknown: give up on a job the service never confirmed. remote_pending (decision R3): stop waiting for a
+   * job the provider keeps reporting as running. Both keep reconciliation, liability and late results as history;
+   * neither infers failure or a refund, from elapsed time or otherwise.
+   */
+  releaseAttempt(projectId: string, attemptId: string, by: string, acknowledgeDoubleCharge: boolean, expectedPhase: "submission_unknown" | "remote_pending" = "submission_unknown") {
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      invariant(acknowledgeDoubleCharge === true, "DOUBLE_CHARGE_NOT_ACKNOWLEDGED", "Acknowledge that both jobs may be charged");
+      const attempt = this.store.get<Attempt>("attempt", attemptId);
+      invariant(attempt?.projectId === projectId, "NOT_FOUND", "Attempt does not belong to this project");
+      invariant(["submission_unknown", "remote_pending"].includes(expectedPhase) && attempt.phase === expectedPhase && !attempt.released
+        && !isLocalExecutionAttempt(attempt) && (expectedPhase === "submission_unknown" || attempt.taskId !== null)
+        && !viggleHasCompletedObservation(this.store, attempt),
+        "ATTEMPT_NOT_RELEASABLE", "Only an unreleased unconfirmed or still-running submission can be released");
+      const at = new Date().toISOString();
+      this.store.put("attempt", attempt.id, projectId, { ...attempt, released: { by, at } });
+      const binding = this.store.get<NodeBinding>("node_binding", attempt.nodeId);
+      if (binding?.projectId === projectId && binding.candidateId === attempt.candidateId)
+        this.store.put("node_binding", binding.id, projectId, restoreRetainedTake(binding) ?? { ...binding, candidateId: null, outputs: {}, outdatedReason: "released" });
+      if (binding?.projectId === projectId && binding.candidateId === attempt.candidateId) this.clearNodeWait(projectId, binding.id);
+      this.store.appendEvent(projectId, "attempt.released", { attemptId, by, at, acknowledgeDoubleCharge: true, ...(expectedPhase === "remote_pending" ? { phase: expectedPhase } : {}) });
+      return { attemptId, shotId: binding?.node.shotId ?? null, releasedAt: at };
+    });
+  }
+
+  /**
+   * Decision R2: a finished job whose owned output is damaged or whose download expired, as its recorded ingestion
+   * issue shows. The person confirms the discard; the job stays charged, its provider evidence and issue stay as
+   * history, and only its publication/blocking authority ends. It is never relabeled unknown or retried.
+   */
+  discardAttempt(projectId: string, attemptId: string, by: string, acknowledgeDiscard: boolean) {
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      invariant(acknowledgeDiscard === true, "DISCARD_NOT_ACKNOWLEDGED", "Acknowledge that the finished job stays charged");
+      const attempt = this.store.get<Attempt>("attempt", attemptId);
+      invariant(attempt?.projectId === projectId, "NOT_FOUND", "Attempt does not belong to this project");
+      const issue = activeAttemptIngestionIssue(this.store, attempt);
+      invariant(attempt.phase === "ingesting" && !attempt.discarded && !isLocalExecutionAttempt(attempt) && issue,
+        "ATTEMPT_NOT_DISCARDABLE", "Only a finished job whose output needs attention can be discarded");
+      const at = new Date().toISOString();
+      const { ingestionDeferred: _deferred, unknownWait: _wait, ...base } = attempt;
+      // Ending the phase also fences any worker still holding this attempt's lease (owns() rejects terminal phases).
+      this.store.put("attempt", attempt.id, projectId, { ...base, phase: "failed", leaseExpiresAt: 0, discarded: { by, at, code: issue.code },
+        failure: { id: "OUTPUT_DISCARDED", technical: false, source: "human:discard/1", retryAllowed: false } });
+      this.setReservation(attempt, "charged");
+      this.store.put("attempt_ingestion_issue", attempt.id, projectId, { ...issue, active: false, resolvedAt: at });
+      const binding = this.store.get<NodeBinding>("node_binding", attempt.nodeId);
+      if (binding?.projectId === projectId && binding.candidateId === attempt.candidateId) {
+        this.store.put("node_binding", binding.id, projectId, restoreRetainedTake(binding) ?? { ...binding, candidateId: null, outputs: {}, outdatedReason: "released" });
+        this.clearNodeWait(projectId, binding.id);
+      }
+      this.store.appendEvent(projectId, "attempt.discarded", { attemptId, by, at, code: issue.code, acknowledgeDiscard: true });
+      this.store.appendEvent(projectId, "attempt.state_changed", { attemptId, phase: "failed" });
+      return { attemptId, shotId: binding?.node.shotId ?? null, discardedAt: at };
+    });
+  }
+
+  /** Read-only: interrupted dispatched local work on the active plan that a person may render again (decision R4). */
+  interruptedLocalWork(projectId: string): { attemptId: string; nodeId: string; kind: "timeline" | "render"; at: string }[] {
+    const project = this.store.getProject(projectId);
+    const local = this.attempts(projectId).filter(isLocalExecutionAttempt);
+    return this.store.list<NodeBinding>("node_binding", projectId)
+      .filter(binding => binding.state === "active" && binding.planId === project.activePlanId && !Object.keys(binding.outputs).length
+        && (binding.node.kind === "timeline" || binding.node.kind === "render"))
+      .flatMap(binding => {
+        const latest = local.filter(attempt => attempt.nodeId === binding.id).sort((a, b) => b.ordinal - a.ordinal || b.createdAt.localeCompare(a.createdAt))[0];
+        return latest && this.localRetryable(latest) && !this.store.get("local_execution_retry", latest.id)
+          ? [{ attemptId: latest.id, nodeId: binding.id, kind: binding.node.kind as "timeline" | "render", at: latest.createdAt }] : [];
+      });
+  }
+
+  /**
+   * Decision R4: a person's fresh retry identity for dispatched local work that ended LOCAL_EXECUTION_INTERRUPTED.
+   * A final receipt check first: a completion that appeared meanwhile is never rendered over. The old attempt, its
+   * intent and dispatch stay untouched; the next ordinary run admits one new attempt with the same content.
+   */
+  async retryLocalAttempt(projectId: string, attemptId: string, by: string, acknowledgeRerender: boolean) {
+    const checked = await this.checkLocalRetry(projectId, attemptId, acknowledgeRerender);
+    return this.recordLocalRetry(projectId, checked, by);
+  }
+  /** The asynchronous half: validation plus the final receipt check, with no writes. */
+  async checkLocalRetry(projectId: string, attemptId: string, acknowledgeRerender: boolean): Promise<Attempt> {
+    this.recovery.assertWritable(projectId);
+    invariant(acknowledgeRerender === true, "RERENDER_NOT_ACKNOWLEDGED", "Acknowledge that the local render runs again");
+    const attempt = this.store.get<Attempt>("attempt", attemptId);
+    invariant(attempt?.projectId === projectId, "NOT_FOUND", "Attempt does not belong to this project");
+    invariant(this.localRetryable(attempt) && !this.store.get("local_execution_retry", attempt.id), "ATTEMPT_NOT_RETRYABLE", "Only interrupted local work can be rendered again, once");
+    const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", attempt.id)!;
+    const port = this.requireLocalPort(), abort = this.operationController();
+    try {
+      // The old lease is long gone; the port's own receipt is the only evidence of a late completion.
+      const late = await port.recover(structuredClone(intent), this.localOptions(attempt, abort.signal));
+      invariant(!late, "LOCAL_EXECUTION_RECOVERABLE", "The interrupted render left a receipt; it is not rendered again");
+    } finally { this.finishOperation(abort); }
+    return attempt;
+  }
+  /** The synchronous half: record the retry only if the checked attempt is unchanged. */
+  recordLocalRetry(projectId: string, attempt: Attempt, by: string) {
+    const attemptId = attempt.id;
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      const current = this.store.get<Attempt>("attempt", attemptId);
+      invariant(current?.projectId === projectId && canonical(current) === canonical(attempt) && this.localRetryable(current) && !this.store.get("local_execution_retry", attemptId),
+        "ATTEMPT_NOT_RETRYABLE", "The interrupted render changed while it was checked");
+      const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", attemptId)!;
+      const at = new Date().toISOString(), dispatch = this.store.get<LocalExecutionDispatch>("local_execution_dispatch", attemptId)!;
+      this.store.insert<LocalExecutionRetry>("local_execution_retry", attemptId, projectId,
+        { id: attemptId, projectId, version: 1, attemptId, intentDigest: digest(intent), dispatchDigest: digest(dispatch), by, at });
+      this.store.appendEvent(projectId, "attempt.local_retry_requested", { attemptId, nodeId: attempt.nodeId, by, at });
+      return { attemptId, nodeId: attempt.nodeId, retriedAt: at };
+    });
+  }
+  private localRetryable(attempt: Attempt): boolean {
+    if (!isLocalExecutionAttempt(attempt) || attempt.phase !== "failed" || attempt.failure?.id !== "LOCAL_EXECUTION_INTERRUPTED") return false;
+    const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", attempt.id);
+    if (!intent || !this.store.get("local_execution_dispatch", attempt.id) || this.store.get("local_execution_completion", attempt.id)) return false;
+    try { assertLocalExecutionIntent(intent, attempt); return true; } catch { return false; }
+  }
+
   /** Read-only UI evidence. Historical attempts remain available for reconciliation. */
   currentAttemptIds(projectId: string, attempts = this.attempts(projectId)): string[] {
     const project = this.store.getProject(projectId);
@@ -342,6 +560,7 @@ export class Engine {
         && nodes.has(binding.id) && canonical(nodes.get(binding.id)) === canonical(binding.node))
       .map(binding => [binding.id, binding]));
     return attempts.filter(attempt => {
+      if (attempt.released) return false;
       const binding = bindings.get(attempt.nodeId);
       if (!binding || binding.node.specDigest !== attempt.specDigest || binding.node.kind !== attempt.request.kind) return false;
       try {
@@ -367,15 +586,16 @@ export class Engine {
     const project = this.store.getProject(projectId);
     return this.store.list<NodeBinding>("node_binding", projectId).filter(binding => binding.state === "active" && binding.planId === project.activePlanId)
       .filter(binding => !Object.hasOwn(binding.node.args, "localExecution") || this.localBindingCurrent(binding))
-      .flatMap(binding => Object.entries(binding.outputs).map(([port, artifact]) => {
+      .flatMap(binding => Object.entries(binding.retainedTake?.outputs ?? binding.outputs).map(([port, artifact]) => {
         const record = this.store.get<ArtifactRecord>("artifact", artifact.artifactId);
         invariant(record?.projectId === projectId && record.artifact.sha256 === artifact.sha256,
           "ARTIFACT_UNAVAILABLE", "Output lacks its owned artifact record");
-        return { nodeId: binding.id, candidateId: binding.candidateId, port, artifact, fixture: record.fixture };
+        return { nodeId: binding.id, candidateId: (binding.retainedTake ? binding.retainedTake.candidateId : binding.candidateId), port, artifact, fixture: record.fixture };
       }));
   }
 
   async runReady(): Promise<{ dispatched: number; reused: number; blocked: { nodeId: string; code: string }[] }> {
+    if (this.stopping) return { dispatched: 0, reused: 0, blocked: [] };
     this.recovery.assertWritable();
     this.store.transaction(() => {
       for (const project of this.projects()) for (const binding of this.store.list<NodeBinding>("node_binding", project.id))
@@ -383,7 +603,8 @@ export class Engine {
           && Object.keys(binding.outputs).length && !this.localBindingCurrent(binding))
           this.store.put("node_binding", binding.id, project.id, { ...binding, outputs: {} });
     });
-    const candidates = this.projects().flatMap(project => this.store.list<NodeBinding>("node_binding", project.id).filter(binding => binding.state === "active" && binding.planId === project.activePlanId && Object.keys(binding.outputs).length === 0));
+    const candidates = this.projects().flatMap(project => this.store.list<NodeBinding>("node_binding", project.id).filter(binding => binding.state === "active"
+      && (binding.planId === project.activePlanId || isCharacterSheetBinding(binding)) && Object.keys(binding.outputs).length === 0));
     const blocked: { nodeId: string; code: string }[] = []; let dispatched = 0; let reused = 0;
     const settled = await Promise.allSettled(candidates.map(async binding => {
       let attempt: Attempt;
@@ -403,7 +624,14 @@ export class Engine {
         if (this.reuseLocal(binding, prepared.fingerprint)) { reused++; return; }
         attempt = this.admit(binding.projectId, binding.id, prepared.fingerprint);
       }
-      catch (error) { if (error instanceof DomainError) { blocked.push({ nodeId: binding.id, code: error.code }); return; } throw error; }
+      catch (error) { if (error instanceof DomainError) {
+        if (error.code === "SCENE_REVIEW_STALE") {
+          if (binding.node.kind === "video") this.takeOffStaleConfirmation(binding);
+          else this.clearNodeWait(binding.projectId, binding.id);
+        }
+        else this.recordNodeWait(binding, error.code);
+        blocked.push({ nodeId: binding.id, code: error.code }); return;
+      } throw error; }
       dispatched++;
       if (attempt.candidateId === null) {
         await this.handle(attempt, { type: "completed", taskId: `local:${attempt.id}`, outputs: fixtureOutputs(attempt.request) }); return;
@@ -418,9 +646,45 @@ export class Engine {
     return { dispatched, reused, blocked };
   }
 
+  private recordNodeWait(binding: NodeBinding, code: string): void {
+    // Invalid or unauthorized inputs fail without writes; they are not queueing conditions.
+    if (!WAIT_CODES.has(code)) return;
+    this.store.transaction(() => {
+      const previous = this.store.get<{ code: string }>("node_wait", binding.id);
+      if (previous?.code === code) return;
+      this.store.put("node_wait", binding.id, binding.projectId, { nodeId: binding.id, code, since: new Date().toISOString() });
+      this.store.appendEvent(binding.projectId, "node.wait_changed", { nodeId: binding.id, code });
+    });
+  }
+  private clearNodeWait(projectId: string, nodeId: string): void {
+    if (!this.store.get("node_wait", nodeId)) return;
+    this.store.db.prepare("DELETE FROM entities WHERE kind='node_wait' AND id=? AND project_id=?").run(nodeId, projectId);
+    this.store.appendEvent(projectId, "node.wait_changed", { nodeId, code: null });
+  }
+
+  private takeOffStaleConfirmation(observed: NodeBinding): void {
+    this.store.transaction(() => {
+      const binding = this.store.get<NodeBinding>("node_binding", observed.id);
+      if (!binding || binding.state !== "active" || binding.planId !== observed.planId || binding.candidateId !== observed.candidateId) return;
+      this.store.put("node_binding", binding.id, binding.projectId, { ...binding, candidateId: null, outdatedReason: "confirmation_stale" });
+      this.clearNodeWait(binding.projectId, binding.id);
+      this.store.appendEvent(binding.projectId, "node.confirmation_stale", { nodeId: binding.id });
+    });
+  }
+
+  /** Local contention changes neither provider evidence nor publication authority. */
+  private deferOutputCapacity(attempt: Attempt, phase = attempt.phase): void {
+    this.store.transaction(() => {
+      const current = this.owns(attempt); if (!current) return;
+      this.store.put("attempt", current.id, current.projectId, { ...current, phase, leaseExpiresAt: 0 });
+    });
+  }
+
   async reconcile(): Promise<{ reconciled: number; blocked?: { attemptId: string; code: string }[] }> {
+    if (this.stopping) return { reconciled: 0 };
     this.recovery.assertWritable();
-    const pending = this.projects().flatMap(project => this.attempts(project.id)).filter(attempt => !TERMINAL.has(attempt.phase));
+    const pending = this.projects().flatMap(project => this.attempts(project.id)).filter(attempt => !TERMINAL.has(attempt.phase))
+      .sort((a, b) => Number(!!a.released) - Number(!!b.released));
     let reconciled = 0; const blocked: { attemptId: string; code: string }[] = [];
     const settled = await Promise.allSettled(pending.map(async observed => {
       if (isLocalExecutionAttempt(observed)) {
@@ -457,7 +721,19 @@ export class Engine {
       let recovered: ExecutionSpoolCompletion | null = null;
       if (!completed && this.outputStore) {
         try { recovered = await this.withLease(attempt, signal => this.outputStore!.recoverCompletion(attempt.projectId, attempt.id, { signal })); }
-        catch {
+        catch (error) {
+          if (isOutputStoreCapacityError(error)) { this.deferOutputCapacity(attempt, observed.phase); return; }
+          // A validated finished task remains finished even when its owned
+          // files need repair. Conflicting, unbound receipts still fail closed.
+          if (viggleHasCompletedObservation(this.store, attempt)) {
+            this.store.transaction(() => {
+              const current = this.owns(attempt); if (!current) return;
+              this.store.put("attempt", current.id, current.projectId, { ...current, phase: "ingesting" });
+              this.recordIngestionIssue(attempt, error instanceof DomainError ? error.code : "OUTPUT_INGESTION_FAILED");
+            });
+            this.deferOutputCapacity(attempt, "ingesting");
+            blocked.push({ attemptId: attempt.id, code: error instanceof DomainError ? error.code : "OUTPUT_INGESTION_FAILED" }); return;
+          }
           await this.handle(attempt, { type: "unknown", diagnostic: "Owned output recovery requires attention" }); reconciled++; return;
         }
         if (!this.owns(attempt)) return;
@@ -521,6 +797,7 @@ export class Engine {
   private async runLocalReady(observed: NodeBinding): Promise<"reused" | "dispatched"> {
     const port = this.localMode(this.store.getProject(observed.projectId), observed.node);
     const prepared = structuredClone(await port.prepare(observed.projectId, observed.id)); assertPreparedLocalExecution(prepared);
+    invariant(!this.stopping, "EXECUTION_SHUTTING_DOWN", "Local execution is shutting down; saved work is retained");
     invariant(prepared.projectId === observed.projectId && prepared.nodeId === observed.id && prepared.specDigest === observed.node.specDigest,
       "LOCAL_EXECUTION_STALE", "Prepared local work belongs to a different node");
     const effective = this.resolveInputs(observed.projectId, observed.node).fingerprint;
@@ -530,7 +807,7 @@ export class Engine {
     if (previous) {
       const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", previous.id);
       invariant(intent, "LOCAL_EXECUTION_CONFLICT", "Cached local output lost its original intent"); assertLocalExecutionIntent(intent, previous);
-      const abort = new AbortController();
+      const abort = this.operationController();
       try {
         const recovered = await port.recover(structuredClone(intent), this.localOptions(previous, abort.signal));
         invariant(recovered, "LOCAL_EXECUTION_COMPLETION_MISSING", "Cached local output has no verified completion");
@@ -547,7 +824,7 @@ export class Engine {
           this.store.appendEvent(project.id, "execution.output_reused", { nodeId: binding.id, attemptId: previous.id });
         });
         return "reused";
-      } finally { abort.abort(); }
+      } finally { this.finishOperation(abort); }
     }
     const attempt = this.store.transaction(() => {
       const project = this.store.getProject(observed.projectId), binding = this.currentBinding(project.id, observed.id);
@@ -557,10 +834,12 @@ export class Engine {
         && this.resolveInputs(project.id, binding.node).fingerprint === effective, "LOCAL_EXECUTION_STALE", "Local admission target changed");
       const predecessors = this.attempts(project.id).filter(sameContent);
       // A stale admission that never crossed dispatch can be rebased onto a fresh
-      // target. Any dispatch or completion retains the no-automatic-rerender rule.
+      // target. Any dispatch or completion retains the no-automatic-rerender rule,
+      // except interrupted work a person explicitly asked to render again (R4).
       invariant(predecessors.every(value => {
         const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", value.id);
         if (intent) assertLocalExecutionIntent(intent, value);
+        if (this.store.get("local_execution_retry", value.id) && this.localRetryable(value)) return true;
         return isLocalExecutionAttempt(value) && value.phase === "failed" && value.failure?.id === "LOCAL_EXECUTION_STALE"
           && !this.store.get("local_execution_dispatch", value.id) && !this.store.get("local_execution_completion", value.id)
           && intent?.prepared.contentDigest === prepared.contentDigest && canonical(intent.prepared.capture) !== canonical(prepared.capture);
@@ -573,6 +852,7 @@ export class Engine {
           inputs: this.resolveInputs(project.id, binding.node).artifacts, execution: snapshotLocalExecution(binding.node.args.localExecution) },
         phase: "ingesting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.leaseMs,
         taskId: null, reservationId: null, failure: null, outputs: {}, createdAt: new Date().toISOString() };
+      this.clearNodeWait(project.id, binding.id);
       this.store.insert("attempt", id, project.id, admitted);
       const intent: LocalExecutionIntent = { id, projectId: project.id, version: 1, attemptId: id, requestDigest: digest(admitted.request),
         capabilityLockId: project.capabilityLockId, execution: snapshotLocalExecution(binding.node.args.localExecution), prepared,
@@ -593,6 +873,7 @@ export class Engine {
     let verifiedCompletion = false;
     try {
       let result = await this.withLease(attempt, signal => port.recover(structuredClone(intent), this.localOptions(attempt, signal)));
+      if (this.stopping) return;
       if (!this.owns(attempt)) return;
       if (!result) {
         this.store.transaction(() => {
@@ -641,9 +922,11 @@ export class Engine {
         const held = error instanceof DomainError && error.code === "EXECUTION_HELD";
         const recoverable = verifiedCompletion || (error instanceof DomainError && error.code === "RESTORED_AUTHORITY_REQUIRES_NEW") || (!!this.store.get("local_execution_dispatch", current.id)
           && !(error instanceof DomainError && ["LOCAL_EXECUTION_INTERRUPTED", "LOCAL_EXECUTION_CONFLICT"].includes(error.code)));
-        this.store.put("attempt", current.id, current.projectId, { ...current, phase: held || recoverable ? "ingesting" : "failed", leaseExpiresAt: 0,
-          failure: held ? null : { id: error instanceof DomainError ? error.code : "LOCAL_EXECUTION_FAILED", technical: true, source: "local_media", retryAllowed: false } });
-        this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase: held || recoverable ? "ingesting" : "failed" });
+        const phase: AttemptPhase = held || recoverable ? "ingesting" : "failed";
+        const failure = held ? null : { id: error instanceof DomainError ? error.code : "LOCAL_EXECUTION_FAILED", technical: true, source: "local_media", retryAllowed: false };
+        this.store.put("attempt", current.id, current.projectId, { ...current, phase, leaseExpiresAt: 0, failure });
+        if (phase !== current.phase || canonical(failure) !== canonical(current.failure))
+          this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase });
       });
       throw error;
     } finally {
@@ -656,7 +939,7 @@ export class Engine {
   private selectLocal(binding: NodeBinding, attemptId: string, prepared: PreparedLocalExecution, result: LocalExecutionResult): void {
     this.store.put<LocalExecutionBinding>("local_execution_binding", binding.id, binding.projectId,
       { id: binding.id, projectId: binding.projectId, attemptId, prepared });
-    this.store.put("node_binding", binding.id, binding.projectId, { ...binding, outputs: { [result.port]: result.artifact.artifact } });
+    this.store.put("node_binding", binding.id, binding.projectId, bindingWithOutputs(binding, { [result.port]: result.artifact.artifact }));
   }
   private async verifyLocalResult(intent: LocalExecutionIntent, result: LocalExecutionResult, signal: AbortSignal): Promise<void> {
     assertLocalExecutionResult(result, intent);
@@ -708,7 +991,7 @@ export class Engine {
       this.lockedProfiles(project);
       invariant(!this.held(project, binding.id), "EXECUTION_HELD", "Dispatch is paused or held");
       invariant(binding.candidateId === null && this.resolveInputs(project.id, binding.node).fingerprint === fingerprint, "REVISION_CONFLICT", "Local cache target changed during verification");
-      this.store.put("node_binding", binding.id, project.id, { ...binding, outputs: previous.outputs });
+      this.store.put("node_binding", binding.id, project.id, bindingWithOutputs(binding, previous.outputs));
       this.store.appendEvent(project.id, "execution.output_reused", { nodeId: binding.id, attemptId: previous.id }); return true;
     });
   }
@@ -718,7 +1001,33 @@ export class Engine {
   }
   private currentBinding(projectId: string, nodeId: string): NodeBinding {
     const binding = this.store.get<NodeBinding>("node_binding", nodeId); const project = this.store.getProject(projectId);
-    invariant(binding?.projectId === projectId && binding.state === "active" && binding.planId === project.activePlanId, "STALE_BINDING", "Node no longer belongs to the active plan"); return binding;
+    invariant(binding?.projectId === projectId && binding.state === "active" && (binding.planId === project.activePlanId || isCharacterSheetBinding(binding)),
+      "STALE_BINDING", "Node no longer belongs to the active plan"); return binding;
+  }
+  /** Exact original operation and resolved inputs must match before Undo reattaches media. */
+  outputsMatchOperation(binding: NodeBinding, outputs: NodeBinding["outputs"]): boolean {
+    try {
+      const inputs = this.resolveInputs(binding.projectId, binding.node);
+      return Object.values(outputs).every(artifact => {
+        const record = this.store.get<ArtifactRecord>("artifact", artifact.artifactId);
+        const attempt = record?.attemptId ? this.store.get<Attempt>("attempt", record.attemptId) : undefined;
+        return attempt?.projectId === binding.projectId && attempt.phase === "succeeded" &&
+          attempt.specDigest === binding.node.specDigest && attempt.fingerprint === inputs.fingerprint &&
+          Object.values(attempt.outputs).some(a => canonical(a) === canonical(artifact));
+      });
+    } catch (error) { if (!(error instanceof DomainError)) throw error; return false; }
+  }
+  /** Exact submitted identity, also usable before an in-flight attempt has outputs. */
+  attemptMatchesOperation(binding: NodeBinding, attempt: Readonly<Attempt>): boolean {
+    try {
+      const inputs = this.resolveInputs(binding.projectId, binding.node);
+      return attempt.projectId === binding.projectId && attempt.nodeId === binding.id && attempt.specDigest === binding.node.specDigest
+        && attempt.fingerprint === inputs.fingerprint && canonical(attempt.request.inputs) === canonical(inputs.artifacts);
+    } catch (error) { if (!(error instanceof DomainError)) throw error; return false; }
+  }
+  /** Trusted host take/Undo operations use the same immutable-byte verification as admission. */
+  verifyArtifact(projectId: string, artifact: ArtifactRef): ArtifactRef {
+    return this.resolveSource(projectId, { kind: "artifact", artifact }, true);
   }
   private resolveSource(projectId: string, source: InputSource, verifyBytes = false): ArtifactRef {
     const binding = source.kind === "output" ? this.currentBinding(projectId, source.nodeId) : null;
@@ -743,6 +1052,7 @@ export class Engine {
   }
   private checkIntent(project: ProjectRecord, node: PlanNode): void {
     if (node.kind !== "image" && node.kind !== "video") return;
+    if (node.characterId !== undefined) { assertCharacterSheetIntent(project, node); return; }
     if (node.shotId === null) return;
     const shot = project.shots.find(item => item.id === node.shotId);
     invariant(shot, "STALE_PROMPT_INTENT", "Shot no longer exists");
@@ -753,7 +1063,7 @@ export class Engine {
     invariant(node.args.prompt === (node.kind === "image" ? shot.imagePrompt : shot.videoPrompt), "STALE_PROMPT_INTENT", "Prompt no longer matches the current shot");
   }
   private held(project: ProjectRecord, nodeId: string): boolean {
-    if (this.store.get<{ paused: boolean }>("execution_control", project.id)?.paused) return true;
+    if (project.archived || this.store.get<{ paused: boolean }>("execution_control", project.id)?.paused) return true;
     const holds = this.store.list<Hold>("hold", project.id).filter(hold => hold.active);
     const visited = new Set<string>();
     const visit = (id: string): boolean => {
@@ -778,6 +1088,19 @@ export class Engine {
       const ownedInput = resolveOwnedTranscriptionNode(this.store, project, node, binding.candidateId);
       if (ownedInput) assertOwnedTranscriptionCurrent(this.store, project, node, binding.candidateId, ownedInput.resolved);
       const speechInput = resolveNarrationSpeechNode(this.store, project, node, binding.candidateId);
+      invariant(!binding.candidateId || !this.store.get("candidate_stop", binding.candidateId),
+        "RETRY_NOT_AUTHORIZED", "Stop ended this candidate's dispatch authority; generate again with a new press");
+      const confirmationId = sceneConfirmationIdForCandidate(this.store, projectId, binding.candidateId);
+      const confirmation = confirmationId ? this.store.get<{ state: string; sceneId: string; shotGuardDigests?: Record<string, string>; framePins: ConfirmationFramePin[] }>("scene_confirmation", confirmationId) : undefined;
+      if (confirmation) {
+        const shotIds = node.shotId ? [node.shotId] : node.kind === "speech" ? narrationSpeechShotScopes(this.store, projectId, binding.candidateId) : [];
+        const pins = confirmation.framePins.filter(pin => shotIds.includes(pin.shotId));
+        invariant(["running", "done"].includes(confirmation.state) && shotIds.length > 0
+          && shotIds.every(id => confirmation.shotGuardDigests?.[id] === sceneConfirmationGuard(project, id, this.store.get("capability_lock", project.capabilityLockId), pins.find(pin => pin.shotId === id)))
+          && (node.kind !== "video" || pins.length === shotIds.length) && confirmationFramesCurrent(this.store, project, pins),
+        "SCENE_REVIEW_STALE", "The scene confirmation changed before dispatch");
+      }
+
       if (speechInput) assertNarrationSpeechCurrent(this.store, project, node, binding.candidateId, speechInput.resolved);
       invariant(Object.keys(binding.outputs).length === 0, "ALREADY_COMPLETE", "Current output is already usable");
       invariant(!this.held(project, nodeId), "EXECUTION_HELD", "Dispatch is paused or held");
@@ -819,14 +1142,14 @@ export class Engine {
         this.recovery.assertFreshAuthority(projectId, "grant", grant.id);
       } else invariant(!GENERATED.has(node.kind), "ORIGIN_NOT_AUTHORIZED", "Generation requires a candidate");
       const workKey = binding.candidateId ? null : digest({ projectId, nodeId, fingerprint: inputs.fingerprint });
-      const previous = this.attempts(projectId).filter(attempt => binding.candidateId ? attempt.candidateId === binding.candidateId : attempt.workKey === workKey).sort((a, b) => b.ordinal - a.ordinal)[0];
+      const previous = this.attempts(projectId).filter(attempt => !attempt.released && (binding.candidateId ? attempt.candidateId === binding.candidateId : attempt.workKey === workKey)).sort((a, b) => b.ordinal - a.ordinal)[0];
       if (previous) {
         invariant(previous.phase === "failed", "ATTEMPT_EXISTS", "Existing work must be reconciled, never resubmitted");
-        invariant(binding.candidateId && previous.failure?.technical && previous.failure.retryAllowed && previous.ordinal <= (profile?.maxRetries ?? 0), "RETRY_NOT_AUTHORIZED", "No trusted technical retry allowance");
+        invariant(automaticRetriesLeft(this.store, previous, profile?.maxRetries ?? 0) > 0, "RETRY_NOT_AUTHORIZED", "No trusted technical retry allowance");
         invariant(previous.fingerprint === inputs.fingerprint, "NEW_CANDIDATE_REQUIRED", "A technical retry cannot change its creative inputs");
       }
       if (profile) {
-        const active = this.projects().flatMap(item => this.attempts(item.id)).filter(attempt => !TERMINAL.has(attempt.phase)
+        const active = this.projects().flatMap(item => this.attempts(item.id)).filter(attempt => !attempt.released && !TERMINAL.has(attempt.phase)
           && attempt.request.args.profileIdentity === profile.id && attempt.request.args.profileRevision === profile.revision
           && canonical(requestExecutionIdentity(attempt.request)) === canonical(execution)).length;
         invariant(active < profile.maxConcurrency, "CAPACITY_EXCEEDED", "Configured provider capacity is occupied");
@@ -844,6 +1167,8 @@ export class Engine {
         externalAllowanceId = approval.allowanceId;
       }
       const pinnedProfile = profile ? executionProfileSnapshot(profile) : undefined;
+      invariant(!binding.candidateId || !this.store.get("candidate_stop", binding.candidateId),
+        "RETRY_NOT_AUTHORIZED", "Stop ended this candidate's dispatch authority; generate again with a new press");
       const attempt: Attempt = {
         id, projectId, nodeId, candidateId: binding.candidateId, ordinal: (previous?.ordinal ?? 0) + 1,
         specDigest: node.specDigest, fingerprint: inputs.fingerprint, workKey,
@@ -856,6 +1181,7 @@ export class Engine {
         ...(ownedInput ? { applicationInput: structuredClone(ownedInput.input) } : {}),
         ...(speechInput ? { narrationSpeech: structuredClone(speechInput.input) } : {}),
       };
+      this.clearNodeWait(projectId, nodeId);
       this.store.insert("attempt", id, projectId, attempt);
       if (reservationId) this.store.insert("reservation", reservationId, projectId, { attemptId: id, micros: cost.toString(), state: "reserved" });
       if (externalAllowanceId && this.externalAdmission?.recordAdmission) {
@@ -891,6 +1217,7 @@ export class Engine {
     invariant(current.reservationId && this.store.get<Reservation>("reservation", current.reservationId)?.state === "reserved",
       "SUBMISSION_PREPARATION_INVALID", "Preparation requires its original reserved liability");
     const project = this.store.getProject(current.projectId), binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
+    if (current.candidateId && this.store.get("candidate_stop", current.candidateId)) return { type: "obsolete", reason: "intent_changed" };
     if (!binding || binding.projectId !== project.id || binding.state !== "active" || binding.planId !== project.activePlanId
       || binding.candidateId !== current.candidateId || binding.node.specDigest !== current.specDigest || Object.keys(binding.outputs).length)
       return { type: "obsolete", reason: "binding_changed" };
@@ -950,7 +1277,8 @@ export class Engine {
   }
   private async runPreparation(attempt: Attempt, resume: boolean): Promise<void> {
     const port = this.submissionPreparation!;
-    const controller = new AbortController();
+    const controller = this.operationController();
+    if (controller.signal.aborted) return;
     const context: SubmissionPreparationContext = Object.freeze({ signal: controller.signal,
       expectedLease: Object.freeze({ owner: attempt.leaseOwner, epoch: attempt.leaseEpoch }),
       eligibility: () => this.preparationEligibility(attempt) });
@@ -974,7 +1302,7 @@ export class Engine {
     try {
       try { outcome = await port[resume ? "resume" : "start"](structuredClone(attempt.request), context); }
       catch (error) { failure = error; }
-    } finally { clearInterval(timer); clearTimeout(deadline); controller.abort(); }
+    } finally { clearInterval(timer); clearTimeout(deadline); this.finishOperation(controller); }
     const current = this.store.get<Attempt>("attempt", attempt.id);
     if (current?.phase === "preparing" && !this.preparationObserved(current)) {
       if (!this.owns(attempt)) return;
@@ -998,8 +1326,11 @@ export class Engine {
       const attempt = this.store.get<Attempt>("attempt", observed.id)!;
       if (TERMINAL.has(attempt.phase) || attempt.leaseExpiresAt > Date.now()) return null;
       if (attempt.phase === "preparing" && !this.preparationObserved(attempt)) return null;
+      if (attempt.phase === "submission_unknown" && (attempt.unknownWait?.nextEligibleAt ?? 0) > Date.now()) return null;
       const updated: Attempt = { ...attempt, phase: attempt.phase === "submitting" ? "submission_unknown" : attempt.phase, leaseOwner: this.workerId, leaseEpoch: attempt.leaseEpoch + 1, leaseExpiresAt: Date.now() + this.leaseMs };
-      this.store.put("attempt", updated.id, updated.projectId, updated); return updated;
+      this.store.put("attempt", updated.id, updated.projectId, updated);
+      if (updated.phase !== attempt.phase) this.store.appendEvent(updated.projectId, "attempt.state_changed", { attemptId: updated.id, phase: updated.phase });
+      return updated;
     });
   }
   private owns(attempt: Attempt): Attempt | null {
@@ -1028,15 +1359,38 @@ export class Engine {
       if (outcome.type === "completed") {
         this.store.put("attempt", current.id, current.projectId, { ...current, phase: "ingesting", taskId: executionTaskId(outcome) }); return true;
       }
-      const phase: AttemptPhase = outcome.type === "accepted" ? "remote_pending" : outcome.type === "unknown" ? "submission_unknown" : "failed";
+      const issue = activeAttemptIngestionIssue(this.store, current);
+      const ingesting = (issue || viggleHasCompletedObservation(this.store, current)) && (outcome.type === "accepted" || outcome.type === "unknown");
+      const phase: AttemptPhase = ingesting ? "ingesting" : outcome.type === "accepted" ? "remote_pending" : outcome.type === "unknown" ? "submission_unknown" : "failed";
       const failure = outcome.type === "failed" || outcome.type === "rejected"
         ? { id: outcome.failureId, technical: outcome.technical, source: executionFailureSource(provider),
           retryAllowed: outcome.technical === true && outcome.retryAllowed === true } : null;
       const taskId = outcome.type === "accepted" || outcome.type === "failed" || outcome.type === "unknown" ? outcome.taskId ?? current.taskId : current.taskId;
-      this.store.put("attempt", current.id, current.projectId, { ...current, phase, taskId, failure, leaseExpiresAt: 0 });
-      if (outcome.type === "rejected") this.setReservation(current, "released");
+      // Reconciliation re-observes the same answer every cycle. Only a change in
+      // observable state is history; an identical unknown answer backs off instead.
+      const unchanged = phase === current.phase && taskId === current.taskId && canonical(failure) === canonical(current.failure);
+      const { unknownWait: previousWait, ingestionDeferred: _deferred, ...base } = current;
+      const unknownWait = unchanged && phase === "submission_unknown" ? unknownBackoff(previousWait?.count ?? 0) : undefined;
+      const updated: Attempt = { ...base, phase, taskId, failure, leaseExpiresAt: ingesting && !issue ? current.leaseExpiresAt : 0, ...(unknownWait ? { unknownWait } : {}) };
+      this.store.put("attempt", current.id, current.projectId, updated);
+      if (ingesting && !issue) {
+        // Immutable provider completion survives a lost polling lease. The new
+        // owner must not turn a later transport failure into a no-answer job.
+        this.recordIngestionIssue(attempt, "OUTPUT_DOWNLOAD_FAILED");
+        this.deferOutputCapacity(attempt, "ingesting");
+      }
+      if (phase === "failed") {
+        const binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
+        const profile = this.lockedProfiles(this.store.getProject(current.projectId)).find(p => p.id === current.request.args.profileIdentity);
+        if (binding?.state === "active" && binding.candidateId === current.candidateId && automaticRetriesLeft(this.store, updated, profile?.maxRetries ?? 0) === 0) {
+          const restored = restoreRetainedTake(binding);
+          if (restored) { this.store.put("node_binding", binding.id, current.projectId, restored); this.clearNodeWait(current.projectId, binding.id); }
+        }
+      }
+      if (outcome.type === "rejected" && !current.released) this.setReservation(current, "released");
       if (outcome.type === "failed") this.setReservation(current, "charged");
-      this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase }); return false;
+      if (!unchanged) this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase });
+      return false;
     });
     if (!owns || outcome.type !== "completed") return;
     const completed = outcome;
@@ -1056,8 +1410,9 @@ export class Engine {
       // liability, but let the next cycle recover it without a vendor call.
       this.store.transaction(() => {
         const current = this.owns(attempt); if (!current || current.phase !== "ingesting") return;
-        this.store.put("attempt", current.id, current.projectId, { ...current, leaseExpiresAt: 0 });
-        this.store.appendEvent(current.projectId, "attempt.ingestion_deferred", { attemptId: current.id, reason: "local_media_busy" });
+        this.store.put("attempt", current.id, current.projectId, { ...current, leaseExpiresAt: 0, ingestionDeferred: "local_media_busy" });
+        if (current.ingestionDeferred !== "local_media_busy")
+          this.store.appendEvent(current.projectId, "attempt.ingestion_deferred", { attemptId: current.id, reason: "local_media_busy" });
       });
       return;
     }
@@ -1080,16 +1435,23 @@ export class Engine {
         this.store.appendEvent(attempt.projectId, "artifact.published", { artifactId: record.id, attemptId: attempt.id, fixture: record.fixture });
       }
       const issue = activeAttemptIngestionIssue(this.store, current);
-      const finished: Attempt = { ...current, phase: "succeeded", outputs: mapped, taskId: executionTaskId(completed), leaseExpiresAt: 0 };
+      const { ingestionDeferred: _deferred, ...base } = current;
+      const finished: Attempt = { ...base, phase: "succeeded", outputs: mapped, taskId: executionTaskId(completed), leaseExpiresAt: 0 };
       this.store.put("attempt", current.id, current.projectId, finished); this.setReservation(current, "charged");
       if (issue) {
         this.store.put("attempt_ingestion_issue", current.id, current.projectId, { ...issue, active: false, resolvedAt: new Date().toISOString() });
         this.store.appendEvent(current.projectId, "attempt.ingestion_issue_resolved", { attemptId: current.id });
       }
       const binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
-      if (binding && binding.projectId === current.projectId && binding.state === "active" && binding.candidateId === current.candidateId) {
+      // A finished sheet is immutable take history even after Stop, a newer take or a character edit; approval is a later human step.
+      const sheetJob = this.store.get<CharacterSheetJob>(CHARACTER_SHEET_JOB_KIND, current.nodeId);
+      if (!current.released && sheetJob?.projectId === current.projectId && mapped.image) try {
+        recordCharacterSheetTake(this.store, { id: sheetJob.id, projectId: current.projectId, characterId: sheetJob.characterId,
+          artifact: mapped.image, prompt: String(current.request.args.prompt), attemptId: current.id });
+      } catch (error) { if (!(error instanceof DomainError)) throw error; }
+      if (!current.released && binding && binding.projectId === current.projectId && binding.state === "active" && binding.candidateId === current.candidateId) {
         const project = this.store.getProject(current.projectId);
-        if (binding.planId === project.activePlanId) {
+        if (binding.planId === project.activePlanId || isCharacterSheetBinding(binding)) {
           try {
             this.checkIntent(project, binding.node);
             const speechInput = resolveNarrationSpeechNode(this.store, project, binding.node, binding.candidateId);
@@ -1097,14 +1459,36 @@ export class Engine {
               assertNarrationSpeechCurrent(this.store, project, binding.node, binding.candidateId, speechInput.resolved);
               assertPersonalVoiceCurrent(this.store, current.projectId, String(binding.node.args.voice), String(binding.node.args.adapter));
             }
-            if (this.resolveInputs(current.projectId, binding.node).fingerprint === current.fingerprint)
-              this.store.put("node_binding", binding.id, binding.projectId, { ...binding, outputs: mapped });
+            if (this.resolveInputs(current.projectId, binding.node).fingerprint === current.fingerprint) {
+              if (binding.retainedTake) this.outdateImageDependents(binding);
+              this.store.put("node_binding", binding.id, binding.projectId, bindingWithOutputs(binding, mapped));
+            }
           } catch (error) { if (!(error instanceof DomainError)) throw error; }
         }
       }
       this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase: "succeeded" });
     });
   }
+  /** Replacement success is the only point at which a retained clip leaves use. */
+  outdateImageDependents(image: NodeBinding): void {
+    const bindings = this.store.list<NodeBinding>("node_binding", image.projectId).filter(b => b.state === "active" && b.planId === image.planId);
+    const affected = new Set([image.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const b of bindings) if (!affected.has(b.id) &&
+        (b.node.kind === "video" && b.node.shotId === image.node.shotId ||
+          b.node.inputs.some(i => i.source.kind === "output" && affected.has(i.source.nodeId)) || b.node.requires.some(id => affected.has(id)))) {
+        affected.add(b.id); grew = true;
+      }
+    }
+    for (const b of bindings.filter(b => b.id !== image.id && affected.has(b.id))) {
+      const { retainedTake: _retained, ...rest } = b;
+      const previous = Object.values(b.retainedTake?.outputs ?? b.outputs)[0] ?? b.outdated?.previous;
+      this.store.put("node_binding", b.id, b.projectId, { ...rest, candidateId: null, outputs: {},
+        ...(previous ? { outdated: { at: new Date().toISOString(), fields: ["keyframe"], previous } } : {}) });
+    }
+  }
+
   private recordIngestionIssue(attempt: Attempt, observedCode: string): void {
     this.store.transaction(() => {
       const current = this.owns(attempt);
@@ -1128,7 +1512,7 @@ export class Engine {
 
   /** Keep paid effects owned during slow I/O; cancellation never discards a late vendor receipt. */
   private async observeProvider(attempt: Attempt, operation: (options: ExecutionCallOptions) => Promise<ExecutionOutcome>, diagnostic: string): Promise<ExecutionOutcome | null> {
-    const controller = new AbortController();
+    const controller = this.operationController();
     const renew = () => {
       if (controller.signal.aborted) return;
       try {
@@ -1139,7 +1523,7 @@ export class Engine {
         });
       } catch { controller.abort(); }
     };
-    renew(); if (controller.signal.aborted) return null;
+    renew(); if (controller.signal.aborted) { this.finishOperation(controller); return null; }
     const timer = setInterval(renew, Math.max(1, Math.floor(this.leaseMs / 3))); timer.unref();
     const deadline = setTimeout(() => controller.abort(), this.providerTimeoutMs);
     try {
@@ -1147,13 +1531,27 @@ export class Engine {
       // observation so an accepted task arriving after lease loss remains evidence.
       try { return await operation(Object.freeze({ signal: controller.signal,
         expectedLease: Object.freeze({ owner: attempt.leaseOwner, epoch: attempt.leaseEpoch }) })); }
-      catch { return { type: "unknown", diagnostic }; }
-    } finally { clearInterval(timer); clearTimeout(deadline); controller.abort(); }
+      catch (error) {
+        if (isOutputStoreCapacityError(error)) { this.deferOutputCapacity(attempt); return null; }
+        if (error instanceof ViggleDownloadPending && requestExecutionIdentity(attempt.request).adapter === "viggle-h3") {
+          this.store.transaction(() => {
+            const current = this.owns(attempt);
+            if (!current || current.taskId !== error.taskId) return;
+            this.store.put("attempt", current.id, current.projectId, { ...current, phase: "ingesting" });
+            this.recordIngestionIssue(attempt, error.code);
+            this.deferOutputCapacity(attempt, "ingesting");
+          });
+          return null;
+        }
+        return { type: "unknown", diagnostic };
+      }
+    } finally { clearInterval(timer); clearTimeout(deadline); this.finishOperation(controller); }
   }
 
   private async withLease<T>(attempt: Attempt, operation: (signal: AbortSignal) => Promise<T>, pauseAware = false): Promise<T | null> {
-    const controller = new AbortController();
+    const controller = this.operationController();
     const renew = (): void => {
+      if (controller.signal.aborted) return;
       try {
         this.store.transaction(() => {
           const current = this.owns(attempt);
@@ -1169,7 +1567,7 @@ export class Engine {
       if (controller.signal.aborted) return null;
       const result = await operation(controller.signal);
       return controller.signal.aborted ? null : result;
-    } finally { clearInterval(timer); controller.abort(); }
+    } finally { clearInterval(timer); this.finishOperation(controller); }
   }
 
   private async ingestOutputs(attempt: Attempt, descriptors: IngestibleExecutionOutput[]): Promise<IngestedOutput[] | null> {

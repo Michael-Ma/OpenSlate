@@ -51,6 +51,7 @@ lines.on("line", line => {
   }
   if (method === "initialized") return;
   if (method === "config/read") {
+    if (mode === "bundled-skills-wrong") config.skills.bundled.enabled = true;
     if (mode === "question-feature-wrong") config.features.default_mode_request_user_input = false;
     if (mode === "bridge-wrong") config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_CREDENTIAL = "wrong-fixed-credential";
     if (mode === "permissions-wrong") config.permissions.fixture.network.enabled = true;
@@ -85,12 +86,16 @@ lines.on("line", line => {
   if (method === "thread/start" || method === "thread/resume") {
     threadId = params.threadId ?? threadId;
     return respond(id, { thread: { id: threadId }, activePermissionProfile: { id: "fixture" },
-      instructionSources: mode === "instructions-extra" ? [{ path: "/fake/AGENTS.md" }] : [] });
+      instructionSources: mode === "home-instructions" ? ["AGENTS.md", "AGENTS.override.md"].map(name => join(process.env.CODEX_HOME, name)).filter(existsSync)
+        : process.env.FIXTURE_INSTRUCTION_SOURCES ? JSON.parse(process.env.FIXTURE_INSTRUCTION_SOURCES)
+        : mode === "instructions-extra" ? [{ path: "/fake/AGENTS.md" }] : [] });
   }
   if (method === "mcpServerStatus/list") {
     const tools = Object.fromEntries(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"].map(name => [name, { name }]));
-    if (["2.0.0", "3.0.0", "4.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") tools.revise_narration_draft = { name: "revise_narration_draft" };
-    if (["3.0.0", "4.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") { tools.prepare_recording_transcription = { name: "prepare_recording_transcription" }; tools.prepare_narration_speech = { name: "prepare_narration_speech" }; }
+    if (["2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") tools.revise_narration_draft = { name: "revise_narration_draft" };
+    if (["3.0.0", "4.0.0", "5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") { tools.prepare_recording_transcription = { name: "prepare_recording_transcription" }; tools.prepare_narration_speech = { name: "prepare_narration_speech" }; }
+    if (["5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") { tools.record_notes = { name: "record_notes" }; tools.propose_change = { name: "propose_change" }; }
+    if (config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT === "6.0.0" && mode !== "catalog-legacy") for (const name of ["make_keyframes", "accept_proposal", "reject_proposal"]) tools[name] = { name };
     if (mode === "catalog-extra") tools.extra = { name: "extra" };
     return respond(id, { data: [{ name: "openslate", runtimeStatus: "connected", tools }], nextCursor: null });
   }
@@ -121,6 +126,23 @@ lines.on("line", line => {
       return setTimeout(() => { process.stdout.write(row.subarray(split)); completed("completed"); }, 10);
     }
     if (mode === "secret-message") { assistant(`redact ${credential}`); return completed("completed"); }
+    if (mode === "activity") {
+      // Payloads intentionally include private content; only phase/state may leave the adapter.
+      for (const type of ["reasoning", "mcpToolCall", "dynamicToolCall", "codeModeToolCall"]) {
+        const item = { id: `activity-${type}`, type, text: `private ${credential}`, arguments: { secret: credential } };
+        notify("item/started", { threadId: "another-thread", turnId, item });
+        notify("item/started", { threadId, turnId: "another-turn", item });
+        notify("item/started", { threadId, turnId, item });
+        notify("item/completed", { threadId, turnId, item });
+      }
+    }
+    if (mode === "overlap-activity") {
+      const a = { id: 'outer', type: 'reasoning' }, b = { id: 'inner', type: 'mcpToolCall' };
+      notify('item/started', { threadId, turnId, item: a });
+      notify('item/started', { threadId, turnId, item: b });
+      notify('item/completed', { threadId, turnId, item: b });
+      notify('item/completed', { threadId, turnId, item: a });
+    }
     setTimeout(done, 10); return;
   }
   if (method === "turn/interrupt") {

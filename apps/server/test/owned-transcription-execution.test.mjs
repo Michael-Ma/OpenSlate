@@ -224,3 +224,33 @@ test('ordinary ProductionService shot edit retains and resumes unchanged owned t
   assert.equal(current(f).id, waiting.id); assert.equal(current(f).phase, 'succeeded'); assert.equal(f.calls.http, 1);
   assert.equal(rows(f, 'external_allowance_consumption').length, 1); assert.equal(rows(f, 'owned_transcription_application').length, 1);
 });
+
+test('L1 reviewed owned transcription propagates in-flight, charged lost reply and fenced no-dispatch outcomes', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const f = await fixture(t); f.control.fetch = async () => { throw Error('offline owned response lost'); };
+  await f.engine.runReady(); assert.equal(current(f).phase, 'submission_unknown');
+  const age = milliseconds => {
+    const attempt = current(f), marker = f.store.get('transcription_execution_dispatch', attempt.id);
+    t.mock.timers.setTime(Date.parse(marker.createdAt) + milliseconds);
+    const fresh = current(f); f.store.put('attempt', fresh.id, f.project.id, { ...fresh, leaseExpiresAt: 0, unknownWait: { count: 0, nextEligibleAt: 0 } });
+  };
+  age(179000); await f.engine.reconcile(); assert.equal(current(f).phase, 'submission_unknown');
+  age(180001); await f.engine.reconcile();
+  assert.equal(current(f).phase, 'failed'); assert.equal(current(f).failure.id, 'SUBMISSION_RESPONSE_LOST'); assert.equal(current(f).failure.retryAllowed, false);
+  assert.equal(f.store.get('reservation', current(f).reservationId).state, 'charged');
+  for (let i = 0; i < 4; i++) { await f.engine.reconcile(); assert.equal((await f.engine.runReady()).dispatched, 0); }
+  assert.equal(f.calls.http, 1); assert.equal(rows(f, 'attempt').length, 1); assert.equal(rows(f, 'transcript_candidate').length, 0);
+  assert.equal(rows(f, 'attempt').filter(item => item.phase !== 'failed' && item.phase !== 'succeeded').length, 0, 'provider capacity is free');
+
+  const g = await fixture(t), resolve = g.engine.resolveInputs(g.project.id, g.node);
+  const neverSent = g.engine.admit(g.project.id, g.node.id, resolve.fingerprint);
+  g.store.put('attempt', neverSent.id, g.project.id, { ...neverSent, leaseExpiresAt: 0 });
+  await g.engine.reconcile();
+  assert.equal(current(g).phase, 'failed'); assert.equal(g.store.get('reservation', current(g).reservationId).state, 'released');
+  assert.equal((await g.bridge.submit(current(g).request)).type, 'rejected'); assert.equal(g.calls.http, 0); assert.equal(g.calls.keys, 0);
+
+  const saved = await fixture(t); await saved.engine.runReady(); assert.equal(current(saved).phase, 'succeeded');
+  const marker = rows(saved, 'transcription_execution_dispatch')[0];
+  t.mock.timers.setTime(Date.parse(marker.createdAt) + 180001);
+  assert.equal((await saved.bridge.lookup(current(saved).id)).type, 'completed'); assert.equal(saved.calls.http, 1);
+});

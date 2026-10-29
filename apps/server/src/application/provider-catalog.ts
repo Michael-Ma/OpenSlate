@@ -1,7 +1,9 @@
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { canonical, DEFAULT_PROFILES, digest, invariant, moneyMicros, providerProfileArguments, snapshotLocalExecution } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
-import { describeOpenAIImageRequest, validateViggleH3Settings } from "@openslate/providers";
+import { describeOpenAIImageRequest, FAL_H3_LIPSYNC_MODEL, FAL_H3_LIPSYNC_RESOLUTIONS, falH3LipSyncPriceMicros, validateViggleH3Settings } from "@openslate/providers";
+import type { FalH3LipSyncResolution } from "@openslate/providers";
+import { lipSyncAudioSamples } from "../execution/lip-sync.js";
 import type { ExecutionIdentity, ExecutionRegistry, OpenAIImageModel, OpenAIImageQuality, ViggleH3Settings } from "@openslate/providers";
 import { preflightAudioProfile } from "../execution/audio-preflight.js";
 import { EnvironmentMediaCredentials } from "./provider-credentials.js";
@@ -76,6 +78,20 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
     validateViggleH3Settings(configuration.settings as unknown as ViggleH3Settings);
     return { credential: "viggle-video", media: "video", fixture: false };
   }
+  if (profile.adapter === "fal-h3-lipsync") {
+    // Audio of at least 5 s drives the clip; shots stay within the 15 s storyboard bound.
+    invariant(profile.kind === "video" && configuration.model === FAL_H3_LIPSYNC_MODEL
+      && integer(profile.minFrames, 150, 450) && integer(profile.maxFrames, Number(profile.minFrames), 450)
+      && Number(profile.minFrames) % 30 === 0 && Number(profile.maxFrames) % 30 === 0,
+    "PROVIDER_CATALOG_INVALID", "Lip-sync profiles require the H3 Max lip-sync model and whole-second bounds within 5 to 15 seconds");
+    exact(configuration.settings, ["resolution"]);
+    const resolution = configuration.settings.resolution as FalH3LipSyncResolution;
+    invariant(FAL_H3_LIPSYNC_RESOLUTIONS.includes(resolution), "PROVIDER_CATALOG_INVALID", "Use a published lip-sync resolution");
+    // The flat per-clip estimate reserves the longest clip at the published per-second price.
+    const ceiling = falH3LipSyncPriceMicros(resolution, lipSyncAudioSamples(Number(profile.maxFrames)) / 48000);
+    invariant(moneyMicros(profile.unitCostMicros) >= BigInt(ceiling), "PROVIDER_CATALOG_INVALID", "The lip-sync clip estimate must cover the longest clip at the published price");
+    return { credential: "fal-video", media: "video", fixture: false };
+  }
   invariant(profile.adapter === "minimax-h3" && profile.kind === "video", "PROVIDER_CATALOG_INVALID", "Only installed fixed media mappings may be configured");
   exact(configuration.settings, ["resolution"]);
   const model = configuration.model, minimum = model === "MiniMax-H3" ? 120 : 150;
@@ -141,8 +157,8 @@ export class InstalledProviderCatalog {
     this.#mediaTools = Object.freeze({ image: options.mediaTools?.image === true, video: options.mediaTools?.video === true, audio: options.mediaTools?.audio === true });
     this.#codexImageConfigured = options.codexImageConfigured === true;
     const enabled = options.enabledExecutions ?? [];
-    invariant(Array.isArray(enabled) && enabled.length <= 6 && enabled.every(value => object(value)
-      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription"].includes(value.adapter) && value.version === "1"),
+    invariant(Array.isArray(enabled) && enabled.length <= 7 && enabled.every(value => object(value)
+      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription", "fal-h3-lipsync"].includes(value.adapter) && value.version === "1"),
     "PROVIDER_CATALOG_INVALID", "Only explicit supported external execution identities can be enabled");
     this.#enabledExecutions = new Set(enabled.map(value => canonical(value)));
     invariant(this.#enabledExecutions.size === enabled.length, "PROVIDER_CATALOG_INVALID", "Enabled execution identities must be distinct");
@@ -159,7 +175,7 @@ export class InstalledProviderCatalog {
     let localAssemblyCompatible = false;
     try { snapshotLocalExecution(localExecution); localAssemblyCompatible = true; } catch { /* Absence and unsupported saved pins require a new project for H3. */ }
     const described = profiles.map(profile => {
-      const row = this.describe(profile), compatible = !(["minimax-h3", "viggle-h3"].includes(row.profile?.adapter ?? "")) || localAssemblyCompatible;
+      const row = this.describe(profile), compatible = !(["minimax-h3", "viggle-h3", "fal-h3-lipsync"].includes(row.profile?.adapter ?? "")) || localAssemblyCompatible;
       return { ...row, projectExecution: { compatible,
         code: compatible ? null : "LOCAL_EXECUTION_UPGRADE_REQUIRED",
         message: compatible ? null : "Create a new project with video generation enabled on this computer. This project's saved assembly mode cannot generate H3 video." } };
@@ -176,13 +192,21 @@ export class InstalledProviderCatalog {
     "PROVIDER_SELECTION_INVALID", "Select at most one installed profile for each operation");
     const selected = profileIds.map(id => {
       const definition = this.#definitions.find(item => item.profile.id === id);
-      invariant(definition, "PROVIDER_SELECTION_INVALID", "A selected provider is not installed"); return definition.profile;
+      invariant(definition, "PROVIDER_SELECTION_INVALID", "A selected provider is not installed");
+      // Lip sync only makes singing shots; new projects pin it beside the chosen video model (see lipSyncProfiles).
+      invariant(definition.profile.adapter !== "fal-h3-lipsync", "PROVIDER_SELECTION_INVALID", "Lip sync is added beside the video model, not chosen as it");
+      return definition.profile;
     });
     invariant(new Set(selected.map(profile => profile.kind)).size === selected.length,
       "PROVIDER_SELECTION_INVALID", "Select only one profile for each operation");
     const profiles = BUILT_IN_PROFILES.map(fallback => structuredClone(selected.find(profile => profile.kind === fallback.kind) ?? fallback));
     const value = Object.freeze({ catalogDigest: this.digest, profileIds: Object.freeze([...profileIds]) });
     selections.set(value, { profiles, provenance: { catalogDigest: this.digest, profileIds: profiles.map(profile => profile.id) } }); return value;
+  }
+  /** Installed, enabled and ready lip-sync profiles, pinned on new projects whose video is a real model. */
+  lipSyncProfiles(): ProviderProfile[] {
+    return this.#definitions.filter(definition => definition.profile.adapter === "fal-h3-lipsync" && this.describe(definition.profile).readiness.realExecutionEnabled)
+      .map(definition => structuredClone(definition.profile)).slice(0, 1);
   }
   private describe(input: unknown, name?: string) {
     let valid = true, policy: ReturnType<typeof profilePolicy> | undefined;

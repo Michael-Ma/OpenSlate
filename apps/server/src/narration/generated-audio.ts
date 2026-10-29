@@ -82,7 +82,8 @@ function generatedShape(input: unknown): VerifiedGeneratedNarrationAudio {
     "derivationReceiptDigest", "sourceDescriptorId", "sourceDigest", "normalizedSamples"]);
   fail(evidence.version === 1 && evidence.adapter === "openai-speech" && evidence.executionVersion === "1"
     && [OPENAI_SPEECH_MODEL, "gpt-4o-mini-tts"].includes(evidence.model as string)
-    && typeof evidence.voice === "string" && (OPENAI_SPEECH_VOICES as readonly string[]).includes(evidence.voice)
+    && typeof evidence.voice === "string" && ((OPENAI_SPEECH_VOICES as readonly string[]).includes(evidence.voice)
+      || /^openai-custom:voice_[A-Za-z0-9_-]{1,120}$/.test(evidence.voice))
     && id(evidence.attemptId) && id(evidence.reservationId) && evidence.artifactId === audio.id
     && ["artifactDigest", "artifactRecordDigest", "requestDigest", "reservationDigest", "mappingDigest", "dispatchDigest", "resultDigest",
       "outputReceiptId", "outputReceiptDigest", "outputSpoolId", "outputSpoolDigest", "derivationId", "derivationIntentDigest", "derivationReceiptDigest",

@@ -16,7 +16,8 @@ function fixture(t, { foreignHold = false } = {}) {
   const engine = new Engine(store, provider, { artifactDir: join(root, 'artifacts') });
   const service = new ProductionService(store, engine), project = service.createProject('Narration preparation');
   const prior = foreignHold ? service.beginRequest(project.id, 'human', 'A separate unfinished edit') : null;
-  const human = service.beginRequest(project.id, 'human', 'Prepare two narration takes'), actor = service.openEpoch(project.id, human).actor;
+  // The rollback cases retain a separate live owner; supersede behavior is covered by request-holds.
+  const human = service.beginRequest(project.id, 'human', 'Prepare two narration takes', foreignHold ? { concurrency: 'alongside' } : {}), actor = service.openEpoch(project.id, human).actor;
   t.after(() => { store.close(); provider.close(); rmSync(root, { recursive: true, force: true }); });
   const f = { root, store, provider, engine, service, project, human, actor, prior };
   f.authorize = count => service.authorize(project.id, human, Array.from({ length: count }, () => ({ scopeId: project.id, kind: 'speech' })), randomUUID());
@@ -70,9 +71,12 @@ test('public preparation and application retain their legacy records, grant bind
   assert.deepEqual(state(f.store), saved); noExecution(f);
 });
 
-test('a current editable audio request creates fresh missing operation ownership without a separate authorization step', async t => {
-  const f = fixture(t), [existing] = f.authorize(1), prepared = await f.prepare();
-  assert.equal(Object.keys(prepared.grantBindings).length, 2);assert.equal(f.store.list('grant',f.project.id).length,2);
+test('Director preparation requires every paid audio grant while a human request may create missing audio ownership', async t => {
+  const f = fixture(t), [existing] = f.authorize(1), before = state(f.store);
+  await assert.rejects(f.prepare(), {code:'ORIGIN_NOT_AUTHORIZED'});
+  assert.deepEqual(state(f.store),before);noExecution(f);
+  const prepared=await f.service.prepare(f.project.id,f.human,f.proposal());
+  assert.equal(Object.keys(prepared.grantBindings).length,2);assert.equal(f.store.list('grant',f.project.id).length,2);
   assert.ok(Object.values(prepared.grantBindings).includes(existing.id));assert.deepEqual(f.store.get('grant',existing.id),existing);
   assert.equal(f.store.list('candidate',f.project.id).length,0);noExecution(f);
 });

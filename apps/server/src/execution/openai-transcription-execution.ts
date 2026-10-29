@@ -15,6 +15,9 @@ import type { PreparationSubmissionOutcome, SubmissionPreparationContext, Submis
 import { assertOwnedTranscriptionPreparation, createTranscriptionPreparationIntent, resolveTranscriptionPreparationIntent } from "./transcription-preparation.js";
 
 const unknown = (diagnostic: string): ExecutionOutcome => ({ type: "unknown", diagnostic });
+// AudioHttpClient bounds every host's transcription POST to this maximum, regardless of a shorter local timeout.
+const MAX_SUBMIT_TIMEOUT_MS = 180000;
+const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false });
 const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "TRANSCRIPTION_EXECUTION_CANCELLED", "Transcription preparation was cancelled");
 
 /** Explicit host bridge: registration is availability, never a spending allowance or default activation. */
@@ -193,7 +196,7 @@ export class OpenAITranscriptionExecution implements ExecutionProvider, Submissi
     const saved = this.#store.get<Attempt>("attempt", attemptId);
     invariant(saved && (!input || input.attemptId === attemptId), "TRANSCRIPTION_EXECUTION_CONFLICT", "Unknown or mismatched transcription attempt");
     const admission = this.admission(structuredClone(input ?? saved.request));
-    return this.recover(admission.attempt, signal);
+    return this.recover(admission.attempt, signal, options.expectedLease);
   }
 
   async poll(_taskId: string, input?: Readonly<ExecutionRequest>, options: ExecutionCallOptions = {}): Promise<ExecutionOutcome> {
@@ -267,7 +270,7 @@ export class OpenAITranscriptionExecution implements ExecutionProvider, Submissi
     if (error instanceof DomainError && error.code === "MEDIA_BUSY") return this.deferred(admission.attempt, "local_media_busy");
     return this.notDispatched(admission, expectedLease, code, signal, context);
   }
-  private async recover(attempt: Attempt, signal?: AbortSignal): Promise<ExecutionOutcome> {
+  private async recover(attempt: Attempt, signal?: AbortSignal, lease?: ExecutionCallOptions["expectedLease"]): Promise<ExecutionOutcome> {
     const admission = this.admission(attempt.request);
     const mapping = this.#store.get<TranscriptionExecutionMapping>("transcription_execution_mapping", attempt.id);
     const dispatch = this.#store.get<TranscriptionExecutionDispatch>("transcription_execution_dispatch", attempt.id);
@@ -278,13 +281,25 @@ export class OpenAITranscriptionExecution implements ExecutionProvider, Submissi
       invariant(mapping, "TRANSCRIPTION_EXECUTION_CONFLICT", "Transcription dispatch has no prepared mapping");
       assertTranscriptionExecutionDispatch(admission.attempt, mapping, dispatch, preparation!);
     }
-    if (!result) return unknown("Transcription dispatch has no durable outcome; automatic resubmission is disabled");
+    if (!dispatch && !result && lease) {
+      this.#store.transaction(() => {
+        if (this.hasDispatchOrResult(attempt.id)) return;
+        const current = this.admission(attempt.request);
+        if (current.attempt.phase !== "submission_unknown" || current.attempt.leaseOwner !== lease.owner
+          || current.attempt.leaseEpoch !== lease.epoch || current.attempt.leaseExpiresAt <= Date.now() || current.reservation.state !== "reserved") return;
+        this.saveResult(current.attempt, { kind: "not_dispatched", code: "LOCAL_CANCELLED" });
+      });
+      if (this.hasDispatchOrResult(attempt.id)) return this.recover(attempt, signal);
+    }
+    const unresolved = (): ExecutionOutcome => dispatch && Date.now() - Date.parse(dispatch.createdAt) >= MAX_SUBMIT_TIMEOUT_MS
+      ? responseLost() : unknown("Transcription dispatch has no durable outcome; automatic resubmission is disabled");
+    if (!result) return unresolved();
     const observation = result.observation;
     assertTranscriptionExecutionResult(admission.attempt, mapping, dispatch, result, preparation, observation.kind === "completed"
       ? this.#store.get("execution_output_receipt", observation.outputReceiptId) : undefined);
     if (observation.kind === "not_dispatched" || observation.kind === "rejected") return { type: "rejected", certainty: "not_accepted",
       failureId: `transcription-${digest(result).slice(0, 32)}`, technical: observation.kind === "not_dispatched" || observation.source === "local", retryAllowed: false };
-    if (observation.kind === "unknown") return unknown(`Transcription submission unresolved: ${observation.code}`);
+    if (observation.kind === "unknown") return unresolved();
     try {
       await this.#outputs.recover(attempt.projectId, observation.outputReceiptId, signal ? { signal } : {});
       const completion = await this.#outputs.recoverCompletion(attempt.projectId, attempt.id, signal ? { signal } : {});

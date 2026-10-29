@@ -1,0 +1,75 @@
+{
+  "at": "2026-10-17T00:17:02.441Z",
+  "project": {
+    "activePlanId": null,
+    "artifacts": [],
+    "brief": "",
+    "capabilityLockId": "db9963c6-99de-41e1-a3ed-ea5f123f3449",
+    "cues": [],
+    "headVersion": 0,
+    "id": "c92bc45e-7df2-4b8f-98d5-47ee8e8aa271",
+    "maxFrames": 10800,
+    "name": "Paper boat LIVE-4",
+    "narration": {
+      "script": "",
+      "source": "undecided"
+    },
+    "revisionId": "5e83dc14-f29a-422f-973d-f703a8b83070",
+    "scenes": [],
+    "shots": [],
+    "story": ""
+  },
+  "plan": null,
+  "attempts": [],
+  "turns": [],
+  "notes": [],
+  "conversation": [],
+  "toolCalls": [],
+  "generation": {
+    "projectId": "c92bc45e-7df2-4b8f-98d5-47ee8e8aa271",
+    "revisionId": "5e83dc14-f29a-422f-973d-f703a8b83070",
+    "headVersion": 0,
+    "cursor": 1,
+    "fps": 30,
+    "stopped": null,
+    "director": {
+      "state": "idle",
+      "scopeIds": []
+    },
+    "controlAuthorityId": null,
+    "scenes": [],
+    "shots": {},
+    "restartCasualties": []
+  },
+  "exports": {
+    "readiness": {
+      "ready": false,
+      "demo": false,
+      "seconds": 0,
+      "blockers": [
+        {
+          "code": "empty_film"
+        }
+      ]
+    },
+    "current": null,
+    "history": []
+  },
+  "director": {
+    "mode": "fake",
+    "status": "idle",
+    "activeRequestId": null,
+    "turn": null,
+    "message": null,
+    "imageAttachmentsAvailable": false
+  },
+  "setup": {
+    "modelCalls": 0,
+    "selection": {
+      "mode": "fake"
+    },
+    "modelCatalogStatus": "blocked",
+    "codexVersion": "0.153.4",
+    "codexDiagnostic": null
+  }
+}

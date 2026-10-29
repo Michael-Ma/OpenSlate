@@ -1,0 +1,272 @@
+import type { GenerationOverview } from "@openslate/core/public";
+import type { Locale } from "../../shared/locale-preference.ts";
+import type { MessageId } from "../i18n/messages.ts";
+import type { Connection, StudioState, Toast } from "../store/state.ts";
+import { filmMeta } from "./keyframes.ts";
+import { msg, type Msg, type ProjectSummary, type ViewName } from "./types.ts";
+
+/** Below this width the shell stacks: sticky top bar, tabs on their own row, Director as a drawer. */
+export const NARROW_QUERY = "(max-width: 899px)";
+
+export const VIEWS: readonly ViewName[] = ["plan", "keyframes", "assets", "film"];
+
+export interface ViewTab {
+  view: ViewName;
+  label: MessageId;
+  selected: boolean;
+  /** The one tab the row's roving focus starts on: the selected tab, else the first (Settings has no tab). */
+  focusable: boolean;
+}
+
+const TAB_LABELS: Record<ViewName, MessageId> = {
+  plan: "shell.tab.plan",
+  keyframes: "shell.tab.keyframes",
+  assets: "shell.tab.assets",
+  film: "shell.tab.film",
+  settings: "shell.tab.settings",
+  start: "shell.tab.start",
+};
+
+export function viewTabs(current: ViewName): ViewTab[] {
+  const anySelected = VIEWS.includes(current);
+  return VIEWS.map((view, index) => ({ view, label: TAB_LABELS[view], selected: view === current, focusable: anySelected ? view === current : index === 0 }));
+}
+
+export const viewLabel = (view: ViewName): MessageId => TAB_LABELS[view];
+
+/** The studio answered and has no films at all. */
+export const hasNoFilms = (state: Pick<StudioState, "projectId" | "projects" | "connection">): boolean =>
+  state.connection !== "connecting" && state.projects.length === 0 && !state.projectId;
+
+/**
+ * The view the workspace shows. A studio with no films at all opens on Start, whatever view was asked for,
+ * because there is nothing to plan or make yet.
+ */
+export function shownView(state: Pick<StudioState, "view" | "projectId" | "projects" | "connection">): ViewName {
+  return hasNoFilms(state) ? "start" : state.view;
+}
+
+/**
+ * Whether a film is open for the Director. Start (from the mark, or held there because there are no films) has
+ * no film open even while the store still remembers the last one, so the Director column shows its no-film state
+ * there and its composer is off: a message typed on Start must not go to a film the page says is not open.
+ */
+export function directorHasFilm(state: Pick<StudioState, "view" | "projectId" | "projects" | "connection">): boolean {
+  return !!state.projectId && shownView(state) !== "start";
+}
+
+/** The views that show a film's shots, so a Director note's Open selects the shot there instead of leaving. */
+const SHOWS_SHOTS: readonly ViewName[] = ["plan", "keyframes", "assets", "film"];
+
+/** Where a Director note's "Open 2.2" lands: the current view when it can show the shot, else Keyframes (from Settings and Start). */
+export const noteOpenView = (view: ViewName): ViewName => (SHOWS_SHOTS.includes(view) ? view : "keyframes");
+
+/**
+ * The top bar in a film (title, tabs, counts, Stop) or with no film open: on Start, and in Settings reached from Start
+ * with no film chosen (the films on this computer; no tabs, no counts, no Stop, since the views have nothing to show).
+ */
+export const topBarMode = (view: ViewName, filmOpen = true): "film" | "films" => (view === "start" || !filmOpen ? "films" : "film");
+
+/**
+ * When the whole page is the Connect screen instead of the studio. Before the film list has been read there
+ * is nothing to show behind a message, so the page connects (or explains why it cannot). Once the studio has
+ * loaded, an expired session is a dialog over the page instead, so nothing on screen is lost.
+ */
+export function connectScreen(state: Pick<StudioState, "connection" | "projectId" | "loadErrors">): "connecting" | "expired" | "failed" | null {
+  if (state.loadErrors.projects !== undefined) return state.connection === "expired" ? "expired" : "failed";
+  if (state.connection === "failed") return "failed";
+  if (state.connection === "connecting" && !state.projectId) return "connecting";
+  return null;
+}
+
+/** Roving focus in the tab row: arrows wrap, Home and End jump. Returns null for keys the row ignores. */
+export function tabKeyTarget(key: string, index: number, count: number): number | null {
+  if (count <= 0) return null;
+  switch (key) {
+    case "ArrowRight": return (index + 1) % count;
+    case "ArrowLeft": return (index - 1 + count) % count;
+    case "Home": return 0;
+    case "End": return count - 1;
+    default: return null;
+  }
+}
+
+
+export const otherLocale = (locale: Locale): Locale => (locale === "en" ? "zh-CN" : "en");
+
+/**
+ * An explicit `?lang=` in the address wins over the saved preference on reload, so a switch must update it too.
+ * Returns null when the address has no language to update.
+ */
+export function searchWithLocale(search: string, locale: Locale): string | null {
+  const params = new URLSearchParams(search);
+  if (!params.has("lang")) return null;
+  params.set("lang", locale);
+  return `?${params.toString()}`;
+}
+
+export interface ConnectionPill {
+  label: Msg;
+  /** "ok" while changes reach the studio; "waiting" while it reconnects; "offline" once it cannot be reached. */
+  tone: "ok" | "waiting" | "offline";
+}
+
+/**
+ * Synced while the studio's events arrive; Reconnecting while the event stream is down but the studio may still
+ * answer; Offline once a plain read got no answer either (`offline`, the shell's reachability check). Before the
+ * first connection it says Connecting, and Not connected once the session ended.
+ */
+export function connectionPill(connection: Connection, offline = false): ConnectionPill {
+  switch (connection) {
+    case "connected": return { label: msg("shell.synced"), tone: "ok" };
+    case "connecting": return offline ? { label: msg("shell.offline"), tone: "offline" } : { label: msg("connect.connecting"), tone: "waiting" };
+    case "reconnecting": return offline ? { label: msg("shell.offline"), tone: "offline" } : { label: msg("shell.reconnecting"), tone: "waiting" };
+    default: return { label: msg("shell.not_connected"), tone: "offline" };
+  }
+}
+
+// ---- the view in the address ------------------------------------------------------------------
+
+const URL_VIEWS: Record<string, ViewName> = {
+  plan: "plan", keyframes: "keyframes", film: "film", assets: "assets", settings: "settings", start: "start",
+  // The classic studio's names, so a link from it opens the same view here.
+  frames: "keyframes", cut: "film",
+};
+
+/** The view a link or a reload asks for (`?view=plan`), or null when it names none. */
+export function viewFromSearch(search: string): ViewName | null {
+  const value = new URLSearchParams(search).get("view");
+  return value && Object.hasOwn(URL_VIEWS, value) ? URL_VIEWS[value]! : null;
+}
+
+/** The address's query with the view on screen, keeping everything else (`ui`, `fixture`, `lang`, `project`). */
+export function searchWithView(search: string, view: ViewName): string {
+  const params = new URLSearchParams(search);
+  params.set("view", view);
+  return `?${params.toString()}`;
+}
+
+export interface FilmHeading {
+  title: string;
+  /** Duration and frame rate; null until the overview is read. */
+  meta: Msg | null;
+  counts: Msg | null;
+}
+
+/** The film's name comes from the snapshot, else the project list while the snapshot loads. */
+export function filmHeading(
+  name: string | undefined,
+  projects: readonly ProjectSummary[],
+  projectId: string | null,
+  overview: GenerationOverview | null,
+): FilmHeading {
+  const title = name ?? projects.find((project) => project.id === projectId)?.name ?? "";
+  if (!overview) return { title, meta: null, counts: null };
+  const meta = filmMeta(overview);
+  return {
+    title,
+    meta: msg("shell.meta", { seconds: meta.seconds, fps: meta.fps }),
+    counts: msg("shell.counts", { scenes: meta.scenes, shots: meta.shots }),
+  };
+}
+
+/** A film picker appears only when there is something to switch to. */
+export const showProjectPicker = (projects: readonly ProjectSummary[]): boolean => projects.length > 1;
+
+// ---- toast timing ------------------------------------------------------------
+
+/** Info toasts leave on their own; errors stay until dismissed. */
+export const TOAST_INFO_MS = 6000;
+/** After the pointer or focus leaves a paused toast, it stays at least this long. */
+export const TOAST_RESUME_MIN_MS = 2000;
+
+export const toastLifetime = (toast: Pick<Toast, "tone">): number | null => (toast.tone === "info" ? TOAST_INFO_MS : null);
+
+/** A pausable countdown. `since` is when the current running stretch began; null while paused. */
+export interface Countdown {
+  remaining: number;
+  since: number | null;
+}
+
+export const startCountdown = (ms: number, now: number): Countdown => ({ remaining: ms, since: now });
+
+export function pauseCountdown(countdown: Countdown, now: number): Countdown {
+  if (countdown.since === null) return countdown;
+  return { remaining: Math.max(0, countdown.remaining - (now - countdown.since)), since: null };
+}
+
+export function resumeCountdown(countdown: Countdown, now: number): Countdown {
+  if (countdown.since !== null) return countdown;
+  return { remaining: Math.max(countdown.remaining, TOAST_RESUME_MIN_MS), since: now };
+}
+
+/** A box on screen, in viewport pixels (the fields of a DOMRect the toast's placement reads). */
+export interface ScreenBox {
+  top: number;
+  bottom: number;
+  left: number;
+  width: number;
+}
+
+/** Where the toast's top edge and horizontal centre go, and how wide it may grow. */
+export interface ToastSpot {
+  top: number;
+  centre: number;
+  maxWidth: number;
+}
+
+/** The toast's distance from what it sits under (and from the workspace's foot), and its widest. */
+const TOAST_GAP = 12;
+const TOAST_FOOT = 22;
+const TOAST_MAX_WIDTH = 640;
+
+/** What the toast's placement reads from the page, in viewport pixels. */
+export interface ToastPlace {
+  /** The view's main area, below the top bar and any film-wide strip. */
+  workspace: ScreenBox;
+  /** The view's picture (the Keyframes preview, the Film player), if it has one, and the row of pills along its top. */
+  picture: ScreenBox | null;
+  pictureHead: ScreenBox | null;
+  /** The view opens with a title row (Plan, Assets, Settings, Start, Film) whose middle is free. */
+  titled: boolean;
+  viewportHeight: number;
+  toastHeight: number;
+}
+
+/**
+ * From 900 px the toast sits over the top of the view's picture (DESIGN.md), just under the picture's own row of
+ * pills, centred on it, so it stays clear of the shot cards and the Film tool row at the foot of the workspace, the
+ * controls a toast usually reports on. When that spot is off screen, and in views with no picture but a title row
+ * (Plan, Assets, Settings, Start), it sits at the top of the workspace, over the title row's free middle. A view with
+ * neither (the recovery review, one card at the top) keeps it at the workspace's foot.
+ */
+export function toastSpot({ workspace, picture, pictureHead, titled, viewportHeight, toastHeight }: ToastPlace): ToastSpot {
+  const width = (box: ScreenBox) => Math.max(0, Math.min(TOAST_MAX_WIDTH, box.width - 2 * TOAST_GAP));
+  const centre = workspace.left + workspace.width / 2;
+  const top = Math.max(0, workspace.top) + TOAST_GAP;
+  if (picture && picture.width > 0) {
+    const over = Math.max(picture.top + TOAST_GAP, pictureHead ? pictureHead.bottom + TOAST_GAP / 2 : -Infinity);
+    // The spot must be on screen, under the workspace's top, and leave the toast inside the picture.
+    if (over >= top && over + toastHeight <= Math.min(viewportHeight, picture.bottom) - TOAST_GAP) {
+      return { top: over, centre: picture.left + picture.width / 2, maxWidth: width(picture) };
+    }
+  }
+  if (picture || titled) return { top, centre, maxWidth: width(workspace) };
+  return { top: Math.max(top, Math.min(viewportHeight, workspace.bottom) - TOAST_FOOT - toastHeight), centre, maxWidth: width(workspace) };
+}
+
+// ---- drawer ------------------------------------------------------------------
+
+/** Esc closes the Director drawer on narrow screens, unless something inside already used the key (an open @ picker). */
+export function escClosesDrawer(event: { key: string; defaultPrevented: boolean }, directorOpen: boolean, narrow: boolean): boolean {
+  return event.key === "Escape" && !event.defaultPrevented && directorOpen && narrow;
+}
+
+// ---- text --------------------------------------------------------------------
+
+/** Split a message on `backticks` so command names render as code. An unpaired backtick stays literal. */
+export function codeSegments(text: string): { text: string; code: boolean }[] {
+  const parts = text.split("`");
+  if (parts.length % 2 === 0) return text ? [{ text, code: false }] : [];
+  return parts.map((part, index) => ({ text: part, code: index % 2 === 1 })).filter((part) => part.text !== "");
+}

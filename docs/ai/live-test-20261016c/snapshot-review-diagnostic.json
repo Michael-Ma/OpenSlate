@@ -1,0 +1,943 @@
+{
+  "project": {
+    "activePlanId": "6df186b3-f667-4c80-8d06-da77882c29bf",
+    "artifacts": [],
+    "brief": "A simple, natural 12-second silent film: a white paper boat floating in a rain puddle at dusk. One scene, two shots of 6 seconds each: close-up, then wide with a gentle slow push-in. No people, text, narration, music or sound. Retain selected Codex images and Viggle models; generation only through human scene review buttons.",
+    "capabilityLockId": "918277f4-d1a1-49a0-83e7-85d3eafdd89d",
+    "cues": [],
+    "headVersion": 6,
+    "id": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+    "maxFrames": 10800,
+    "name": "Harbour film LIVE-3",
+    "narration": {
+      "script": "",
+      "source": "undecided"
+    },
+    "revisionId": "2daf0165-ac6a-4c52-902c-bfec3c25b954",
+    "scenes": [
+      {
+        "id": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "purpose": "Paper Boat at Dusk",
+        "revisionId": "55529191-9369-49df-8d33-57610a1c6d08"
+      }
+    ],
+    "shots": [
+      {
+        "action": "A white folded-paper boat floats and gently bobs in a rain puddle at dusk.",
+        "cueId": null,
+        "desiredFrames": 180,
+        "framing": "Close-up",
+        "id": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+        "imagePrompt": "Naturalistic close-up at puddle level of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Soft cool dusk light, delicate concentric rain ripples, visible paper folds, restrained natural colors. Simple composition. No people, no text, no logos.",
+        "motion": "Locked camera; subtle boat drift and small rain ripples.",
+        "narration": {
+          "mode": "none",
+          "text": "",
+          "voice": "stock"
+        },
+        "promptIntent": {
+          "image": "952cc233453e5936451aa8168f5ae520867c0b5da88990629a53ced8df06e44d",
+          "video": "0a256832b06963c79eae659a9f75198bfe8792c58eac4471c2213c4040ec1845"
+        },
+        "purpose": "Introduce the fragile white paper boat and quiet rain ripples.",
+        "referenceArtifactIds": [],
+        "revisionId": "f7014cf7-7f5d-458c-88b0-2caa33db0c53",
+        "sceneId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "videoPrompt": "Six-second naturalistic close-up. Keep the camera locked as the white paper boat gently bobs and drifts slightly on the rain puddle; small raindrops create delicate ripples. Preserve the boat's folded shape and soft dusk lighting. No people, text, dramatic motion or added objects. Silent, no narration or music."
+      },
+      {
+        "action": "The same white folded-paper boat floats quietly in the puddle, surrounded by wet ground and soft rain ripples.",
+        "cueId": null,
+        "desiredFrames": 180,
+        "framing": "Wide",
+        "id": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+        "imagePrompt": "Naturalistic wide view of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Show the full puddle and simple surrounding wet ground, with the boat small but clearly visible. Match the close-up's white folded boat, soft cool dusk light and restrained natural colors. Delicate rain ripples. No people, text or logos.",
+        "motion": "Gentle slow push-in; subtle boat bobbing and rain ripples.",
+        "narration": {
+          "mode": "none",
+          "text": "",
+          "voice": "stock"
+        },
+        "promptIntent": {
+          "image": "b62e024c77572dfed54f36d95fb4ad871587e94d93f8ece8e1dfa5db0f10f9cc",
+          "video": "9c2351c7a4e9a6a9d37347a50e8ab2f14e9edf85c7b745d2b9e60d3646078825"
+        },
+        "purpose": "Reveal the boat's small scale within the dusk puddle.",
+        "referenceArtifactIds": [],
+        "revisionId": "01f93f32-9bef-4076-802c-3b40f711332b",
+        "sceneId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "videoPrompt": "Six-second naturalistic wide shot of the same white folded-paper boat in the dusk rain puddle. Make a gentle, slow, steady camera push-in toward the boat while retaining a wide view and visible puddle edges. The boat gently bobs with slight natural drift; delicate rain ripples spread across the water. Preserve folded shape, environment and soft cool dusk light. No people, text, added objects or dramatic movement. Silent, no narration or music."
+      }
+    ],
+    "story": "Dusk settles over a rain puddle. In close-up, a small white folded-paper boat floats quietly amid delicate rain ripples. Cut to a wide view of the same boat and puddle, revealing the surrounding wet ground; a gentle slow push-in returns our attention to the boat. Natural light, restrained movement, a straight cut and complete silence."
+  },
+  "turns": [
+    {
+      "id": "2b77c7c7-c32c-43a9-9cae-514b87d390cf",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "state": "completed",
+      "at": "2026-10-16T23:36:23.908Z",
+      "updatedAt": "2026-10-16T23:37:03.930Z",
+      "runtime": "live",
+      "action": "conversation",
+      "reason": null,
+      "effects": {
+        "notesCreated": 0,
+        "proposalsHeld": 0,
+        "changesApplied": 2
+      },
+      "activity": {
+        "phase": "tool",
+        "state": "completed",
+        "at": "2026-10-16T23:37:00.654Z"
+      },
+      "progress": {
+        "tool": "read_context",
+        "state": "succeeded"
+      }
+    },
+    {
+      "id": "524aa404-9900-4c18-91b4-18ecafc18f0b",
+      "requestId": "f3aeb7fa-655d-4386-9a4a-eed6a3d6113a",
+      "state": "completed",
+      "at": "2026-10-16T23:39:17.907Z",
+      "updatedAt": "2026-10-16T23:39:53.697Z",
+      "runtime": "live",
+      "action": "keyframe_review",
+      "reason": null,
+      "effects": {
+        "notesCreated": 0,
+        "proposalsHeld": 0,
+        "changesApplied": 0
+      },
+      "activity": {
+        "phase": "tool",
+        "state": "completed",
+        "at": "2026-10-16T23:39:49.593Z"
+      },
+      "progress": {
+        "tool": "read_context",
+        "state": "succeeded"
+      }
+    }
+  ],
+  "notes": [],
+  "latestStoryboardEdit": {
+    "id": "958f738b-7566-4144-adf8-88b7ddee62e0",
+    "headVersion": 4,
+    "requestId": "b6be42d8-7873-42f6-a618-5bc7d20d99b9"
+  },
+  "workflow": {
+    "recipe": {
+      "id": "narrated-video",
+      "version": "1",
+      "stages": [
+        "intake",
+        "story",
+        "scene_plan",
+        "shot_plan",
+        "narration",
+        "storyboard",
+        "video",
+        "assembly",
+        "review"
+      ]
+    },
+    "narration": {
+      "hasScript": false,
+      "source": "undecided",
+      "inputState": "no_narration",
+      "timingCoverage": {
+        "total": 2,
+        "ready": 2,
+        "pending": 0
+      },
+      "acceptedMeasuredCues": []
+    },
+    "scopes": [
+      {
+        "shotId": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+        "sceneId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "planning": "available",
+        "videoTiming": "ready",
+        "timing": {
+          "source": "planned_duration",
+          "frames": 180
+        }
+      },
+      {
+        "shotId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+        "sceneId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "planning": "available",
+        "videoTiming": "ready",
+        "timing": {
+          "source": "planned_duration",
+          "frames": 180
+        }
+      }
+    ]
+  },
+  "stages": [
+    {
+      "bindingVersion": 1,
+      "contractDigest": "fb1720b6e925cb74d6843cf3eadac1bac005f332a93e0e39330f7b456b33f49f",
+      "id": "494d42a58c883529f7ea6d58e57ca991ab474bda881a9d3b778ffb25b93fb817",
+      "inputDigest": "85ab6cfd2239a31436ae21df7fa8cc944498fc81c36e5941f2b8a72bc5f49f9f",
+      "outputDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "progressVersion": 0,
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "stageId": "intake"
+    },
+    {
+      "bindingVersion": 1,
+      "contractDigest": "bd937d8c9722fab26236fc5732de70689f7e33ad26799de7b13e2b40abef8c98",
+      "id": "39d241dfd1530d3ca0de0a7deb3a81e85ab09e3305046d2c1ba85a94f90ca1ca",
+      "inputDigest": "c86b1e7f2d0603c164c564aae9c49229fbf3293b45fb90ea6f6e5c0628365fd2",
+      "outputDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "progressVersion": 0,
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "stageId": "story"
+    },
+    {
+      "bindingVersion": 1,
+      "contractDigest": "83ab2be09a07a3c0ebe0fd45749863555c2a5af008d6e34897cae713b837b68f",
+      "id": "35a618d9e4724715200bc277c27dfb11ede984740be437616cb6ca7a9df63bdd",
+      "inputDigest": "8fc60d00a833aacd0e018200ec8cbe52e32c24363f70968fb2dbd4a7eb14a7d6",
+      "outputDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "progressVersion": 0,
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+      "stageId": "scene_plan"
+    },
+    {
+      "bindingVersion": 1,
+      "contractDigest": "49c24d96f7c97572129e25446878ca97766e520009f3ea0264b247ae06073293",
+      "id": "d50f9c77cfd918100183921bb2a4dfe563f061a82f9776b8af27fbf5b2786475",
+      "inputDigest": "e813aa15796d31f6e4bb116217a723c1eef7f45e2e7780a591a0251c2a22582b",
+      "outputDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "progressVersion": 0,
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+      "stageId": "shot_plan"
+    },
+    {
+      "bindingVersion": 1,
+      "contractDigest": "49c24d96f7c97572129e25446878ca97766e520009f3ea0264b247ae06073293",
+      "id": "e1e1dee4322d8d6b662292b7ce6dca81aed315dc27cceb6bb5e567c5393fc6ff",
+      "inputDigest": "92d0ff4891798b43aed9a34e80b61872bbedbf5abd8d51aa04ee77e7e029f0af",
+      "outputDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "progressVersion": 0,
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+      "stageId": "shot_plan"
+    },
+    {
+      "bindingVersion": 2,
+      "contractDigest": "2904ab812dc748a7d4cade139895922c932ecdec809b8e3c612b7ce6d89a4ee6",
+      "id": "2f600f7b2ac872bb67ccee220073a8b5474df9afca4f6a59a6e09fa4b1f8311f",
+      "inputDigest": "ed0f901f971c94505cea2bcad6bc7874144eedb7278c1d88ef8d7e3a95ec4729",
+      "outputDigest": "1dd669d7292efe6325c6c1543753cf3ae3ce3185020f79952a05a6efc35402ff",
+      "progressVersion": 0,
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+      "stageId": "storyboard"
+    },
+    {
+      "bindingVersion": 2,
+      "contractDigest": "2904ab812dc748a7d4cade139895922c932ecdec809b8e3c612b7ce6d89a4ee6",
+      "id": "b558d9feb5085ab860894da53013e776cb1cb691856e56f195c2f029bf1d3283",
+      "inputDigest": "630f6773c73c225697396637221ddd409ff2ea39c92e7341a795a67d12ad30ce",
+      "outputDigest": "c8b4ce451a243164b4d85b0fa8abf24215d2c83456a02af59b3b964d2a4d0a61",
+      "progressVersion": 0,
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+      "stageId": "storyboard"
+    },
+    {
+      "bindingVersion": 1,
+      "contractDigest": "3f427f646ccbaf3a1fbee7676dc5aaba47b2005ac568bd56e2b1016262e729a0",
+      "id": "a15fff125639f9b2adfad940db317ff88f8a0931a2e25dc60d227e3de59fecaf",
+      "inputDigest": "909e5ca317563150eebd0be4e1b72a445f8745e9261ebf94978e4d08223ba179",
+      "outputDigest": "1dd669d7292efe6325c6c1543753cf3ae3ce3185020f79952a05a6efc35402ff",
+      "progressVersion": 0,
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+      "stageId": "video"
+    },
+    {
+      "bindingVersion": 1,
+      "contractDigest": "3f427f646ccbaf3a1fbee7676dc5aaba47b2005ac568bd56e2b1016262e729a0",
+      "id": "af7b73b3bb28c92bc1db253fd816c0961d3657038f357c5dfe15ca7369f305d1",
+      "inputDigest": "5d48bf7f48d4f97698a87cb5efdcfcc2ea0be47b426dd14d165832516a5d725b",
+      "outputDigest": "c8b4ce451a243164b4d85b0fa8abf24215d2c83456a02af59b3b964d2a4d0a61",
+      "progressVersion": 0,
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+      "stageId": "video"
+    }
+  ],
+  "outputs": [
+    {
+      "nodeId": "b4d5cca5-ca09-4f78-8b4a-caa946982432",
+      "candidateId": "d51d3970-3177-4bbe-a059-19f19b448907",
+      "port": "image",
+      "artifact": {
+        "artifactId": "beef05f39e99f85701fda766f81532d0d09857696166fe80473e0c7188d42dff",
+        "kind": "image",
+        "sha256": "42e50f9fa5a3e4231682244fd21452cdec7cd4e9e888b262d5d7388b2a1cfe9d"
+      },
+      "fixture": false
+    },
+    {
+      "nodeId": "f337577a-8250-4442-8e17-4e19b0ffe741",
+      "candidateId": "5476f4e0-7dbd-41b9-a365-72f91d611166",
+      "port": "image",
+      "artifact": {
+        "artifactId": "3d45548dd2f3be6720d5be66d85ef1e7d30b7e6ba7ea7cd654e620df853c3326",
+        "kind": "image",
+        "sha256": "8c088e98cf301a6acd8d913a92764274a1f3f768b6ef2e919c44c9eba3489476"
+      },
+      "fixture": false
+    }
+  ],
+  "attempts": [
+    {
+      "candidateId": "d51d3970-3177-4bbe-a059-19f19b448907",
+      "createdAt": "2026-10-16T23:38:07.148Z",
+      "failure": null,
+      "fingerprint": "024d68b45433a34a332d874077c13ac7427ebe8b2b8de971774c1da8f081c13f",
+      "id": "149d081e-5f1c-40a9-aaaf-1834aaf5bd6b",
+      "leaseEpoch": 1,
+      "leaseExpiresAt": 0,
+      "leaseOwner": "65881bd2-0f79-4e01-beb4-5252c6562ad6",
+      "nodeId": "b4d5cca5-ca09-4f78-8b4a-caa946982432",
+      "ordinal": 1,
+      "outputs": {
+        "image": {
+          "artifactId": "beef05f39e99f85701fda766f81532d0d09857696166fe80473e0c7188d42dff",
+          "kind": "image",
+          "sha256": "42e50f9fa5a3e4231682244fd21452cdec7cd4e9e888b262d5d7388b2a1cfe9d"
+        }
+      },
+      "phase": "succeeded",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "request": {
+        "args": {
+          "adapter": "codex-image",
+          "executionVersion": "1",
+          "height": 1024,
+          "profileConfiguration": {
+            "model": "codex-image-generation",
+            "settings": {
+              "directorModel": "gpt-6-astra",
+              "height": 1024,
+              "runtimeVersion": "0.153.4",
+              "width": 1024
+            }
+          },
+          "profileDigest": "4ec82d832f68f16ef8cb0df82b25ee58953117876a670fc753e8913d8573b051",
+          "profileIdentity": "codex-keyframes",
+          "profileRevision": "manual-live-1",
+          "prompt": "Naturalistic close-up at puddle level of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Soft cool dusk light, delicate concentric rain ripples, visible paper folds, restrained natural colors. Simple composition. No people, no text, no logos.",
+          "settings": {},
+          "width": 1024
+        },
+        "attemptId": "149d081e-5f1c-40a9-aaaf-1834aaf5bd6b",
+        "execution": {
+          "adapter": "codex-image",
+          "version": "1"
+        },
+        "fingerprint": "024d68b45433a34a332d874077c13ac7427ebe8b2b8de971774c1da8f081c13f",
+        "inputs": [],
+        "kind": "image",
+        "nodeId": "b4d5cca5-ca09-4f78-8b4a-caa946982432",
+        "profile": {
+          "configuration": {
+            "model": "codex-image-generation",
+            "settings": {
+              "directorModel": "gpt-6-astra",
+              "height": 1024,
+              "runtimeVersion": "0.153.4",
+              "width": 1024
+            }
+          },
+          "digest": "4ec82d832f68f16ef8cb0df82b25ee58953117876a670fc753e8913d8573b051",
+          "id": "codex-keyframes",
+          "revision": "manual-live-1"
+        },
+        "providerUse": {
+          "capabilityLockDigest": "2a88005eacd9b0c0ecfaad1e2ca242c4ed93415f32a0196f01b570237fd37c64",
+          "capabilityLockId": "918277f4-d1a1-49a0-83e7-85d3eafdd89d",
+          "kind": "configured",
+          "profileDefinitionDigest": "9a6a6cccb80d358a843757b2beae0c3189218ac1634a2ca4426ff945bb5aa679"
+        }
+      },
+      "reservationId": "f0fe88c2-cfd3-412b-8610-49a01c9222a4",
+      "specDigest": "024d68b45433a34a332d874077c13ac7427ebe8b2b8de971774c1da8f081c13f",
+      "taskId": null,
+      "workKey": null
+    },
+    {
+      "candidateId": "5476f4e0-7dbd-41b9-a365-72f91d611166",
+      "createdAt": "2026-10-16T23:38:48.288Z",
+      "failure": null,
+      "fingerprint": "83ce4892d42aa8cd7ab6ce881d812048b64d3dfd5a5ed6dbb3fe5c6573b245e9",
+      "id": "020959c5-0bf0-4415-b033-f5870a376957",
+      "leaseEpoch": 1,
+      "leaseExpiresAt": 0,
+      "leaseOwner": "65881bd2-0f79-4e01-beb4-5252c6562ad6",
+      "nodeId": "f337577a-8250-4442-8e17-4e19b0ffe741",
+      "ordinal": 1,
+      "outputs": {
+        "image": {
+          "artifactId": "3d45548dd2f3be6720d5be66d85ef1e7d30b7e6ba7ea7cd654e620df853c3326",
+          "kind": "image",
+          "sha256": "8c088e98cf301a6acd8d913a92764274a1f3f768b6ef2e919c44c9eba3489476"
+        }
+      },
+      "phase": "succeeded",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "request": {
+        "args": {
+          "adapter": "codex-image",
+          "executionVersion": "1",
+          "height": 1024,
+          "profileConfiguration": {
+            "model": "codex-image-generation",
+            "settings": {
+              "directorModel": "gpt-6-astra",
+              "height": 1024,
+              "runtimeVersion": "0.153.4",
+              "width": 1024
+            }
+          },
+          "profileDigest": "4ec82d832f68f16ef8cb0df82b25ee58953117876a670fc753e8913d8573b051",
+          "profileIdentity": "codex-keyframes",
+          "profileRevision": "manual-live-1",
+          "prompt": "Naturalistic wide view of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Show the full puddle and simple surrounding wet ground, with the boat small but clearly visible. Match the close-up's white folded boat, soft cool dusk light and restrained natural colors. Delicate rain ripples. No people, text or logos.",
+          "settings": {},
+          "width": 1024
+        },
+        "attemptId": "020959c5-0bf0-4415-b033-f5870a376957",
+        "execution": {
+          "adapter": "codex-image",
+          "version": "1"
+        },
+        "fingerprint": "83ce4892d42aa8cd7ab6ce881d812048b64d3dfd5a5ed6dbb3fe5c6573b245e9",
+        "inputs": [],
+        "kind": "image",
+        "nodeId": "f337577a-8250-4442-8e17-4e19b0ffe741",
+        "profile": {
+          "configuration": {
+            "model": "codex-image-generation",
+            "settings": {
+              "directorModel": "gpt-6-astra",
+              "height": 1024,
+              "runtimeVersion": "0.153.4",
+              "width": 1024
+            }
+          },
+          "digest": "4ec82d832f68f16ef8cb0df82b25ee58953117876a670fc753e8913d8573b051",
+          "id": "codex-keyframes",
+          "revision": "manual-live-1"
+        },
+        "providerUse": {
+          "capabilityLockDigest": "2a88005eacd9b0c0ecfaad1e2ca242c4ed93415f32a0196f01b570237fd37c64",
+          "capabilityLockId": "918277f4-d1a1-49a0-83e7-85d3eafdd89d",
+          "kind": "configured",
+          "profileDefinitionDigest": "9a6a6cccb80d358a843757b2beae0c3189218ac1634a2ca4426ff945bb5aa679"
+        }
+      },
+      "reservationId": "2c8399bb-025e-42cc-9446-90e8aed41774",
+      "specDigest": "83ce4892d42aa8cd7ab6ce881d812048b64d3dfd5a5ed6dbb3fe5c6573b245e9",
+      "taskId": null,
+      "workKey": null
+    },
+    {
+      "candidateId": "a58058c6-367a-4d8c-af0d-bc833631e2e3",
+      "createdAt": "2026-10-16T23:39:56.062Z",
+      "failure": null,
+      "fingerprint": "659d1d230d0c4244812a67bf055b60e33d2b275820a83c2e3bfbccc1d8076d12",
+      "id": "be48c9ab-85d6-4607-870b-6161a158f666",
+      "leaseEpoch": 161,
+      "leaseExpiresAt": 1792194108427,
+      "leaseOwner": "65881bd2-0f79-4e01-beb4-5252c6562ad6",
+      "nodeId": "ae49b79d-a71e-41cf-a863-ba24bed11a5e",
+      "ordinal": 1,
+      "outputs": {},
+      "phase": "remote_pending",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "request": {
+        "args": {
+          "adapter": "viggle-h3",
+          "durationFrames": 180,
+          "executionVersion": "1",
+          "frameRate": {
+            "denominator": 1,
+            "numerator": 30
+          },
+          "profileConfiguration": {
+            "model": "MiniMax-H3",
+            "settings": {
+              "aspectRatio": "16:9",
+              "quality": "low",
+              "resolution": "768p"
+            }
+          },
+          "profileDigest": "285e0ec396607c5d49d72be2a890e5042a33ac5bef1af757e1ca6d10194639df",
+          "profileIdentity": "viggle-live-six-seconds",
+          "profileRevision": "manual-live-1",
+          "prompt": "Six-second naturalistic close-up. Keep the camera locked as the white paper boat gently bobs and drifts slightly on the rain puddle; small raindrops create delicate ripples. Preserve the boat's folded shape and soft dusk lighting. No people, text, dramatic motion or added objects. Silent, no narration or music.",
+          "settings": {}
+        },
+        "attemptId": "be48c9ab-85d6-4607-870b-6161a158f666",
+        "execution": {
+          "adapter": "viggle-h3",
+          "version": "1"
+        },
+        "fingerprint": "659d1d230d0c4244812a67bf055b60e33d2b275820a83c2e3bfbccc1d8076d12",
+        "inputs": [
+          {
+            "artifactId": "beef05f39e99f85701fda766f81532d0d09857696166fe80473e0c7188d42dff",
+            "kind": "image",
+            "sha256": "42e50f9fa5a3e4231682244fd21452cdec7cd4e9e888b262d5d7388b2a1cfe9d"
+          }
+        ],
+        "kind": "video",
+        "nodeId": "ae49b79d-a71e-41cf-a863-ba24bed11a5e",
+        "profile": {
+          "configuration": {
+            "model": "MiniMax-H3",
+            "settings": {
+              "aspectRatio": "16:9",
+              "quality": "low",
+              "resolution": "768p"
+            }
+          },
+          "digest": "285e0ec396607c5d49d72be2a890e5042a33ac5bef1af757e1ca6d10194639df",
+          "id": "viggle-live-six-seconds",
+          "revision": "manual-live-1"
+        },
+        "providerUse": {
+          "capabilityLockDigest": "2a88005eacd9b0c0ecfaad1e2ca242c4ed93415f32a0196f01b570237fd37c64",
+          "capabilityLockId": "918277f4-d1a1-49a0-83e7-85d3eafdd89d",
+          "kind": "configured",
+          "profileDefinitionDigest": "bcddfa20fb2bdf019d8b7712f5d52ec2208b3e72014208a11e9ac6843597c70a"
+        }
+      },
+      "reservationId": "f4459fbe-907b-46b3-82f1-1199a92b737b",
+      "specDigest": "a92e41939256619ef44ae8292f98dca64da2390951575da0a4e943a595dc0384",
+      "taskId": "vid_af346239-e052-4d1f-9efd-54bed8aef874",
+      "workKey": null
+    }
+  ],
+  "currentAttemptIds": [
+    "149d081e-5f1c-40a9-aaaf-1834aaf5bd6b",
+    "020959c5-0bf0-4415-b033-f5870a376957",
+    "be48c9ab-85d6-4607-870b-6161a158f666"
+  ],
+  "assessments": [],
+  "holds": [
+    {
+      "active": false,
+      "id": "94325db6-fd96-4fd4-b776-731c246defba",
+      "ownerId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921"
+    },
+    {
+      "active": false,
+      "id": "f7998e67-1620-4afe-b96d-4c7748398026",
+      "ownerId": "35650ac0-aa47-4242-bbf7-f21cdc9fd6aa",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563"
+    },
+    {
+      "active": false,
+      "id": "3d64d901-30f5-4913-b207-6af77f9826ed",
+      "ownerId": "4170aafc-1369-4a74-8d08-7fbb1c53b9de",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563"
+    }
+  ],
+  "pendingEditContinuations": [],
+  "messages": [
+    {
+      "contextDigest": "906fd4f9ecb41fab579735786f5b63c9aa1f6067cdcfc80a7a06e20aa25a6cac",
+      "editing": true,
+      "id": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "principalId": "local-user",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeIds": [
+        "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921"
+      ],
+      "source": "user",
+      "state": "superseded",
+      "text": "Make a short silent film about a white paper boat floating in a rain puddle at dusk: two shots, 6 seconds each, total 12 seconds. First a close-up, then a wide view with a gentle slow push-in. Simple, natural, no people, no text, no narration and no music. Save the story, one scene, both shots, prompts and explicit No narration. Use the selected Codex images and Viggle models. Leave media generation for my scene review buttons."
+    },
+    {
+      "concurrency": "alongside",
+      "contextDigest": null,
+      "editing": true,
+      "id": "b88efd18-44f0-46e2-b250-d7d6ca8f3e62",
+      "principalId": "local-user",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeIds": [
+        "3d899eae-6cee-4443-bb1e-b2e45604f32e"
+      ],
+      "source": "app",
+      "state": "superseded",
+      "text": "Storyboard edit: shotFields. Preserve unaffected work and replan only what this edit requires."
+    },
+    {
+      "concurrency": "alongside",
+      "contextDigest": null,
+      "editing": true,
+      "id": "b6be42d8-7873-42f6-a618-5bc7d20d99b9",
+      "principalId": "local-user",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeIds": [
+        "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921"
+      ],
+      "source": "app",
+      "state": "superseded",
+      "text": "Storyboard edit: undo. Preserve unaffected work and replan only what this edit requires."
+    },
+    {
+      "contextDigest": null,
+      "editing": true,
+      "id": "35650ac0-aa47-4242-bbf7-f21cdc9fd6aa",
+      "principalId": "local-user",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeIds": [
+        "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563"
+      ],
+      "source": "app",
+      "state": "active",
+      "text": "Generate keyframes for  this reviewed scene."
+    },
+    {
+      "contextDigest": null,
+      "editing": false,
+      "id": "f3aeb7fa-655d-4386-9a4a-eed6a3d6113a",
+      "principalId": "local-user",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeIds": [
+        "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+        "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8"
+      ],
+      "source": "app",
+      "state": "active",
+      "text": "Review the newly returned keyframe batch. Read context, record honest notes and propose changes only. Do not edit the film or start generation."
+    },
+    {
+      "concurrency": "alongside",
+      "contextDigest": null,
+      "editing": true,
+      "id": "4170aafc-1369-4a74-8d08-7fbb1c53b9de",
+      "principalId": "local-user",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "scopeIds": [
+        "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563"
+      ],
+      "source": "app",
+      "state": "active",
+      "text": "Confirm the reviewed scene frames, narration and video recipe."
+    }
+  ],
+  "conversation": [
+    {
+      "id": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "role": "user",
+      "text": "Make a short silent film about a white paper boat floating in a rain puddle at dusk: two shots, 6 seconds each, total 12 seconds. First a close-up, then a wide view with a gentle slow push-in. Simple, natural, no people, no text, no narration and no music. Save the story, one scene, both shots, prompts and explicit No narration. Use the selected Codex images and Viggle models. Leave media generation for my scene review buttons.",
+      "state": "superseded",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "at": "2026-10-16T23:36:23.908Z"
+    },
+    {
+      "id": "af8abfef-b607-4999-9888-e485952cc54d",
+      "role": "assistant",
+      "text": "Saved the story, scene and six-second close-up with explicit No narration. I’m adding the six-second wide shot next, keeping generation for your scene buttons.",
+      "state": "commentary",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "at": "2026-10-16T23:36:50.041Z",
+      "runtime": "live"
+    },
+    {
+      "id": "9ad078e8-1bb2-43f2-8fbb-993c66bfbea4",
+      "role": "assistant",
+      "text": "Saved **Paper Boat at Dusk**: story, one scene, both shots and prompts.\n\n- Close-up — 6 seconds.\n- Wide with gentle slow push-in — 6 seconds.\n- Explicit **No narration** on both; no music, people or text.\n\nSelected Codex images and Viggle models preserved. No generation started. Next: use your scene button to create keyframes.",
+      "state": "final",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "at": "2026-10-16T23:37:03.889Z",
+      "runtime": "live"
+    },
+    {
+      "id": "837d3808-b87e-4347-a3eb-4fb9220f0f54",
+      "role": "assistant",
+      "text": "**Paper Boat at Dusk:** I recommend keeping both frames.\n\n- **Close-up:** Clear paper folds and rain ripples; convincing natural dusk mood.\n- **Wide:** Effective scale change, with the boat still readable and broadly consistent lighting.\n\nThe stills cannot verify bobbing or the slow push-in. No film edits or generation initiated. Notes could not be saved because the application rejected the note payload.",
+      "state": "final",
+      "requestId": "f3aeb7fa-655d-4386-9a4a-eed6a3d6113a",
+      "at": "2026-10-16T23:39:53.647Z",
+      "runtime": "live"
+    }
+  ],
+  "control": {
+    "paused": false
+  },
+  "plan": {
+    "id": "6df186b3-f667-4c80-8d06-da77882c29bf",
+    "graphDigest": "f55a395da07fd527670a7a6d7b430f6909eca0844f5dfbc290efbdefca815299",
+    "canonicalSource": "definePlan({ \"baseRevision\": \"0b59e403-b704-4540-86af-56d367d63584\" }, (p) => {\n  const __scene_8 = p.shot(\"eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8\");\n  const __scene_5 = p.shot(\"3d899eae-6cee-4443-bb1e-b2e45604f32e\");\n  const __scene_3 = p.shot(\"eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8\");\n  const __scene_1 = p.shot(\"3d899eae-6cee-4443-bb1e-b2e45604f32e\");\n  const __scene_2 = p.image(\"shot-3d899eae-6cee-4443-bb1e-b2e45604f32e/keyframe\", { \"intent\": __scene_1, \"profile\": \"codex-keyframes\", \"prompt\": \"Naturalistic close-up at puddle level of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Soft cool dusk light, delicate concentric rain ripples, visible paper folds, restrained natural colors. Simple composition. No people, no text, no logos.\", \"references\": [], \"width\": 1024, \"height\": 1024 });\n  const __scene_4 = p.image(\"shot-eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8/keyframe\", { \"intent\": __scene_3, \"profile\": \"codex-keyframes\", \"prompt\": \"Naturalistic wide view of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Show the full puddle and simple surrounding wet ground, with the boat small but clearly visible. Match the close-up's white folded boat, soft cool dusk light and restrained natural colors. Delicate rain ripples. No people, text or logos.\", \"references\": [], \"width\": 1024, \"height\": 1024 });\n  const __scene_6 = p.humanReview(\"scene-3d899eae-6cee-4443-bb1e-b2e45604f32e/review\", { \"shots\": [{ \"intent\": __scene_5, \"keyframe\": __scene_2, \"videoProfile\": \"viggle-live-six-seconds\", \"motionPrompt\": \"Six-second naturalistic close-up. Keep the camera locked as the white paper boat gently bobs and drifts slightly on the rain puddle; small raindrops create delicate ripples. Preserve the boat's folded shape and soft dusk lighting. No people, text, dramatic motion or added objects. Silent, no narration or music.\", \"seconds\": 6 }] });\n  const __scene_7 = p.video(\"shot-3d899eae-6cee-4443-bb1e-b2e45604f32e/video\", { \"intent\": __scene_5, \"profile\": \"viggle-live-six-seconds\", \"firstFrame\": p.approvedImage(__scene_2, __scene_6), \"prompt\": \"Six-second naturalistic close-up. Keep the camera locked as the white paper boat gently bobs and drifts slightly on the rain puddle; small raindrops create delicate ripples. Preserve the boat's folded shape and soft dusk lighting. No people, text, dramatic motion or added objects. Silent, no narration or music.\", \"seconds\": 6 });\n  const __scene_9 = p.humanReview(\"scene-eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8/review\", { \"shots\": [{ \"intent\": __scene_8, \"keyframe\": __scene_4, \"videoProfile\": \"viggle-live-six-seconds\", \"motionPrompt\": \"Six-second naturalistic wide shot of the same white folded-paper boat in the dusk rain puddle. Make a gentle, slow, steady camera push-in toward the boat while retaining a wide view and visible puddle edges. The boat gently bobs with slight natural drift; delicate rain ripples spread across the water. Preserve folded shape, environment and soft cool dusk light. No people, text, added objects or dramatic movement. Silent, no narration or music.\", \"seconds\": 6 }] });\n  const __scene_10 = p.video(\"shot-eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8/video\", { \"intent\": __scene_8, \"profile\": \"viggle-live-six-seconds\", \"firstFrame\": p.approvedImage(__scene_4, __scene_9), \"prompt\": \"Six-second naturalistic wide shot of the same white folded-paper boat in the dusk rain puddle. Make a gentle, slow, steady camera push-in toward the boat while retaining a wide view and visible puddle edges. The boat gently bobs with slight natural drift; delicate rain ripples spread across the water. Preserve folded shape, environment and soft cool dusk light. No people, text, added objects or dramatic movement. Silent, no narration or music.\", \"seconds\": 6 });\n  return [__scene_2, __scene_4];\n});\n",
+    "nodes": [
+      {
+        "alias": "shot-3d899eae-6cee-4443-bb1e-b2e45604f32e/keyframe",
+        "args": {
+          "adapter": "codex-image",
+          "executionVersion": "1",
+          "height": 1024,
+          "profileConfiguration": {
+            "model": "codex-image-generation",
+            "settings": {
+              "directorModel": "gpt-6-astra",
+              "height": 1024,
+              "runtimeVersion": "0.153.4",
+              "width": 1024
+            }
+          },
+          "profileDigest": "4ec82d832f68f16ef8cb0df82b25ee58953117876a670fc753e8913d8573b051",
+          "profileIdentity": "codex-keyframes",
+          "profileRevision": "manual-live-1",
+          "prompt": "Naturalistic close-up at puddle level of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Soft cool dusk light, delicate concentric rain ripples, visible paper folds, restrained natural colors. Simple composition. No people, no text, no logos.",
+          "settings": {},
+          "width": 1024
+        },
+        "id": "b4d5cca5-ca09-4f78-8b4a-caa946982432",
+        "inputs": [],
+        "intentDigest": "952cc233453e5936451aa8168f5ae520867c0b5da88990629a53ced8df06e44d",
+        "kind": "image",
+        "profileId": "codex-keyframes",
+        "requires": [],
+        "shotId": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+        "shotRevisionId": "f7014cf7-7f5d-458c-88b0-2caa33db0c53",
+        "specDigest": "024d68b45433a34a332d874077c13ac7427ebe8b2b8de971774c1da8f081c13f"
+      },
+      {
+        "alias": "shot-eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8/keyframe",
+        "args": {
+          "adapter": "codex-image",
+          "executionVersion": "1",
+          "height": 1024,
+          "profileConfiguration": {
+            "model": "codex-image-generation",
+            "settings": {
+              "directorModel": "gpt-6-astra",
+              "height": 1024,
+              "runtimeVersion": "0.153.4",
+              "width": 1024
+            }
+          },
+          "profileDigest": "4ec82d832f68f16ef8cb0df82b25ee58953117876a670fc753e8913d8573b051",
+          "profileIdentity": "codex-keyframes",
+          "profileRevision": "manual-live-1",
+          "prompt": "Naturalistic wide view of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Show the full puddle and simple surrounding wet ground, with the boat small but clearly visible. Match the close-up's white folded boat, soft cool dusk light and restrained natural colors. Delicate rain ripples. No people, text or logos.",
+          "settings": {},
+          "width": 1024
+        },
+        "id": "f337577a-8250-4442-8e17-4e19b0ffe741",
+        "inputs": [],
+        "intentDigest": "b62e024c77572dfed54f36d95fb4ad871587e94d93f8ece8e1dfa5db0f10f9cc",
+        "kind": "image",
+        "profileId": "codex-keyframes",
+        "requires": [],
+        "shotId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+        "shotRevisionId": "01f93f32-9bef-4076-802c-3b40f711332b",
+        "specDigest": "83ce4892d42aa8cd7ab6ce881d812048b64d3dfd5a5ed6dbb3fe5c6573b245e9"
+      },
+      {
+        "alias": "shot-3d899eae-6cee-4443-bb1e-b2e45604f32e/video",
+        "args": {
+          "adapter": "viggle-h3",
+          "durationFrames": 180,
+          "executionVersion": "1",
+          "frameRate": {
+            "denominator": 1,
+            "numerator": 30
+          },
+          "profileConfiguration": {
+            "model": "MiniMax-H3",
+            "settings": {
+              "aspectRatio": "16:9",
+              "quality": "low",
+              "resolution": "768p"
+            }
+          },
+          "profileDigest": "285e0ec396607c5d49d72be2a890e5042a33ac5bef1af757e1ca6d10194639df",
+          "profileIdentity": "viggle-live-six-seconds",
+          "profileRevision": "manual-live-1",
+          "prompt": "Six-second naturalistic close-up. Keep the camera locked as the white paper boat gently bobs and drifts slightly on the rain puddle; small raindrops create delicate ripples. Preserve the boat's folded shape and soft dusk lighting. No people, text, dramatic motion or added objects. Silent, no narration or music.",
+          "settings": {}
+        },
+        "id": "ae49b79d-a71e-41cf-a863-ba24bed11a5e",
+        "inputs": [
+          {
+            "destinationPort": "firstFrame",
+            "order": 0,
+            "role": "first_frame",
+            "source": {
+              "kind": "output",
+              "nodeId": "b4d5cca5-ca09-4f78-8b4a-caa946982432",
+              "port": "image"
+            }
+          }
+        ],
+        "intentDigest": "0a256832b06963c79eae659a9f75198bfe8792c58eac4471c2213c4040ec1845",
+        "kind": "video",
+        "profileId": "viggle-live-six-seconds",
+        "requires": [
+          "443054c9-1c8c-4c6f-80c1-b5467a8c450d"
+        ],
+        "shotId": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+        "shotRevisionId": "f7014cf7-7f5d-458c-88b0-2caa33db0c53",
+        "specDigest": "a92e41939256619ef44ae8292f98dca64da2390951575da0a4e943a595dc0384"
+      },
+      {
+        "alias": "shot-eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8/video",
+        "args": {
+          "adapter": "viggle-h3",
+          "durationFrames": 180,
+          "executionVersion": "1",
+          "frameRate": {
+            "denominator": 1,
+            "numerator": 30
+          },
+          "profileConfiguration": {
+            "model": "MiniMax-H3",
+            "settings": {
+              "aspectRatio": "16:9",
+              "quality": "low",
+              "resolution": "768p"
+            }
+          },
+          "profileDigest": "285e0ec396607c5d49d72be2a890e5042a33ac5bef1af757e1ca6d10194639df",
+          "profileIdentity": "viggle-live-six-seconds",
+          "profileRevision": "manual-live-1",
+          "prompt": "Six-second naturalistic wide shot of the same white folded-paper boat in the dusk rain puddle. Make a gentle, slow, steady camera push-in toward the boat while retaining a wide view and visible puddle edges. The boat gently bobs with slight natural drift; delicate rain ripples spread across the water. Preserve folded shape, environment and soft cool dusk light. No people, text, added objects or dramatic movement. Silent, no narration or music.",
+          "settings": {}
+        },
+        "id": "2ebf0e35-4317-45cf-9f93-a4fc66c946f9",
+        "inputs": [
+          {
+            "destinationPort": "firstFrame",
+            "order": 0,
+            "role": "first_frame",
+            "source": {
+              "kind": "output",
+              "nodeId": "f337577a-8250-4442-8e17-4e19b0ffe741",
+              "port": "image"
+            }
+          }
+        ],
+        "intentDigest": "9c2351c7a4e9a6a9d37347a50e8ab2f14e9edf85c7b745d2b9e60d3646078825",
+        "kind": "video",
+        "profileId": "viggle-live-six-seconds",
+        "requires": [
+          "8c2e34e1-4094-4998-ba2a-d7c38f1b06c1"
+        ],
+        "shotId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+        "shotRevisionId": "01f93f32-9bef-4076-802c-3b40f711332b",
+        "specDigest": "0c96f76a2be71876003ecd4a4a49acb0730c0b05f30836cc4d8aff95fd9c51b3"
+      }
+    ]
+  },
+  "questions": [],
+  "previousPreviews": [],
+  "pendingAudioRequests": [],
+  "reconciliations": [],
+  "toolCalls": [
+    {
+      "id": "c235412ea0306498f4aeefe32dc400cfc7d0ebfd1ff85a4b106ae43608f6dc90",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "epochId": "195588c4-82cd-4eec-a837-ce8e4ce7511c",
+      "callId": "92da80a7-8355-4929-a1b5-e2c42d80b5c2",
+      "tool": "read_context",
+      "state": "succeeded",
+      "resultDigest": "fe34a71d06dd5eabe1626644d4f809c7b5d1ded6fe2b8e267807d29506240929"
+    },
+    {
+      "id": "75adb8763bc2b9063a8dd51e20f1e84c889600f29a912bbaa4d416291d87fddf",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "epochId": "195588c4-82cd-4eec-a837-ce8e4ce7511c",
+      "callId": "71998322-18ec-4dd0-9806-9c7b7ee46a70",
+      "tool": "prepare_change",
+      "state": "succeeded",
+      "resultDigest": "a05c3cb1705bc4c2e6d26e0d8013b8a84365cd9ed7b896e44633cd6c3da67234"
+    },
+    {
+      "id": "f7662108c607007b8234579cc687f3f2e4ce28e879aab81ba6d63d0692d14e9e",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "epochId": "195588c4-82cd-4eec-a837-ce8e4ce7511c",
+      "callId": "e31ba160-fff9-47b6-9ef6-e0287d4aaab8",
+      "tool": "apply_change",
+      "state": "succeeded",
+      "resultDigest": "466228b3d617f3fa0914b457de2783c98ad7455c97d4a2894a8621a67e9ddbd3"
+    },
+    {
+      "id": "3b9f998e3eb715b1ce90d273f9e5bba77f90727ffde0211f877ba49870c8cc96",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "epochId": "195588c4-82cd-4eec-a837-ce8e4ce7511c",
+      "callId": "99359f63-1adf-46d3-9d3b-eb70cf5e3c65",
+      "tool": "read_context",
+      "state": "succeeded",
+      "resultDigest": "b473e03c71af772be14b42d317d591b717f9fdb43df1fbc8441a5478947e9c58"
+    },
+    {
+      "id": "8c7bd000dd42a91b10ec8237d3c56fe2c56dbb2b776b717cb7320a67c74c668f",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "epochId": "195588c4-82cd-4eec-a837-ce8e4ce7511c",
+      "callId": "6e4ae68f-26dd-489b-834a-309e6f118ffc",
+      "tool": "prepare_change",
+      "state": "succeeded",
+      "resultDigest": "e57f9a421c053c743811fc73cab5d47e08b4c6a8c85956f335450a4df8b4be2c"
+    },
+    {
+      "id": "ff2d81c0117bb48976ccc884920edc974d6167b716a434c3887067e67577fef0",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "epochId": "195588c4-82cd-4eec-a837-ce8e4ce7511c",
+      "callId": "7945142b-df67-45b7-9daa-0e4329b04d1f",
+      "tool": "apply_change",
+      "state": "succeeded",
+      "resultDigest": "4288ebcb18187e862dc4f00edce56cf2308ee589b374db3fb2be6563e44fdbb6"
+    },
+    {
+      "id": "6ae3bcf72b9e38f96383362e687204dc43772712ca3b35db00522accc608ecec",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "epochId": "195588c4-82cd-4eec-a837-ce8e4ce7511c",
+      "callId": "4f1a5742-f0cf-4500-a10f-21cd315299c6",
+      "tool": "read_context",
+      "state": "succeeded",
+      "resultDigest": "ff5cec59aff47151b2c7ccb3227244a02f35f1d658413b3aa71f9c5bf4b99f99"
+    },
+    {
+      "id": "62ca2b91cfd246c4dedbc46e4576bb38d721cccfd758d2923884f10ea6aabf5f",
+      "requestId": "f3aeb7fa-655d-4386-9a4a-eed6a3d6113a",
+      "epochId": "20dba440-7fa7-415d-a0d1-03f8082b2f02",
+      "callId": "adbd4b17-5471-40fa-92ee-3a3ad31f1608",
+      "tool": "read_context",
+      "state": "succeeded",
+      "resultDigest": "b633fe4226c30853cb90e24614261cde2e708bdac677352d795d39c712b4a7ae"
+    },
+    {
+      "id": "43d160e26d4168214b5dbd940df2903734c8edb852dd51513ba57987513ec4f6",
+      "requestId": "f3aeb7fa-655d-4386-9a4a-eed6a3d6113a",
+      "epochId": "20dba440-7fa7-415d-a0d1-03f8082b2f02",
+      "callId": "7d5a0355-ddd2-4270-a682-5e4a2fbc31a6",
+      "tool": "read_context",
+      "state": "succeeded",
+      "resultDigest": "fef157162dfefa1ebf16f95dcd0c0ecf7969a805fd86ab3667a8e1fa0cfa1c1b"
+    }
+  ],
+  "cursor": 263
+}

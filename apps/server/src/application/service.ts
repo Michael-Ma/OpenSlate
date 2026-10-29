@@ -1,3 +1,11 @@
+import { directorTurnViews } from "./director-turn-view.js";
+import { rebaseCreativeDraft } from "./creative-rebase.js";
+import { recordHumanFields, assertNoHumanFieldConflict } from "./human-fields.js";
+import { assertAcceptedNarrationDurationFloor } from "./publication-validation.js";
+import { directorNotes } from "./director-notes.js";
+import { messageAttachmentViews } from "./director-images.js";
+import { contextToolVersion } from "./audio-operation-context.js";
+import { requestScopesIntersect } from "./request-scopes.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   applyCreativePatch, compilePlanIsolated, DEFAULT_PROFILES, digest, diffPlans, invariant, newId,
@@ -9,9 +17,12 @@ import type {
   ActorContext, ArtifactRef, ChangeProposal, CompiledPlan, NodeImpact, OperationKind, ProjectRecord,
   LocalExecutionIdentity, ProviderProfile, ShotRecord, StageRequirement,
 } from "@openslate/core";
+import type { DirectorAttachmentRef, MessageAttachmentView, RequestSource } from "@openslate/core/public";
+import { projectRequest, migrateLegacyRequestSources } from "./request-source.js";
 import { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
-import type { ArtifactRecord, NodeBinding } from "../execution/engine.js";
+import type { ArtifactRecord, Attempt, NodeBinding } from "../execution/engine.js";
+import type { StopView, ReleaseAttemptInput, ReleaseAttemptReceipt, DiscardAttemptInput, DiscardAttemptReceipt, RetryLocalAttemptInput, RetryLocalAttemptReceipt } from "@openslate/core/public";
 import { projectDirectorContext } from "./context-projection.js";
 import type { DirectorContextQuery } from "./context-projection.js";
 import { selectedProviderProfiles } from "./provider-catalog.js";
@@ -22,9 +33,9 @@ import type { OwnedTranscriptionApplication, OwnedTranscriptionApplyReceipt, Own
 import { assertContinueEdits, continuationCovers, continuedRequestAuthorities, pendingEditContinuations, reviewPendingEdits } from './pending-edit-continuation.js';
 import type { ContinueEdits } from './pending-edit-continuation.js';
 import { isScopedAssemblyRebuild } from './scoped-assembly.js';
-import { assertNarrationAuthority } from '../narration/narration-scope.js';
+import { assertNarrationAuthority, narrationSpeechShotScopes } from '../narration/narration-scope.js';
 
-interface RequestRecord { source?: "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: "active" | "superseded"; contextDigest: string | null }
+export interface RequestRecord { source?: RequestSource | "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; concurrency?: "alongside"; state: "active" | "superseded"; contextDigest: string | null; attachments?: DirectorAttachmentRef[] }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; tokenHash: string; state: "active" | "read_only" | "revoked"; scopeIds: string[] }
 interface PlanRecord { id: string; projectId: string; compiled: CompiledPlan }
 interface Grant { id: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
@@ -42,11 +53,14 @@ interface Prepared {
 }
 
 export interface ApplyReceipt { preparedId: string; projectId: string; revisionId: string; headVersion: number; activePlanId: string | null; cursor: number }
+export type ShotNarrationAcceptance = Pick<ShotRecord, 'cueId' | 'narrationPending' | 'narrationTimingMode' | 'narrationFit'>;
 export interface ProductionServiceOptions {
   /** Trusted installation choice for new projects only. Existing locks never inherit this default. */
   newProjectLocalExecution?: LocalExecutionIdentity;
   /** Limit the new-project pin to the resolved trusted profile selection. Omission means all. */
   newProjectLocalExecutionFor?: "all" | "external-video";
+  /** Ready lip-sync profiles pinned beside a real video model on new projects; they make only singing shots. */
+  newProjectLipSyncProfiles?: readonly ProviderProfile[];
 }
 interface ProjectCapabilityLock {
   projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string;
@@ -67,6 +81,7 @@ export class ProductionService {
   get recovery() { return this.engine.recovery; }
   private readonly newProjectLocalExecution: Readonly<LocalExecutionIdentity> | undefined;
   private readonly newProjectLocalExecutionFor: "all" | "external-video";
+  private readonly newProjectLipSyncProfiles: readonly ProviderProfile[];
   constructor(readonly store: Store, readonly engine: Engine, readonly profiles: ProviderProfile[] = DEFAULT_PROFILES,
     options: ProductionServiceOptions = {}) {
     const selected = options.newProjectLocalExecution;
@@ -75,15 +90,22 @@ export class ProductionService {
     invariant(scope === "all" || scope === "external-video", "LOCAL_EXECUTION_UNSUPPORTED", "Unsupported new-project local execution scope");
     invariant(scope !== "external-video" || this.newProjectLocalExecution, "LOCAL_EXECUTION_UNSUPPORTED", "External-video scope requires an exact local execution identity");
     this.newProjectLocalExecutionFor = scope;
+    this.newProjectLipSyncProfiles = structuredClone([...(options.newProjectLipSyncProfiles ?? [])]);
+    invariant(this.newProjectLipSyncProfiles.length <= 1 && this.newProjectLipSyncProfiles.every(profile => profile.kind === "video" && profile.adapter === "fal-h3-lipsync"),
+      "PROVIDER_SELECTION_INVALID", "Pin at most one lip-sync profile");
+    migrateLegacyRequestSources(this.store);
   }
 
   createProject(name: string, selection?: InstalledProviderSelection): ProjectRecord {
     this.recovery.assertWritable();
     invariant(typeof name === "string" && name.trim().length > 0 && name.length <= 160, "VALIDATION_ERROR", "Provide a short project name");
     const selected = selection === undefined ? undefined : selectedProviderProfiles(selection);
-    const profiles = selected?.profiles ?? this.profiles;
+    const chosen = selected?.profiles ?? this.profiles;
     const pinLocalExecution = this.newProjectLocalExecution && (this.newProjectLocalExecutionFor === "all"
-      || profiles.some(profile => profile.kind === "video" && profile.adapter !== "fake"));
+      || chosen.some(profile => profile.kind === "video" && profile.adapter !== "fake"));
+    // Appended after the chosen profiles, so every "first video profile" lookup still finds the chosen one.
+    const profiles = pinLocalExecution && selected && chosen.some(profile => profile.kind === "video" && profile.adapter !== "fake")
+      ? [...chosen, ...structuredClone(this.newProjectLipSyncProfiles).filter(profile => !chosen.some(row => row.id === profile.id))] : chosen;
     return this.store.transaction(() => {
       const project: ProjectRecord = {
         id: newId(), revisionId: newId(), headVersion: 0, name, brief: "", story: "", scenes: [],
@@ -102,11 +124,22 @@ export class ProductionService {
   }
 
   /** Invoked from an authenticated human channel, never from model arguments. */
-  beginRequest(projectId: string, principalId: string, text: string, options: { scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
+  beginRequest(projectId: string, principalId: string, text: string, options: { source?: RequestSource; concurrency?: "alongside"; holdScopeIds?: string[]; supersede?: "intersecting"; scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string; attachments?: DirectorAttachmentRef[] } = {}): ActorContext {
     this.recovery.assertWritable(projectId);
-    invariant(text.trim().length > 0 && text.length <= 16000, "VALIDATION_ERROR", "Message must contain at most 16000 characters");
+    invariant((text.trim().length > 0 || options.attachments && options.attachments.length >= 1 && options.attachments.length <= 8 && options.contextDigest) && text.length <= 16000, "VALIDATION_ERROR", "Write a message of at most 16000 characters or attach files");
+    invariant(options.source === undefined || ["user", "app", "director"].includes(options.source), "VALIDATION_ERROR", "Use a supported request source");
+    invariant(options.concurrency !== "alongside" || !options.resumeFromStopId && !options.continueEdits, "VALIDATION_ERROR", "Alongside work cannot replace stopped or continued conversation authority");
+    invariant(options.concurrency === undefined || options.concurrency === "alongside", "VALIDATION_ERROR", "Unsupported request concurrency");
+    const attachments = options.attachments === undefined ? undefined : snapshotOwnedTranscriptionData(options.attachments, 16384);
+    invariant(attachments === undefined || Array.isArray(attachments) && attachments.length > 0 && attachments.length <= 8
+      && attachments.every(ref => ref !== null && typeof ref === 'object' && !Array.isArray(ref)
+        && Object.keys(ref).sort().join('\0') === ['artifactId', 'sha256'].join('\0')
+        && typeof ref.artifactId === 'string' && ref.artifactId.length > 0 && ref.artifactId.length <= 160
+        && typeof ref.sha256 === 'string' && /^[a-f0-9]{64}$/.test(ref.sha256))
+      && new Set(attachments.map(ref => ref.artifactId)).size === attachments.length,
+    'VALIDATION_ERROR', 'Attach one to eight exact owned artifact identities');
     const key = options.key ?? newId();
-    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.continueEdits ? { continueEdits: options.continueEdits } : {}), ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
+    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ ...(options.concurrency ? { concurrency: options.concurrency } : {}), ...(options.holdScopeIds ? { holdScopeIds: options.holdScopeIds } : {}), ...(options.supersede ? { supersede: options.supersede } : {}), ...(attachments ? { attachments } : {}), text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.continueEdits ? { continueEdits: options.continueEdits } : {}), ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
       const project = this.store.getProject(projectId);
       if (options.resumeFromStopId) {
         const control = this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId);
@@ -120,16 +153,33 @@ export class ProductionService {
       const scopeIds = [...new Set(options.scopeIds ?? [projectId])];
       invariant(scopeIds.length > 0 && scopeIds.length <= 400, "VALIDATION_ERROR", "A request requires a bounded scope");
       scopeIds.forEach(scopeId => validateStageScope(project, scopeId));
+      invariant(!options.holdScopeIds || options.concurrency === "alongside" && options.holdScopeIds.every(id => scopeIds.includes(id) || project.shots.some(s => s.id === id && scopeIds.includes(s.sceneId))), "SCOPE_DENIED", "Holds must belong to this alongside scope");
       invariant(!options.continueEdits || (options.editing !== false && !options.continuationRequestId && !options.resumeFromStopId), 'VALIDATION_ERROR', 'Continue selected edits using one fresh editable conversation.');
       if (options.continueEdits) assertContinueEdits(this.store, project, principalId, scopeIds, options.continueEdits);
-      const request: RequestRecord = { id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
+      const request: RequestRecord = { source: options.source ?? "user", ...(options.concurrency ? { concurrency: options.concurrency } : {}), ...(attachments ? { attachments } : {}), id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
       this.store.insert("message", request.id, projectId, request);
+      const supersededRequestIds = new Set<string>();
+      // A fresh user message also ends application-only reviews, including discuss-only messages.
+      if (request.source === "user") for (const review of this.store.list<RequestRecord>("message", projectId)) {
+        if (review.state !== "active" || !this.store.get("keyframe_review_request", review.id)) continue;
+        this.store.put("message", review.id, projectId, { ...review, state: "superseded" });
+        supersededRequestIds.add(review.id);
+        for (const epoch of this.store.list<Epoch>("epoch", projectId).filter(e => e.requestId === review.id && e.state !== "revoked")) this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+      }
+      // Direct writes fence stale prepared changes by headVersion without ending a Director turn.
+      // Scene presses only replace authority that intersects their own command scope.
       if (options.editing !== false) {
-        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.editing && prior.state === "active")
-          this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
-        for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked")
-          this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
-        for (const scopeId of scopeIds) this.engine.setHold(projectId, { scopeId, ownerId: request.id });
+        if (options.concurrency !== "alongside") {
+          for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.editing && prior.state === "active"
+            && (!options.supersede || requestScopesIntersect(project, scopeIds, prior.scopeIds))) {
+            this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
+            supersededRequestIds.add(prior.id);
+          }
+          for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked"
+            && (!options.supersede || requestScopesIntersect(project, scopeIds, epoch.scopeIds)))
+            this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+        }
+        for (const scopeId of options.holdScopeIds ?? scopeIds) this.engine.setHold(projectId, { scopeId, ownerId: request.id });
         const continuedIds = options.continueEdits?.requestIds ?? (options.continuationRequestId ? [options.continuationRequestId] : []);
         for (const priorId of continuedIds) {
           const prior = this.store.get<RequestRecord>("message", priorId);
@@ -151,13 +201,18 @@ export class ProductionService {
           this.engine.releaseHold(projectId, hold.id, prior.id); owners.add(prior.id);
         }
         for (const fromRequestId of owners) this.store.insert("request_continuation", newId(), projectId, { fromRequestId, toRequestId: request.id });
-        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.state === "active")
+        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.state === "active") {
           this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
+          supersededRequestIds.add(prior.id);
+        }
         this.engine.setPaused(projectId, false, request.id);
       }
+      // Validate explicit continuation against the original holds before retiring superseded owners.
+      for (const requestId of supersededRequestIds) this.releaseOwnedRequestHolds(projectId, requestId);
       this.store.appendEvent(projectId, "message.recorded", { requestId: request.id, text, editing: options.editing ?? true });
       return { kind: "human", principalId, requestId: request.id };
     });
+    invariant(projectRequest(this.store, this.request(projectId, actor)).source === (options.source ?? "user"), "IDEMPOTENCY_CONFLICT", "This request identity has a different source");
     this.recovery.assertFreshAuthority(projectId, "message", actor.requestId); return actor;
   }
 
@@ -254,13 +309,18 @@ export class ProductionService {
   async prepare(projectId: string, actor: ActorContext, input: unknown): Promise<Prepared> {
     this.assertActor(projectId, actor, true);
     const proposal = parseChangeProposal(input);
+    assertNoHumanFieldConflict(this.store, projectId, actor, proposal.creative);
     if (actor.kind === "director" && this.store.get("plan_import", actor.requestId)) {
       invariant(!proposal.source && !proposal.requestNewTakes?.length && !!proposal.creative, "IMPORT_REVIEW_REQUIRED", "Prepare only a creative interpretation of the supplied material. No executable plan or generation; the human confirms the exact draft in Film plan.");
     }
     invariant(!proposal.source || !proposal.creative?.createShots?.length, "VALIDATION_ERROR", "Create shot intents first, then reference their saved IDs in the executable plan");
     const proposalDigest = digest(proposal);
     const same = this.store.list<Prepared>("prepared", projectId).find(item => item.requestId === actor.requestId && item.epochId === (actor.kind === "director" ? actor.epochId : null) && item.proposalDigest === proposalDigest);
-    if (same) return same;
+    if (same) {
+      const current = this.store.getProject(projectId);
+      if (current.headVersion === same.baseVersion) this.assertDirectorProposalRequired(projectId, actor, current, same.next, same.proposal.creative);
+      return same;
+    }
     this.holdRequest(projectId, actor);
     const before = this.store.getProject(projectId);
     const lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
@@ -268,6 +328,7 @@ export class ProductionService {
     const localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
     invariant(before.headVersion === proposal.expectedHeadVersion, "REVISION_CONFLICT", "Project changed before preparation");
     const next = proposal.creative ? applyCreativePatch(before, proposal.creative, (shot, cue) => ({ ...shot, promptIntent: { image: shotIntentDigest(shot, "image", cue), video: shotIntentDigest(shot, "video", cue) } })) : structuredClone(before);
+    this.assertDirectorProposalRequired(projectId, actor, before, next, proposal.creative);
     const logicalIds = { ...(this.store.get<{ aliases: Record<string, string> }>("logical_ids", projectId)?.aliases ?? {}) };
     const basePlan = before.activePlanId ? this.store.get<PlanRecord>("plan", before.activePlanId)?.compiled ?? null : null;
     const transcriptionInputs = ownedTranscriptionCatalog(this.store, projectId, basePlan);
@@ -315,7 +376,9 @@ export class ProductionService {
     const { impact, stages, extraTakeIds: extra } = assessment;
     // Parsing and provider completion may interleave. Authority and project version are rechecked here.
     this.assertActor(projectId, actor, true);
+    assertNoHumanFieldConflict(this.store, projectId, actor, proposal.creative);
     invariant(this.store.getProject(projectId).headVersion === before.headVersion, "REVISION_CONFLICT", "Project changed during preparation");
+    this.assertDirectorProposalRequired(projectId, actor, before, next, proposal.creative);
     const duplicate = this.store.list<Prepared>("prepared", projectId).find(item => item.requestId === actor.requestId && item.epochId === (actor.kind === "director" ? actor.epochId : null) && item.proposalDigest === proposalDigest);
     if (duplicate) return duplicate;
     const noProgress = digest(before) === digest(next) && !compiled;
@@ -332,7 +395,7 @@ export class ProductionService {
       if (deferredNodeIds.includes(node.id)) { invariant(node.kind === "video", "VALIDATION_ERROR", "Only video work may wait for scene review"); continue; }
       const sceneId = next.shots.find(s => s.id === node.shotId)?.sceneId;
       const grant = grants.find(g => !used.has(g.id) && g.kind === node.kind && (!extra.has(node.id) || g.origin === "user_change") && (g.scopeId === node.shotId || g.scopeId === sceneId || g.scopeId === projectId))
-        ?? (["speech", "transcription"].includes(node.kind) ? this.engine.createGrant(projectId, node.shotId ?? projectId, node.kind, actor.requestId, "user_change") : undefined);
+        ?? (actor.kind === "human" && ["speech", "transcription"].includes(node.kind) ? this.engine.createGrant(projectId, node.shotId ?? projectId, node.kind, actor.requestId, "user_change") : undefined);
       invariant(grant, "ORIGIN_NOT_AUTHORIZED", `Human generation authorization is required for ${node.alias}`);
       used.add(grant.id); grantBindings[node.id] = grant.id;
     }
@@ -358,19 +421,29 @@ export class ProductionService {
   }
 
   /** Application-only publication of a scene plan compiled in the isolated worker before any mutation. */
-  applyCompiledSceneGeneration(projectId: string, actor: ActorContext, compiled: CompiledPlan, logicalIds: Record<string, string>, expectedHeadVersion: number, expectedLockDigest: string, kind: "image" | "video"): ApplyReceipt {
+  applyCompiledSceneGeneration(projectId: string, actor: ActorContext, compiled: CompiledPlan, logicalIds: Record<string, string>, expectedHeadVersion: number, expectedLockDigest: string, kind: "image" | "video", reviewedNodeIds: readonly string[], retainHolds = false): ApplyReceipt {
     invariant(actor.kind === "human", "ACTOR_DENIED", "Scene generation requires the human scene check");
     const before = this.store.getProject(projectId), lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
     invariant(lock?.projectId === projectId && digest(lock) === expectedLockDigest && before.headVersion === expectedHeadVersion, "REVISION_CONFLICT", "The reviewed scene or model changed during preparation");
     const proposal = parseChangeProposal({ variant: "plan", expectedHeadVersion, source: compiled.canonicalSource });
     const captured: PreparedChangeCapture = { before, next: structuredClone(before), lock, proposal, proposalDigest: digest(proposal), compiled, logicalIds };
-    const targets = new Set(compiled.nodes.filter(node => node.kind === kind && node.shotId && this.allows(before, actor, node.shotId)).map(node => node.id));
+    // Request authority may cover the entire film. Only this scene decision's
+    // exact operations can acquire fresh candidates, including known-failure retries.
+    invariant(Array.isArray(reviewedNodeIds), "SCOPE_DENIED", "Scene generation requires exact reviewed operations");
+    const targets = new Set(reviewedNodeIds);
+    const reviewed = compiled.nodes.filter(node => targets.has(node.id));
+    invariant(targets.size > 0 && targets.size <= 64 && targets.size === reviewedNodeIds.length
+      && reviewed.length === targets.size && reviewed.every(node => node.kind === kind && node.shotId
+        && before.shots.some(shot => shot.id === node.shotId) && this.allows(before, actor, node.shotId))
+      && new Set(reviewed.map(node => node.shotId)).size === targets.size
+      && new Set(reviewed.map(node => before.shots.find(shot => shot.id === node.shotId)?.sceneId)).size === 1,
+    "SCOPE_DENIED", "Scene generation requires the exact reviewed operations in one scene");
     const assessment = this.assessCompiledChange(captured, actor, undefined, targets);
     // A new human scene check after a known terminal failure is a new candidate,
     // rather than an unauthorized retry of the previous failed candidate.
     for (const change of assessment.impact.filter(item => item.kind === "reuse")) {
       const node = compiled.nodes.find(node => node.id === change.nodeId)!;
-      if (node.kind !== kind || !node.shotId || !this.allows(before, actor, node.shotId)) continue;
+      if (!targets.has(node.id)) continue;
       const binding = this.store.get<NodeBinding>("node_binding", node.id);
       const last = this.engine.attempts(projectId).filter(attempt => attempt.candidateId === binding?.candidateId && attempt.nodeId === node.id).at(-1);
       if (binding && !Object.keys(binding.outputs).length && last?.phase === "failed") {
@@ -385,7 +458,7 @@ export class ProductionService {
     }
     this.checkFootprint(before, captured.next, actor, compiled, assessment.impact);
     const deferred = kind === "image" ? assessment.impact.filter(change => ["new", "replace"].includes(change.kind) && compiled.nodes.some(node => node.id === change.nodeId && node.kind === "video")).map(change => change.nodeId) : [];
-    return this.publishPreparedChange(projectId, actor, this.finalizePreparedChange(projectId, actor, captured, assessment, deferred));
+    return this.publishPreparedChange(projectId, actor, this.finalizePreparedChange(projectId, actor, captured, assessment, deferred), retainHolds);
   }
 
   /** Trusted synchronous host boundary after review re-verifies bytes and isolated composition.
@@ -393,12 +466,15 @@ export class ProductionService {
    * This method is never a model tool; admission independently verifies the exact owned bytes again.
    */
   commitOwnedTranscriptionReview(projectId: string, human: ActorContext, input: ReviewOwnedTranscription,
-    options: { signal?: AbortSignal; requested?: true; requestedAtCursor?: number } = {}): OwnedTranscriptionApplyReceipt {
+    options: { signal?: AbortSignal; requested?: true; requestedAtCursor?: number; retainHolds?: boolean;
+      /** Trusted host hook: authority and visible effects commit with the paid operation. */
+      onPublished?: (receipt: OwnedTranscriptionApplyReceipt) => void } = {}): OwnedTranscriptionApplyReceipt {
     const signal = options.signal, requested = options.requested === true, requestedAtCursor = options.requestedAtCursor;
     const stopped = (): void => invariant(!signal?.aborted, "OWNED_TRANSCRIPTION_CANCELLED", "Recording review was cancelled");
     stopped();
     human = snapshotOwnedTranscriptionData(human, 16384); input = captureOwnedTranscriptionReviewInput(input);
     const authority = (): void => {
+      invariant(human.kind === "human", "ACTOR_DENIED", "Only a human press may publish paid transcription");
       this.assertActor(projectId, human, true);
       invariant(this.request(projectId, human).scopeIds.includes(projectId), "SCOPE_DENIED", "Recording review requires editable project scope");
       this.recovery.assertFreshAuthority(projectId, "owned_transcription_proposal", input.proposalId);
@@ -421,7 +497,9 @@ export class ProductionService {
           sourceBinding: owned.sourceBinding, nodeId: node.id, specDigest: node.specDigest, compiledDigest: digest(owned.compiled) };
         this.store.insert("owned_transcription_review", review.id, projectId, review);
         const prepared = this.recordPreparedChange(projectId, human, captured, assessment, { [node.id]: grant.id });
-        const applied = this.publishPreparedChange(projectId, human, prepared);
+        // A Director's attached recording selects no picture work. Its original
+        // conversation keeps ownership of any unfinished film edits.
+        const applied = this.publishPreparedChange(projectId, human, prepared, options.retainHolds === true);
         const binding = this.store.get<{ candidateId: string }>("node_binding", node.id)!;
         const candidate = this.store.get("candidate", binding.candidateId)!;
         const application: OwnedTranscriptionApplication = { id: binding.candidateId, version: 1, projectId,
@@ -435,7 +513,7 @@ export class ProductionService {
         return { proposalId: owned.id, proposalDigest: input.proposalDigest, reviewId: review.id,
           applicationId: application.id, grantId: grant.id, candidateId: binding.candidateId, applied };
       });
-      stopped(); return receipt;
+      stopped(); options.onPublished?.(receipt); stopped(); return receipt;
     });
   }
 
@@ -448,6 +526,7 @@ export class ProductionService {
     human = snapshotOwnedTranscriptionData(human, 16384); input = captureNarrationSpeechReviewInput(input);
     const authority = (): void => {
       this.assertActor(projectId, human, true);
+      invariant(human.kind === "human", "ACTOR_DENIED", "Only a human press may publish paid narration");
       const selected = this.store.get<NarrationSpeechProposal>('narration_speech_proposal', input.proposalId);
       invariant(selected?.projectId === projectId, 'SCOPE_DENIED', 'Narration speech proposal belongs to this film');
       assertNarrationAuthority(this, projectId, human, selected.section.segmentId);
@@ -502,6 +581,14 @@ export class ProductionService {
     });
   }
 
+  planImportDraft(projectId: string, preparedId: string): ProjectRecord | null {
+    const prepared = this.store.get<Prepared>("prepared", preparedId), current = this.store.getProject(projectId);
+    if (!prepared || prepared.projectId !== projectId || prepared.compiled || prepared.proposal.source) return null;
+    if (prepared.baseVersion === current.headVersion) return prepared.next;
+    const base = this.store.list<{ project: ProjectRecord }>("project_revision", projectId).find(r => r.project.headVersion === prepared.baseVersion)?.project;
+    return base ? rebaseCreativeDraft(base, prepared.next, current) : null;
+  }
+
   /** Human-only import acceptance: retain the exact reviewed draft and recheck all publication predicates. */
   confirmPlanImport(projectId: string, requestId: string, preparedId: string, proposalDigest: string, key: string): ApplyReceipt {
     this.recovery.assertWritable(projectId);
@@ -510,7 +597,7 @@ export class ProductionService {
       invariant(material?.projectId === projectId && material.state === "pending", "IMPORT_STALE", "This import is no longer pending.");
       this.recovery.assertFreshAuthority(projectId, "message", requestId);
       const request = this.store.get<RequestRecord>("message", requestId);
-      invariant(request?.principalId === "local-user" && request.state === "active" && this.store.list<RequestRecord>("message", projectId).filter(row => row.editing).at(-1)?.id === requestId,
+      invariant(request?.principalId === "local-user" && request.state === "active" && this.store.list<RequestRecord>("message", projectId).filter(row => row.editing && row.concurrency !== "alongside").at(-1)?.id === requestId,
         "IMPORT_STALE", "Newer direction superseded this import. Re-import against the current film plan.");
       invariant(!this.store.get<{ paused: boolean }>("execution_control", projectId)?.paused, "IMPORT_STALE", "The conversation is stopped. Resume with a fresh request before importing again.");
       invariant(!this.store.list<{ requestId: string; state: string }>("director_turn", projectId).some(turn => turn.requestId === requestId && ["queued", "running"].includes(turn.state)), "IMPORT_NOT_READY", "Wait for the director to finish interpreting the source.");
@@ -518,24 +605,179 @@ export class ProductionService {
       const latest = this.store.list<Prepared>("prepared", projectId).filter(row => row.requestId === requestId).at(-1);
       invariant(prepared?.projectId === projectId && prepared.requestId === requestId && latest?.id === preparedId && prepared.proposalDigest === proposalDigest && !prepared.compiled && !prepared.proposal.source,
         "IMPORT_STALE", "Review the current import draft before confirming.");
-      invariant(prepared.baseVersion === this.store.getProject(projectId).headVersion, "REVISION_CONFLICT", "The film plan changed. Re-import against its current version.");
-      const human = this.beginRequest(projectId, "local-user", "Confirm the reviewed supplied-material plan. No generation is authorized.", { editing: true, continuationRequestId: requestId, key: `confirm-import:${key}`, contextDigest: digest({ preparedId, proposalDigest }) });
-      const reviewed: Prepared = { ...prepared, id: newId(), requestId: human.requestId, principalId: human.principalId, epochId: null };
-      this.store.insert("prepared", reviewed.id, projectId, reviewed);
+      const next = this.planImportDraft(projectId, prepared.id);
+      invariant(next, "REVISION_CONFLICT", "The imported fields changed. Re-import against the current film plan.");
+      const human = this.beginRequest(projectId, "local-user", "Confirm the reviewed supplied-material plan. No generation is authorized.", { source: "app", editing: true, continuationRequestId: requestId, key: `confirm-import:${key}`, contextDigest: digest({ preparedId, proposalDigest }) });
+      const before = this.store.getProject(projectId), lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId)!;
+      const capture: PreparedChangeCapture = { before, next, lock, proposal: prepared.proposal, proposalDigest: prepared.proposalDigest, compiled: null, logicalIds: prepared.logicalIds };
+      const reviewed = this.recordPreparedChange(projectId, human, capture, this.assessCompiledChange(capture, human), {});
       const result = this.apply(projectId, human, reviewed.id);
+      // The reviewed import is complete and authorizes no generation, so its continuation has nothing left to hold.
+      this.releaseOwnedRequestHolds(projectId, human.requestId);
       this.store.put("plan_import", requestId, projectId, { ...material, state: "confirmed", preparedId, confirmation: result });
       this.store.appendEvent(projectId, "plan_import.confirmed", { requestId, preparedId });
       return result;
     });
   }
 
+  validateHeldCreativePatch(projectId: string, actor: ActorContext, patch: import('@openslate/core').CreativePatch): void {
+    this.assertActor(projectId, actor);
+    assertNoHumanFieldConflict(this.store, projectId, actor, patch);
+    const before = this.store.getProject(projectId);
+    const next = applyCreativePatch(before, patch, shot => shot);
+    this.checkFootprint(before, next, actor, null, []);
+    this.validateHeldCreativePublication(projectId, patch);
+  }
+
+  /** Read-only publication checks also apply when projecting a held proposal after later changes. */
+  validateHeldCreativePublication(projectId: string, patch: import('@openslate/core').CreativePatch): void {
+    const before = this.store.getProject(projectId), next = applyCreativePatch(before, patch, shot => shot);
+    const lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
+    invariant(lock?.projectId === projectId && lock.recipeDigest === RECIPE_DIGEST && lock.stageContractsDigest === STAGE_CONTRACTS_DIGEST, "CAPABILITY_MISMATCH", "Project workflow lock is unsupported");
+    for (const [index, update] of (patch.updateShots ?? []).entries()) if (update.desiredFrames !== undefined) {
+      invariant(Number.isSafeInteger(update.desiredFrames) && update.desiredFrames >= 90 && update.desiredFrames <= 450,
+        "VALIDATION_ERROR", `patch.updateShots[${index}].desiredFrames: use 90–450 frames (3–15 seconds) per shot.`);
+      for (const profile of lock.profiles.filter(profile => profile.kind === "video"))
+        invariant(update.desiredFrames >= (profile.minFrames ?? 1) && update.desiredFrames <= (profile.maxFrames ?? 10800),
+          "PROFILE_INCOMPATIBLE", `patch.updateShots[${index}].desiredFrames: use a duration within the locked video profile bounds (${profile.minFrames ?? 1}–${profile.maxFrames ?? 10800} frames).`);
+    }
+    assertAcceptedNarrationDurationFloor(next);
+    validateStageRequirements(next, requiredStages(before, next, null));
+  }
+
+  /** Current catalogs require the person's preview decision before invalidating existing media. */
+  private assertDirectorProposalRequired(projectId: string, actor: ActorContext, before: ProjectRecord, next: ProjectRecord, patch?: import('@openslate/core').CreativePatch): void {
+    if (actor.kind !== "director" || !patch || Number(contextToolVersion(this.store, projectId, actor).split(".")[0]) < 5) return;
+    const media = new Map<string, Set<OperationKind>>();
+    const add = (shotId: string, kind: OperationKind) => {
+      const kinds = media.get(shotId) ?? new Set<OperationKind>(); kinds.add(kind); media.set(shotId, kinds);
+    };
+    const attempts = this.engine.attempts(projectId);
+    for (const binding of this.store.list<NodeBinding>("node_binding", projectId)) {
+      if (binding.state !== "active" || binding.planId !== before.activePlanId) continue;
+      const outputs = { ...binding.retainedTake?.outputs, ...binding.outputs };
+      const artifactKind = binding.node.kind === "image" ? "image" : binding.node.kind === "video" ? "video" : binding.node.kind === "speech" ? "audio" : null;
+      const running = attempts.some(attempt => attempt.nodeId === binding.id && attempt.candidateId === binding.candidateId
+        && attempt.specDigest === binding.node.specDigest && !attempt.released && !["failed", "succeeded"].includes(attempt.phase));
+      if (!artifactKind || !running && !Object.values(outputs).some(output => output.kind === artifactKind)) continue;
+      if (binding.node.shotId) add(binding.node.shotId, binding.node.kind);
+      else if (binding.node.kind === "speech") for (const candidateId of new Set([binding.candidateId, binding.retainedTake?.candidateId ?? null]))
+        for (const shotId of narrationSpeechShotScopes(this.store, projectId, candidateId)) add(shotId, "speech");
+    }
+    const refused = new Set<string>();
+    for (const original of before.shots) {
+      const updated = next.shots.find(shot => shot.id === original.id);
+      if (!updated) continue;
+      const cue = before.cues.find(cue => cue.id === original.cueId), nextCue = next.cues.find(cue => cue.id === updated.cueId);
+      const kinds = media.get(original.id);
+      const imageChanged = kinds?.has("image") && (shotIntentDigest(original, "image", cue) !== shotIntentDigest(updated, "image", nextCue) || original.imagePrompt !== updated.imagePrompt);
+      const videoChanged = kinds?.has("video") && (shotIntentDigest(original, "video", cue) !== shotIntentDigest(updated, "video", nextCue) || original.videoPrompt !== updated.videoPrompt);
+      const narrationChanged = (kinds?.has("speech") || cue?.accepted) && (digest(original.narration ?? null) !== digest(updated.narration ?? null)
+        || original.cueId !== updated.cueId || cue?.accepted && !nextCue?.accepted);
+      for (const field of ["purpose", "action", "framing", "motion", "desiredFrames", "imagePrompt", "videoPrompt", "referenceArtifactIds", "cueId", "narration"] as const) {
+        if (digest(original[field] ?? null) === digest(updated[field] ?? null)) continue;
+        if (imageChanged && ["purpose", "action", "framing", "imagePrompt", "referenceArtifactIds"].includes(field)
+          || videoChanged && ["purpose", "action", "framing", "motion", "desiredFrames", "videoPrompt", "referenceArtifactIds", "cueId"].includes(field)
+          || narrationChanged && ["narration", "cueId"].includes(field)) refused.add(field);
+      }
+      if (narrationChanged && digest(cue ?? null) !== digest(nextCue ?? null)) refused.add("narration");
+      if (narrationChanged && before.narration.script !== next.narration.script) refused.add("narrationScript");
+    }
+    invariant(refused.size === 0, "PROPOSAL_REQUIRED", `These fields would outdate existing paid media or accepted narration: ${[...refused].join(", ")}. Use propose_change, or ask the person to edit these fields in Plan.`);
+  }
+
+  /** Held creative changes use the same validated Prepared/publication kernel, without generation authority. */
+  publishHumanCreativePatch(projectId: string, actor: ActorContext, creative: import('@openslate/core').CreativePatch, clearNarrationShotIds: string[] = [], restoreNarration: { shotId: string; state: ShotNarrationAcceptance }[] = []): ApplyReceipt {
+    return this.store.transaction(() => {
+      this.assertActor(projectId, actor, true);
+      invariant(actor.kind === "human" && this.request(projectId, actor).concurrency === "alongside", "ACTOR_DENIED", "Use an alongside human request");
+      const before = this.store.getProject(projectId);
+      const proposal = parseChangeProposal({ variant: "project", expectedHeadVersion: before.headVersion, creative });
+      const next = applyCreativePatch(before, creative, (shot, cue) => ({ ...shot, promptIntent: { image: shotIntentDigest(shot, "image", cue), video: shotIntentDigest(shot, "video", cue) } }));
+      for (const id of clearNarrationShotIds) {
+        const shot = next.shots.find(s => s.id === id);
+        invariant(shot && creative.updateShots?.some(s => s.id === id), "SCOPE_DENIED", "Inverse narration targets must be in the reviewed patch");
+        delete shot.narration;
+        delete shot.narrationFit;
+        delete shot.narrationPending;
+        shot.revisionId = newId();
+      }
+      for (const { shotId, state } of restoreNarration) {
+        const shot = next.shots.find(s => s.id === shotId);
+        invariant(shot && creative.updateShots?.some(s => s.id === shotId), 'SCOPE_DENIED', 'Narration restoration must belong to the inverse patch');
+        invariant(state.cueId === null || next.cues.some(cue => cue.id === state.cueId), 'NARRATION_INTEGRITY_ERROR', 'The original accepted narration is unavailable');
+        for (const field of ['narrationPending', 'narrationTimingMode', 'narrationFit'] as const) delete shot[field];
+        Object.assign(shot, state);
+        const cue = next.cues.find(cue => cue.id === shot.cueId);
+        shot.promptIntent = { image: shotIntentDigest(shot, 'image', cue), video: shotIntentDigest(shot, 'video', cue) };
+      }
+      const lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
+      invariant(lock?.projectId === projectId && lock.recipeDigest === RECIPE_DIGEST && lock.stageContractsDigest === STAGE_CONTRACTS_DIGEST, "CAPABILITY_MISMATCH", "Project workflow lock is unsupported");
+      const capture: PreparedChangeCapture = { before, next, lock, proposal, proposalDigest: digest(proposal), compiled: null, logicalIds: {} };
+      const prepared = this.finalizePreparedChange(projectId, actor, capture, this.assessCompiledChange(capture, actor));
+      return this.apply(projectId, actor, prepared.id);
+    });
+  }
+
+  private releaseOwnedRequestHolds(projectId: string, requestId: string): number {
+    const request = this.store.get<RequestRecord>("message", requestId);
+    invariant(request?.projectId === projectId, "ACTOR_DENIED", "Edit holds belong to another project");
+    const holds = this.store.list<Hold>("hold", projectId).filter(hold => hold.active && hold.ownerId === requestId);
+    for (const hold of holds) this.engine.releaseHold(projectId, hold.id, requestId);
+    return holds.length;
+  }
+
+  /** Terminal reasoning alone is not an unfinished edit. Retain exact pending work for human review. */
+  releaseFinishedRequestHolds(projectId: string, requestId: string): void {
+    this.store.transaction(() => {
+      const request = this.store.get<RequestRecord>("message", requestId);
+      invariant(request?.projectId === projectId, "ACTOR_DENIED", "Edit holds belong to another project");
+      if (!this.store.list<Hold>("hold", projectId).some(hold => hold.active && hold.ownerId === requestId)) return;
+      if (request.state !== "superseded") {
+        const turns = this.store.list<{ requestId: string; state: string }>("director_turn", projectId).filter(turn => turn.requestId === requestId);
+        if (!turns.length || turns.some(turn => ["queued", "running", "waiting_user"].includes(turn.state))) return;
+        const applied = new Set(this.store.readEvents(projectId).filter(event => event.kind === "change.applied").map(event => event.payload.preparedId));
+        if (this.store.list<Prepared>("prepared", projectId).some(prepared => prepared.requestId === requestId && !applied.has(prepared.id))) return;
+      }
+      this.releaseOwnedRequestHolds(projectId, requestId);
+    });
+  }
+
+  /** Authenticated human abandonment fences only this request before releasing its holds. */
+  releaseRequestHolds(projectId: string, requestId: string, key: string, principalId = "local-user") {
+    this.recovery.assertWritable(projectId);
+    return this.store.command(`${principalId}:${projectId}:release-holds`, key, digest({ requestId }), () => {
+      this.store.getProject(projectId);
+      const request = this.store.get<RequestRecord>("message", requestId);
+      invariant(request?.projectId === projectId, "NOT_FOUND", "Choose an edit in this project");
+      invariant(request.principalId === principalId, "ACTOR_DENIED", "This edit belongs to another person");
+      invariant(!this.store.list<{ requestId: string; state: string }>("director_turn", projectId).some(turn => turn.requestId === requestId && ["queued", "running"].includes(turn.state)),
+        "DIRECTOR_WORKING", "Wait for the Director to finish this edit or stop it first");
+      this.store.put("message", requestId, projectId, { ...request, state: "superseded" });
+      for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.requestId === requestId && epoch.state !== "revoked")
+        this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+      const receipt = { requestId, releasedHolds: this.releaseOwnedRequestHolds(projectId, requestId) };
+      this.store.appendEvent(projectId, "request.holds_released", receipt);
+      return receipt;
+    });
+  }
+
+  releaseAlongsideHolds(projectId: string, actor: ActorContext): void {
+    this.assertActor(projectId, actor, true);
+    invariant(this.request(projectId, actor).concurrency === "alongside", "ACTOR_DENIED", "Only release this alongside request's holds");
+    for (const hold of this.store.list<Hold>("hold", projectId)) if (hold.active && hold.ownerId === actor.requestId) this.engine.releaseHold(projectId, hold.id, actor.requestId);
+  }
+
   /** Shared synchronous publication kernel; callers retain exact actor ownership and command authority. */
   private publishPreparedChange(projectId: string, actor: ActorContext, prepared: Prepared, retainHolds = false): ApplyReceipt {
     const preparedId = prepared.id;
     const before = this.store.getProject(projectId);
+    assertNoHumanFieldConflict(this.store, projectId, actor, prepared.proposal.creative);
     invariant(digest(this.store.get("capability_lock", before.capabilityLockId) ?? null) === prepared.capabilityDigest, "CAPABILITY_MISMATCH", "Project capability lock changed");
     validateStageRequirements(prepared.next, prepared.stages);
     invariant(before.headVersion === prepared.baseVersion, "REVISION_CONFLICT", "Prepared change is stale");
+    this.assertDirectorProposalRequired(projectId, actor, before, prepared.next, prepared.proposal.creative);
+    assertAcceptedNarrationDurationFloor(prepared.next);
     for (const [id, version] of Object.entries(prepared.stageVersions)) invariant((this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0) === version, "STAGE_BINDING_CONFLICT", "Stage binding changed");
     let planId = before.activePlanId;
     if (prepared.compiled) planId = newId();
@@ -545,7 +787,10 @@ export class ProductionService {
       this.engine.installPlan(projectId, planId!, prepared.compiled, prepared.grantBindings, prepared.deferredNodeIds);
       this.store.put("logical_ids", projectId, projectId, { aliases: prepared.logicalIds });
     }
-    if (changed) this.store.insert("project_revision", next.revisionId, projectId, { project: next });
+    if (changed) {
+      this.store.insert("project_revision", next.revisionId, projectId, { project: next });
+      recordHumanFields(this.store, before, next, actor);
+    }
     for (const stage of prepared.stages) {
       const id = this.stageId(projectId, stage);
       const previous = this.store.get<StageBinding>("stage", id);
@@ -557,7 +802,7 @@ export class ProductionService {
       if (bindingVersion !== previous?.bindingVersion) this.store.insert("stage_revision", newId(), projectId, { binding, preparedId });
     }
     for (const proposal of prepared.proposal.stages ?? []) this.store.insert("stage_assessment", newId(), projectId, { ...proposal, preparedId, advisory: true });
-    if (prepared.compiled && !retainHolds) this.releaseResolvedHolds(projectId, actor, prepared);
+    if ((prepared.compiled || this.request(projectId, actor).concurrency === "alongside") && !retainHolds) this.releaseResolvedHolds(projectId, actor, prepared);
     this.store.appendEvent(projectId, "change.applied", { preparedId, revisionId: next.revisionId, planId, headVersion: next.headVersion });
     return { preparedId, projectId, revisionId: next.revisionId, headVersion: next.headVersion, activePlanId: next.activePlanId, cursor: this.store.cursor(projectId) };
   }
@@ -596,21 +841,22 @@ export class ProductionService {
       const project = this.store.getProject(projectId);
       const plan = project.activePlanId ? this.store.get<PlanRecord>("plan", project.activePlanId) : undefined;
       const attempts = this.engine.attempts(projectId);
-      const messages = this.store.list<RequestRecord>("message", projectId);
-      const outputs = this.store.list<{ id: string; requestId: string; text: string; phase: string }>("director_output", projectId);
+      const messages = this.store.list<RequestRecord>("message", projectId).map(message => projectRequest(this.store, message));
+      const outputs = this.store.list<{ id: string; requestId: string; turnId: string; text: string; phase: string }>("director_output", projectId);
       const messageById = new Map(messages.map(message => [message.id, message])), outputById = new Map(outputs.map(output => [output.id, output]));
-      const conversation = this.store.readEvents(projectId).flatMap(event => {
+      const conversation = this.store.readEvents(projectId).flatMap<{ id: string; role: "user" | "assistant"; text: string; state: string; requestId: string; at: string; scopeIds?: string[]; runtime?: "scripted" | "live"; attachments?: MessageAttachmentView[] }>(event => {
         if (event.kind === "message.recorded") {
           const message = messageById.get(String(event.payload.requestId));
-          return message && message.source !== "storyboard" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id }] : [];
+          const attachments = message ? (messageAttachmentViews(this.store, projectId, message.id) ?? []) : [];
+          return message && message.source === "user" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id, at: event.occurredAt, ...(!message.scopeIds.includes(projectId) ? { scopeIds: message.scopeIds } : {}), ...(attachments.length ? { attachments } : {}) }] : [];
         }
         if (event.kind === "director.message") {
           const output = outputById.get(String(event.payload.outputId));
-          return output ? [{ id: output.id, role: "assistant", text: output.text, state: output.phase, requestId: output.requestId }] : [];
+          return output ? [{ id: output.id, role: "assistant", text: output.text, state: output.phase, requestId: output.requestId, at: event.occurredAt, runtime: this.store.get<{ runtimeId: string }>("director_turn", output.turnId)?.runtimeId === "codex-app-server" ? "live" : "scripted" }] : [];
         }
         return [];
       });
-      return { project, latestStoryboardEdit: this.store.list<{ id: string; headVersion: number; requestId: string }>("storyboard_edit", projectId).map(({ id, headVersion, requestId }) => ({ id, headVersion, requestId })).at(-1) ?? null, workflow: workflowReadiness(project),
+      return { project, turns: directorTurnViews(this, projectId), notes: directorNotes(this.store, projectId), latestStoryboardEdit: this.store.list<{ id: string; headVersion: number; requestId: string }>("storyboard_edit", projectId).map(({ id, headVersion, requestId }) => ({ id, headVersion, requestId })).at(-1) ?? null, workflow: workflowReadiness(project),
       stages: this.store.list<StageBinding>("stage", projectId), outputs: this.engine.outputs(projectId), attempts,
       currentAttemptIds: this.engine.currentAttemptIds(projectId, attempts),
       assessments: this.store.list("stage_assessment", projectId),
@@ -622,6 +868,7 @@ export class ProductionService {
           || this.recovery.isImported(projectId, "director_turn", question.turnId) || this.store.get<RequestRecord>("message", question.requestId)?.state === "superseded" ? { ...question, canAnswer: false } : question),
       previousPreviews: this.engine.attempts(projectId).filter(attempt => attempt.request.kind === "render" && attempt.phase === "succeeded")
         .reverse().flatMap(attempt => Object.values(attempt.outputs).map(artifact => ({ artifact, nodeId: attempt.nodeId, fixture: this.artifactFixture(projectId, artifact) }))).slice(0, 3),
+      pendingAudioRequests: this.store.list("director_audio_request", projectId),
       reconciliations: this.store.list("tool_reconciliation", projectId),
       toolCalls: this.store.list<{ id: string; requestId: string; epochId: string; callId: string; tool: string; state: string; resultDigest: string | null }>("tool_invocation", projectId).slice(-20)
         .map(({ id, requestId, epochId, callId, tool, state, resultDigest }) => ({ id, requestId, epochId, callId, tool, state, resultDigest })),
@@ -651,19 +898,60 @@ export class ProductionService {
     return { status: "approved" as const, approvals: this.approve(projectId, human, snapshotId, snapshot.members.map(member => member.videoNodeId)) };
   }
 
-  control(projectId: string, actor: ActorContext, action: "pause" | "resume" | "stop") {
+  /** Read-only GR-13 projection for the generation overview (B2). */
+  stopView(projectId: string): StopView | null {
+    const control = this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId);
+    const stopped = control?.paused ? this.store.get<StopView>("execution_stop", control.authorityId) : undefined;
+    return stopped ? { stopId: stopped.stopId, at: stopped.at, sentJobs: stopped.sentJobs, detachedJobs: stopped.detachedJobs } : null;
+  }
+
+  releaseAttempt(projectId: string, actor: ActorContext, attemptId: string, input: ReleaseAttemptInput): ReleaseAttemptReceipt {
+    this.assertActor(projectId, actor);
+    invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Releasing a job requires a human project command");
+    invariant(input.expectedPhase === "submission_unknown" || input.expectedPhase === "remote_pending", "ATTEMPT_NOT_RELEASABLE", "Only an unconfirmed or still-running submission can be released");
+    return this.engine.releaseAttempt(projectId, attemptId, actor.principalId, input.acknowledgeDoubleCharge, input.expectedPhase);
+  }
+
+  /** Decision R2: discard a finished job's unusable output; it stays charged and in history. */
+  discardAttempt(projectId: string, actor: ActorContext, attemptId: string, input: DiscardAttemptInput): DiscardAttemptReceipt {
+    this.assertActor(projectId, actor);
+    invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Discarding a job requires a human project command");
+    invariant(input.expectedPhase === "ingesting", "ATTEMPT_NOT_DISCARDABLE", "Only a finished job whose output needs attention can be discarded");
+    return this.engine.discardAttempt(projectId, attemptId, actor.principalId, input.acknowledgeDiscard);
+  }
+
+  /** Decision R4, asynchronous half: validate and run the final receipt check without writing anything. */
+  checkLocalRetry(projectId: string, attemptId: string, input: RetryLocalAttemptInput): Promise<Attempt> {
+    invariant(input.expectedFailure === "LOCAL_EXECUTION_INTERRUPTED", "ATTEMPT_NOT_RETRYABLE", "Only interrupted local work can be rendered again");
+    return this.engine.checkLocalRetry(projectId, attemptId, input.acknowledgeRerender);
+  }
+  /** Decision R4: record a person's fresh retry identity for the checked interrupted local render. */
+  retryLocalAttempt(projectId: string, actor: ActorContext, checked: Attempt): RetryLocalAttemptReceipt {
+    this.assertActor(projectId, actor);
+    invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Rendering again requires a human project command");
+    return this.engine.recordLocalRetry(projectId, checked, actor.principalId);
+  }
+
+  control(projectId: string, actor: ActorContext, action: "pause" | "resume" | "stop", expectedAuthorityId?: string | null) {
     return this.store.transaction(() => {
       this.recovery.assertWritable(projectId, actor.requestId);
       this.assertActor(projectId, actor);
       invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Execution controls require a human project command");
+      if (action === "resume" && expectedAuthorityId !== undefined)
+        invariant((this.store.get<{ authorityId: string }>("execution_control", projectId)?.authorityId ?? null) === expectedAuthorityId,
+          "STOP_CHANGED", "The stop state changed. Refresh before continuing.");
       if (action === "stop") {
-        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== actor.requestId && prior.state === "active")
+        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== actor.requestId && prior.state === "active") {
           this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
+          this.releaseOwnedRequestHolds(projectId, prior.id);
+        }
         for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked")
           this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+        const stopped: StopView = { stopId: actor.requestId, at: new Date().toISOString(), ...this.engine.detachUnsent(projectId, actor.requestId) };
+        this.store.insert("execution_stop", actor.requestId, projectId, stopped);
       }
       this.engine.setPaused(projectId, action !== "resume", actor.requestId);
-      return { action, cursor: this.store.cursor(projectId) };
+      return { action, stopped: this.stopView(projectId) };
     });
   }
 

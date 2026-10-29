@@ -1,6 +1,6 @@
-import { ExternalAllowanceService } from '../apps/server/dist/application/external-allowances.js';
 // Disposable integration studio. Uses only FakeProvider; --native uses existing Codex sign-in for one read-only turn.
 // No production database, paid media adapter or provider credentials are loaded.
+import { seedLastFerry } from './fixtures/last-ferry.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -18,14 +18,22 @@ import { applyCreativePatch, shotIntentDigest, compilePlan, DEFAULT_PROFILES } f
 import { NarrationService, NarrationCanonicalService } from '../apps/server/dist/narration/index.js';
 import { LocalImageStore, LocalMediaService, ImageApplicationService, MediaApplicationService, PNG_IMPORT_MAX_BYTES } from '../apps/server/dist/media/index.js';
 import { ManagedUploadStore } from '../apps/server/dist/narration/managed-upload.js';
+const portFlag=process.argv.indexOf("--port"),port=portFlag>=0?Number(process.argv[portFlag+1]):5173;
+if(!Number.isInteger(port)||port<1024||port>65535||port===3001) throw new Error("--port must be a free port above 1023 and never 3001");
 const root = mkdtempSync(join(tmpdir(),'openslate-storyboard-review-')), repo = resolve(import.meta.dirname,'..');
 const store = new Store(join(root,'db.sqlite')), provider = new FakeProvider(join(root,'fake.sqlite'));
 const engine = new Engine(store,provider,{ artifactDir:join(root,'artifacts') }), service = new ProductionService(store,engine);
-let project=service.createProject('First Light · integration review');
+const filmFlag=process.argv.indexOf('--film'), film=filmFlag < 0 ? null : process.argv[filmFlag+1];
+if(film && film!=='last-ferry')throw new Error('Unknown --film');
+if(film && (!process.argv.includes('--fixtures') || process.argv.includes('--native')))throw new Error('Last Ferry requires --fixtures and cannot run a native turn');
+let project;
+if(!film){
+project=service.createProject('First Light · integration review');
 const scenes=['Opening the café','The ritual','A moment to stay'];
 project=applyCreativePatch(project,{brief:'Before the city wakes.',story:'A 36-second café film. Warm morning light, tactile close-ups, and an unhurried first sip.',createScenes:scenes.map((purpose,i)=>({key:`scene${i}`,purpose})),createShots:['A new morning','Let the light in','Freshly ground','A slower pour','Your usual corner','Stay a little longer'].map((purpose,i)=>({key:`shot${i}`,sceneId:`scene${Math.floor(i/2)}`,purpose,action:purpose,framing:['Wide café exterior at dawn','Sunlight crosses the oak counter','Coffee beans tumble into the grinder','Steam rises from the pour-over dripper','Hands place a cup by the window','Coffee and an open book'][i],motion:'Slow camera push',narration:{mode:'none',text:'',voice:'stock'},desiredFrames:180,imagePrompt:purpose,videoPrompt:purpose,referenceArtifactIds:[],cueId:null}))},(shot,cue)=>({...shot,promptIntent:{image:shotIntentDigest(shot,'image',cue),video:shotIntentDigest(shot,'video',cue)}}));
 project=store.saveProject({...project,revisionId:randomUUID()},0);store.insert('project_revision',project.revisionId,project.id,{project});
-if(process.argv.includes('--fixtures')) {
+}
+if(process.argv.includes('--fixtures') && !film) {
  let source=`definePlan({baseRevision:${JSON.stringify(project.revisionId)}},p=>{`;
  project.shots.forEach((shot,i)=>{source+=`const s${i}=p.shot(${JSON.stringify(shot.id)});const i${i}=p.image("image${i}",{intent:s${i},profile:"fake-image-v1",prompt:${JSON.stringify(shot.imagePrompt)}});const r${i}=p.humanReview("review${i}",{shots:[{intent:s${i},keyframe:i${i},videoProfile:"fake-video-v1",motionPrompt:${JSON.stringify(shot.videoPrompt)},seconds:6}]});const v${i}=p.video("video${i}",{intent:s${i},profile:"fake-video-v1",firstFrame:p.approvedImage(i${i},r${i}),prompt:${JSON.stringify(shot.videoPrompt)},seconds:6});`;});
  source+=`return [${project.shots.map((_,i)=>`v${i}`).join(',')}];});`;
@@ -35,12 +43,13 @@ if(process.argv.includes('--fixtures')) {
  for(let i=0;i<3;i++){await engine.runReady();await engine.reconcile();}
  console.log(JSON.stringify({fixtureMedia:true,acceptedFakeJobs:provider.acceptedCount()}));
 }
-const ffmpegPath='/opt/homebrew/bin/ffmpeg',ffprobePath='/opt/homebrew/bin/ffprobe';
+const ffmpegPath=process.env.OPENSLATE_FFMPEG_PATH ?? '/opt/homebrew/bin/ffmpeg',ffprobePath=process.env.OPENSLATE_FFPROBE_PATH ?? '/opt/homebrew/bin/ffprobe';
 mkdirSync(join(root,'uploads'),{recursive:true});
 const media=new LocalMediaService({rootDir:join(root,'media'),allowedInputRoots:[join(root,'uploads')],ffmpegPath,ffprobePath});
 const narration=new NarrationService(service,media),canonical=new NarrationCanonicalService(narration);
 const mediaApp=new MediaApplicationService(service,media),images=new ImageApplicationService(service,new LocalImageStore({rootDir:join(root,'artifacts','images'),ffmpegPath,ffprobePath}));
-const director=new LocalDirectorController(service,{repositoryRoot:repo,dataDirectory:root,endpoint:'http://127.0.0.1:5173',ffmpegPath, setup:async input=>{const result=await setupLocalCodex(input);console.log(JSON.stringify({readiness:result.readiness}));return result;}});
+const director=new LocalDirectorController(service,{repositoryRoot:repo,dataDirectory:root,endpoint:`http://127.0.0.1:${port}`,ffmpegPath, setup:async input=>{const result=await setupLocalCodex(input);console.log(JSON.stringify({readiness:result.readiness}));return result;}});
+if(film)project=await seedLastFerry(service,narration,director,root);
 const uiReplay = process.argv.includes('--ui-replay');
 if (uiReplay && process.argv.includes('--native')) throw new Error('UI replay cannot launch a native turn');
 let replayActor = null, replayTimer = null;
@@ -53,12 +62,12 @@ if (uiReplay) {
 }
 const visibleDirector=uiReplay?{enqueue(){},tick(){},status(){return{mode:'native',status:'running',activeRequestId:replayActor.requestId,imageAttachmentsAvailable:false};}}:director;
 const sessions=new StudioSessions();
-const app=createApp({service,allowanceRoutes:{service,allowances:new ExternalAllowanceService(store)},director:visibleDirector,runtimeSettings:director,localToken:randomBytes(32).toString('base64url'),studioSessions:sessions,webAssets:loadWebAssets(join(repo,'apps/web/dist')),
+const app=createApp({allowedOrigins:[`http://127.0.0.1:${port}`,`http://localhost:${port}`,'http://127.0.0.1:5173','http://localhost:5173'],service,director:visibleDirector,runtimeSettings:director,localToken:randomBytes(32).toString('base64url'),studioSessions:sessions,webAssets:loadWebAssets(join(repo,'apps/web/dist')),
  narrationRoutes:{production:service,narration,canonical,uploadDirectory:join(root,'uploads','audio')},
  mediaRoutes:{production:service,media:mediaApp,uploads:new ManagedUploadStore({rootDir:join(root,'uploads','video')})},
  imageRoutes:{production:service,images,uploads:new ManagedUploadStore({rootDir:join(root,'uploads','image'),maxBytes:PNG_IMPORT_MAX_BYTES})}});
-await app.listen({host:'127.0.0.1',port:5173});
-const url=`http://127.0.0.1:5173/#connect=${sessions.issueLaunch()}`;
+await app.listen({host:'127.0.0.1',port});
+const url=`http://127.0.0.1:${port}/#connect=${sessions.issueLaunch()}`;
 writeFileSync(join(root,'launch.txt'),url,{mode:0o600});console.log(JSON.stringify({root,url,projectId:project.id}));
 if(process.argv.includes('--native')) { try {
  const setup=await director.configure(project.id,{mode:'native',binaryPath:director.defaults.binaryPath,model:'gpt-6-astra'},randomUUID());
@@ -69,5 +78,5 @@ if(process.argv.includes('--native')) { try {
 } catch(error) { console.log(JSON.stringify({nativeBlocked:error.code ?? 'SETUP_FAILED', message:error.message})); }
 }
 let fixtureTickBusy=false;
-const fixtureTimer = process.argv.includes('--fixtures') ? setInterval(() => { if(fixtureTickBusy)return;fixtureTickBusy=true;void engine.runReady().then(() => engine.reconcile()).catch(error => console.error(error.code ?? 'FIXTURE_RUN_FAILED')).finally(()=>{fixtureTickBusy=false;}); }, 300) : null;
+const fixtureTimer = process.argv.includes('--fixtures') ? setInterval(() => { if(fixtureTickBusy)return;fixtureTickBusy=true;void engine.runReady().then(() => engine.reconcile()).then(() => director.tick()).catch(error => console.error(error.code ?? 'FIXTURE_RUN_FAILED')).finally(()=>{fixtureTickBusy=false;}); }, 300) : null;
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,async()=>{if(fixtureTimer)clearInterval(fixtureTimer);if(replayTimer)clearInterval(replayTimer);await director.close();await app.close();store.close();provider.close();process.exit(0);});

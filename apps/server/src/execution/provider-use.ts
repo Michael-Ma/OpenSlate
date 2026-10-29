@@ -6,7 +6,7 @@ import type { Attempt, Candidate, Grant } from "./engine.js";
 
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
 const hash = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
-const externalV1 = new Set(["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription"]);
+const externalV1 = new Set(["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription", "fal-h3-lipsync"]);
 
 /** A recorded host policy, never inferred by deleting historical allowance evidence. */
 export function configuredProviderUse(request: ExecutionRequest): boolean {

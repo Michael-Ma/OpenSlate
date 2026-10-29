@@ -1,15 +1,16 @@
+import { composeOwnedTranscriptionPlan } from '../narration/owned-transcription-composition.js';
 import type { ArtifactRecord } from "../execution/engine.js";
 import { assertConfiguredProviderAdmission } from "../execution/provider-use.js";
 import { assertRequestedNarrationShotScope } from "../narration/narration-scope.js";
 import { codexImageBackupClosure } from "./codex-image-backup.js";
 import { CODEX_IMAGE_RECORD_KINDS } from "../execution/codex-image-lineage.js";
-import { composeSpeechPlanIsolated } from "@openslate/core";
+import { composeNarrationSpeechPlan } from "../narration/narration-speech-composition.js";
 import { assertNarrationSpeechProposal } from "../narration/narration-speech-records.js";
 import { assertNarrationSpeechReview, assertNarrationSpeechApplication, assertNarrationSpeechAttemptInput, resolveNarrationSpeechApplication } from "../narration/narration-speech-authorization.js";
 import Database from "better-sqlite3";
 import { viggleBackupClosure } from "./viggle-backup.js";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { canonical, composeTranscriptionPlanIsolated, digest, invariant, snapshotLocalExecution } from "@openslate/core";
+import { canonical, digest, invariant, snapshotLocalExecution } from "@openslate/core";
 import type { CompiledPlan, ProjectRecord, ProviderProfile } from "@openslate/core";
 import { assertOwnedTranscriptionSource, assertOwnedTranscriptionProposal, ownedTranscriptionCatalog } from "../narration/owned-transcription-records.js";
 import type { OwnedTranscriptionSource } from "../narration/owned-transcription-types.js";
@@ -141,7 +142,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       const catalog = ownedTranscriptionCatalog(speechReader, projectId, base);
       for (const item of catalog) await ownedSource(get("owned_transcription_source", item.id), projectId);
       const logicalIds = { ...value.logicalIds }, localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
-      const compiled = await composeTranscriptionPlanIsolated(base, value.operation, { project, profiles: lock.profiles, logicalIds,
+      const compiled = await composeOwnedTranscriptionPlan(speechReader, base, value.operation, { project, profiles: lock.profiles, logicalIds,
         allocateId: () => { fail(false, "Owned transcription proposal lacks an exact saved logical ID"); return ""; },
         transcriptionInputs: [...catalog, { id: binding.id, digest: digest(binding), consumerAlias: binding.consumerAlias, artifact: binding.artifact }],
         ...(localExecution ? { localExecution } : {}) });
@@ -159,7 +160,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       const catalog = ownedTranscriptionCatalog(speechReader, projectId, base);
       for (const item of catalog) await ownedSource(get("owned_transcription_source", item.id), projectId);
       const logicalIds = { ...value.logicalIds }, localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
-      const compiled = await composeSpeechPlanIsolated(base, value.operation, { project, profiles: lock.profiles, logicalIds,
+      const compiled = await composeNarrationSpeechPlan(speechReader, base, value.operation, { project, profiles: lock.profiles, logicalIds,
         allocateId: () => { fail(false, "Speech proposal lost its saved logical identity"); return ""; }, transcriptionInputs: catalog,
         ...(localExecution ? { localExecution } : {}) });
       fail(canonical(compiled) === canonical(value.compiled) && canonical(logicalIds) === canonical(value.logicalIds), "Speech proposal differs from isolated historical recomposition");
@@ -331,7 +332,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
     for (const [path, file] of files) {
       // Binary objects and timeline documents use the exact byte hash as the name.
       const named = /^(?:artifacts\/(?:images\/blobs|local-timelines\/documents|[^/]+)|media\/blobs|execution-output\/blobs|audio-derivatives\/blobs)\/([a-f0-9]{64})\.[a-z]+$/.exec(path)
-        ?? /^native\/[^/]+\/workspace\/image-attachments\/[a-f0-9]{64}\/[0-3]-([a-f0-9]{64})\.jpg$/.exec(path);
+        ?? /^native\/[^/]+\/workspace\/(?:image|material)-attachments\/[a-f0-9]{64}\/[0-7]-([a-f0-9]{64})\.jpg$/.exec(path)
+        ?? /^artifacts\/documents\/blobs\/([a-f0-9]{64})$/.exec(path);
       if (named) fail(file.sha256 === named[1], `Content-addressed filename differs: ${path}`);
       if (path.startsWith("media/sources/")) { const value = await json(path); fail(path === `media/sources/${value.id}.json`, "Source descriptor filename differs"); await source(value); }
       else if (path.startsWith("media/manifests/")) { const value = await json(path); fail(path === `media/manifests/${value.digest}.json`, "Render manifest filename differs"); await renderManifest(value); }
@@ -547,12 +549,18 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       } else if (row.kind === "request_image_projection") {
         fail(Array.isArray(value.images), "Invalid saved image projection");
         for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/image-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);
+      } else if (row.kind === "request_attachment_projection") {
+        fail(Array.isArray(value.images) && value.images.length <= 8 && Array.isArray(value.attachments), "Invalid saved attachment projection");
+        for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/material-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);
       } else if (row.kind === "skill_activation") {
         for (const skill of value.activation?.skills ?? []) absoluteReference(skill.entryPath, skill.entrySha256);
       } else if (row.kind === "director_skill_lock") {
         fail(Array.isArray(value.lock?.skills), "Invalid saved skill lock");
         for (const skill of value.lock.skills) fail(files.has(`skill-snapshots/${skill.packageDigest}/SKILL.md`)
           || files.has(`native/${value.projectId}/workspace/.agents/skills/${skill.packageDigest}/SKILL.md`), "A locked skill snapshot is missing");
+        if (value.lock.schemaVersion === 2) { const release = value.lock.release?.releaseDigest;
+          fail(typeof release === "string" && (files.has(`skill-snapshots/${release}/release.json`)
+            || files.has(`native/${value.projectId}/workspace/.agents/skills/${release}/release.json`)), "A locked guidance release snapshot is missing"); }
       }
     }
     // Current canonical references must retain their owned artifact identity too.

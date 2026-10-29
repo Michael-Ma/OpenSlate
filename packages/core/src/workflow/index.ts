@@ -1,6 +1,8 @@
 import { Ajv } from "ajv";
 import { digest, invariant, newId } from "../common.js";
-import type { CompiledPlan, CueRecord, ProjectRecord, ShotRecord } from "../contracts.js";
+import { filmKindInputSchema, LEGACY_FILM_KIND_VALUES, normalizeFilmKind, parseFilmKind } from "../film-kind.js";
+import type { FilmKindInput, LegacyFilmKindValue } from "../film-kind.js";
+import type { CompiledPlan, CueRecord, ProjectRecord, ShotRecord, VisualStyle } from "../contracts.js";
 import { shotVideoTiming } from '../video-timing.js';
 
 export const STAGES = ["intake", "story", "scene_plan", "shot_plan", "narration", "storyboard", "video", "assembly", "review"] as const;
@@ -34,9 +36,13 @@ export interface ShotDraft {
   videoPrompt: string;
   referenceArtifactIds: string[];
   cueId: string | null;
+  /** 7.0.0: an existing shot ID, or the key of a shot created earlier in this patch, in the same scene. */
+  beforeId?: string;
 }
 
 export interface ShotUpdate {
+  /** 7.0.0 casting; applied by the character tools, never by applyCreativePatch. */
+  characterIds?: string[];
   narration?: NonNullable<ShotRecord['narration']>;
   id: string;
   purpose?: string;
@@ -49,11 +55,28 @@ export interface ShotUpdate {
   reauthorPrompts?: boolean;
 }
 
-export interface CreativePatch {
+/** Contract 7.0.0 project fields. A visual style's revisionId is issued by the application. */
+export interface ProjectPatch {
+  /** The whole structured record (film-kind@1). A pre-structure string is accepted only from held 7.0.0 proposals. */
+  filmKind?: FilmKindInput | LegacyFilmKindValue;
+  visualStyle?: Omit<VisualStyle, "revisionId"> | null;
+}
+
+/** Contract 7.0.0 character fields. They are applied by the character tools, never by applyCreativePatch. */
+export interface CharacterPatchFields {
+  createCharacters?: Array<{ key: string; name: string; identity: string; baseOutfit?: string; wardrobe?: Array<{ sceneId: string; outfit: string; notes?: string }> }>;
+  updateCharacters?: Array<{ id: string; name?: string; identity?: string; baseOutfit?: string | null;
+    setWardrobe?: Array<{ sceneId: string; outfit: string; notes?: string }>; clearWardrobe?: string[] }>;
+  deleteCharacterIds?: string[];
+}
+
+export interface CreativePatch extends CharacterPatchFields {
   brief?: string;
   story?: string;
-  createScenes?: Array<{ key: string; purpose: string }>;
-  updateScenes?: Array<{ id: string; purpose: string }>;
+  project?: ProjectPatch;
+  /** beforeId (7.0.0): an existing scene ID; omitted appends. */
+  createScenes?: Array<{ key: string; title?: string; purpose: string; beforeId?: string }>;
+  updateScenes?: Array<{ id: string; title?: string | null; purpose?: string }>;
   createShots?: ShotDraft[];
   updateShots?: ShotUpdate[];
   narrationScript?: string;
@@ -95,8 +118,69 @@ export const changeProposalSchema = object({
   }),
 }, ["variant", "expectedHeadVersion"]);
 
+/** Shipped catalogs copy changeProposalSchema. Additions must never mutate it. */
+export const shortFramingSchema = { type: "string", minLength: 1, maxLength: 40, pattern: "^\\S+(?: \\S+){0,2}(?![\\s\\S])", examples: ["Close-up", "Medium", "Wide"] };
+export const sceneTitleSchema = { type: "string", minLength: 1, maxLength: 60, pattern: "^\\S+(?: \\S+){0,5}(?![\\s\\S])" };
+const compatibleChangeProposalSchema = structuredClone(changeProposalSchema);
+type CreativeSchema = { properties: Record<string, { items: { properties: Record<string, object>; required: string[] } }> };
+const compatibleCreative = (compatibleChangeProposalSchema.properties as { creative: { properties: Record<string, object> } }).creative.properties;
+compatibleCreative.createScenes = arr(object({ key: short, title: text, purpose: text }, ["key", "purpose"]));
+compatibleCreative.updateScenes = arr({ ...object({ id: short, title: { anyOf: [text, { type: 'null' }] }, purpose: text }, ["id"]), minProperties: 2 });
+export const successorChangeProposalSchema = structuredClone(compatibleChangeProposalSchema);
+const successorCreative = (successorChangeProposalSchema.properties as { creative: CreativeSchema }).creative.properties;
+successorCreative.createScenes!.items.properties.title = structuredClone(sceneTitleSchema);
+successorCreative.updateScenes!.items.properties.title = structuredClone(sceneTitleSchema);
+successorCreative.createShots!.items.properties.framing = structuredClone(shortFramingSchema);
+successorCreative.updateShots!.items.properties.framing = structuredClone(shortFramingSchema);
+
+// Contract 7.0.0 additions. Cloned from the successor after every shipped schema has been captured, so 1.0.0–6.0.0
+// catalogs stay byte-for-byte unchanged. The application-side parser accepts them too; older catalogs reject them first.
+const line = (max: number) => ({ type: "string", minLength: 1, maxLength: max });
+const visualStyleTraits = object(Object.fromEntries(["palette", "lighting", "lensFormat", "texture", "composition", "productionDesign"].map(key => [key, line(600)])),
+  ["palette", "lighting", "lensFormat", "texture", "composition", "productionDesign"]);
+export const visualStyleInputSchema = object({
+  styleId: line(80), libraryVersion: line(40), label: line(80), traits: visualStyleTraits,
+  imageBlock: line(600), motionBlock: line(240),
+  motion: object({ cameraGrammar: line(300), frameRateFeel: { enum: ["24fps-cinematic", "30fps-video", "12fps-on-twos", "8-12fps-stop-motion", "60fps-smooth"] },
+    motionScale: { enum: ["still", "subtle", "moderate", "energetic"] } }, ["cameraGrammar", "frameRateFeel", "motionScale"]),
+  negatives: { type: "array", maxItems: 24, items: line(160) },
+  anchors: object({ referenceArtifactIds: { type: "array", maxItems: 8, uniqueItems: true, items: short }, characterSheets: { type: "array", maxItems: 32, uniqueItems: true, items: short } },
+    ["referenceArtifactIds", "characterSheets"]),
+  variationAxes: { type: "array", maxItems: 5, uniqueItems: true, items: { enum: ["timeOfDay", "paletteShift", "lightingKey", "weather", "treatment"] } },
+  overrides: { ...object(Object.fromEntries(["palette", "lighting", "lensFormat", "texture", "composition", "productionDesign"].map(key => [key, line(600)]))), minProperties: 1 },
+  rationale: line(300),
+}, ["styleId", "libraryVersion", "label", "traits", "imageBlock", "motionBlock", "motion", "negatives", "anchors", "variationAxes", "rationale"]);
+const wardrobeEntry = object({ sceneId: short, outfit: line(600), notes: { type: "string", maxLength: 300 } }, ["sceneId", "outfit"]);
+function addContractSevenFields(input: unknown, legacyFilmKind = false): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON Schema surgery on a cloned literal.
+  const creative = input as Record<string, any>;
+  // The application parser also reads the pre-structure 7.0.0 strings a held proposal may carry; the catalog does not offer them.
+  const filmKind = legacyFilmKind ? { anyOf: [structuredClone(filmKindInputSchema), { enum: LEGACY_FILM_KIND_VALUES }] } : structuredClone(filmKindInputSchema);
+  creative.project = { ...object({ filmKind, visualStyle: { anyOf: [visualStyleInputSchema, { type: "null" }] } }), minProperties: 1 };
+  creative.createScenes!.items.properties.beforeId = short;
+  creative.createShots!.items.properties.beforeId = short;
+  creative.updateShots!.items.properties.characterIds = { type: "array", maxItems: 32, uniqueItems: true, items: short };
+  creative.createCharacters = { type: "array", minItems: 1, maxItems: 32, items: object({ key: short, name: line(80), identity: line(1200), baseOutfit: line(600),
+    wardrobe: { type: "array", maxItems: 64, items: wardrobeEntry } }, ["key", "name", "identity"]) };
+  creative.updateCharacters = { type: "array", minItems: 1, maxItems: 32, items: { ...object({ id: short, name: line(80), identity: line(1200),
+    baseOutfit: { anyOf: [line(600), { type: "null" }] }, setWardrobe: { type: "array", maxItems: 64, items: wardrobeEntry },
+    clearWardrobe: { type: "array", maxItems: 64, uniqueItems: true, items: short } }, ["id"]), minProperties: 2 } };
+  creative.deleteCharacterIds = { type: "array", minItems: 1, maxItems: 32, uniqueItems: true, items: short };
+}
+export const contractSevenChangeProposalSchema = structuredClone(successorChangeProposalSchema);
+addContractSevenFields((contractSevenChangeProposalSchema.properties as { creative: CreativeSchema }).creative.properties);
+addContractSevenFields((compatibleChangeProposalSchema.properties as { creative: CreativeSchema }).creative.properties, true);
+
+/** Whether a creative patch carries 7.0.0 character fields, which the character tools apply. */
+export function hasCharacterPatchFields(patch: CreativePatch | undefined): boolean {
+  return !!patch && (patch.createCharacters !== undefined || patch.updateCharacters !== undefined || patch.deleteCharacterIds !== undefined
+    || (patch.updateShots ?? []).some(row => row.characterIds !== undefined));
+}
+
 const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false });
-const validate = ajv.compile(changeProposalSchema);
+// The application also reads historical preparations and restores human titles,
+// which may exceed the Director's short-label bounds. Epoch-specific tools validate first.
+const validate = ajv.compile(compatibleChangeProposalSchema);
 
 export function parseChangeProposal(value: unknown): ChangeProposal {
   invariant(validate(value), "VALIDATION_ERROR", ajv.errorsText(validate.errors));
@@ -114,6 +198,21 @@ export function applyCreativePatch(
   const next = structuredClone(before);
   if (patch.brief !== undefined) next.brief = patch.brief;
   if (patch.story !== undefined) next.story = patch.story;
+  invariant(!hasCharacterPatchFields(patch), "VALIDATION_ERROR", "Character changes are applied by the character tools, not a creative patch");
+  if (patch.project?.filmKind !== undefined) {
+    const input = typeof patch.project.filmKind === "string" ? normalizeFilmKind(patch.project.filmKind) : patch.project.filmKind;
+    invariant(input, "VALIDATION_ERROR", "Unknown filmKind");
+    next.filmKind = parseFilmKind(input);
+  }
+  if (patch.project?.visualStyle === null) delete next.visualStyle;
+  else if (patch.project?.visualStyle !== undefined) {
+    const style = structuredClone(patch.project.visualStyle);
+    const unchanged = next.visualStyle && digest({ ...next.visualStyle, revisionId: null }) === digest({ ...style, revisionId: null });
+    if (!unchanged) {
+      invariant(style.anchors.referenceArtifactIds.every(id => next.artifacts.some(a => a.artifactId === id)), "SCOPE_DENIED", "Style references an unknown artifact");
+      next.visualStyle = { ...style, revisionId: newId() };
+    }
+  }
   if (patch.narrationSource !== undefined) next.narration.source = patch.narrationSource;
   if (patch.narrationScript !== undefined && patch.narrationScript !== next.narration.script) {
     next.narration.script = patch.narrationScript;
@@ -125,7 +224,13 @@ export function applyCreativePatch(
     invariant(!sceneKeys.has(scene.key), "VALIDATION_ERROR", "Duplicate scene key");
     const id = newId();
     sceneKeys.set(scene.key, id);
-    next.scenes.push({ id, revisionId: newId(), purpose: scene.purpose });
+    const created = { id, revisionId: newId(), purpose: scene.purpose, ...(scene.title !== undefined ? { title: scene.title } : {}) };
+    if (scene.beforeId === undefined) next.scenes.push(created);
+    else {
+      const at = next.scenes.findIndex(item => item.id === (sceneKeys.get(scene.beforeId!) ?? scene.beforeId));
+      invariant(at >= 0 && scene.beforeId !== scene.key, "SCOPE_DENIED", "Insert the scene before an existing scene of this film");
+      next.scenes.splice(at, 0, created);
+    }
   }
   const changedScenes = new Set<string>();
   for (const update of patch.updateScenes ?? []) {
@@ -133,10 +238,12 @@ export function applyCreativePatch(
     changedScenes.add(update.id);
     const scene = next.scenes.find(item => item.id === update.id);
     invariant(scene, "SCOPE_DENIED", "Scene does not belong to project");
-    scene.purpose = update.purpose;
+    if (update.purpose !== undefined) scene.purpose = update.purpose;
+    if (update.title === null) delete scene.title;
+    else if (update.title !== undefined) scene.title = update.title;
     scene.revisionId = newId();
   }
-  const keys = new Set<string>();
+  const keys = new Set<string>(), shotKeys = new Map<string, string>();
   for (const draft of patch.createShots ?? []) {
     invariant(!keys.has(draft.key), "VALIDATION_ERROR", "Duplicate shot key"); keys.add(draft.key);
     const sceneId = sceneKeys.get(draft.sceneId) ?? draft.sceneId;
@@ -144,9 +251,17 @@ export function applyCreativePatch(
     invariant(draft.referenceArtifactIds.every(id => next.artifacts.some(a => a.artifactId === id)), "SCOPE_DENIED", "Shot references an unknown artifact");
     invariant(draft.cueId === null || next.cues.some(cue => cue.id === draft.cueId), "SCOPE_DENIED", "Shot references an unknown cue");
     invariant(draft.narration?.mode !== 'none' || draft.cueId === null, 'VALIDATION_ERROR', 'A shot with no narration cannot reference an audio cue');
-    const { key: _key, ...fields } = draft;
+    const { key: _key, beforeId, ...fields } = draft;
     const shot: ShotRecord = { ...fields, sceneId, id: newId(), revisionId: newId(), promptIntent: { image: "", video: "" } };
-    next.shots.push(bind(shot, next.cues.find(cue => cue.id === shot.cueId)));
+    shotKeys.set(draft.key, shot.id);
+    const bound = bind(shot, next.cues.find(cue => cue.id === shot.cueId));
+    if (beforeId === undefined) next.shots.push(bound);
+    else {
+      // Same rule as the person's moveShot: the target belongs to the destination scene.
+      const at = next.shots.findIndex(item => item.id === (shotKeys.get(beforeId) ?? beforeId) && item.sceneId === sceneId && item.id !== shot.id);
+      invariant(at >= 0, "SCOPE_DENIED", "Insert the shot before an existing shot of the same scene");
+      next.shots.splice(at, 0, bound);
+    }
   }
   const updated = new Set<string>();
   for (const update of patch.updateShots ?? []) {
@@ -163,6 +278,8 @@ export function applyCreativePatch(
     const shot = { ...original, ...fields, ...(fields.narration?.mode === 'none' ? { cueId: null } : {}),
       ...(writingChanged ? { narrationPending: fields.narration?.mode !== 'none' } : {}),
       revisionId: onlyWriting && (fields.narration?.mode !== 'none' || original.cueId === null || original.narrationTimingMode === 'within_shot') ? original.revisionId : newId() };
+    if (original.promptState === "placeholder" && ["action", "framing", "imagePrompt", "videoPrompt"].some(key => Object.hasOwn(fields, key))) shot.promptState = "ready";
+    if (writingChanged) delete shot.narrationFit;
     next.shots[index] = bind(shot, next.cues.find(cue => cue.id === shot.cueId));
   }
   invariant(next.scenes.length <= 400 && next.shots.length <= 400, "VALIDATION_ERROR", "Project exceeds current planning limits");
@@ -175,7 +292,7 @@ export interface StageRequirement { stageId: StageId; scopeId: string }
 export function requiredStages(before: ProjectRecord, next: ProjectRecord, plan: CompiledPlan | null): StageRequirement[] {
   const requirements = new Map<string, StageRequirement>();
   const add = (stageId: StageId, scopeId: string) => requirements.set(`${stageId}:${scopeId}`, { stageId, scopeId });
-  if (before.brief !== next.brief) add("intake", next.id);
+  if (before.brief !== next.brief || digest(before.filmKind ?? null) !== digest(next.filmKind ?? null) || digest(before.visualStyle ?? null) !== digest(next.visualStyle ?? null)) add("intake", next.id);
   if (before.story !== next.story) add("story", next.id);
   if (digest(before.narration) !== digest(next.narration)) add("narration", next.id);
   for (const scene of next.scenes) if (digest(before.scenes.find(s => s.id === scene.id) ?? null) !== digest(scene)) add("scene_plan", scene.id);

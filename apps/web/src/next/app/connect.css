@@ -1,0 +1,21 @@
+/* The Connect screen on top of ui/studio.css. This file can load before studio.css, so overrides are more specific, never later. */
+.connect{min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:24px 16px;background:var(--ground)}
+.connect-card{width:100%;max-width:420px;background:var(--bar);border:1px solid var(--hairline);border-radius:var(--r-big);padding:24px 24px 22px}
+.connect .brand{width:auto;margin-bottom:20px}
+.connect .brand .word{display:inline}
+.connect h1{margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-.01em}
+.connect-reason{margin:0 0 4px;color:var(--text)}
+.connect-how{margin:0 0 20px;color:var(--text-2);font-size:13px}
+/* Start's reconnect note (films saved, nothing resent) reads as one block under the steps. */
+.connect-how[data-note="films-saved"]{margin-bottom:6px}
+.connect-how code{font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--raised-2);color:var(--text);border-radius:5px;padding:1px 5px}
+.connect .pill.primary{padding:7px 18px}
+.connect-wait{display:flex;align-items:center;gap:10px;margin:0;color:var(--text-2);animation:connect-in .2s .4s both}
+.connect-dots{display:inline-flex;gap:4px}
+.connect-dots i{width:5px;height:5px;border-radius:50%;background:var(--muted);animation:blink 1s infinite}
+.connect-dots i:nth-child(2){animation-delay:.2s}
+.connect-dots i:nth-child(3){animation-delay:.4s}
+@keyframes connect-in{from{opacity:0}to{opacity:1}}
+/* After Disconnect: a Try again without a fresh link says so above the button. */
+.connect .connect-still{margin:0 0 14px;color:var(--text);font-size:13px}
+.connect .connect-still:empty{margin:0}

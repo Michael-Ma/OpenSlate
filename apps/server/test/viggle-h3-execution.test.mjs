@@ -3,15 +3,15 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonical, digest } from '@openslate/core';
+import { canonical, digest, DomainError } from '@openslate/core';
 import { describeViggleH3Request } from '@openslate/providers';
 import { Store } from '../dist/persistence/store.js';
 import { Engine } from '../dist/execution/engine.js';
-import { ViggleH3Execution } from '../dist/execution/viggle-h3-execution.js';
+import { ViggleH3Execution, ViggleDownloadPending, viggleHasCompletedObservation } from '../dist/execution/viggle-h3-execution.js';
 import { ExecutionOutputStore } from '../dist/execution/output-store.js';
 import { EnvironmentMediaCredentials } from '../dist/application/provider-credentials.js';
 import { assertViggleRecords, assertViggleSpoolLineage } from '../dist/execution/viggle-h3-lineage.js';
-import { assertViggleH3ExecutionMapping, viggleH3CompletedObservationId } from '../dist/execution/viggle-h3-receipts.js';
+import { assertViggleH3ExecutionMapping, assertViggleH3FirstFrameAspect, assertViggleH3OperationOptions, viggleH3CompletedObservationId, viggleH3RequestAspect } from '../dist/execution/viggle-h3-receipts.js';
 import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from '../dist/application/installation-recovery.js';
 import { fixture, context, due, rows, taskId, key, json, accepted, pending, completed, hash } from './viggle-h3-execution-fixture.mjs';
 
@@ -113,10 +113,10 @@ test('credential callback cannot publish local failure or POST after stealing th
   assert.equal(rows(f, 'viggle_h3_execution_submit').length, 0); assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0); assert.equal(f.calls.post, 0);
 });
 
-test('unknown marker and observation survive reopen without blind GET, credential lookup, or another POST', async t => {
+test('lost reply marker and observation survive reopen as final loss without blind GET, credential lookup, or another POST', async t => {
   const f = await fixture(t, { fetch: async () => { throw Error('lost response'); } });
-  assert.equal((await f.bridge.submit(f.request, context(f))).type, 'unknown'); const reopened = reopen(f);
-  assert.equal((await reopened.bridge.submit(f.request)).type, 'unknown'); assert.equal((await reopened.bridge.lookup(f.attempt.id)).type, 'unknown');
+  assert.deepEqual(await f.bridge.submit(f.request, context(f)), lostReply); const reopened = reopen(f);
+  assert.deepEqual(await reopened.bridge.submit(f.request), lostReply); assert.deepEqual(await reopened.bridge.lookup(f.attempt.id), lostReply);
   assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 0); assert.equal(reopened.store.list('viggle_h3_execution_dispatch', f.project.id).length, 1);
 });
 
@@ -141,15 +141,152 @@ test('known polling cooldown is durable and a late worker cannot shorten a repla
   assert.equal(f.calls.post, 1); await second.poll(taskId, f.request); assert.equal(f.calls.query, 2);
 });
 
+for (const kind of ['pending', 'unknown']) test(`identical ${kind} polls with fresh HTTP request ids retain bounded history across restart`, async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => {
+    if (init.method === 'POST') return accepted();
+    return json(kind === 'pending' ? await pending().json() : { error: { code: 'RATE_LIMITED', message: 'PRIVATE_NOT_RETAINED',
+      retryable: true, details: {}, remediation: { action: 'wait', retry_after_ms: 20000 }, request_id: null } },
+      kind === 'pending' ? 200 : 429, { 'x-request-id': `req_fresh_${f.calls.query}`, ...(kind === 'unknown' ? { 'retry-after': '20' } : {}) });
+  } });
+  await f.bridge.submit(f.request, context(f)); let active = f;
+  for (let cycle = 0; cycle < 12; cycle++) {
+    if (cycle === 6) active = { ...f, ...reopen(f, false) };
+    due(active); const outcome = await active.bridge.poll(taskId, f.request);
+    assert.equal(outcome.type, kind === 'pending' ? 'accepted' : 'unknown');
+  }
+  const observations = rows(active, 'viggle_h3_execution_observation');
+  assert.equal(observations.length, 1, 'transport trace ids are not new task state');
+  assert.equal(observations[0].observation.receipt.requestId, 'req_fresh_1');
+  if (kind === 'unknown') {
+    assert.deepEqual(observations[0].observation.error, { code: 'RATE_LIMITED', category: 'throttled', retryAfterMs: 20000 });
+    assert.equal(rows(active, 'viggle_h3_poll_schedule')[0].nextPollAt - f.clock.value, 20000);
+  }
+  assertViggleRecords(active.store, f.attempt.id);
+  assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 12); assert.equal(f.calls.download, 0);
+});
+
+test('nonterminal deduplication retains real status, HTTP status and retry timing changes', async t => {
+  let status = 'queued', httpStatus = 200, retryAfterMs = 20000;
+  const f = await fixture(t, { fetch: async (_url, init) => {
+    if (init.method === 'POST') return accepted();
+    const body = httpStatus === 200 ? await pending(status).json() : httpStatus === 429 ? { error: { code: 'RATE_LIMITED', message: 'PRIVATE',
+      retryable: true, details: {}, remediation: { action: 'wait', retry_after_ms: retryAfterMs }, request_id: null } } : {};
+    return json(body, httpStatus, { 'x-request-id': `req_changed_${f.calls.query}` });
+  } });
+  await f.bridge.submit(f.request, context(f));
+  const poll = async () => { due(f); return f.bridge.poll(taskId, f.request); };
+  await poll(); status = 'processing'; await poll(); status = 'queued'; await poll();
+  assert.equal(rows(f, 'viggle_h3_execution_observation').length, 2);
+  httpStatus = 500; await poll(); httpStatus = 503; await poll(); httpStatus = 500; await poll();
+  assert.equal(rows(f, 'viggle_h3_execution_observation').length, 4);
+  httpStatus = 429; await poll(); retryAfterMs = 60000; await poll();
+  assert.equal(rows(f, 'viggle_h3_execution_observation').length, 6);
+  assert.equal(rows(f, 'viggle_h3_poll_schedule')[0].nextPollAt - f.clock.value, 60000);
+  retryAfterMs = 20000; await poll();
+  assert.equal(rows(f, 'viggle_h3_execution_observation').length, 6);
+  assert.equal(rows(f, 'viggle_h3_poll_schedule')[0].nextPollAt - f.clock.value, 20000);
+  assertViggleRecords(f.store, f.attempt.id); assert.equal(f.calls.post, 1);
+});
+
+test('nonterminal deduplication never promotes a matching receipt with corrupt lineage', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted()
+    : json(await pending().json(), 200, { 'x-request-id': `req_corrupt_${f.calls.query}` }) });
+  await f.bridge.submit(f.request, context(f)); due(f); await f.bridge.poll(taskId, f.request);
+  const retained = rows(f, 'viggle_h3_execution_observation')[0];
+  tamper(f, 'viggle_h3_execution_observation', { ...retained, mappingDigest: '0'.repeat(64) });
+  const schedule = rows(f, 'viggle_h3_poll_schedule')[0];
+  f.store.put('viggle_h3_poll_schedule', schedule.id, f.project.id, { ...schedule, lastObservationId: null });
+  due(f); assert.equal((await f.bridge.poll(taskId, f.request)).type, 'unknown');
+  assert.equal(rows(f, 'viggle_h3_execution_observation').length, 1);
+  assert.throws(() => assertViggleRecords(f.store, f.attempt.id), { code: 'VIGGLE_H3_EXECUTION_CONFLICT' });
+  assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 2); assert.equal(f.calls.download, 0);
+});
+
 test('expired signed locator refreshes only through another known-task GET and retains both immutable observations', async t => {
   let f, status = 400;
   f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed(String(f.calls.query)), downloadStatus: () => status });
-  assert.equal((await ready(f)).type, 'unknown'); const first = rows(f, 'execution_output_receipt')[0];
+  await assert.rejects(ready(f), error => error instanceof ViggleDownloadPending && error.code === 'OUTPUT_DOWNLOAD_FAILED' && error.taskId === taskId);
+  const first = rows(f, 'execution_output_receipt')[0];
   status = 200; due(f); const result = await f.bridge.poll(taskId, f.request); assert.equal(result.type, 'completed');
   assert.equal(rows(f, 'execution_output_receipt').length, 2); assert.equal(rows(f, 'viggle_h3_execution_observation').length, 2);
   assert.deepEqual(f.store.get('execution_output_receipt', first.id), first); assertViggleSpoolLineage(f.store, f.attempt, result.outputs[0].storage.spoolId);
   const before = { ...f.calls }; assert.deepEqual(await f.bridge.lookup(f.attempt.id), result); assert.deepEqual(await f.bridge.poll(taskId, f.request), result);
   assert.deepEqual(f.calls, before); assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 2);
+});
+
+test('completed clip with an unapproved download host retains its known task and sanitized local cause', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted()
+    : json({ ...await completed().json(), video_url: 'https://unapproved.example.test/clip.mp4?private-signature=fixture' }) });
+  await assert.rejects(ready(f), error => error instanceof ViggleDownloadPending && error.code === 'OUTPUT_DOWNLOAD_LOCATOR'
+    && error.taskId === taskId && !error.message.includes('private-signature'));
+  assert.equal(rows(f, 'viggle_h3_execution_observation')[0].observation.kind, 'completed');
+  assert.equal(rows(f, 'execution_output_receipt').length, 1); assert.equal(rows(f, 'execution_output_spool').length, 0);
+  assert.equal(f.calls.download, 0); assert.deepEqual(await f.bridge.lookup(f.attempt.id), { type: 'accepted', taskId });
+  assert.equal(f.calls.post, 1);
+});
+
+test('completed clip with an expired protected locator preserves the expiry code without an unknown result', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed() });
+  const source = f.downloader.source.bind(f.downloader);
+  // H3 currently reports no expiry; a trusted downloader may know that this signed locator has expired.
+  f.downloader.source = receipt => source({ ...receipt, source: { ...receipt.source, expiresAt: '2000-01-01T00:00:00.000Z' } });
+  await assert.rejects(ready(f), error => error instanceof ViggleDownloadPending && error.code === 'OUTPUT_DOWNLOAD_EXPIRED' && error.taskId === taskId);
+  assert.equal(rows(f, 'viggle_h3_execution_observation')[0].observation.kind, 'completed'); assert.equal(f.calls.download, 0);
+  assert.equal(rows(f, 'execution_output_receipt').length, 1); assert.equal(f.calls.post, 1);
+});
+
+test('Viggle local spool and recovery capacity errors pass through without becoming provider unknowns', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed() });
+  const spool = f.outputs.spool.bind(f.outputs);
+  f.outputs.spool = async () => { throw new DomainError('OUTPUT_STORE_BUSY', 'synthetic writer capacity'); };
+  await assert.rejects(ready(f), error => error.code === 'OUTPUT_STORE_BUSY' && !(error instanceof ViggleDownloadPending));
+  assert.equal(rows(f, 'viggle_h3_execution_observation')[0].observation.kind, 'completed');
+  f.outputs.spool = spool;
+  const recover = f.outputs.recoverCompletion.bind(f.outputs);
+  f.outputs.recoverCompletion = async () => { throw new DomainError('OUTPUT_STORE_BUSY', 'synthetic recovery capacity'); };
+  await assert.rejects(f.bridge.lookup(f.attempt.id), { code: 'OUTPUT_STORE_BUSY' }); f.outputs.recoverCompletion = recover;
+  due(f); const result = await f.bridge.poll(taskId, f.request); assert.equal(result.type, 'completed'); assert.equal(f.calls.post, 1);
+});
+
+test('a durable completed observation survives lease loss and later unavailable task queries', async t => {
+  let unavailable = false;
+  const f = await fixture(t, { fetch: async (_url, init) => {
+    if (init.method === 'POST') return accepted();
+    if (unavailable) throw Error('synthetic unavailable task lookup');
+    return json({ ...await completed().json(), video_url: 'https://unapproved.example.test/clip.mp4' });
+  } });
+  assert.equal(viggleHasCompletedObservation(f.store, f.attempt), false);
+  const source = f.downloader.source.bind(f.downloader);
+  f.downloader.source = receipt => {
+    f.store.put('attempt', f.attempt.id, f.project.id, { ...current(f), leaseOwner: 'replacement', leaseEpoch: f.attempt.leaseEpoch + 1 });
+    return source(receipt);
+  };
+  await assert.rejects(ready(f), { code: 'OUTPUT_DOWNLOAD_LOCATOR' });
+  assert.equal(viggleHasCompletedObservation(f.store, current(f)), true);
+  assert.deepEqual(await f.bridge.lookup(f.attempt.id), { type: 'accepted', taskId });
+  unavailable = true; due(f);
+  await assert.rejects(f.bridge.poll(taskId, f.request), error => error instanceof ViggleDownloadPending && error.code === 'OUTPUT_DOWNLOAD_FAILED');
+  assert.equal(rows(f, 'viggle_h3_execution_observation').filter(value => value.observation.kind === 'completed').length, 1);
+  assert.equal(f.calls.post, 1);
+});
+
+test('finished task storage corruption stays a local ingestion issue and repairs without a provider request', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed() });
+  const completion = await ready(f), owned = await f.outputs.resolveOwned(f.project.id, completion.receiptId), before = { ...f.calls };
+  chmodSync(owned.path, 0o600); writeFileSync(owned.path, 'synthetic local corruption');
+  await assert.rejects(f.bridge.lookup(f.attempt.id), error => error instanceof ViggleDownloadPending && error.code === 'OUTPUT_DOWNLOAD_FAILED');
+  assert.equal(viggleHasCompletedObservation(f.store, f.attempt), true); assert.deepEqual(f.calls, before);
+  writeFileSync(owned.path, f.video); chmodSync(owned.path, 0o444);
+  assert.deepEqual(await f.bridge.lookup(f.attempt.id), completion); assert.deepEqual(f.calls, before);
+});
+
+test('completion helper refuses a mismatched request or corrupted provider receipt', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed() });
+  await ready(f); assert.equal(viggleHasCompletedObservation(f.store, f.attempt), true);
+  assert.equal(viggleHasCompletedObservation(f.store, { ...f.attempt, request: { ...f.request, fingerprint: 'mismatched' } }), false);
+  assert.equal(viggleHasCompletedObservation(f.store, { ...f.attempt, taskId: 'vid_other' }), false);
+  const receipt = rows(f, 'execution_output_receipt')[0]; tamper(f, 'execution_output_receipt', { ...receipt, requestDigest: '0'.repeat(64) });
+  assert.equal(viggleHasCompletedObservation(f.store, f.attempt), false); assert.equal(f.calls.post, 1);
 });
 
 test('identical bytes from an alternate winning receipt cannot bypass Viggle completed-observation lineage', async t => {
@@ -160,9 +297,9 @@ test('identical bytes from an alternate winning receipt cannot bypass Viggle com
       await spool(f.project.id, other.id, async function* () { yield f.video; }); }
     return spool(...args);
   };
-  assert.equal((await ready(f)).type, 'unknown'); const winner = rows(f, 'execution_output_slot')[0];
+  await assert.rejects(ready(f), { code: 'OUTPUT_DOWNLOAD_FAILED' }); const winner = rows(f, 'execution_output_slot')[0];
   assert.throws(() => assertViggleSpoolLineage(f.store, f.attempt, winner.spoolId), /Viggle/);
-  const before = { ...f.calls }; assert.equal((await f.bridge.lookup(f.attempt.id)).type, 'unknown'); assert.deepEqual(f.calls, before);
+  const before = { ...f.calls }; await assert.rejects(f.bridge.lookup(f.attempt.id), { code: 'OUTPUT_DOWNLOAD_FAILED' }); assert.deepEqual(f.calls, before);
   assert.equal(rows(f, 'video_derivation_intent').length, 0);
 });
 
@@ -238,4 +375,75 @@ test('human scene-scope approval retains historical validity after the shot move
     shots: project.shots.map(shot => ({ ...shot, sceneId })) }, project.headVersion);
   due(f); assert.equal((await f.bridge.poll(taskId, f.request)).type, 'completed'); assertViggleRecords(f.store, f.attempt.id);
   assert.equal(f.calls.post, 1);
+});
+
+const attemptEvents = f => f.store.readEvents(f.project.id).filter(event => event.payload?.attemptId === f.attempt.id);
+const lostReply = { type: 'failed', taskId: null, failureId: 'SUBMISSION_RESPONSE_LOST', technical: true, retryAllowed: false };
+
+test('a lost POST reply with no task id ends charged at once, with one POST, no GET and no automatic retry', async t => {
+  const f = await fixture(t, { deferAdmission: true, fetch: async () => { throw Error('lost response'); } });
+  await f.engine.runReady(); f.attempt = current(f);
+  assert.equal(f.attempt.phase, 'failed'); assert.equal(f.attempt.taskId, null);
+  assert.deepEqual(f.attempt.failure, { id: 'SUBMISSION_RESPONSE_LOST', technical: true, source: f.attempt.failure.source, retryAllowed: false });
+  assert.equal(f.store.get('reservation', f.attempt.reservationId).state, 'charged', 'counted as spent');
+  assert.deepEqual(attemptEvents(f).map(event => event.payload.phase), ['submitting', 'failed']);
+  for (let cycle = 0; cycle < 5; cycle++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.equal(f.calls.post, 1, 'never resubmitted without a human press'); assert.equal(f.calls.query, 0);
+  assert.equal(attemptEvents(f).length, 2); assert.equal(f.engine.attempts(f.project.id).length, 1);
+});
+
+test('a dispatched POST whose worker died with no receipt is lost only after any POST must have ended', async t => {
+  const f = await fixture(t, { deferAdmission: true, fetch: async () => { throw Error('lost response'); } }), insert = f.store.insert.bind(f.store);
+  f.store.insert = (...args) => { if (args[0] === 'viggle_h3_execution_submit') throw Error('worker died before the receipt'); return insert(...args); };
+  try { await f.engine.runReady(); } finally { f.store.insert = insert; }
+  f.attempt = current(f); assert.equal(f.attempt.phase, 'submission_unknown'); assert.equal(rows(f, 'viggle_h3_execution_submit').length, 0);
+  const wake = () => { const { unknownWait: _wait, ...saved } = current(f); tamper(f, 'attempt', { ...saved, leaseExpiresAt: 0 }); };
+  f.clock.value = rows(f, 'viggle_h3_execution_dispatch')[0].createdAt + 119999; wake(); await f.engine.reconcile();
+  assert.equal(current(f).phase, 'submission_unknown', 'a POST that may still be running is not declared lost');
+  f.clock.value += 1; wake(); await f.engine.reconcile();
+  assert.equal(current(f).phase, 'failed'); assert.equal(current(f).failure.id, 'SUBMISSION_RESPONSE_LOST');
+  assert.equal(f.store.get('reservation', current(f).reservationId).state, 'charged'); assert.equal(f.calls.post, 1);
+});
+
+test('a worker that died before the dispatch marker is fenced as never sent: released, not charged, no POST', async t => {
+  const f = await fixture(t); tamper(f, 'attempt', { ...current(f), leaseExpiresAt: 0 });
+  await f.engine.reconcile(); const settled = current(f);
+  assert.equal(settled.phase, 'failed'); assert.equal(settled.failure.retryAllowed, false);
+  assert.equal(f.store.get('reservation', settled.reservationId).state, 'released', 'never sent is never charged');
+  assert.equal(rows(f, 'viggle_h3_execution_submit')[0].observation.kind, 'not_dispatched');
+  for (let cycle = 0; cycle < 3; cycle++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.equal(f.calls.post, 0); assert.equal(f.calls.credentials, 0);
+});
+
+const reels = { version: 'film-kind@1', kind: 'social', format: { platform: 'ig_reels', aspect: '9:16' } };
+test('a 9:16 film sends aspect_ratio 9:16 with its portrait first frame; the profile aspect stays for older requests', async t => {
+  let form;
+  const f = await fixture(t, { filmKind: reels, pngSize: [180, 320], fetch: async (url, init) => {
+    form = await new Request(url, { method: 'POST', headers: init.headers, body: Buffer.from(init.body) }).formData(); return accepted();
+  } });
+  assert.equal(f.node.args.aspect, '9:16'); assert.equal(f.profile.configuration.settings.aspectRatio, '16:9');
+  assert.deepEqual(await f.bridge.submit(f.request, context(f)), { type: 'accepted', taskId });
+  assert.equal(form.get('aspect_ratio'), '9:16');
+  const mapping = rows(f, 'viggle_h3_execution_mapping')[0];
+  assert.equal(mapping.transport.aspectRatio, '9:16'); assert.deepEqual([mapping.transport.firstFrame.width, mapping.transport.firstFrame.height], [180, 320]);
+  assertViggleRecords(f.store, f.attempt.id);
+  const legacy = await fixture(t, { fetch: async (url, init) => {
+    form = await new Request(url, { method: 'POST', headers: init.headers, body: Buffer.from(init.body) }).formData(); return accepted();
+  } });
+  assert.equal(Object.hasOwn(legacy.node.args, 'aspect'), false);
+  await legacy.bridge.submit(legacy.request, context(legacy)); assert.equal(form.get('aspect_ratio'), '16:9');
+});
+
+test('a first frame of another shape is refused before any POST', async t => {
+  const f = await fixture(t, { filmKind: reels });
+  assert.equal(f.node.args.aspect, '9:16'); assert.deepEqual([f.image.width, f.image.height], [320, 180]);
+  const outcome = await f.bridge.submit(f.request, context(f));
+  assert.equal(outcome.type, 'rejected'); assert.equal(outcome.retryAllowed, false); assert.equal(f.calls.post, 0); assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0);
+  assert.equal(rows(f, 'viggle_h3_execution_mapping').length, 0);
+  assert.equal(rows(f, 'viggle_h3_execution_submit')[0].observation.code, 'LOCAL_INPUT_INVALID');
+  assert.throws(() => assertViggleH3FirstFrameAspect(f.request.args, 1024, 1024), error => error.code === 'VIGGLE_H3_FIRST_FRAME_ASPECT');
+  assert.doesNotThrow(() => assertViggleH3FirstFrameAspect(f.request.args, 1024, 1536));
+  assert.doesNotThrow(() => assertViggleH3FirstFrameAspect(Object.fromEntries(Object.entries(f.request.args).filter(([k]) => k !== 'aspect')), 1024, 1024), 'older requests have no aspect check');
+  assert.equal(viggleH3RequestAspect(f.request.args, f.profile), '9:16');
+  assert.throws(() => assertViggleH3OperationOptions(f.profile, { ...f.request.args, aspect: '4:5' }), error => error.code === 'VIGGLE_H3_PREFLIGHT_INVALID');
 });

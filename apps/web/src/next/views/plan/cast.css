@@ -1,0 +1,128 @@
+/*
+ * Plan › Cast, the sheet review and the film's look (v8 step 5). Only :root tokens. App facts (sheet state, missing
+ * outfits, what approval outdates) are neutral with an icon; amber stays the Director's.
+ */
+
+/* ---------- look ---------- */
+.plan .look{display:grid;grid-template-columns:minmax(0,1fr);gap:12px 24px}
+.plan .look.with-song{grid-template-columns:minmax(0,1fr) minmax(200px,280px)}
+.plan .look-label{margin:6px 0 0;font-size:14.5px}
+.plan .look-detail{margin:3px 0 0;color:var(--text-2);font-size:12.5px;line-height:1.45;overflow-wrap:anywhere}
+.plan .look .hint{margin:3px 0 0}
+.plan .look-song{border-left:1px solid var(--hairline);padding-left:20px;display:flex;flex-direction:column;gap:4px;justify-content:center}
+.plan .look-song .eyebrow{color:var(--text-2);font-size:11px}
+.plan .look-song .hint{margin:0}
+.plan .look-song .link-btn{align-self:flex-start;font-size:12.5px;color:var(--text)}
+
+/* ---------- cast ---------- */
+.plan .cast .cast-count{font-size:12.5px}
+.plan .cast-empty{margin:8px 0 2px;max-width:640px}
+.plan .cast-unsupported{margin:8px 0 0}
+.plan .cast-list{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column}
+.plan .cast-row{display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:14px;align-items:start;padding:12px 0;border-top:1px solid var(--hairline)}
+.plan .cast-row:first-child{border-top:0;padding-top:4px}
+.plan .sheet-thumb{position:relative;width:72px;aspect-ratio:1;border-radius:10px;overflow:hidden;border:1px solid var(--hairline);background:var(--surface-stripe);padding:0;display:block}
+.plan .sheet-thumb .pic-img,.plan .sheet-thumb .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.plan .sheet-thumb.empty{border-style:dashed;background:none;color:var(--muted);font-size:11px;display:grid;place-items:center;text-align:center;padding:4px}
+.plan .sheet-thumb:hover{border-color:var(--track)}
+.plan .sheet-making{position:absolute;inset:0;background:repeating-linear-gradient(135deg,rgba(20,21,23,.55) 0 8px,rgba(20,21,23,.3) 8px 16px)}
+.plan .cast-name{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.plan .cast-name b{font-size:14.5px;font-weight:700}
+.plan .sheet-state .ic{width:14px;height:14px;font-size:9px}
+.plan .status[data-tone="attention"]{color:var(--text);border-color:var(--track);background:var(--raised)}
+.plan .cast-identity{margin:5px 0 0;font-size:13px;line-height:1.45;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.plan .cast-meta{display:flex;gap:4px 14px;flex-wrap:wrap;margin-top:4px;color:var(--text-2);font-size:12px}
+.plan .cast-acts{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+
+/* ---------- wardrobe ---------- */
+.plan .wardrobe-wrap{margin-top:6px;border-top:1px solid var(--hairline);padding-top:10px}
+.plan .wardrobe-head{display:flex;align-items:center;gap:12px}
+.plan .wardrobe-head b{font-size:13px}
+.plan .wardrobe-hint{margin:2px 0 8px}
+.plan .wardrobe{display:flex;flex-direction:column}
+.plan .wd-row{display:grid;grid-template-columns:120px repeat(var(--wd-scenes),minmax(0,1fr));gap:8px;align-items:stretch;padding:6px 0;border-top:1px solid var(--hairline)}
+.plan .wd-head{border-top:0;padding-bottom:2px;font-size:11.5px;color:var(--muted);font-weight:600}
+.plan .wd-head .wd-scene{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plan .wd-name{display:flex;align-items:center;font-size:13px;min-width:0;overflow-wrap:anywhere}
+.plan .wd-cell{position:relative;border:1px solid var(--hairline);background:var(--bar);border-radius:10px;padding:8px 10px 8px;font-size:12.5px;line-height:1.4;min-width:0;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.plan .wd-cell[data-state="absent"]{background:none;border-style:dashed;color:var(--muted)}
+.plan .wd-cell[data-state="missing"]{border-color:var(--text-2)}
+.plan .wd-cell .wd-outfit{overflow-wrap:anywhere}
+.plan .wd-cell .wd-outfit small{display:block;color:var(--text-2);font-size:11.5px;margin-top:2px}
+.plan .wd-cell .wd-base{color:var(--text-2);font-style:italic;overflow-wrap:anywhere}
+.plan .wd-cell .check{white-space:normal}
+.plan .wd-cell .wd-edit{margin-top:auto}
+.plan .wd-scene-label{display:none}
+
+/* ---------- cast on a shot row ---------- */
+.plan .shot-cast{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px;font-size:12px}
+.plan .cast-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--hairline);background:var(--raised);border-radius:var(--r-pill);padding:1px 9px 1px 2px;font-weight:600;color:var(--text)}
+.plan .cast-chip.unapproved{border-style:dashed}
+.plan .shot-cast .link-btn{margin:0;font-size:12px}
+
+/* ---------- dialogs ---------- */
+.plan .cast-dialog{width:min(520px,calc(100vw - 32px))}
+.plan .cast-form{display:flex;flex-direction:column;gap:12px}
+.plan .cast-form .foot{margin-top:4px}
+.plan .cast-remove{margin-right:auto}
+.plan .cast-dialog .impact{margin:0}
+.plan .cast-choices{border:0;margin:6px 0 12px;padding:0;display:flex;flex-direction:column;gap:6px}
+.plan .cast-choice{display:flex;gap:10px;align-items:center;border:1px solid var(--hairline);background:var(--surface);border-radius:12px;padding:8px 12px;cursor:pointer}
+.plan .cast-choice:has(input:checked){border-color:var(--select)}
+.plan .cast-choice input{accent-color:var(--select);margin:0;flex:none}
+.plan .cast-choice b{display:block;font-size:13.5px}
+.plan .cast-choice small{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;color:var(--text-2);font-size:12px}
+
+/* ---------- the sheet review ---------- */
+.plan .sheet-review{width:min(560px,100vw)}
+.plan .sheet-review .sheet-head h2{min-width:0;overflow-wrap:anywhere}
+.plan .sr-state{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;font-size:12.5px;line-height:1.45}
+.plan .sr-state .muted{flex:1 1 260px}
+.plan .sr-preview{position:relative;width:min(100%,380px,40vh);aspect-ratio:1;border-radius:var(--r-big);overflow:hidden;background:var(--surface);border:1px solid var(--hairline);margin:0 auto}
+.plan .sr-preview .pic-img,.plan .sr-preview .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#d9dce0}
+.plan .sr-preview .dashed-frame b{display:block;margin-bottom:6px}
+.plan .sr-takes{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+.plan .sr-take{flex:none;width:92px;display:flex;flex-direction:column;gap:4px;align-items:flex-start;border:1px solid var(--hairline);background:var(--surface);border-radius:12px;padding:5px 5px 7px;text-align:left}
+.plan .sr-take[aria-pressed="true"]{border:2px solid var(--select);padding:4px 4px 6px}
+.plan .sr-take-pic{position:relative;width:100%;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--surface-stripe)}
+.plan .sr-take-pic .pic-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.plan .sr-take-label{font-size:12px;font-weight:600}
+.plan .sr-take .status{font-size:10.5px;padding:1px 7px}
+.plan .sr-impact ul{margin:4px 0 0;padding-left:16px;line-height:1.55}
+.plan .sr-impact li + li{margin-top:2px}
+.plan .sr-done p{margin:3px 0 8px}
+.plan .sr-done .pill{margin-top:2px}
+.plan .sr-upload{display:flex;flex-direction:column;gap:6px;align-items:flex-start;border:1px solid var(--hairline);background:var(--surface);border-radius:12px;padding:10px 12px}
+.plan .sr-upload .hint{margin:0}
+.plan .sr-upload .eyebrow.sub{margin:6px 0 0}
+.plan .sr-assets{display:flex;gap:8px;flex-wrap:wrap}
+.plan .sr-asset{position:relative;width:96px;aspect-ratio:16/9;border-radius:8px;overflow:hidden;border:1px solid var(--hairline);padding:0;background:var(--surface-stripe)}
+.plan .sr-asset:hover:not(:disabled){border-color:var(--select)}
+.plan .sr-asset .pic-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.plan .sr-prompt pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:12px;line-height:1.5;color:var(--text-2);background:var(--surface);border:1px solid var(--hairline);border-radius:10px;padding:8px 10px;max-height:200px;overflow:auto}
+.plan .sr-dl{margin:8px 0 0;display:grid;grid-template-columns:90px minmax(0,1fr);gap:4px 10px;font-size:12.5px}
+.plan .sr-dl dt{color:var(--muted)}
+.plan .sr-dl dd{margin:0;overflow-wrap:anywhere}
+.plan .sheet-review .sheet-foot .pill.primary{order:-1}
+
+/* ---------- between the phone layout and 1240 px ---------- */
+@media (min-width:900px) and (max-width:1239px){
+  .plan .look.with-song{grid-template-columns:minmax(0,1fr)}
+  .plan .look-song{border-left:0;padding-left:0;border-top:1px solid var(--hairline);padding-top:10px}
+}
+
+/* ---------- phone ---------- */
+@media (max-width:899px){
+  .plan .look.with-song{grid-template-columns:minmax(0,1fr)}
+  .plan .look-song{border-left:0;padding-left:0;border-top:1px solid var(--hairline);padding-top:10px}
+  .plan .cast-row{grid-template-columns:64px minmax(0,1fr);gap:8px 12px}
+  .plan .sheet-thumb{width:64px}
+  .plan .cast-acts{grid-column:1/-1;justify-content:flex-start}
+  .plan .wd-row.wd-head{display:none}
+  .plan .wd-row{display:flex;flex-direction:column;gap:6px;padding:10px 0}
+  .plan .wd-name{font-size:13.5px}
+  .plan .wd-cell{flex-direction:column}
+  .plan .wd-cell[data-state="absent"]{display:none}
+  .plan .wd-scene-label{display:block;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .plan .sr-preview{width:100%}
+}

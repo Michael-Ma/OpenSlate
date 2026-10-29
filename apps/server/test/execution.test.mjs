@@ -8,7 +8,7 @@ import { Store } from "../dist/persistence/index.js";
 import { Engine } from "../dist/execution/index.js";
 import { FakeProvider } from "../../../packages/providers/dist/index.js";
 import { compilePlan, DEFAULT_PROFILES } from "../../../packages/core/dist/index.js";
-import { setup, refreshIntent, sourceFor } from "./execution-fixture.mjs";
+import { setup, refreshIntent, sourceFor, elapseUnknownBackoff } from "./execution-fixture.mjs";
 
 async function images(f) { assert.equal((await f.engine.runReady()).dispatched, 2); await f.engine.reconcile(); }
 test("independent branches generate in parallel, while every video waits for its exact human review", async t => {
@@ -31,14 +31,25 @@ test("owned scoped holds and user pauses compose without stopping accepted-job m
   assert.equal((await f.engine.runReady()).dispatched, 0);
   f.engine.setPaused(f.projectId, false, "human-resume"); assert.equal((await f.engine.runReady()).dispatched, 1);
 });
-test("lost submission acknowledgment remains reserved and reconciles after restart without another acceptance", async t => {
-  const f = setup(t, { count: 1 }); const image = f.plan.nodes.find(node => node.kind === "image");
+test("lost submission acknowledgment is charged after restart and never automatically resubmitted", async t => {
+  const f = setup(t, { count: 1, imagesOnly: true }); const image = f.plan.nodes.find(node => node.kind === "image");
   f.provider.setMode(image.id, "unknown_after_accept"); await f.engine.runReady();
   assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
   await f.engine.runReady(); assert.equal(f.provider.acceptedCount(), 1);
   f.store.close(); f.provider.close();
   const store = new Store(f.dbPath); const provider = new FakeProvider(f.providerPath); const engine = new Engine(store, provider, { artifactDir: f.artifactDir });
-  try { await engine.reconcile(); assert.equal(engine.attempts(f.projectId)[0].phase, "succeeded"); assert.equal(provider.acceptedCount(), 1); assert.equal(engine.outputs(f.projectId).length, 1); }
+  try {
+    await engine.reconcile(); const lost = engine.attempts(f.projectId)[0];
+    assert.equal(lost.phase, "failed"); assert.equal(lost.failure.id, "SUBMISSION_RESPONSE_LOST");
+    assert.equal(lost.failure.retryAllowed, false); assert.equal(store.get("reservation", lost.reservationId).state, "charged");
+    for (let i = 0; i < 4; i++) { await engine.reconcile(); await engine.runReady(); }
+    assert.equal(provider.acceptedCount(), 1); assert.equal(engine.outputs(f.projectId).length, 0);
+    const project = store.getProject(f.projectId), grant = engine.createGrant(f.projectId, "shot-0", "image", "human-new-press", "user_change");
+    const planId = randomUUID(); store.transaction(() => { engine.installPlan(f.projectId, planId, f.plan, { [image.id]: grant.id }); store.saveProject({ ...project, activePlanId: planId }, project.headVersion); });
+    assert.equal((await engine.runReady()).dispatched, 1); await engine.reconcile();
+    assert.equal(provider.acceptedCount(), 2); assert.equal(engine.outputs(f.projectId).length, 1);
+    assert.equal(engine.attempts(f.projectId)[0].phase, "failed");
+  }
   finally { store.close(); provider.close(); }
 });
 test("trusted technical failure retries the same candidate under a new attempt ordinal and reservation", async t => {
@@ -92,9 +103,13 @@ test("late stale-lease evidence is retained and cannot overwrite the active fenc
   const attempt = f.engine.attempts(f.projectId)[0]; f.store.put("attempt", attempt.id, f.projectId, { ...attempt, leaseExpiresAt: 0 });
   const second = new Store(f.dbPath); const provider = new FakeProvider(f.providerPath); const engine = new Engine(second, provider, { artifactDir: f.artifactDir });
   try {
+    // This request is still in flight; its adapter must wait for its response.
+    provider.lookup = async () => ({ type: "unknown", diagnostic: "Submission still in flight" });
     await engine.reconcile(); release(); await running;
+    delete provider.lookup; elapseUnknownBackoff(second, attempt.id);
+    await engine.reconcile(); await engine.reconcile();
     assert.equal(engine.attempts(f.projectId)[0].phase, "succeeded"); assert.ok(engine.attempts(f.projectId)[0].leaseEpoch > 1);
-    assert.equal(provider.acceptedCount(), 1); assert.equal(second.list("execution_evidence", f.projectId).length, 2); assert.equal(engine.outputs(f.projectId).length, 1);
+    assert.equal(provider.acceptedCount(), 1); assert.equal(second.list("execution_evidence", f.projectId).length, 3); assert.equal(engine.outputs(f.projectId).length, 1);
   } finally { second.close(); provider.close(); }
 });
 test("two real worker connections admit each covered submission once while an old project cap does not block them", async t => {
@@ -113,6 +128,8 @@ test("two real worker connections admit each covered submission once while an ol
 test("uncertain pre-send failure never guesses rejection or frees its liability", async t => {
   const f = setup(t, { count: 1, imagesOnly: true, budgetMicros: "100" });
   f.provider.submit = async () => { throw Error("connection lost before any trustworthy acceptance evidence"); };
+  // This adapter has no dispatch evidence and cannot prove either acceptance or rejection.
+  f.provider.lookup = async () => ({ type: "unknown", diagnostic: "No trustworthy local evidence" });
   await f.engine.runReady(); await f.engine.reconcile(); await f.engine.runReady();
   assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.engine.attempts(f.projectId).length, 1);
   assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
@@ -145,6 +162,14 @@ test("a technical retry cannot exceed the bounded paid attempt allowance", async
   const f = setup(t, { count: 1, imagesOnly: true }); f.provider.setMode(f.plan.nodes[0].id, ["technical_failure", "technical_failure", "complete"]);
   await f.engine.runReady(); await f.engine.reconcile(); await f.engine.runReady(); await f.engine.reconcile();
   const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, "RETRY_NOT_AUTHORIZED"); assert.equal(f.provider.acceptedCount(), 2);
+});
+
+test("a Stop-fenced candidate cannot start its first attempt after Continue", async t => {
+  const f = setup(t, { count: 1, imagesOnly: true }), binding = f.store.list("node_binding", f.projectId)[0];
+  f.store.insert("candidate_stop", binding.candidateId, f.projectId, { stopId: "human-stop" });
+  const result = await f.engine.runReady();
+  assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, "RETRY_NOT_AUTHORIZED");
+  assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.engine.attempts(f.projectId).length, 0);
 });
 
 test("restart uses immutable lock prices and profiles instead of changed constructor defaults", async t => {
@@ -235,7 +260,7 @@ test("narrated dispatch requires measured cue, shot and requested video duration
 });
 
 
-test("chat Stop persists across restart, recovers an uncertain accepted job, and blocks remaining generation",async t=>{
+test("chat Stop persists across restart, charges a lost reply, and blocks remaining generation",async t=>{
   const f=setup(t),service=new ProductionService(f.store,f.engine);
   service.beginRequest(f.projectId,'human','Hold the second shot',{scopeIds:['shot-1']});
   const firstImage=f.plan.nodes.find(n=>n.kind==='image'&&n.shotId==='shot-0');
@@ -248,7 +273,9 @@ test("chat Stop persists across restart, recovers an uncertain accepted job, and
   const store=new Store(f.dbPath),provider=new FakeProvider(f.providerPath),engine=new Engine(store,provider,{artifactDir:f.artifactDir});
   try {
     assert.equal(store.get('execution_control',f.projectId).paused,true);
-    await engine.reconcile();assert.equal(engine.attempts(f.projectId)[0].phase,'succeeded');
+    await engine.reconcile();assert.equal(engine.attempts(f.projectId)[0].phase,'failed');
+    assert.equal(engine.attempts(f.projectId)[0].failure.id,'SUBMISSION_RESPONSE_LOST');
+    assert.equal(store.get('reservation',before.reservationId).state,'charged');
     assert.equal(engine.attempts(f.projectId)[0].id,before.id);
     assert.equal((await engine.runReady()).dispatched,0);assert.equal(provider.acceptedCount(),1);
     const continued=new ProductionService(store,engine).beginRequest(f.projectId,'human','Change the second shot',{resumeFromStopId:stop.requestId});

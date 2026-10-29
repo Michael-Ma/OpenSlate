@@ -1,0 +1,161 @@
+import type { ExportView, GenerationOverview } from "@openslate/core/public";
+import { useRecoveryLock } from "../../app/useWriteGuard.ts";
+import { useI18n } from "../../i18n/I18n.tsx";
+import { MAX_FILM_SECONDS, filmFrame, blockersFirst, elapsedSeconds, filmSeconds, panelState, readinessRows, unavailableMsg, whenMsg, whyNotReady, type MediaView } from "../../model/film-export.ts";
+import { clock as formatClock } from "../../model/motion.ts";
+import { useNow, useReducedMotion } from "./clock-hooks.ts";
+import { useLineSeparators, useRowsBelow } from "./layout-hooks.ts";
+
+/**
+ * The least the "n more" footer covers of a readiness table cut short (film.css .checks-more), in px: it reaches up
+ * to the first row it counts.
+ */
+const CHECKS_COVER_PX = 22;
+
+interface Props {
+  overview: GenerationOverview;
+  view: ExportView | null;
+  media: MediaView | null;
+  /** The code of a failed /exports read (an older studio has no storyboard export). */
+  error: string | null;
+  writable: boolean;
+  busy: { start: boolean; cancel: boolean; recover: boolean };
+  onExport(): void;
+  onCancel(exportId: string): void;
+  onRecover(exportId: string): void;
+  /** The film's music is missing or unmeasured, which stops the readiness read: open Change music. */
+  onChangeMusic(anchor: HTMLElement): void;
+}
+
+/**
+ * The Export panel (SB-16, SB-17, SB-18): readiness per shot with Clip and Voice columns, one Export button
+ * whose summary says why it is off, rendering with elapsed time (no percentage exists), Cancel, and Check
+ * again for an export a restart interrupted, which only looks for the finished file.
+ */
+export function ExportPanel({ overview, view, media, error, writable, busy, onExport, onCancel, onRecover, onChangeMusic }: Props) {
+  const { t, tm, locale } = useI18n();
+  // The clock ticks while the record says rendering: elapsed time, and a prepared export that never started.
+  const now = useNow(view?.current?.state === "rendering");
+  const state = panelState(view, media, now);
+  const readiness = view?.readiness ?? null;
+  const demo = !!readiness?.demo;
+  const locked = useRecoveryLock();
+  const offline = writable ? undefined : locked ?? t("film.offline");
+  // Stopped turns off what would start work, and the title says why (P5-DESIGN shell change 8).
+  // Exports render on this computer and spend nothing, so Stop does not turn them off (card B12).
+  const startOff = offline;
+  // The export follows the film's aspect (9:16 renders 720 × 1280); a chosen aspect leads the size line.
+  const frame = filmFrame(overview), size = { width: frame.width, height: frame.height };
+  const aspectLead = frame.chosen ? <><span data-act="export-aspect">{frame.aspect}</span> · </> : null;
+  const reduced = useReducedMotion();
+  // The shots that stop the export come first, so a short screen shows the ones the summary names.
+  const rows = state.kind === "idle" ? blockersFirst(readinessRows(overview, demo)) : [];
+  // A long film's rows scroll inside the table: say how many are still below, and scroll to them on a press.
+  const [table, below, showMore] = useRowsBelow("[role='row'][data-shot]", CHECKS_COVER_PX, rows.map((row) => row.shotId).join(), reduced);
+  // The rendering line wraps in a narrow panel: its separator never ends or starts a line.
+  const renderingLine = useLineSeparators(":scope > .sep");
+
+  let body;
+  if (state.kind === "rendering") {
+    const seconds = readiness?.seconds ?? filmSeconds(overview);
+    body = (
+      <>
+        <div className="big">{t("film.export.exporting")}<small>{t(state.record.demo ? "film.export.exporting_sub_demo" : "film.export.exporting_sub", { seconds, ...size })}</small></div>
+        <div className="rendering">
+          {/* Only the words are a live region: the elapsed time changes every second and is read on demand. */}
+          <span className="rendering-line" ref={renderingLine}>
+            <span role="status">{t("film.export.rendering")}</span> <span className="sep" aria-hidden="true">·</span> <b className="elapsed" data-act="elapsed">{t("film.export.elapsed", { elapsed: formatClock(elapsedSeconds(state.record.startedAt, now)) })}</b>
+          </span>
+          <div className="progress indet" role="progressbar" aria-label={t("film.export.progress")}><i /></div>
+          <span>{t("film.export.no_percent")}</span>
+        </div>
+        <button type="button" className="pill go" data-act="cancel-export" disabled={!writable || busy.cancel} title={offline} onClick={() => onCancel(state.record.exportId)}>{t("film.export.cancel")}</button>
+      </>
+    );
+  } else if (state.kind === "interrupted") {
+    const started = whenMsg(state.record.startedAt, new Date(), locale);
+    body = (
+      <>
+        <div className="big">{t("film.export.interrupted")}<small>{t("film.export.interrupted_sub", { time: started ? tm(started) : "" })}</small></div>
+        <div className="impact cost" role="status"><span className="ic" aria-hidden="true">?</span><span>{t("film.export.interrupted_body")}</span></div>
+        <button type="button" className="pill primary go" data-act="check-again" disabled={!writable || busy.recover} title={offline} onClick={() => onRecover(state.record.exportId)}>
+          {busy.recover ? t("film.export.checking") : t("film.export.check")}
+        </button>
+        <button type="button" className="pill go" data-act="export-again" disabled={!writable || busy.start || !readiness?.ready} title={startOff} onClick={onExport}>{t("film.export.again")}</button>
+      </>
+    );
+  } else {
+    const ready = !!readiness?.ready;
+    const reasons = readiness && !ready ? whyNotReady(readiness, overview, locale) : [];
+    const unavailable = !readiness && error ? unavailableMsg(error) : null;
+    const head = !readiness ? (
+      <div className="big">{t("film.export.not_ready")}<small data-act="export-unavailable">{unavailable ? tm(unavailable.text) : t("film.loading")}</small></div>
+    ) : ready ? (
+      demo
+        ? <div className="big">{t("film.export.ready_demo")}<small>{t("film.export.ready_demo_sub")}</small></div>
+        : <div className="big">{t("film.export.ready")}<small>{t("film.export.ready_sub", { seconds: readiness.seconds })}</small></div>
+    ) : (
+      <div className="big">{t("film.export.not_ready")}<small data-act="why-not">{reasons.map((reason) => tm(reason)).join(t("film.why.sep"))}</small></div>
+    );
+    // Without a readiness read (older studio, missing music) the length still comes from the storyboard.
+    const seconds = readiness?.seconds ?? filmSeconds(overview);
+    body = (
+      <>
+        {head}
+        {unavailable?.music ? (
+          <button type="button" className="pill sm" data-act="export-music" aria-haspopup="menu" disabled={!writable} title={offline} onClick={(event) => onChangeMusic(event.currentTarget)}>{t("film.tools.change_music")}</button>
+        ) : null}
+        {state.failed ? (
+          <div className="impact cost" role="status" data-act="export-failed" data-code={state.failed.code ?? undefined} title={state.failed.code ? t("film.export.failed_code", { code: state.failed.code }) : undefined}>
+            <span className="ic" aria-hidden="true">!</span>
+            <span>{state.failed.reason ? t(state.failed.text.id, { ...state.failed.text.values, reason: tm(state.failed.reason) }) : tm(state.failed.text)}</span>
+          </div>
+        ) : null}
+        {state.cancelled ? <div className="hint" role="status" data-act="export-cancelled">{t("film.export.cancelled")}</div> : null}
+        <div className="checks-box">
+          <div className="checks" role="table" aria-label={t("film.checks.label")} ref={table}>
+            <div role="row" className="checks-row">
+              <span role="columnheader" className="h">{t("film.checks.shot")}</span>
+              <span role="columnheader" className="h">{t("film.checks.clip")}</span>
+              <span role="columnheader" className="h">{t("film.checks.voice")}</span>
+            </div>
+            {rows.map((row) => (
+              <div role="row" className="checks-row" key={row.shotId} data-shot={row.shotId} data-blocks={row.blocks || undefined}>
+                <b role="rowheader">{row.label}</b>
+                <span role="cell" className={row.clip.tone === "ok" ? "y" : "n"}>{row.clip.tone === "ok" ? <span aria-hidden="true">✓ </span> : null}{tm(row.clip.text)}</span>
+                <span role="cell" className={row.voice.tone === "ok" ? "y" : row.voice.text.id === "film.cell.no_line" ? "" : "n"}>{row.voice.tone === "ok" ? <span aria-hidden="true">✓ </span> : null}{tm(row.voice.text)}</span>
+              </div>
+            ))}
+          </div>
+          {below.count ? (
+            <button type="button" className="checks-more" data-act="checks-more" style={{ height: below.cover - 1 }} aria-label={t("film.checks.more_label", { count: below.count })} onClick={showMore}>
+              <span aria-hidden="true">↓</span> {t("film.checks.more", { count: below.count })}
+            </button>
+          ) : null}
+        </div>
+        <div className="hint" data-act="export-size">{aspectLead}{seconds <= MAX_FILM_SECONDS ? t("film.export.length", { seconds, ...size }) : t("film.export.free", size)}</div>
+        <button
+          type="button"
+          className={`pill go${ready ? " primary" : ""}`}
+          data-act="export"
+          disabled={!ready || !writable || busy.start}
+          title={startOff}
+          aria-describedby="fv-export-why"
+          onClick={onExport}
+        >
+          {t(demo ? "film.export.button_demo" : "film.export.button")}
+        </button>
+        <div className="why" id="fv-export-why">
+          {!writable ? offline : !readiness ? null : !ready ? t("film.export.settle_first") : demo ? t("film.export.demo_stamp") : t("film.export.size")}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <aside className="panel export" aria-label={t("film.export.eyebrow")} data-state={state.kind}>
+      <div className="panel-head"><span className="eyebrow">{t("film.export.eyebrow")}</span></div>
+      {body}
+    </aside>
+  );
+}

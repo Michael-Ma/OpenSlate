@@ -192,6 +192,29 @@ test("known audio MEDIA_BUSY releases only the owned lease and recovers immediat
   assert.deepEqual(f.calls, { submit: 1, poll: 0, lookup: 0, normalization: 1, ingestion: 2 });
 });
 
+test("repeated audio normalization contention retains one deferral event across restart without buying again", async t => {
+  const f = fixture(t);
+  f.setHandler(() => { throw new DomainError("MEDIA_BUSY", "Synthetic unavailable local normalizer"); });
+  await f.engine.runReady(); const id = f.engine.attempts(f.projectId)[0].id;
+  const events = () => f.store.readEvents(f.projectId).filter(event => event.payload?.attemptId === id);
+  const before = events().length, records = f.store.db.prepare("SELECT count(*) count FROM entities").get().count;
+  for (let cycle = 0; cycle < 12; cycle++) {
+    if (cycle === 6) f.reopen();
+    await f.engine.reconcile();
+  }
+  assert.equal(events().length, before, "unchanged local contention must not grow history");
+  assert.equal(events().filter(event => event.kind === "attempt.ingestion_deferred").length, 1);
+  assert.equal(f.store.db.prepare("SELECT count(*) count FROM entities").get().count, records);
+  const attempt = f.engine.attempts(f.projectId)[0];
+  assert.equal(attempt.phase, "ingesting"); assert.equal(attempt.leaseExpiresAt, 0);
+  assert.equal(f.store.get("reservation", attempt.reservationId).state, "reserved");
+  f.setHandler(f.derive); await f.engine.reconcile();
+  assert.equal(f.engine.attempts(f.projectId)[0].phase, "succeeded");
+  assert.equal(f.engine.attempts(f.projectId)[0].ingestionDeferred, undefined);
+  assert.equal(f.store.get("reservation", attempt.reservationId).state, "charged");
+  assert.equal(f.calls.submit, 1); assert.equal(f.calls.poll, 0); assert.equal(f.calls.lookup, 0);
+});
+
 test("late audio MEDIA_BUSY cannot overwrite a replacement owner", async t => {
   const f = fixture(t); let replacement;
   f.setHandler(input => {

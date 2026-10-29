@@ -133,9 +133,9 @@ test('project-only semantic changes keep old execution held until that request s
   await f.engine.runReady(); assert.equal(f.provider.acceptedCount(), 1);
 });
 
-test('a later request cannot release a previous hold without explicit human continuation', async t => {
+test('an alongside request cannot release a previous active hold without explicit human continuation', async t => {
   const f = await withShot(t);
-  const newer = f.service.beginRequest(f.project.id,'human','A separate edit');
+  const newer = f.service.beginRequest(f.project.id,'human','A separate edit',{concurrency:'alongside'});
   f.service.authorize(f.project.id,newer,[{scopeId:f.shot.id,kind:'image'}],'newslot');
   const actor = f.service.openEpoch(f.project.id,newer).actor;
   const prep = await f.service.prepare(f.project.id,actor,{variant:'plan',expectedHeadVersion:f.project.headVersion,source:source(f.project)});
@@ -228,4 +228,14 @@ test('a superseded human request cannot mint a fresh director bridge', async t =
   const f=await withShot(t);
   f.service.beginRequest(f.project.id,'human','Replace old request');
   assert.throws(()=>f.service.openEpoch(f.project.id,f.human),code('ACTOR_DENIED'));
+});
+
+
+test('Director apply prepared before a direct edit is refused by version without revoking its epoch', async t=>{
+ const f=await withShot(t), {editStoryboard}=await import('../dist/storyboard.js');
+ const prepared=await f.service.prepare(f.project.id,f.actor,{variant:'project',expectedHeadVersion:f.project.headVersion,creative:{brief:'Director draft'}});
+ editStoryboard(f.service,f.project.id,{kind:'shot',id:f.shot.id,field:'desiredFrames',value:'240',expectedHeadVersion:f.project.headVersion},newId());
+ assert.equal(f.store.get('epoch',f.actor.epochId).state,'active');assert.equal(f.store.get('message',f.actor.requestId).state,'active');
+ assert.throws(()=>f.service.apply(f.project.id,f.actor,prepared.id),code('REVISION_CONFLICT'));
+ assert.equal(f.store.getProject(f.project.id).shots[0].desiredFrames,240);
 });

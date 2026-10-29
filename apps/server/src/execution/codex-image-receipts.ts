@@ -1,8 +1,9 @@
 import { configuredProviderUse, providerAdmissionRequest, allowanceMappingMatches } from "./provider-use.js";
 import { canonical, digest, invariant, providerProfileArguments } from '@openslate/core';
-import type { ProviderProfile } from '@openslate/core';
-import { describeCodexImageInput } from '@openslate/providers';
-import type { CodexImageDescription, CodexImagePrepared, ExecutionRequest } from '@openslate/providers';
+import type { NativeDiagnostic,ProviderProfile } from '@openslate/core';
+import { safeNativeDiagnostic } from '../application/native-diagnostics.js';
+import { codexImageCanvasValid, describeCodexImageInput } from '@openslate/providers';
+import type { CodexImageAspect, CodexImageDescription, CodexImagePrepared, ExecutionRequest } from '@openslate/providers';
 import type { Attempt } from './engine.js';
 import { assertOutputReceiptIdentity } from './output-store.js';
 import type { OutputReceipt } from './output-store.js';
@@ -15,8 +16,8 @@ export interface CodexImageExecutionMapping extends Identity {
 }
 export interface CodexImageExecutionDispatch extends Identity { mappingDigest:string;threadId:string;turnInputDigest:string;createdAt:string }
 export interface CodexImageExecutionRun extends Identity { mappingDigest:string;dispatchDigest:string;threadId:string;turnId:string }
-export type CodexImageObservation = {kind:'not_dispatched';code:'LOCAL_INPUT_INVALID'|'LOCAL_NATIVE_UNAVAILABLE'|'LOCAL_CANCELLED'}
-  | {kind:'failed';code:'USAGE_LIMIT'|'TURN_FAILED'|'IMAGE_FAILED';threadId:string;turnId:string}
+export type CodexImageObservation = {kind:'not_dispatched';code:'LOCAL_INPUT_INVALID'|'LOCAL_NATIVE_UNAVAILABLE'|'LOCAL_CANCELLED'|'SELECTION_CHANGED';nativeDiagnostic?:NativeDiagnostic}
+  | {kind:'failed';code:'USAGE_LIMIT'|'TURN_FAILED'|'IMAGE_FAILED'|'TURN_INTERRUPTED'|'NO_IMAGE';threadId:string;turnId:string}
   | {kind:'completed';threadId:string;turnId:string;itemId:string;revisedPrompt:string|null;outputReceiptId:string;
       output:{sha256:string;byteLength:number;width:number;height:number}};
 export interface CodexImageExecutionResult extends Identity { mappingDigest:string|null;dispatchDigest:string|null;runDigest:string|null;observation:CodexImageObservation }
@@ -34,17 +35,29 @@ function base(attempt:Attempt,value:Identity,fields:string[]):void {
     && attempt.request.kind==='image' && providerAdmissionRequest(attempt.request) && attempt.taskId===null && Buffer.byteLength(canonical(value))<=131072,
   'CODEX_IMAGE_EXECUTION_CONFLICT','Codex image record differs from its admitted attempt');
 }
+/**
+ * The turn canvas an admitted image request asks for. Without `aspect` it is a codex-image-turn-v1 request: the profile's
+ * 1024-square preference, exactly as before. With `aspect` (a keyframe of a project with a chosen format) it is a
+ * codex-image-turn-v2 request for that aspect's canvas. The profile definition, and so its digest, is the same for both.
+ */
+export function codexImageTurnCanvas(args:ExecutionRequest['args']):{width:number;height:number;aspect?:CodexImageAspect} {
+  const aspect=Object.hasOwn(args,'aspect')?args.aspect:undefined;
+  invariant(!Object.hasOwn(args,'aspect')||typeof aspect==='string','CODEX_IMAGE_PREFLIGHT_INVALID','Codex image aspect must be a supported frame aspect');
+  invariant(codexImageCanvasValid(args.width,args.height,aspect),'CODEX_IMAGE_PREFLIGHT_INVALID','Codex image canvas must match its turn policy');
+  return {width:args.width as number,height:args.height as number,...(aspect===undefined?{}:{aspect:aspect as CodexImageAspect})};
+}
 export function assertCodexImageOperationOptions(profile:ProviderProfile,args:ExecutionRequest['args']):void {
   const expected=providerProfileArguments(profile);
   codexFields(profile.configuration,['model','settings']); const settings=profile.configuration.settings; codexFields(settings,['runtimeVersion','directorModel','width','height']);
-  codexFields(args,[...Object.keys(expected),'prompt','width','height','settings']); codexFields(args.settings,[]);
+  codexFields(args,[...Object.keys(expected),'prompt','width','height',...(Object.hasOwn(args,'aspect')?['aspect']:[]),'settings']); codexFields(args.settings,[]);
+  const canvas=codexImageTurnCanvas(args);
   invariant(profile.kind==='image' && profile.adapter==='codex-image' && profile.executionVersion==='1'
     && profile.unitCostMicros==='0' && profile.maxRetries===0 && profile.maxConcurrency===1
     && profile.configuration.model==='codex-image-generation' && settings.runtimeVersion==='0.153.4' && settings.directorModel==='gpt-6-astra'
-    && settings.width===1024 && settings.height===1024 && args.width===settings.width && args.height===settings.height
+    && settings.width===1024 && settings.height===1024 && (canvas.aspect!==undefined || args.width===settings.width && args.height===settings.height)
     && Object.entries(expected).every(([key,value])=>canonical(args[key])===canonical(value)) && typeof args.prompt==='string',
   'CODEX_IMAGE_PREFLIGHT_INVALID','Codex image options must match the exact pinned usage profile');
-  describeCodexImageInput({attemptId:'preflight',requestDigest:'a'.repeat(64),prompt:args.prompt,width:1024,height:1024,runtimeVersion:'0.153.4',model:'gpt-6-astra',images:[]});
+  describeCodexImageInput({attemptId:'preflight',requestDigest:'a'.repeat(64),prompt:args.prompt as string,...canvas,runtimeVersion:'0.153.4',model:'gpt-6-astra',images:[]});
 }
 export function assertCodexImageExecutionProfile(profile:ProviderProfile,attempt:Attempt):void {
   codexFields(profile,['id','revision','kind','adapter','executionVersion','configuration','maxConcurrency','unitCostMicros','maxRetries']);
@@ -66,7 +79,7 @@ export function assertCodexImageExecutionMapping(attempt:Attempt,mapping:CodexIm
     && runtime.version===1 && runtime.runtimeVersion==='0.153.4' && runtime.model==='gpt-6-astra' && runtime.authMode==='chatgpt'
     && codexHash(runtime.runtimeDigest) && codexHash(runtime.configurationDigest) && codexId(mapping.native.session.threadId)
     && Array.isArray(transport.images) && canonical(transport)===canonical(describeCodexImageInput({attemptId:attempt.id,requestDigest:digest(attempt.request),
-      prompt:attempt.request.args.prompt as string,width:1024,height:1024,runtimeVersion:'0.153.4',model:'gpt-6-astra',images:transport.images}))
+      prompt:attempt.request.args.prompt as string,...codexImageTurnCanvas(attempt.request.args),runtimeVersion:'0.153.4',model:'gpt-6-astra',images:transport.images}))
     && mapping.native.session.turnInputDigest===transport.turnInputDigest && mapping.references.length===attempt.request.inputs.length
     && transport.images.length===attempt.request.inputs.length && mapping.references.every((ref,index)=>{
       codexFields(ref,['artifactId','artifactDigest']); const input=attempt.request.inputs[index],image=transport.images[index];
@@ -93,10 +106,13 @@ export function assertCodexImageExecutionResult(attempt:Attempt,mapping:CodexIma
   invariant(result.mappingDigest===(mapping?digest(mapping):null) && result.dispatchDigest===(dispatch?digest(dispatch):null) && result.runDigest===(run?digest(run):null),
     'CODEX_IMAGE_EXECUTION_CONFLICT','Codex result lost its exact history');
   const value=result.observation;
-  if(value.kind==='not_dispatched') {codexFields(value,['kind','code']);invariant(!dispatch&&!run&&['LOCAL_INPUT_INVALID','LOCAL_NATIVE_UNAVAILABLE','LOCAL_CANCELLED'].includes(value.code),
+  if(value.kind==='not_dispatched') {codexFields(value,['kind','code',...(value.nativeDiagnostic===undefined?[]:['nativeDiagnostic'])]);
+    if(value.nativeDiagnostic!==undefined)invariant(value.code==='LOCAL_NATIVE_UNAVAILABLE'&&canonical(value.nativeDiagnostic)===canonical(safeNativeDiagnostic(value.nativeDiagnostic)??null),
+      'CODEX_IMAGE_EXECUTION_CONFLICT','Native preparation diagnostic must contain only safe evidence');
+    invariant(!dispatch&&!run&&['LOCAL_INPUT_INVALID','LOCAL_NATIVE_UNAVAILABLE','LOCAL_CANCELLED','SELECTION_CHANGED'].includes(value.code),
     'CODEX_IMAGE_EXECUTION_CONFLICT','Only a pre-marker local failure proves no start');return;}
   invariant(mapping&&dispatch&&run&&value.threadId===run.threadId&&value.turnId===run.turnId,'CODEX_IMAGE_EXECUTION_CONFLICT','Result belongs to another native turn');
-  if(value.kind==='failed'){codexFields(value,['kind','code','threadId','turnId']);invariant(['USAGE_LIMIT','TURN_FAILED','IMAGE_FAILED'].includes(value.code),'CODEX_IMAGE_EXECUTION_CONFLICT','Invalid terminal native failure');return;}
+  if(value.kind==='failed'){codexFields(value,['kind','code','threadId','turnId']);invariant(['USAGE_LIMIT','TURN_FAILED','IMAGE_FAILED','TURN_INTERRUPTED','NO_IMAGE'].includes(value.code),'CODEX_IMAGE_EXECUTION_CONFLICT','Invalid terminal native failure');return;}
   codexFields(value,['kind','threadId','turnId','itemId','revisedPrompt','outputReceiptId','output']);codexFields(value.output,['sha256','byteLength','width','height']);
   invariant(value.kind==='completed'&&codexId(value.itemId)&&(value.revisedPrompt===null||typeof value.revisedPrompt==='string'&&Buffer.byteLength(value.revisedPrompt)<=32768)
     &&codexHash(value.output.sha256)&&Number.isSafeInteger(value.output.byteLength)&&value.output.byteLength>=33&&value.output.byteLength<=32*1024**2

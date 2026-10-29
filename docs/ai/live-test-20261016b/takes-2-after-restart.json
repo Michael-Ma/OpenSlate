@@ -1,0 +1,15 @@
+{
+  "shotId": "124459eb-678e-4288-8cc4-df33fbc71585",
+  "keyframes": [
+    {
+      "artifact": {
+        "artifactId": "4a91f4a32554c1e6ab953aae0d0a8a5996e1ece2761b677898d9586bffa78b42",
+        "sha256": "7eeb371024bb50c6640827301e3709a120ee3718043b5a4f1f5cee640a80edb0",
+        "kind": "image"
+      },
+      "current": true,
+      "createdAt": "2026-10-16T22:56:49.723Z",
+      "selectable": true
+    }
+  ]
+}

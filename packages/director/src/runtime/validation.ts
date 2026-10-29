@@ -1,9 +1,22 @@
 import { isAbsolute } from "node:path";
 import { ToolBridge } from "../tools/bridge.js";
 import type { DirectorRunIdentity, DirectorRunInput } from "./types.js";
+import type { NativeDiagnostic } from "@openslate/core";
 
 export class RuntimeFault extends Error {
-  constructor(readonly code: string, message: string) { super(message); }
+  constructor(readonly code: string, message: string, readonly nativeDiagnostic?: NativeDiagnostic) { super(message); }
+}
+/** Trusted adapter proof that synchronous validation refused before any run could start. */
+export class DirectorStartRefusal extends Error {
+  readonly code: string;
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : "Director runtime refused before dispatch");
+    this.code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "RUNTIME_INPUT_INVALID";
+  }
+}
+/** Only wrap guards that run before entering the adapter's execution path. */
+export function beforeDispatch<T>(validate: () => T): T {
+  try { return validate(); } catch (error) { throw new DirectorStartRefusal(error); }
 }
 export function requireRuntime(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new RuntimeFault(code, message);

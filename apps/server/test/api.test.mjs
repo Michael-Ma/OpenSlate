@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { digest } from "@openslate/core";
 import { createApp } from "../dist/app.js";
 import { ProductionService } from "../dist/application/service.js";
 import { Store } from "../dist/persistence/index.js";
@@ -54,23 +55,26 @@ async function reviewFixture(t) {
     method: "POST", url: `/api/projects/${f.projectId}/${route}`, payload,
     headers: { host: "127.0.0.1", authorization: `Bearer ${localToken}`, "idempotency-key": key },
   });
-  return { ...f, snapshot, post };
+  return { ...f, service, snapshot, post };
 }
 
-test("an approval key binds the exact snapshot and selected videos while identical replay preserves its outcome", async t => {
+test("service review binds exact inputs and preserves one approval for identical replay", async t => {
   const f = await reviewFixture(t);
   const [firstVideo, secondVideo] = f.snapshot.members.map(member => member.videoNodeId);
   const body = { snapshotId: f.snapshot.id, videoNodeIds: [firstVideo] };
-  const first = await f.post("approvals", body, "one-review-command");
-  assert.equal(first.statusCode, 200, first.body);
-  assert.equal(first.json().length, 1);
+  const review = input => {
+    const actor = f.service.beginRequest(f.projectId, "local-user", "Review exact frames", {
+      source: "app", editing: false, key: "one-review-command", contextDigest: digest(input),
+    });
+    return f.service.approve(f.projectId, actor, input.snapshotId, input.videoNodeIds);
+  };
+  const first = review(body);
+  assert.equal(first.length, 1);
   const cursor = f.store.cursor(f.projectId);
-  const replay = await f.post("approvals", body, "one-review-command");
-  assert.equal(replay.statusCode, 200, replay.body);
-  assert.deepEqual(replay.json(), first.json());
-  error(await f.post("approvals", { ...body, videoNodeIds: [secondVideo] }, "one-review-command"), 409, "IDEMPOTENCY_CONFLICT");
+  assert.deepEqual(review(body), first);
+  assert.throws(() => review({ ...body, videoNodeIds: [secondVideo] }), { code: "IDEMPOTENCY_CONFLICT" });
   const otherSnapshot = f.engine.reviewSnapshot(f.projectId);
-  error(await f.post("approvals", { ...body, snapshotId: otherSnapshot.id }, "one-review-command"), 409, "IDEMPOTENCY_CONFLICT");
+  assert.throws(() => review({ ...body, snapshotId: otherSnapshot.id }), { code: "IDEMPOTENCY_CONFLICT" });
   assert.equal(f.store.cursor(f.projectId), cursor);
   assert.equal(f.store.list("message", f.projectId).length, 1);
   assert.equal(f.store.list("approval", f.projectId).length, 1);
@@ -94,14 +98,28 @@ test("a review reply key binds replyToReviewId while identical approval replies 
   assert.equal(f.store.list("approval", f.projectId).length, 2);
 });
 
+test("job recovery commands (rule-drift decisions R2-R4) are human commands that refuse without acknowledgement", async t => {
+  const f = await reviewFixture(t);
+  error(await f.post("attempts/unknown/discard", { expectedPhase: "ingesting", acknowledgeDiscard: false }, "discard-unacknowledged"), 409, "DISCARD_NOT_ACKNOWLEDGED");
+  error(await f.post("attempts/unknown/discard", { expectedPhase: "ingesting", acknowledgeDiscard: true }, "discard-missing"), 404, "NOT_FOUND");
+  error(await f.post("attempts/unknown/discard", { expectedPhase: "remote_pending", acknowledgeDiscard: true }, "discard-wrong-phase"), 400, "VALIDATION_ERROR");
+  error(await f.post("attempts/unknown/release", { expectedPhase: "remote_pending", acknowledgeDoubleCharge: true }, "detach-missing"), 404, "NOT_FOUND");
+  error(await f.post("attempts/unknown/retry-local", { expectedFailure: "LOCAL_EXECUTION_INTERRUPTED", acknowledgeRerender: false }, "retry-unacknowledged"), 409, "RERENDER_NOT_ACKNOWLEDGED");
+  error(await f.post("attempts/unknown/retry-local", { expectedFailure: "LOCAL_EXECUTION_STALE", acknowledgeRerender: true }, "retry-wrong-failure"), 400, "VALIDATION_ERROR");
+});
+
 test("health remains public on loopback while project routes require a valid local session", async t => {
   const f = fixture(t);
   for (const [method, url, payload] of [
     ["GET", f.path], ["GET", `${f.path}/review`], ["GET", `${f.path}/events`],
     ["POST", "/api/projects", { name: "Denied project" }],
     ["POST", `${f.path}/messages`, { text: "Denied request" }],
-    ["POST", `${f.path}/controls`, { action: "resume" }],
-    ["POST", `${f.path}/approvals`, { snapshotId: "snapshot", videoNodeIds: ["video"] }],
+    ["POST", `${f.path}/controls`, { action: "resume", expectedAuthorityId: null }],
+    ["POST", `${f.path}/attempts/unknown/release`, { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true }],
+    ["POST", `${f.path}/attempts/unknown/release`, { expectedPhase: "remote_pending", acknowledgeDoubleCharge: true }],
+    ["POST", `${f.path}/attempts/unknown/discard`, { expectedPhase: "ingesting", acknowledgeDiscard: true }],
+    ["POST", `${f.path}/attempts/unknown/retry-local`, { expectedFailure: "LOCAL_EXECUTION_INTERRUPTED", acknowledgeRerender: true }],
+    ["POST", `${f.path}/scenes/unknown/confirm`, { confirmationDigest: "a".repeat(64), reviewedFrames: [] }],
   ]) {
     error(await f.app.inject({ method, url, payload, headers: { host: "127.0.0.1" } }), 403, "AUTH_REQUIRED");
     error(await f.app.inject({ method, url, payload, headers: f.headers("invalid-token-0123456789012345") }), 403, "AUTH_REQUIRED");
@@ -139,9 +157,8 @@ test("public schemas reject additional authority fields and type coercion before
   ]) error(await f.request("POST", `${f.path}/messages`, payload), 400, "VALIDATION_ERROR");
   for (const payload of [{ name: "Project", actor: "human" }, { name: 12 }, { name: "" }])
     error(await f.request("POST", "/api/projects", payload), 400, "VALIDATION_ERROR");
-  error(await f.request("POST", `${f.path}/controls`, { action: "resume", principalId: "forged" }), 400, "VALIDATION_ERROR");
-  error(await f.request("POST", `${f.path}/approvals`, { snapshotId: "snapshot", videoNodeIds: ["video"], actor: "human" }), 400, "VALIDATION_ERROR");
-  error(await f.request("POST", `${f.path}/approvals`, { snapshotId: "snapshot", videoNodeIds: ["video", "video"] }), 400, "VALIDATION_ERROR");
+  error(await f.request("POST", `${f.path}/controls`, { action: "resume", expectedAuthorityId: null, principalId: "forged" }), 400, "VALIDATION_ERROR");
+  error(await f.request("POST", `${f.path}/scenes/unknown/confirm`, { confirmationDigest: "a".repeat(64), reviewedFrames: [], actor: "human" }, { "idempotency-key": "forged-confirm" }), 400, "VALIDATION_ERROR");
   assert.equal(f.store.cursor(f.project.id), cursor);
   assert.deepEqual(f.store.list("message", f.project.id), []);
   assert.equal(f.store.getProject(f.project.id).headVersion, 0);
@@ -171,8 +188,12 @@ test("local-user and director tokens cannot cross routes or gain human review an
   error(await f.tool("read_context", {}, f.localToken), 403, "EPOCH_REVOKED");
   for (const [method, url, payload] of [
     ["GET", f.path],
-    ["POST", `${f.path}/controls`, { action: "resume" }],
-    ["POST", `${f.path}/approvals`, { snapshotId: "snapshot", videoNodeIds: ["video"] }],
+    ["POST", `${f.path}/controls`, { action: "resume", expectedAuthorityId: null }],
+    ["POST", `${f.path}/attempts/unknown/release`, { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true }],
+    ["POST", `${f.path}/attempts/unknown/release`, { expectedPhase: "remote_pending", acknowledgeDoubleCharge: true }],
+    ["POST", `${f.path}/attempts/unknown/discard`, { expectedPhase: "ingesting", acknowledgeDiscard: true }],
+    ["POST", `${f.path}/attempts/unknown/retry-local`, { expectedFailure: "LOCAL_EXECUTION_INTERRUPTED", acknowledgeRerender: true }],
+    ["POST", `${f.path}/scenes/unknown/confirm`, { confirmationDigest: "a".repeat(64), reviewedFrames: [] }],
   ]) error(await f.app.inject({ method, url, payload, headers: f.headers(bridge.token) }), 403, "AUTH_REQUIRED");
   const read = await f.tool("read_context", {}, bridge.token);
   assert.equal(read.statusCode, 200, read.body);
@@ -360,11 +381,12 @@ test('chat stop and continuation retries never override newer human intent or mu
   error(stale,409,'STOP_CHANGED');
   assert.deepEqual(f.engine.attempts(f.project.id),attemptsBefore);
   const holds=f.service.snapshot(f.project.id).holds.filter(h=>h.active);
-  assert.equal(holds.length,1);assert.equal(holds[0].ownerId,follow.json().requestId);
+  assert.deepEqual(holds,[], 'the second Stop retires the superseded follow-up holds');
+  assert.equal(f.store.get('message',follow.json().requestId).state,'superseded');
 });
 
 test('stopped continuation is project-wide and cannot be smuggled through a review reply',async t=>{
-  const f=fixture(t);await f.request('POST',`${f.path}/controls`,{action:'stop'});
+  const f=fixture(t);const stopped=await f.request('POST',`${f.path}/controls`,{action:'stop'},{'idempotency-key':randomUUID()});assert.equal(stopped.statusCode,200,stopped.body);
   const resumeFromStopId=f.service.snapshot(f.project.id).control.authorityId;
   const before=f.store.list('message',f.project.id).length;
   const readOnly=await f.request('POST',`${f.path}/messages`,{text:'Continue',editing:false,resumeFromStopId});

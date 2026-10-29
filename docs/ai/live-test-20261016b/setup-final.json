@@ -1,0 +1,22 @@
+{
+  "selection": {
+    "binaryPath": "/Users/michael/.local/share/openslate-codex/node_modules/@openai/codex/bin/codex.js",
+    "mode": "native",
+    "model": "gpt-6-astra"
+  },
+  "selectionDigest": "378565db95db9688ed5087dd094a693dad18c4d03563c42dd55f7429471c5025",
+  "busy": false,
+  "changeAvailable": true,
+  "changeAppliesTo": "next_turn",
+  "defaults": {
+    "binaryPath": "/Users/michael/.local/share/openslate-codex/node_modules/@openai/codex/bin/codex.js",
+    "model": "gpt-6-astra"
+  },
+  "locked": true,
+  "modelCalls": 2,
+  "modelChoices": [],
+  "modelCatalogStatus": "unchecked",
+  "modelCatalogCheckedAt": null,
+  "codexDiagnostic": null,
+  "codexVersion": "0.153.4"
+}

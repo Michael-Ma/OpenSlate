@@ -1,0 +1,10 @@
+{
+  "at": "2026-10-16T23:43:37.349Z",
+  "pid": 27460,
+  "interrupts": 1,
+  "browserContextKeptOpen": true,
+  "exited": true,
+  "elapsedMs": 204,
+  "withinAbout10Seconds": true,
+  "portFree": true
+}

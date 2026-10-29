@@ -234,6 +234,7 @@ function timelineCapture(
       cueId: currentShot?.cueId ?? null,
       startFrame: timelineStartFrame,
       durationFrames: frames!,
+      ...(currentShot?.narrationFit ? { narrationFit: currentShot.narrationFit } : {}),
       ...(currentShot?.narrationTimingMode
         ? { timingMode: currentShot.narrationTimingMode }
         : {}),

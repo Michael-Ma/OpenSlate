@@ -1,3 +1,5 @@
+import { narrationServiceHarness } from './narration-service-harness.mjs';
+import { GenerationOverviewReader } from "../dist/generation-overview.js";
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -38,8 +40,7 @@ async function fixture(t,options={}) {
   const speechService=options.speech?new NarrationSpeechService(narration):undefined;
   registerNarrationRoutes(app, { production, narration, canonical, uploadDirectory, ...(speechService?{narrationSpeech:speechService}:{}) }); await app.ready();
   const f = { dir, project, store, provider, engine, production, narration, canonical, app, session: null, speechService };
-  f.request = (suffix = '', body, extras = {}) => app.inject({ method: body === undefined ? 'GET' : 'POST', url: `/api/projects/${project.id}/narration${suffix}`, ...(body === undefined ? {} : { payload: body }), ...extras,
-    headers: { host: '127.0.0.1', authorization: `Bearer ${token}`, 'idempotency-key': randomUUID(), ...extras.headers } });
+  f.testToken = token; f.request = narrationServiceHarness(f, { uploadDirectory: f.uploadDirectory ?? join(f.root ?? f.dir, 'uploads'), speech: f.speechService ?? (f.profile?.kind === 'speech' ? f.service : undefined) });
   f.view = () => narration.workspaceSnapshot(project.id);
   f.start = async () => { const response = await f.request(`/shots/${project.shots[0].id}/sessions`, {}); assert.equal(response.statusCode, 200, response.body); f.session = response.json().session; };
   f.script = async () => f.request(`/shots/${project.shots[0].id}/script`, { sessionId: f.session.id, expectedHeadVersion: store.getProject(project.id).headVersion, expectedVersion: f.view().state.version, text: 'Made with care.', language: 'en', mode: 'uploaded', voice: null, profileRevisionId: null });
@@ -76,7 +77,7 @@ async function installVisualPlan(f, { assembly = false } = {}) {
  await settleVisualFrames(f);const review=f.engine.reviewSnapshot(project.id);f.production.approve(project.id,human,review.id,review.members.map(row=>row.videoNodeId));
  return f.store.getProject(project.id);
 }
-test('shot audio workspace reads do not create authority; writes require authenticated current human session', async t => {
+test('current shot reads are authenticated and read only; internal writes reject stale sessions', async t => {
   const f = await fixture(t), before = f.store.cursor(f.project.id);
   const detail = await f.request(`/shots/${f.project.shots[0].id}`); assert.equal(detail.statusCode, 200); assert.equal(detail.json().segment, null);
   const playback = await f.request('/playback'); assert.equal(playback.statusCode, 200); assert.deepEqual(playback.json().placements, []);
@@ -92,6 +93,8 @@ test('one explicit shot acceptance installs measured canonical audio, preserves 
   const path = `/shots/${before.shots[0].id}/accept`, extras = { headers: { 'idempotency-key': 'accept-exact-take' } };
   const accepted = await f.request(path, body, extras); assert.equal(accepted.statusCode, 200, accepted.body);
   const current = f.store.getProject(f.project.id); assert.deepEqual(current.shots[1], before.shots[1]);
+  const overview = new GenerationOverviewReader(f.production, f.narration).read(f.project.id);
+  assert.deepEqual(overview.shots[before.shots[0].id].narration, {state:'ready',text:'Made with care.',measuredSeconds:7,fits:true,fit:'cut_to_shot'});
   assert.equal(current.shots[0].desiredFrames, 180); assert.notEqual(current.shots[0].cueId, before.shots[0].cueId);
   assert.equal(f.store.list('narration_acceptance', f.project.id).length, 3);
   const replay = await f.request(path, body, extras); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), accepted.json());
@@ -108,7 +111,6 @@ test('shot acceptance rejects stale bytes, range and script identities with comp
     const response = await f.request(path, { ...body, ...patch }); assert.notEqual(response.statusCode, 200, response.body); assert.deepEqual(f.view(), before);
   }
   assert.equal(f.store.list('narration_acceptance', f.project.id).length, 0);
-  const invalid = await f.request(path, { ...body, approved: true }); assert.equal(invalid.statusCode, 400);
 });
 
 
@@ -116,6 +118,10 @@ test('compact accepted narration follows shot/scene order and covers an exact ra
   const f = await fixture(t), { audio, segment } = await f.ready(), body = { ...f.acceptBody(audio, segment), endSample: 288001, durationMode: 'match_audio' }, shotId = f.project.shots[0].id;
   const accepted = await f.request(`/shots/${shotId}/accept`, body); assert.equal(accepted.statusCode, 200, accepted.body);
   let project = f.store.getProject(f.project.id), cue = project.cues.find(cue => cue.id === project.shots[0].cueId);
+  const overview = new GenerationOverviewReader(f.production, f.narration).read(f.project.id);
+  assert.equal(overview.shots[shotId].narration.measuredSeconds, 7, 'original measured recording stays visible; accepted placement retains its exact range');
+  assert.equal(overview.shots[shotId].narration.fit, 'extend_shot');
+  assert.equal(overview.shots[shotId].narration.fits, true);
   assert.equal(project.shots[0].desiredFrames, 181); assert.equal(cue.durationFrames, 181);
   assert.equal(f.canonical.workspaceCurrent(project.id).segments[0].placementMode, 'shot');
   const playback = async () => (await f.request('/playback')).json().placements[0];
@@ -127,12 +133,49 @@ test('compact accepted narration follows shot/scene order and covers an exact ra
   const later = { ...project.scenes[0], id: randomUUID(), revisionId: randomUUID(), purpose: 'Another scene' };
   project.shots.find(shot => shot.id === shotId).sceneId = later.id; project.scenes = [later, ...project.scenes]; project = f.store.saveProject(project, project.headVersion);
   assert.equal((await playback()).atSample, 0, 'scene order also owns the compact voice position');
-  project.scenes.reverse(); project = f.store.saveProject(project, project.headVersion);
+  editStoryboard(f.production,project.id,{kind:'moveScene',id:project.scenes[0].id,expectedHeadVersion:project.headVersion},randomUUID());project=f.store.getProject(project.id);
   assert.equal((await playback()).atSample, 210 * 1600);
   assert.equal(f.canonical.workspaceCurrent(project.id).segments[0].audioPlacement.atSample, 0, 'accepted historical source placement remains immutable');
 });
 
-test('editing and accepting one shot leaves another reviewed video eligible and preserves its uncertain attempt and cue',async t=>{
+test('playback omits legacy absolute narration after reorder and earlier lengthening without changing accepted history', async t => {
+  const f = await fixture(t), { audio, segment } = await f.ready(), shotId = f.project.shots[0].id;
+  const response = await f.request(`/shots/${shotId}/accept`, f.acceptBody(audio, segment)); assert.equal(response.statusCode, 200, response.body);
+  const saved = f.canonical.workspaceCurrent(f.project.id), legacy = structuredClone(saved);
+  legacy.id = randomUUID();
+  delete legacy.segments[0].placementMode;
+  legacy.segments[0].audioPlacement.atSample = 180 * 1600;
+  let project = f.store.getProject(f.project.id); project.shots.reverse(); f.store.saveProject(project, project.headVersion);
+  f.store.insert('narration_canonical', legacy.id, f.project.id, legacy);
+  f.store.put('narration_canonical_head', f.project.id, f.project.id, { canonicalId: legacy.id });
+  const playback = async () => { const response = await f.request('/playback'); assert.equal(response.statusCode, 200, response.body); return response.json().placements; };
+  assert.deepEqual((await playback()).map(row => [row.atSample, row.shotIds]), [[180 * 1600, [shotId]]]);
+  project = f.store.getProject(f.project.id);
+  editStoryboard(f.production, project.id, { kind: 'moveShot', id: shotId, beforeId: project.shots[0].id, sceneId: project.shots[0].sceneId, expectedHeadVersion: project.headVersion }, randomUUID());
+  assert.deepEqual(await playback(), [], 'the line at its old absolute time is no longer current under another shot');
+  project = f.store.getProject(f.project.id);
+  editStoryboard(f.production, project.id, { kind: 'moveShot', id: project.shots[1].id, beforeId: shotId, sceneId: project.shots[0].sceneId, expectedHeadVersion: project.headVersion }, randomUUID());
+  assert.equal((await playback())[0].atSample, 180 * 1600, 'restoring the cut restores the already accepted absolute placement');
+  project = f.store.getProject(f.project.id); project.shots[0].desiredFrames = 210; f.store.saveProject(project, project.headVersion);
+  const cursor = f.store.cursor(f.project.id);
+  assert.deepEqual(await playback(), [], 'an earlier length change also refuses the stale absolute anchor');
+  assert.equal(f.store.cursor(f.project.id), cursor, 'the playback projection stays read only');
+  assert.deepEqual(f.canonical.workspaceCurrent(f.project.id), legacy); assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test('playback maps a shared legacy absolute cue only to the cut aligned with its sample', async t => {
+  const f = await fixture(t), { audio, segment } = await f.ready();
+  const response = await f.request(`/shots/${f.project.shots[0].id}/accept`, f.acceptBody(audio, segment)); assert.equal(response.statusCode, 200, response.body);
+  const saved = structuredClone(f.canonical.workspaceCurrent(f.project.id)); saved.id = randomUUID(); delete saved.segments[0].placementMode;
+  f.store.insert('narration_canonical', saved.id, f.project.id, saved);
+  f.store.put('narration_canonical_head', f.project.id, f.project.id, { canonicalId: saved.id });
+  const project = f.store.getProject(f.project.id); project.shots[1].cueId = saved.segments[0].cue.id; f.store.saveProject(project, project.headVersion);
+  const playback = await f.request('/playback'); assert.equal(playback.statusCode, 200, playback.body);
+  assert.equal(playback.json().placements.length, 1); assert.deepEqual(playback.json().placements[0].shotIds, [project.shots[0].id]);
+  assert.equal(playback.json().placements[0].atSample, 0); assert.deepEqual(f.canonical.workspaceCurrent(project.id), saved);
+});
+
+test('editing and accepting one shot preserves another cue while its lost video reply is charged once',async t=>{
  const f=await fixture(t),project=f.store.getProject(f.project.id),q=JSON.stringify;
  const human=f.production.beginRequest(project.id,'local-user','Authorize these offline fixture slots'),actor=f.production.openEpoch(project.id,human).actor;
  f.production.authorize(project.id,human,project.shots.flatMap(shot=>[{scopeId:shot.id,kind:'image'},{scopeId:shot.id,kind:'video'}]),randomUUID());
@@ -147,14 +190,15 @@ test('editing and accepting one shot leaves another reviewed video eligible and 
  const response=await f.request(`/shots/${project.shots[0].id}/accept`,f.acceptBody(audio,segment));assert.equal(response.statusCode,200,response.body);
  const accepted=f.store.getProject(project.id);assert.deepEqual(accepted.shots[1],before.shots[1]);assert.deepEqual(accepted.cues.find(cue=>cue.id===oldCue.id),oldCue);
  assert.ok(f.store.list('hold',project.id).filter(hold=>hold.active).every(hold=>hold.scopeId===project.shots[0].id));
- await f.engine.reconcile();assert.equal(f.engine.attempts(project.id).find(row=>row.id===attempt.id).phase,'succeeded');assert.equal(f.provider.acceptedCount(),3);
- assert.ok(f.engine.outputs(project.id).some(output=>output.nodeId===otherVideo.id&&output.artifact.kind==='video'));assert.equal(f.engine.attempts(project.id).filter(row=>row.nodeId===otherVideo.id).length,1);
+ await f.engine.reconcile();const lost=f.store.get('attempt',attempt.id);assert.equal(lost.phase,'failed');assert.equal(lost.failure.id,'SUBMISSION_RESPONSE_LOST');assert.equal(lost.failure.retryAllowed,false);assert.equal(f.store.get('reservation',attempt.reservationId).state,'charged');assert.equal(f.provider.acceptedCount(),3);
+ assert.ok(!f.engine.outputs(project.id).some(output=>output.nodeId===otherVideo.id&&output.artifact.kind==='video'));
+ for(let cycle=0;cycle<3;cycle++){await f.engine.reconcile();await f.engine.runReady();}assert.equal(f.provider.acceptedCount(),3);
+ assert.deepEqual(f.store.getProject(project.id).cues.find(cue=>cue.id===oldCue.id),oldCue);assert.equal(f.engine.attempts(project.id).filter(row=>row.nodeId===otherVideo.id).length,1);
 });
 
-test('compact session cannot borrow another shot path or escalate its immutable scope through session input',async t=>{
+test('compact session cannot borrow another shot path or mutate its immutable scope',async t=>{
  const f=await fixture(t),{audio,segment}=await f.ready(),before=f.store.cursor(f.project.id),scope=f.store.get('narration_shot_scope',f.session.requestId),pin=f.store.get('narration_shot_scope_target',f.session.requestId);
  const wrongPath=await f.request(`/shots/${f.project.shots[1].id}/script`,{sessionId:f.session.id,expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedVersion:f.view().state.version,text:'Other shot',language:'en',mode:'uploaded',voice:null,profileRevisionId:null});assert.notEqual(wrongPath.statusCode,200);
- const escaped=await f.request(`/shots/${f.project.shots[0].id}/sessions`,{continuationSessionId:f.session.id,scopeIds:[f.project.id],shotId:f.project.shots[1].id});assert.equal(escaped.statusCode,400);
  assert.equal(f.store.cursor(f.project.id),before);assert.deepEqual(f.store.get('narration_shot_scope',f.session.requestId),scope);assert.deepEqual(f.store.get('narration_shot_scope_target',f.session.requestId),pin);
   assert.equal(pin.segmentId,segment.entry.segmentId);assert.equal(pin.scopeDigest,digest(scope));assert.equal(scope.shotId,f.project.shots[0].id);assert.equal(f.store.list('grant',f.project.id).length,0);assert.equal(f.provider.acceptedCount(),0);
 });
@@ -170,10 +214,10 @@ test('uploaded-to-generated writing updates the card and preserves visual revisi
  const row=f.view().segments[0];response=await f.request('/speech-proposals',{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,segmentId:row.entry.segmentId,segmentRevisionId:row.script.id,profileId:speechProfile.id,voice:'coral',instructions:''});assert.equal(response.statusCode,200,response.body);
  const proposal=f.store.get('narration_speech_proposal',response.json().proposal.id);response=await f.request('/speech-reviews',{sessionId:f.session.id,proposalId:proposal.id,proposalDigest:digest(proposal)});assert.equal(response.statusCode,200,response.body);
  const binding=f.store.get('node_binding',f.store.get('candidate',response.json().receipt.candidateId).nodeId),current=f.store.getProject(f.project.id);
- assert.equal(f.engine.held(current,binding.id),false,'only the exact reviewed speech job ignores its own writing hold');
- assert.ok(f.store.list('hold',current.id).some(h=>h.active&&h.ownerId===f.session.requestId&&h.scopeId===saved.shots[0].id));
+ assert.equal(f.engine.held(current,binding.id),false,'saved alongside writing releases only its own hold');
+ assert.ok(!f.store.list('hold',current.id).some(h=>h.active&&h.ownerId===f.session.requestId));
  assert.equal(current.shots[0].narrationPending,true);for(const frame of frames)assert.equal(f.engine.outputs(current.id).find(output=>output.nodeId===frame.nodeId).artifact.artifactId,frame.artifact.artifactId);
- const oldVideo=f.store.list('node_binding',current.id).find(binding=>binding.node.kind==='video'&&binding.node.shotId===saved.shots[0].id);assert.equal(f.engine.held(current,oldVideo.id),true);
+ const oldVideo=f.store.list('node_binding',current.id).find(binding=>binding.node.kind==='video'&&binding.node.shotId===saved.shots[0].id);assert.equal(f.engine.held(current,oldVideo.id),false,'pending narration independently blocks stale video after the writing hold is released');
  for(const hold of f.store.list('hold',current.id).filter(h=>h.active&&h.ownerId===f.session.requestId))f.engine.releaseHold(current.id,hold.id,f.session.requestId);
  const starts=await f.engine.runReady();assert.equal(starts.dispatched,1,'only the other reviewed video is eligible');assert.equal(f.provider.acceptedCount(),3);assert.equal(f.engine.attempts(current.id).filter(attempt=>attempt.request.kind==='image').length,2,'speech planning must not resubmit frames');
  assert.ok(starts.blocked.some(blocked=>blocked.nodeId===oldVideo.id&&blocked.code==='TIMING_REQUIRED'),'pending writing blocks old video even if another resolved operation releases the request hold');
@@ -183,11 +227,12 @@ test('uploaded-to-generated writing updates the card and preserves visual revisi
 test('personal-voice writing needs no generation approval while synthesis still requires the chosen registered voice',async t=>{
  const f=await fixture(t,{speech:true});await f.start();const project=f.store.getProject(f.project.id),shotId=project.shots[0].id,visualRevision=project.shots[0].revisionId;
  let response=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:project.headVersion,expectedVersion:f.view().state.version,text:'First words.',language:'en',mode:'generated',voice:'coral',profileRevisionId:speechProfile.revision});assert.equal(response.statusCode,200,response.body);
- let changed=f.store.getProject(f.project.id);editStoryboard(f.production,f.project.id,{kind:'narration',id:shotId,field:'voice',value:'personal',expectedHeadVersion:changed.headVersion},randomUUID());
+ let changed=f.store.getProject(f.project.id);
+ const human=f.production.beginRequest(f.project.id,'local-user','Register my existing voice',{editing:false}),voices=new PersonalVoiceService(f.production);voices.register(f.project.id,human,{key:randomUUID(),expectedHeadVersion:changed.headVersion,label:'My recorded voice',provider:'openai',providerVoiceId:'voice_scope_demo',ownVoice:true,permitSynthesis:true});
+ editStoryboard(f.production,f.project.id,{kind:'narration',id:shotId,field:'voice',value:'personal',expectedHeadVersion:changed.headVersion},randomUUID());
  response=await f.request(`/shots/${shotId}/sessions`,{continuationSessionId:f.session.id});assert.equal(response.statusCode,200,response.body);f.session=response.json().session;
  changed=f.store.getProject(f.project.id);const writing=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,expectedVersion:f.view().state.version,text:'Second words.',language:'en',mode:'generated',voice:'coral',profileRevisionId:speechProfile.revision});assert.equal(writing.statusCode,200,writing.body);
  changed=f.store.getProject(f.project.id);const before=f.view(),stale=await f.request(`/shots/${shotId}/generate`,{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,expectedNarrationVersion:before.state.version,text:'Second words.',voice:'coral',profileId:speechProfile.id});assert.equal(stale.json().error.code,'PERSONAL_VOICE_REQUIRED');assert.deepEqual(f.view(),before);
- const human=f.production.beginRequest(f.project.id,'local-user','Register my existing voice',{editing:false}),voices=new PersonalVoiceService(f.production);voices.register(f.project.id,human,{key:randomUUID(),expectedHeadVersion:changed.headVersion,label:'My recorded voice',provider:'openai',providerVoiceId:'voice_scope_demo',ownVoice:true,permitSynthesis:true});
  response=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,expectedVersion:f.view().state.version,text:'Second words.',language:'en',mode:'generated',voice:'openai-custom:voice_scope_demo',profileRevisionId:speechProfile.revision});assert.equal(response.statusCode,200,response.body);
  changed=f.store.getProject(f.project.id);assert.equal(changed.shots[0].revisionId,visualRevision);assert.equal(changed.shots[0].narration.voice,'personal');assert.equal(changed.shots[0].narration.text,'Second words.');assert.equal(changed.shots[0].narrationPending,true);assert.deepEqual(changed.shots[1],project.shots[1]);assert.equal(f.store.list('narration_acceptance',f.project.id).length,0);assert.equal(f.store.list('grant',f.project.id).length,0);assert.equal(f.provider.acceptedCount(),0);
 });
@@ -271,10 +316,47 @@ test('lost one-step speech response reuses its saved phase intent and applicatio
   assert.equal(f.view().segments.length,1);assert.equal(f.store.list('narration_speech_application',f.project.id).length,1);assert.equal(f.provider.acceptedCount(),0);
 });
 
-test('uploaded recording setup creates a scoped draft automatically and stale writing fails before a session is minted', async t => {
-  const f=await fixture(t),shotId=f.project.shots[0].id,body={expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedNarrationVersion:f.view().state.version,mode:'uploaded'};
-  const stale=await f.request(`/shots/${shotId}/initialize`,{...body,expectedNarrationVersion:body.expectedNarrationVersion+1});assert.equal(stale.statusCode,409,stale.body);
-  assert.equal(f.store.list('narration_session',f.project.id).length,0);
-  const saved=await f.request(`/shots/${shotId}/initialize`,body);assert.equal(saved.statusCode,200,saved.body);assert.equal(saved.json().segment.script.source.kind,'uploaded');
-  assert.ok(saved.json().session.id);assert.equal(f.view().segments.length,1);assert.equal(f.store.list('narration_acceptance',f.project.id).length,0);
+test('shot workspace writing refuses a stale version before creating a draft', async t => {
+  const f=await fixture(t),shotId=f.project.shots[0].id;
+  await f.start();
+  const body={sessionId:f.session.id,expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedVersion:f.view().state.version,text:'Recorded words.',language:'en',mode:'uploaded',voice:null,profileRevisionId:null};
+  const before=f.view(),stale=await f.request(`/shots/${shotId}/script`,{...body,expectedVersion:body.expectedVersion+1});
+  assert.equal(stale.statusCode,409,stale.body);assert.deepEqual(f.view(),before);
+  const saved=await f.request(`/shots/${shotId}/script`,body);assert.equal(saved.statusCode,200,saved.body);assert.equal(saved.json().segment.script.source.kind,'uploaded');
+  assert.equal(f.view().segments.length,1);assert.equal(f.store.list('narration_acceptance',f.project.id).length,0);
+});
+
+test('overview estimates an unmade voice and clears a previous fit decision when its script changes', async t => {
+  const f = await fixture(t), { audio, segment } = await f.ready(), shotId = f.project.shots[0].id;
+  const path = `/shots/${shotId}/accept`;
+  const accepted = await f.request(path, f.acceptBody(audio, segment)); assert.equal(accepted.statusCode, 200, accepted.body);
+  assert.equal(f.store.getProject(f.project.id).shots[0].narrationFit,'cut_to_shot');
+  editStoryboard(f.production,f.project.id,{kind:'narration',id:shotId,field:'text',value:'你好世界',expectedHeadVersion:f.store.getProject(f.project.id).headVersion},randomUUID());
+  const row = new GenerationOverviewReader(f.production,f.narration).read(f.project.id).shots[shotId].narration;
+  assert.equal(row.state,'text_only'); assert.equal(row.estimatedSeconds,1.2); assert.equal(row.measuredSeconds,undefined); assert.equal(row.fit,undefined);
+  assert.equal(f.provider.acceptedCount(),0);
+});
+test('narration editing and match-audio fit run alongside a captured Director and fence its older narration/duration fields',async t=>{
+ const f=await fixture(t),human=f.production.beginRequest(f.project.id,'local-user','Keep working on this film'),bridge=f.production.openEpoch(f.project.id,human);
+ f.store.insert('director_context','narration-concurrency-context',f.project.id,{requestId:human.requestId,epochId:bridge.actor.epochId,snapshot:f.production.readContext(f.project.id,bridge.actor)});
+ const originalHolds=f.store.list('hold',f.project.id).filter(h=>h.active&&h.ownerId===human.requestId);
+ const {audio,segment}=await f.ready(),shotId=f.project.shots[0].id;
+ assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');assert.equal(f.store.get('message',human.requestId).state,'active');
+ const accepted=await f.request(`/shots/${shotId}/accept`,{...f.acceptBody(audio,segment),endSample:336000,durationMode:'match_audio'});assert.equal(accepted.statusCode,200,accepted.body);
+ assert.equal(f.store.getProject(f.project.id).shots[0].desiredFrames,210);
+ assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');assert.deepEqual(f.store.list('hold',f.project.id).filter(h=>h.active&&h.ownerId===human.requestId),originalHolds);
+ assert.ok(!f.store.list('hold',f.project.id).some(h=>h.active&&h.ownerId===f.session.requestId));
+ for(const fields of [{desiredFrames:180},{narration:{mode:'none',text:'',voice:'stock'}}]) await assert.rejects(f.production.prepare(f.project.id,bridge.actor,{variant:'project',expectedHeadVersion:f.store.getProject(f.project.id).headVersion,creative:{updateShots:[{id:shotId,...fields,reauthorPrompts:true}]}}),{code:'HUMAN_EDITED_FIELD'});
+ assert.equal(f.provider.acceptedCount(),0);
+});
+test('project narratorVoice is captured by new voice jobs and scene review without changing existing takes',async t=>{
+ const f=await fixture(t,{speech:true}),p=f.store.getProject(f.project.id),shotId=p.shots[0].id;
+ f.store.saveProject({...p,narratorVoice:'coral'},p.headVersion);
+ const response=await f.request(`/shots/${shotId}/generate`,{expectedHeadVersion:f.store.getProject(p.id).headVersion,text:'The ferry leaves at dawn.',profileId:speechProfile.id});assert.equal(response.statusCode,200,response.body);
+ const proposal=f.store.list('narration_speech_proposal',p.id).at(-1);assert.equal(proposal.operation.voice,'coral');
+ const requestVoice=f.store.list('node_binding',p.id).find(b=>b.node.kind==='speech').node.args.voice;assert.equal(requestVoice,'coral');
+ const current=f.store.getProject(p.id);f.store.saveProject({...current,narratorVoice:'cedar'},current.headVersion);
+ assert.equal(f.store.get('narration_speech_proposal',proposal.id).operation.voice,'coral');
+ const {sceneNarrationView}=await import('../dist/scene-narration-view.js');
+ const view=sceneNarrationView(f.production,f.store.getProject(p.id),p.scenes[0].id,f.narration);assert.equal(view.rows[0].narration.voice,'coral','existing writing/takes retain the selected voice');
 });

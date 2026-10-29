@@ -11,7 +11,7 @@ import { Engine } from "../dist/execution/index.js";
 import { ProductionService } from "../dist/application/service.js";
 import { LocalMediaService, MediaApplicationService } from "../dist/media/index.js";
 import { FakeProvider } from "@openslate/providers";
-import { compilePlan, DEFAULT_PROFILES, newId, shotIntentDigest } from "@openslate/core";
+import { compilePlan, DEFAULT_PROFILES, DomainError, newId, shotIntentDigest } from "@openslate/core";
 
 const execute = promisify(execFile), code = expected => error => error?.code === expected;
 const ffmpeg = process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync("/opt/homebrew/bin/ffmpeg") ? "/opt/homebrew/bin/ffmpeg" : "/usr/bin/ffmpeg");
@@ -149,12 +149,88 @@ test("pause or cancellation after FFmpeg finishes retains evidence but suppresse
   assert.equal((await f.app.run(f.project.id, f.renderActor, another.id)).state, "historical");
 });
 
-test("cancelled process does not publish or silently retry", async t => {
+test("host interruption does not claim human cancellation, publish or silently retry", async t => {
   const f = await fixture(t), job = await f.prepare(), abort = new AbortController(); abort.abort();
   await assert.rejects(f.app.run(f.project.id, f.renderActor, job.id, { signal: abort.signal }), code("MEDIA_CANCELLED"));
-  assert.equal(f.store.get("media_render", job.id).state, "cancelled");
+  const interrupted = f.store.get("media_render", job.id);
+  assert.equal(interrupted.state, "interrupted");
+  assert.equal(interrupted.cancelRequested, false);
+  assert.equal(interrupted.errorCode, null);
   await assert.rejects(f.app.run(f.project.id, f.renderActor, job.id), code("MEDIA_RENDER_NOT_READY"));
   assert.equal(f.app.snapshot(f.project.id, f.renderActor).preview, null);
+});
+
+test("render waits for the shared normalization worker and dispatches once after it is free", async t => {
+  const f = await fixture(t), job = await f.prepare();
+  const temporary = f.media.temporary.bind(f.media), render = f.media.render.bind(f.media);
+  let entered, release, sawBusy, dispatches = 0;
+  const held = new Promise(resolve => { release = resolve; });
+  const began = new Promise(resolve => { entered = resolve; });
+  const busy = new Promise(resolve => { sawBusy = resolve; });
+  f.media.temporary = async fn => { f.media.temporary = temporary; entered(); await held; return temporary(fn); };
+  f.media.render = async (...args) => {
+    try { const result = await render(...args); dispatches++; return result; }
+    catch (error) { if (error.code === 'MEDIA_BUSY') sawBusy(); throw error; }
+  };
+  const normalization = f.media.importMedia({ artifactId: newId(), path: red, kind: 'video' });
+  await began;
+  const running = f.app.run(f.project.id, f.renderActor, job.id);
+  try {
+    await busy;
+    const waiting = f.store.get('media_render', job.id);
+    assert.equal(waiting.state, 'running'); assert.equal(waiting.errorCode, null); assert.ok(waiting.ownerToken);
+  } finally { release(); }
+  await normalization;
+  assert.equal((await running).state, 'published'); assert.equal(dispatches, 1);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test("waiting for FFmpeg is abortable and a shutdown never dispatches the waiting render", async t => {
+  const f = await fixture(t), job = await f.prepare(), abort = new AbortController();
+  let observed, calls = 0;
+  const busy = new Promise(resolve => { observed = resolve; });
+  f.media.render = async () => { calls++; observed(); throw new DomainError('MEDIA_BUSY', 'Synthetic occupied worker'); };
+  const running = f.app.run(f.project.id, f.renderActor, job.id, { signal: abort.signal });
+  await busy; abort.abort();
+  await assert.rejects(running, code('MEDIA_CANCELLED'));
+  const interrupted = f.store.get('media_render', job.id);
+  assert.equal(interrupted.state, 'interrupted'); assert.equal(interrupted.cancelRequested, false); assert.equal(calls, 1);
+  await assert.rejects(f.app.run(f.project.id, f.renderActor, job.id), code('MEDIA_RENDER_NOT_READY'));
+});
+
+test("waiting render rechecks its frozen target before retrying worker admission", async t => {
+  const f = await fixture(t), job = await f.prepare(); let calls = 0;
+  f.media.render = async () => {
+    calls++;
+    const project = f.head(); f.store.saveProject({ ...project, revisionId: newId() }, project.headVersion);
+    throw new DomainError('MEDIA_BUSY', 'Synthetic occupied worker');
+  };
+  await assert.rejects(f.app.run(f.project.id, f.renderActor, job.id), code('MEDIA_STALE_TARGET'));
+  assert.equal(calls, 1); assert.equal(f.store.get('media_render', job.id).state, 'failed');
+});
+
+test("waiting render cannot borrow a later caller's authority after its original request is revoked", async t => {
+  const f = await fixture(t), job = await f.prepare(); let calls = 0;
+  const later = f.production.beginRequest(f.project.id, 'human', 'Run the prepared export', { editing: false });
+  f.media.render = async () => {
+    calls++;
+    const request = f.store.get('message', job.actor.requestId);
+    f.store.put('message', job.actor.requestId, f.project.id, { ...request, state: 'superseded' });
+    throw new DomainError('MEDIA_BUSY', 'Synthetic occupied worker');
+  };
+  await assert.rejects(f.app.run(f.project.id, later, job.id), code('ACTOR_DENIED'));
+  assert.equal(calls, 1); assert.equal(f.store.get('media_render', job.id).artifact, null);
+});
+
+test("a hold added while waiting fences the render before FFmpeg admission is retried", async t => {
+  const f = await fixture(t), job = await f.prepare(); let calls = 0;
+  f.media.render = async () => {
+    calls++; f.engine.setHold(f.project.id, { scopeId: f.project.id, ownerId: 'edit-during-wait' });
+    throw new DomainError('MEDIA_BUSY', 'Synthetic occupied worker');
+  };
+  await assert.rejects(f.app.run(f.project.id, f.renderActor, job.id), code('MEDIA_HELD'));
+  assert.equal(calls, 1); assert.equal(f.store.get('media_render', job.id).artifact, null);
+  assert.ok(f.store.list('hold', f.project.id).some(hold => hold.ownerId === 'edit-during-wait' && hold.active));
 });
 
 test("installed receipt survives SQL failure and backend restart; recovery never calls FFmpeg again", async t => {

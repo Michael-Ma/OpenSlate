@@ -1,0 +1,146 @@
+[
+  {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900
+      }
+    ],
+    "format": {
+      "duration": "41.840000",
+      "size": "1814954"
+    },
+    "file": "phase-01-start.webm"
+  },
+  {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900
+      }
+    ],
+    "format": {
+      "duration": "34.280000",
+      "size": "2126618"
+    },
+    "file": "phase-02-director-setup.webm"
+  },
+  {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900
+      }
+    ],
+    "format": {
+      "duration": "50.880000",
+      "size": "2660224"
+    },
+    "file": "phase-03-settings-diagnostic.webm"
+  },
+  {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900
+      }
+    ],
+    "format": {
+      "duration": "1.200000",
+      "size": "79920"
+    },
+    "file": "phase-04-director-request.webm"
+  },
+  {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900
+      }
+    ],
+    "format": {
+      "duration": "20.520000",
+      "size": "1446166"
+    },
+    "file": "phase-05-plan-keyframes.webm"
+  },
+  {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900
+      }
+    ],
+    "format": {
+      "duration": "19.760000",
+      "size": "1565126"
+    },
+    "file": "phase-05-review-running.webm"
+  },
+  {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900
+      }
+    ],
+    "format": {
+      "duration": "1.480000",
+      "size": "184558"
+    },
+    "file": "phase-07-keyframe-retry.webm"
+  },
+  {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900
+      }
+    ],
+    "format": {
+      "duration": "1.200000",
+      "size": "136859"
+    },
+    "file": "phase-08-review-second-batch.webm"
+  },
+  {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900
+      }
+    ],
+    "format": {
+      "duration": "1.240000",
+      "size": "141152"
+    },
+    "file": "phase-09-final-notes.webm"
+  }
+]

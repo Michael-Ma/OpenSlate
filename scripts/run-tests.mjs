@@ -15,6 +15,7 @@ const patterns = [
   "packages/director/test/*.test.mjs",
   "apps/server/test/*.test.mjs",
   "apps/web/test/*.test.mjs",
+  "apps/web/test/next/*.test.mjs",
 ];
 const requested = process.argv.slice(2),
   files = requested.length

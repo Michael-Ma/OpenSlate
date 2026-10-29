@@ -91,7 +91,7 @@ test('selection rejects foreign, stale, fixture, duplicate, path-bearing and una
   const f = fixture(t), image = f.add(), foreignProject = f.service.createProject('Foreign'), foreign = f.add(foreignProject.id); await f.director.configure(f.project.id, f.native, 'native');
   const fixtureImage = f.add(f.project.id, png, { fixture: true, origin: 'fake' });
   const before = f.store.list('message', f.project.id).length;
-  for (const images of [[f.select(fixtureImage)], [f.select(foreign)], [{ ...f.select(image), sha256: 'a'.repeat(64) }], [f.select(image), f.select(image)], [{ ...f.select(image), path: image.path }], Array(5).fill(f.select(image))]) {
+  for (const images of [[f.select(fixtureImage)], [f.select(foreign)], [{ ...f.select(image), sha256: 'a'.repeat(64) }], [f.select(image), f.select(image)], [{ ...f.select(image), path: image.path }], Array(9).fill(f.select(image))]) {
     const response = await f.req({ text: 'Discuss', images }); assert.ok(response.statusCode >= 400, response.body);
   }
   for (const other of [{ replyToReviewId: 'unknown' }, { replyToQuestionId: 'unknown' }]) assert.ok((await f.req({ ...f.body([image]), ...other })).statusCode >= 400);
@@ -178,4 +178,114 @@ test('mutating the caller options cannot replace the original cancellation signa
   const pending = c.projector.prepare(c.input, c.bridge.actor, c.projection, options); options.signal = new AbortController().signal;
   await until(() => existsSync(marker)); abort.abort(); await assert.rejects(pending, error => error.code === 'MEDIA_CANCELLED');
   assert.equal(f.store.list('request_image_projection', f.project.id).length, 0);
+});
+
+// Generated frame projection uses owned outputs, never user-authored filesystem references.
+import { KeyframeProjector } from '../dist/application/keyframe-projector.js';
+import { projectFixture } from './execution-fixture.mjs';
+import { shotIntentDigest } from '@openslate/core';
+import { recordNotes } from '../dist/application/director-notes.js';
+function keyframes(f, count, { fixture = false, svg = false } = {}) {
+  const shape = projectFixture(f.project.id, count), initial = f.store.getProject(f.project.id);
+  let project = f.store.saveProject({ ...initial, ...shape, capabilityLockId: initial.capabilityLockId, scenes: [{ id: 'scene', revisionId: newId(), purpose: 'Test frames' }], shots: shape.shots.map(s => ({ ...s, sceneId: 'scene' })), activePlanId: 'frames' }, initial.headVersion);
+  for (const shot of project.shots) {
+    const image = f.add(project.id, png, { fixture, ...(svg ? { mimeType: 'image/svg+xml' } : {}) });
+    const artifact = f.store.get('artifact', image.artifactId).artifact;
+    f.store.insert('node_binding', shot.id, project.id, { id: shot.id, projectId: project.id, planId: 'frames', state: 'active', candidateId: `candidate-${shot.id}`, node: { kind: 'image', shotId: shot.id, args: { prompt: shot.imagePrompt }, intentDigest: shotIntentDigest(shot, 'image') }, outputs: { image: artifact } });
+  }
+  return f.store.getProject(project.id);
+}
+function frameContext(f, scopeIds = ['scene'], refs = []) {
+  const actor = f.service.beginRequest(f.project.id, 'local-user', 'Discuss current frames', { editing: false, scopeIds, ...(refs.length ? { contextDigest: imageMessageContext(refs.map(f.select)) } : {}) });
+  const projector = new KeyframeProjector(f.service, { ffmpegPath }), bridge = f.service.openEpoch(f.project.id, actor), turnId = newId();
+  f.store.insert('director_turn', turnId, f.project.id, { id: turnId, requestId: actor.requestId, epochId: bridge.actor.epochId, state: 'completed' });
+  if (refs.length) projector.record(f.project.id, actor, refs.map(f.select));
+  const input = { projectId: f.project.id, requestId: actor.requestId, epochId: bridge.actor.epochId, turnId, text: 'Discuss', context: '{}', skills: [], bridge: {} };
+  const projection = join(f.root, 'projection'); mkdirSync(projection, { recursive: true });
+  return { actor, projector, bridge, input, projection };
+}
+test('up to four current scoped keyframes attach individually; frozen receipt replays after later outputs', async t => {
+  const f = fixture(t); keyframes(f, 4); const c = frameContext(f);
+  const prepared = await c.projector.prepare(c.input, c.bridge.actor, c.projection);
+  assert.equal(prepared.images.length, 4); assert.equal((await prepareDirectorImages(prepared.images, c.projection)).length, 4);
+  const receipt = f.store.get('request_keyframe_projection', c.actor.requestId);
+  assert.equal(receipt.images.length, 4); assert.equal(new Set(prepared.images.map(i => i.path)).size, 4);
+  assert.ok(receipt.images.every(i => i.tile === 0));
+  const binding = f.store.get('node_binding', 'shot-0'); f.store.put('node_binding', binding.id, f.project.id, { ...binding, outputs: {} });
+  assert.deepEqual(await c.projector.prepare(c.input, c.bridge.actor, c.projection), prepared);
+  assert.deepEqual(f.store.get('request_keyframe_projection', c.actor.requestId), receipt);
+});
+test('five frames become one bounded row-major contact sheet accepted by the runtime', async t => {
+  const f = fixture(t); keyframes(f, 5); const c = frameContext(f);
+  const prepared = await c.projector.prepare(c.input, c.bridge.actor, c.projection), context = JSON.parse(prepared.context).attachedKeyframes;
+  assert.equal(prepared.images.length, 1); assert.equal(context.images.length, 5); assert.deepEqual(context.images.map(i => i.tile), [0,1,2,3,4]);
+  assert.ok(context.attachments[0].byteLength <= 512 * 1024); assert.equal((await prepareDirectorImages(prepared.images, c.projection)).length, 1);
+  assert.match(context.instructions, /frozen at turn start/);
+});
+test('references take precedence; eight references fill the native budget and describe omitted frames', async t => {
+  const f = fixture(t); keyframes(f, 5); const refs = Array.from({length:8},()=>f.add());
+  const c = frameContext(f, ['scene'], refs.slice(0, 2)), prepared = await c.projector.prepare(c.input, c.bridge.actor, c.projection);
+  assert.equal(prepared.images.length, 3); assert.equal(JSON.parse(prepared.context).attachedKeyframes.images.length, 5);
+  assert.equal((await prepareDirectorImages(prepared.images, c.projection)).length, 3);
+  const full = frameContext(f, ['scene'], refs), input = await full.projector.prepare(full.input, full.bridge.actor, full.projection);
+  assert.equal(input.images.length, 8); assert.equal(JSON.parse(input.context).attachedKeyframes.images.length, 0);
+  assert.ok(JSON.parse(input.context).attachedKeyframes.described.every(s => s.reason === 'user_references_fill_image_budget'));
+});
+test('fixture SVG frames are described; scope and stale image intent exclude unshown frames', async t => {
+  const f = fixture(t); keyframes(f, 2, { fixture: true, svg: true }); const c = frameContext(f, ['shot-0']);
+  const prepared = await c.projector.prepare(c.input, c.bridge.actor, c.projection), frames = JSON.parse(prepared.context).attachedKeyframes;
+  assert.equal(prepared.images, undefined); assert.deepEqual(frames.described, [{ shotId: 'shot-0', reason: 'fixture_not_visually_inspected' }]);
+  const whole = frameContext(f, [f.project.id]); assert.equal((await whole.projector.prepare(whole.input, whole.bridge.actor, whole.projection)).images, undefined);
+});
+test('seenKeyframe must match this request and epoch projection exactly, never a context claim', async t => {
+  const f = fixture(t); keyframes(f, 1); const c = frameContext(f);
+  await c.projector.prepare(c.input, c.bridge.actor, c.projection);
+  const frame = f.store.get('request_keyframe_projection', c.actor.requestId).images[0];
+  const seen = { shotId: frame.shotId, artifactId: frame.artifactId, sha256: frame.sha256 };
+  const note = { anchor: { shotIds: ['shot-0'] }, kind: 'observation', blocking: false, text: 'Frame has been attached.', seenKeyframe: seen, choices: [{ kind: 'accept', label: 'Keep' }] };
+  const before = f.store.list('director_note', f.project.id).length;
+  assert.throws(() => recordNotes(f.service, f.project.id, c.bridge.actor, newId(), { notes: [{ ...note, seenKeyframe: { ...seen, sha256: 'f'.repeat(64) } }] }), { code: 'SCOPE_DENIED' });
+  assert.equal(f.store.list('director_note', f.project.id).length, before);
+  assert.equal(recordNotes(f.service, f.project.id, c.bridge.actor, newId(), { notes: [note] }).notes.length, 1);
+  const other = frameContext(f); assert.throws(() => recordNotes(f.service, f.project.id, other.bridge.actor, newId(), { notes: [note] }), { code: 'SCOPE_DENIED' });
+});
+
+test('stale frame intent and nonfixture SVG are omitted rather than attached', async t => {
+ const f=fixture(t);keyframes(f,2);const b=f.store.get('node_binding','shot-0');f.store.put('node_binding',b.id,f.project.id,{...b,node:{...b.node,intentDigest:'old'}});
+ const other=f.store.get('node_binding','shot-1'),image=f.add(f.project.id,png,{mimeType:'image/svg+xml'});f.store.put('node_binding',other.id,f.project.id,{...other,outputs:{image:f.store.get('artifact',image.artifactId).artifact}});
+ const c=frameContext(f),prepared=await c.projector.prepare(c.input,c.bridge.actor,c.projection);
+ assert.equal(prepared.images,undefined);assert.deepEqual(JSON.parse(prepared.context).attachedKeyframes.described.map(s=>s.reason),['no_current_keyframe','unsupported_image']);
+});
+test('unavailable image tool degrades with recorded omissions and never records seen-frame evidence', async t => {
+ const f=fixture(t);keyframes(f,1);const c=frameContext(f),binary=join(f.root,'unavailable-ffmpeg');writeFileSync(binary,'#!/bin/sh\nexit 8\n',{mode:0o755});
+ const projector=new KeyframeProjector(f.service,{ffmpegPath:binary}),prepared=await projector.prepare(c.input,c.bridge.actor,c.projection);
+ assert.equal(prepared.images,undefined);assert.deepEqual(JSON.parse(prepared.context).attachedKeyframes.described,[{shotId:'shot-0',reason:'image_projection_unavailable'}]);
+ assert.deepEqual(f.store.get('request_keyframe_projection',c.actor.requestId).images,[]);
+});
+test('keyframe cancellation publishes no receipt or note evidence', async t => {
+ const f=fixture(t);keyframes(f,1);const c=frameContext(f),abort=new AbortController();abort.abort();
+ await assert.rejects(c.projector.prepare(c.input,c.bridge.actor,c.projection,{signal:abort.signal}),{code:'MEDIA_CANCELLED'});
+ assert.equal(f.store.get('request_keyframe_projection',c.actor.requestId),undefined);
+});
+
+test('noisy contact sheet shrinks to the budget left after three user references', async t => {
+ const f=fixture(t);keyframes(f,5);
+ for(const binding of f.store.list('node_binding',f.project.id)){
+   const image=f.add(f.project.id,noisyPng),artifact=f.store.get('artifact',image.artifactId).artifact;
+   f.store.put('node_binding',binding.id,f.project.id,{...binding,outputs:{image:artifact}});
+ }
+ const reference=join(f.root,'reference.png');
+ await promisify(execFile)(ffmpegPath,['-nostdin','-v','error','-i',join(inputRoot,'noise.png'),'-vf','scale=256:256','-frames:v','1','-threads','1',reference],{timeout:15000});
+ const referenceBytes=readFileSync(reference),references=[f.add(f.project.id,referenceBytes),f.add(f.project.id,referenceBytes),f.add(f.project.id,referenceBytes)],c=frameContext(f,['scene'],references),prepared=await c.projector.prepare(c.input,c.bridge.actor,c.projection);
+ assert.equal(prepared.images.length,4);assert.equal(JSON.parse(prepared.context).attachedKeyframes.images.length,5);
+ assert.equal((await prepareDirectorImages(prepared.images,c.projection)).length,4);
+ assert.ok(prepared.images.reduce((n,i)=>n+readFileSync(i.path).length,0)<=512*1024);
+});
+
+test('a keyframe with disguised SVG bytes cannot select a different input demuxer',async t=>{
+ const f=fixture(t);keyframes(f,1);const image=f.add(f.project.id,Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1"/></svg>'));
+ const binding=f.store.get('node_binding','shot-0');f.store.put('node_binding',binding.id,f.project.id,{...binding,outputs:{image:f.store.get('artifact',image.artifactId).artifact}});
+ const c=frameContext(f),prepared=await c.projector.prepare(c.input,c.bridge.actor,c.projection);
+ assert.equal(prepared.images,undefined);assert.deepEqual(JSON.parse(prepared.context).attachedKeyframes.images,[]);
+ assert.equal(JSON.parse(prepared.context).attachedKeyframes.described[0].reason,'image_projection_unavailable');
 });

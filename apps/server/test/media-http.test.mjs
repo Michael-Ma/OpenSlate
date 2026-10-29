@@ -2,14 +2,16 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { createApp } from "../dist/app.js";
 import { Store } from "../dist/persistence/index.js";
 import { Engine } from "../dist/execution/index.js";
 import { ProductionService } from "../dist/application/service.js";
+import { LocalDirectorController } from "../dist/application/local-director.js";
 import { LocalMediaService, MediaApplicationService, registerMediaRoutes } from "../dist/media/index.js";
 import { ManagedUploadStore } from "../dist/narration/managed-upload.js";
 import { FakeProvider } from "@openslate/providers";
@@ -25,16 +27,24 @@ before(async () => {
   bytes = await readFile(path);
 });
 after(async () => { await rm(inputs, { recursive: true, force: true }); });
-async function fixture(t, maxBytes) {
+async function writable(path) {
+  await chmod(path, 0o700);
+  for (const entry of await readdir(path, { withFileTypes: true })) if (entry.isDirectory()) await writable(join(path, entry.name));
+}
+async function fixture(t, { maxBytes, withDirector = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "openslate-media-http-")), store = new Store(join(dir, "db.sqlite")), provider = new FakeProvider(join(dir, "fake.sqlite"));
   const engine = new Engine(store, provider, { artifactDir: join(dir, "artifacts") }), production = new ProductionService(store, engine);
   const project = production.createProject("HTTP supplied render"), uploads = new ManagedUploadStore({ rootDir: join(dir, "uploads"), ...(maxBytes ? { maxBytes } : {}) });
   const local = new LocalMediaService({ rootDir: join(dir, "media"), allowedInputRoots: [uploads.rootDir], ffmpegPath: ffmpeg, ffprobePath: ffprobe });
   const media = new MediaApplicationService(production, local), token = "test-local-token-with-enough-characters";
-  const app = createApp({ service: production, localToken: token }); registerMediaRoutes(app, { production, media, uploads });
+  const director = withDirector ? new LocalDirectorController(production, {
+    repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: dir, endpoint: "http://127.0.0.1:3101", ffmpegPath: ffmpeg,
+    defaults: { binaryPath: process.execPath, model: "test-model" }, setup: async () => { throw new Error("Media HTTP tests must keep the scripted Director"); },
+  }) : undefined;
+  const app = createApp({ service: production, localToken: token, ...(director ? { director, runtimeSettings: director } : {}) }); registerMediaRoutes(app, { production, media, uploads });
   const path = `/api/projects/${project.id}/media`;
   const request = (method, url, payload, key = newId(), extra = {}) => app.inject({ method, url, ...(payload !== undefined ? { payload } : {}), headers: { host: "127.0.0.1", authorization: `Bearer ${token}`, "idempotency-key": key, ...extra } });
-  const upload = (key = newId(), requestId, payload = bytes) => request("POST", `${path}/uploads?expectedHeadVersion=${store.getProject(project.id).headVersion}${requestId ? `&requestId=${requestId}` : ""}`, payload, key, { "content-type": "application/octet-stream" });
+  const upload = (key = newId(), requestId, payload = bytes, version = store.getProject(project.id).headVersion, name) => request("POST", `${path}/uploads?expectedHeadVersion=${version}${requestId ? `&requestId=${requestId}` : ""}${name === undefined ? "" : `&name=${encodeURIComponent(name)}`}`, payload, key, { "content-type": "application/octet-stream" });
   const install = () => {
     const current = store.getProject(project.id), planId = newId();
     const source = `definePlan({baseRevision:${JSON.stringify(current.revisionId)}},p=>{const timeline=p.timeline("timeline",{takes:[${current.artifacts.filter(a => a.kind === "video").map(a => `p.asset(${JSON.stringify(a.artifactId)})`).join(",")}]});return p.render("render",{timeline,width:160,height:90});});`;
@@ -45,8 +55,8 @@ async function fixture(t, maxBytes) {
     });
     return { expectedHeadVersion: store.getProject(project.id).headVersion, renderNodeId: compiled.nodes.find(n => n.kind === "render").id };
   };
-  t.after(async () => { await app.close(); store.close(); provider.close(); await rm(dir, { recursive: true, force: true }); });
-  return { dir, app, store, provider, engine, production, project, local, media, uploads, path, request, upload, install };
+  t.after(async () => { await director?.close(); await app.close(); store.close(); provider.close(); if (director) await writable(dir); await rm(dir, { recursive: true, force: true }); });
+  return { dir, app, store, provider, engine, production, project, local, media, director, uploads, path, request, upload, install };
 }
 async function waitJob(f, id, predicate) {
   for (let count = 0; count < 300; count++) {
@@ -56,6 +66,63 @@ async function waitJob(f, id, predicate) {
   }
   throw new Error("Render status did not reach the expected state");
 }
+
+test("named video uploads retain their file name in Assets and a Director message", async t => {
+  const f = await fixture(t, { withDirector: true }), name = "渡口 camera movement.mp4", upload = await f.upload("named", undefined, bytes, 0, name);
+  assert.equal(upload.statusCode, 200, upload.body);
+  const artifact = upload.json().artifact, assets = await f.request("GET", `/api/projects/${f.project.id}/assets`);
+  assert.equal(assets.statusCode, 200, assets.body); assert.equal(assets.json().assets.find(item => item.artifact.artifactId === artifact.artifactId)?.label, name);
+  const message = await f.request("POST", `/api/projects/${f.project.id}/messages`, { text: "Discuss this camera movement.", editing: false, attachments: [{ artifactId: artifact.artifactId, sha256: artifact.sha256 }] });
+  assert.equal(message.statusCode, 200, message.body); await f.director.settle();
+  const snapshot = await f.request("GET", `/api/projects/${f.project.id}`); assert.equal(snapshot.statusCode, 200, snapshot.body);
+  assert.deepEqual(snapshot.json().conversation.find(item => item.role === "user" && item.requestId === message.json().requestId).attachments, [{ artifact, name, readable: true }]);
+  assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.store.list("native_model_start", f.project.id).length, 0);
+});
+
+test("unnamed videos retain the original Assets and message attachment labels", async t => {
+  const f = await fixture(t, { withDirector: true }), upload = await f.upload(); assert.equal(upload.statusCode, 200, upload.body);
+  const artifact = upload.json().artifact, assets = await f.request("GET", `/api/projects/${f.project.id}/assets`);
+  assert.equal(assets.statusCode, 200, assets.body); assert.equal(assets.json().assets[0].label, `${f.project.name} · upload`);
+  const message = await f.request("POST", `/api/projects/${f.project.id}/messages`, { editing: false, attachments: [{ artifactId: artifact.artifactId, sha256: artifact.sha256 }] });
+  assert.equal(message.statusCode, 200, message.body); await f.director.settle();
+  const snapshot = await f.request("GET", `/api/projects/${f.project.id}`); assert.equal(snapshot.statusCode, 200, snapshot.body);
+  assert.deepEqual(snapshot.json().conversation.find(item => item.role === "user" && item.requestId === message.json().requestId).attachments, [{ artifact, name: `video ${artifact.artifactId}`, readable: true }]);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test("video upload names accept both length boundaries and reject empty, long, control and path names before staging", async t => {
+  const f = await fixture(t);
+  for (const name of ["", "x".repeat(121), "a\u0000b.mp4", "a\tb.mp4", "a\nb.mp4", "a\u007fb.mp4", "folder/clip.mp4", "folder\\clip.mp4"]) {
+    const response = await f.upload(newId(), undefined, bytes, 0, name);
+    assert.equal(response.statusCode, 400, response.body); assert.equal(response.json().error.code, "VALIDATION_ERROR");
+  }
+  for (const kind of ["message", "media_import", "artifact"]) assert.equal(f.store.list(kind, f.project.id).length, 0);
+  assert.deepEqual(await readdir(f.uploads.rootDir), []);
+  for (const name of ["x", "x".repeat(120)]) {
+    const response = await f.upload(newId(), undefined, bytes, f.store.getProject(f.project.id).headVersion, name); assert.equal(response.statusCode, 200, response.body);
+  }
+  assert.equal(f.store.getProject(f.project.id).artifacts.length, 2); assert.deepEqual(await readdir(f.uploads.rootDir), []);
+});
+
+for (const explicit of [false, true]) test(`video upload name binds ${explicit ? "explicit" : "automatic"} request replay without duplicating an import`, async t => {
+  const f = await fixture(t), actor = explicit ? f.production.beginRequest(f.project.id, "local-user", "Import reference videos") : undefined;
+  const first = await f.upload("named-once", actor?.requestId, bytes, 0, "reference.mp4"); assert.equal(first.statusCode, 200, first.body);
+  f.local.importMedia = () => { throw new Error("A completed upload replay must not decode again"); };
+  const replay = await f.upload("named-once", actor?.requestId, bytes, 0, "reference.mp4"); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), first.json());
+  for (const name of ["renamed.mp4", undefined]) {
+    const changed = await f.upload("named-once", actor?.requestId, bytes, 0, name);
+    assert.equal(changed.statusCode, 409, changed.body); assert.equal(changed.json().error.code, "IDEMPOTENCY_CONFLICT");
+  }
+  for (const kind of ["message", "media_import", "media_import_receipt", "media_source", "artifact"]) assert.equal(f.store.list(kind, f.project.id).length, 1);
+  assert.equal(f.store.getProject(f.project.id).artifacts.length, 1); assert.deepEqual(await readdir(f.uploads.rootDir), []); assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test("unnamed video upload replay preserves the original request identity", async t => {
+  const f = await fixture(t), first = await f.upload("unnamed-once", undefined, bytes, 0); assert.equal(first.statusCode, 200, first.body);
+  const replay = await f.upload("unnamed-once", undefined, bytes, 0); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), first.json());
+  assert.equal(f.store.list("message", f.project.id).length, 1); assert.equal(f.store.list("media_import", f.project.id).length, 1); assert.equal(f.store.getProject(f.project.id).artifacts.length, 1);
+  assert.deepEqual(await readdir(f.uploads.rootDir), []);
+});
 
 test("authenticated binary uploads reuse one explicit import session and GET creates no new messages", async t => {
   const f = await fixture(t);
@@ -126,7 +193,7 @@ test("render HTTP returns a job, survives synchronous admission failure, and exp
   assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.store.list("attempt", f.project.id).length, 0);
 });
 
-test("server close aborts and awaits its background render before returning", async t => {
+test("server close interrupts and awaits its background render without recording a human cancel", async t => {
   const f = await fixture(t); assert.equal((await f.upload()).statusCode, 200); const body = f.install();
   let entered, exited = false;
   const began = new Promise(resolve => { entered = resolve; });
@@ -139,12 +206,36 @@ test("server close aborts and awaits its background render before returning", as
   };
   const response = await f.request("POST", `${f.path}/renders`, body, "close"); assert.equal(response.statusCode, 202, response.body);
   await began; await f.app.close();
-  assert.equal(exited, true); assert.equal(f.store.get("media_render", response.json().job.id).state, "cancelled");
+  const job = f.store.get("media_render", response.json().job.id);
+  assert.equal(exited, true); assert.equal(job.state, "interrupted");
+  assert.equal(job.cancelRequested, false); assert.equal(job.errorCode, null);
+  assert.equal(job.ownerToken, null); assert.equal(job.leaseUntil, null);
   assert.equal(f.store.get("media_preview", f.project.id), undefined);
 });
 
+test("the person's Cancel still aborts a running render and records cancellation", async t => {
+  const f = await fixture(t); assert.equal((await f.upload()).statusCode, 200); const body = f.install();
+  let entered;
+  const began = new Promise(resolve => { entered = resolve; });
+  f.local.render = async (_manifest, { signal }) => {
+    entered();
+    await new Promise((resolve, reject) => {
+      const stop = () => reject(new DomainError('MEDIA_CANCELLED', 'Human cancelled child'));
+      if (signal.aborted) stop(); else signal.addEventListener('abort', stop, { once: true });
+    });
+  };
+  const response = await f.request('POST', `${f.path}/renders`, body, 'human-cancel');
+  assert.equal(response.statusCode, 202, response.body); await began;
+  const id = response.json().job.id;
+  const cancelled = await f.request('POST', `${f.path}/renders/${id}/cancel`, {}, 'cancel-once');
+  assert.equal(cancelled.statusCode, 200, cancelled.body);
+  const job = await waitJob(f, id, job => job.state === 'cancelled');
+  assert.equal(job.cancelRequested, true); assert.equal(job.canRun, false);
+  assert.equal(f.store.get('media_preview', f.project.id), undefined);
+});
+
 test("oversize and empty upload bodies are rejected without canonical artifacts or leftover staging files", async t => {
-  const f = await fixture(t, 100);
+  const f = await fixture(t, { maxBytes: 100 });
   const large = await f.upload("too-large"); assert.equal(large.statusCode, 409, large.body); assert.equal(large.json().error.code, "UPLOAD_TOO_LARGE");
   assert.equal(typeof large.json().requestId, "string");
   const empty = await f.upload("empty", large.json().requestId, Buffer.alloc(0)); assert.equal(empty.statusCode, 400, empty.body);

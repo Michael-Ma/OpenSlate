@@ -27,6 +27,8 @@ See [activation variables](MEDIA-EXECUTION-LAUNCHER.md). Local credential presen
 
 The native director is configured separately. Use a pinned Codex 0.153.4 executable and complete its zero-turn local setup check. Its ChatGPT/API login is independent of media API keys; the image worker requires ChatGPT login. OpenSlate does not copy login credentials into project files.
 
+Native Director turns have a **180,000 ms** total deadline, including startup. For a deliberately larger planning task, the host may set `OPENSLATE_DIRECTOR_RUN_TIMEOUT_MS` to an integer from **1,000 to 600,000** before starting the studio. The three-minute default is retained: LIVE-1 showed a native stall after a completed read, with no evidence that a longer default fixes it. Prefer small saved steps. Raising the limit allows more time for one run and never retries an unknown outcome. The thread shows elapsed time and observed tool/native phases; timeout feedback reports confirmed changes, notes and proposals retained by that turn.
+
 ## Storage and restart
 
 Set one explicit `OPENSLATE_DATA_DIR` when changing launch modes. Root `pnpm start` defaults to repository `.openslate`; filtered/development server commands can otherwise point to a different directory. Keep data outside the public `apps/web/dist` bundle. The normal launcher reads `.env.live.local`, with exported variables taking precedence.

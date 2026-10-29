@@ -1,0 +1,72 @@
+{
+  "at": "2026-10-16T23:35:51.887Z",
+  "project": {
+    "activePlanId": null,
+    "artifacts": [],
+    "brief": "",
+    "capabilityLockId": "d229c4e1-3f96-4f6c-b34b-23000e753e0f",
+    "cues": [],
+    "headVersion": 0,
+    "id": "e618468c-de37-44a3-9b70-a9bc4a9e5331",
+    "maxFrames": 10800,
+    "name": "Harbour LIVE-3",
+    "narration": {
+      "script": "",
+      "source": "undecided"
+    },
+    "revisionId": "f6741bb6-ad2a-4211-b1f8-3e58ce462fb5",
+    "scenes": [],
+    "shots": [],
+    "story": ""
+  },
+  "plan": null,
+  "attempts": [],
+  "turns": [],
+  "generation": {
+    "projectId": "e618468c-de37-44a3-9b70-a9bc4a9e5331",
+    "revisionId": "f6741bb6-ad2a-4211-b1f8-3e58ce462fb5",
+    "headVersion": 0,
+    "cursor": 1,
+    "fps": 30,
+    "stopped": null,
+    "director": {
+      "state": "idle",
+      "scopeIds": []
+    },
+    "controlAuthorityId": null,
+    "scenes": [],
+    "shots": {},
+    "restartCasualties": []
+  },
+  "exports": {
+    "readiness": {
+      "ready": false,
+      "demo": false,
+      "seconds": 0,
+      "blockers": [
+        {
+          "code": "empty_film"
+        }
+      ]
+    },
+    "current": null,
+    "history": []
+  },
+  "director": {
+    "mode": "fake",
+    "status": "idle",
+    "activeRequestId": null,
+    "turn": null,
+    "message": null,
+    "imageAttachmentsAvailable": false
+  },
+  "setup": {
+    "modelCalls": 0,
+    "selection": {
+      "mode": "fake"
+    },
+    "modelCatalogStatus": "unchecked",
+    "codexVersion": "0.153.4",
+    "codexDiagnostic": null
+  }
+}

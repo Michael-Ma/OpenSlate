@@ -1,4 +1,5 @@
 import { constants, mkdirSync, realpathSync } from "node:fs";
+import { toolVersion } from "../installation-status.js";
 import { chmod, copyFile, link, lstat, mkdtemp, open, readFile, realpath, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, sep } from "node:path";
@@ -9,13 +10,21 @@ import { assertTranscriptionAudioCapacity, assertTranscriptionAudioMeasurement, 
 import type { MeasuredTranscriptionAudio, TranscriptionAudioOptions, TranscriptionAudioRecipe } from "./transcription-audio-types.js";
 import type { FrozenRenderManifest, LocalMediaOptions, MediaAudioNormalizationIdentity, MediaLimits, MediaNormalizationIdentity, MediaProbe, RenderCompletion, RenderManifestInput, RenderOptions, RenderResult, SuppliedMedia } from "./types.js";
 
-const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioSources: 65, maxAudioPlacements: 65, timeoutMs: 120000 };
+const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioSources: 130, maxAudioPlacements: 260, timeoutMs: 120000 };
 // No playlists, concat demuxer, devices or network protocols. MOV external data
 // references remain disabled by the demuxer's default; files are copied first.
 const INPUT_OPTIONS = ["-protocol_whitelist", "file", "-format_whitelist", "mov,matroska,webm,avi,wav,mp3,flac,ogg"];
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const FPS = 30, SAMPLE_RATE = 48000, SAMPLES_PER_FRAME = 1600;
+const MAX_TOOL_TIMEOUT_MS = 600000, RENDER_MS_PER_FRAME = 40, RENDER_ENCODER_THREADS = 4;
+
+/** Whole-film encoding gets a frame allowance; other media tools keep their limit. */
+export function renderTimeoutMs(totalFrames: number, baseTimeoutMs = DEFAULTS.timeoutMs): number {
+  integer(totalFrames, 1, 10800, "render frame count");
+  integer(baseTimeoutMs, 50, MAX_TOOL_TIMEOUT_MS, "tool time limit");
+  return Math.min(MAX_TOOL_TIMEOUT_MS, baseTimeoutMs + totalFrames * RENDER_MS_PER_FRAME);
+}
 
 /** Partition by sample intervals so late cues never allocate long delay buffers. */
 function audioLanes(audio: FrozenRenderManifest["audio"]): number[][] {
@@ -60,7 +69,7 @@ export class LocalMediaService {
     });
     mkdirSync(options.rootDir, { recursive: true, mode: 0o700 });
     this.rootDir = realpathSync(options.rootDir);
-    for (const dir of ["tmp", "blobs", "sources", "manifests", "completions"]) mkdirSync(join(this.rootDir, dir), { recursive: true, mode: 0o700 });
+    for (const dir of ["tmp", "blobs", "sources", "manifests", "completions", "clip-audio"]) mkdirSync(join(this.rootDir, dir), { recursive: true, mode: 0o700 });
     this.ffmpeg = options.ffmpegPath;
     this.ffprobe = options.ffprobePath;
     this.limits = Object.freeze({ ...DEFAULTS, ...options.limits });
@@ -69,9 +78,16 @@ export class LocalMediaService {
     integer(this.limits.maxDurationFrames, 1, 10800, "duration limit");
     integer(this.limits.maxClips, 1, 64, "clip limit");
     integer(this.limits.maxAudioTracks, 0, 8, "audio track limit");
-    integer(this.limits.maxAudioSources, 0, 65, "audio source limit");
-    integer(this.limits.maxAudioPlacements, 0, 65, "audio placement limit");
-    integer(this.limits.timeoutMs, 50, 600000, "tool time limit");
+    // Kept clip sound adds one source per clip and up to three ducked pieces per shot (clip-audio.ts).
+    integer(this.limits.maxAudioSources, 0, 130, "audio source limit");
+    integer(this.limits.maxAudioPlacements, 0, 260, "audio placement limit");
+    integer(this.limits.timeoutMs, 50, MAX_TOOL_TIMEOUT_MS, "tool time limit");
+  }
+
+  /** Inspect exactly the configured media tools, without decoding or changing state. */
+  async toolStatus() {
+    const [ffmpeg, ffprobe] = await Promise.all([toolVersion(this.ffmpeg, "ffmpeg"), toolVersion(this.ffprobe, "ffprobe")]);
+    return { ffmpeg: { available: ffmpeg !== null, version: ffmpeg }, ffprobe: { available: ffprobe !== null, version: ffprobe } };
   }
 
   /** Version probes only; no source decoding/transcoding or application-state mutation. */
@@ -262,6 +278,80 @@ export class LocalMediaService {
     }));
   }
 
+  /**
+   * The sound of an imported clip as normalized 48 kHz stereo PCM. Clip import keeps only silent video
+   * ("silent-h264-30fps-v1"); the untouched original stays in the blob store, so its audio stream is read from there,
+   * trimmed to the clip's measured picture. Content-addressed and cached: a clip is derived once, and a clip with
+   * no audio stream is remembered as such. Never reads a caller path.
+   */
+  async deriveClipAudio(video: SuppliedMedia, options: { signal?: AbortSignal } = {}): Promise<{ media: SuppliedMedia } | { reason: "no_audio_stream" | "source_unavailable" }> {
+    const { signal } = options;
+    const value = structuredClone(video);
+    return this.exclusive(async () => this.temporary(async dir => {
+      await this.verifySource(value, signal);
+      invariant(value.kind === "video" && value.probe.video && HASH.test(value.originalSha256), "MEDIA_INVALID_INPUT", "Clip audio needs a normalized video source");
+      const key = digest({ recipe: "clip-audio-v1", video: value.id });
+      const recordPath = join(this.rootDir, "clip-audio", `${key}.json`);
+      let cached: { media?: SuppliedMedia; reason?: "no_audio_stream" } | undefined;
+      try { cached = await this.readRecord(recordPath, signal) as typeof cached; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      if (cached?.reason === "no_audio_stream") return { reason: "no_audio_stream" as const };
+      if (cached?.media) { await this.verifySource(cached.media, signal); return { media: frozen(await this.readSource(cached.media, signal)) }; }
+      const original = join(this.rootDir, "blobs", `${value.originalSha256}.source`);
+      let observed: { sha256: string; byteLength: number };
+      try { observed = await this.hashFile(original, this.limits.maxInputBytes, signal); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { reason: "source_unavailable" as const }; throw error; }
+      if (observed.sha256 !== value.originalSha256 || observed.byteLength !== value.originalByteLength) return { reason: "source_unavailable" as const };
+      const input = join(dir, "input");
+      await copyFile(original, input, constants.COPYFILE_EXCL);
+      const inputProbe = await this.inspect(input, signal);
+      if (!inputProbe.audio) { await this.installJson("clip-audio", key, { reason: "no_audio_stream" }); return { reason: "no_audio_stream" as const }; }
+      const output = join(dir, "clip-audio.wav"), toolchainDigest = await this.toolchainDigest(signal);
+      const seconds = value.probe.video.frames / FPS;
+      await this.run(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...INPUT_OPTIONS, "-i", input, "-map_metadata", "-1", "-map_chapters", "-1",
+        "-map", `0:${inputProbe.audio.streamIndex}`, "-vn", "-af", "aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2",
+        "-t", String(seconds), "-fs", String(this.limits.maxOutputBytes), output], signal);
+      const probe = await this.inspect(output, signal);
+      invariant(probe.audio?.sampleRate === SAMPLE_RATE && probe.audio.channels === 2 && probe.audio.samples !== null && probe.audio.samples > 0 && !probe.video, "MEDIA_VALIDATION_FAILED", "Clip audio must have measured 48 kHz stereo samples");
+      await this.decode(output, signal);
+      aborted(signal);
+      const normalized = await this.installFile(output, "wav", this.limits.maxOutputBytes);
+      const body = { artifactId: `clip-audio_${value.id}`, kind: "audio" as const, originalSha256: value.originalSha256, originalByteLength: value.originalByteLength,
+        sha256: normalized.sha256, byteLength: normalized.byteLength, probe, toolchainDigest };
+      const media: SuppliedMedia = { id: digest(body), ...body };
+      await this.installJson("sources", media.id, media);
+      await this.installJson("clip-audio", key, { media });
+      return { media: frozen(media) };
+    }));
+  }
+
+  /** Trusted fixture adapter. Bytes are supplied by the host after project ownership/hash checks. */
+  async importFixture(input: { artifactId: string; bytes: Uint8Array; kind: "video" | "audio"; durationFrames: number }): Promise<SuppliedMedia> {
+    const value = structuredClone(input);
+    return this.exclusive(async () => this.temporary(async dir => {
+      invariant(ID.test(value.artifactId) && ["video", "audio"].includes(value.kind) && value.bytes.length > 0 && value.bytes.length <= this.limits.maxInputBytes, "MEDIA_INVALID_INPUT", "Invalid fixture source");
+      integer(value.durationFrames, 1, this.limits.maxDurationFrames, "fixture frames");
+      const path = join(dir, "fixture"), file = await open(path, "wx", 0o600);
+      try { await file.writeFile(value.bytes); await file.sync(); } finally { await file.close(); }
+      const output = join(dir, value.kind === "video" ? "fixture.mp4" : "fixture.wav");
+      const args = ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...INPUT_OPTIONS, "-i", path];
+      if (value.kind === "video") args.push("-an", "-vf", `fps=30,tpad=stop_mode=clone:stop_duration=${value.durationFrames / 30},trim=end_frame=${value.durationFrames},setpts=PTS-STARTPTS,format=yuv420p`, "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-frames:v", String(value.durationFrames));
+      else args.push("-vn", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le");
+      args.push("-map_metadata", "-1", "-fs", String(this.limits.maxOutputBytes), output);
+      const toolchainDigest = await this.toolchainDigest();
+      await this.run(this.ffmpeg, args);
+      const probe = await this.inspect(output);
+      invariant(value.kind !== "video" || probe.video?.frames === value.durationFrames, "MEDIA_VALIDATION_FAILED", "Fixture duration differs from planned frames");
+      await this.decode(output);
+      const original = await this.installFile(path, "source", this.limits.maxInputBytes);
+      const normalized = await this.installFile(output, value.kind === "video" ? "mp4" : "wav", this.limits.maxOutputBytes);
+      const body = { artifactId: value.artifactId, kind: value.kind, originalSha256: original.sha256, originalByteLength: original.byteLength,
+        sha256: normalized.sha256, byteLength: normalized.byteLength, probe, toolchainDigest };
+      const source = { id: digest(body), ...body };
+      await this.installJson("sources", source.id, source); return frozen(source);
+    }));
+  }
+
   async freezeManifest(input: RenderManifestInput, options: { signal?: AbortSignal } = {}): Promise<FrozenRenderManifest> {
     const { signal } = options;
     aborted(signal);
@@ -272,6 +362,7 @@ export class LocalMediaService {
     invariant(value.width % 2 === 0 && value.height % 2 === 0 && value.width * value.height <= 1920 * 1080, "MEDIA_INVALID_INPUT", "Output requires bounded even dimensions");
     invariant(Array.isArray(value.clips) && value.clips.length > 0 && value.clips.length <= this.limits.maxClips, "MEDIA_INVALID_INPUT", "Invalid clip count");
     invariant(Array.isArray(value.audio ?? []) && (value.audio?.length ?? 0) <= this.limits.maxAudioPlacements, "MEDIA_INVALID_INPUT", "Too many audio placements");
+    invariant(value.demo === undefined || value.demo === true, "MEDIA_INVALID_INPUT", "Invalid demo mark");
     let totalFrames = 0;
     const clips = [];
     const sourceIdentities = new Map<string, string>();
@@ -306,10 +397,11 @@ export class LocalMediaService {
       integer(placement.gainMilliDb ?? 0, -60000, 12000, "audio gain");
       invariant(placement.startSample + placement.durationSamples <= source.probe.audio.samples, "MEDIA_SOURCE_TOO_SHORT", "Audio range exceeds measured samples");
       invariant(placement.atSample + placement.durationSamples <= totalSamples, "MEDIA_AUDIO_OUTSIDE_TIMELINE", "Audio cannot be silently cut at the timeline boundary");
-      audio.push({ source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb: placement.gainMilliDb ?? 0 });
+      if (placement.fadeOutSamples !== undefined) integer(placement.fadeOutSamples, 1, Math.min(4800, placement.durationSamples), "audio fade");
+      audio.push({ ...(placement.fadeOutSamples !== undefined ? { fadeOutSamples: placement.fadeOutSamples } : {}), source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb: placement.gainMilliDb ?? 0 });
     }
     invariant(audioLanes(audio).length <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Too many simultaneous audio placements");
-    const body = { version: 1 as const, projectId: value.projectId, targetRevisionId: value.targetRevisionId, width: value.width, height: value.height, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, toolchainDigest: await this.toolchainDigest(signal) };
+    const body = { version: 1 as const, projectId: value.projectId, targetRevisionId: value.targetRevisionId, width: value.width, height: value.height, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, ...(value.demo ? { demo: true as const } : {}), toolchainDigest: await this.toolchainDigest(signal) };
     aborted(signal);
     const manifest: FrozenRenderManifest = { digest: digest(body), ...body };
     await this.installJson("manifests", manifest.digest, manifest);
@@ -345,7 +437,21 @@ export class LocalMediaService {
         const fit = clip.fit === "contain" ? `scale=${size}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${size}:(ow-iw)/2:(oh-ih)/2:color=black` : `scale=${size}:force_original_aspect_ratio=increase:force_divisible_by=2,crop=${size}`;
         filters.push(`[${index}:v:0]trim=start_frame=${clip.startFrame}:end_frame=${clip.startFrame + clip.durationFrames},setpts=PTS-STARTPTS,${fit},setsar=1,format=yuv420p[v${index}]`);
       });
-      filters.push(`${manifest.clips.map((_, i) => `[v${i}]`).join("")}concat=n=${manifest.clips.length}:v=1:a=0[outv]`);
+      filters.push(`${manifest.clips.map((_, i) => `[v${i}]`).join("")}concat=n=${manifest.clips.length}:v=1:a=0[${manifest.demo ? "demov" : "outv"}]`);
+      if (manifest.demo) {
+        // Fixed bitmap glyphs spell "Demo". No host fonts or drawtext dependency in the pinned media profile.
+        const glyphs = [
+          ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+          ["00000", "00000", "01110", "10001", "11111", "10000", "01111"],
+          ["00000", "00000", "11010", "10101", "10101", "10101", "10101"],
+          ["00000", "00000", "01110", "10001", "10001", "10001", "01110"],
+        ];
+        const size = Math.max(1, Math.floor(manifest.width / 160)), boxes = [`drawbox=x=4:y=4:w=${25 * size}:h=${9 * size}:color=black@0.8:t=fill`];
+        glyphs.forEach((rows, letter) => rows.forEach((row, y) => [...row].forEach((pixel, x) => {
+          if (pixel === "1") boxes.push(`drawbox=x=${4 + (letter * 6 + x + 1) * size}:y=${4 + (y + 1) * size}:w=${size}:h=${size}:color=white:t=fill`);
+        })));
+        filters.push(`[demov]${boxes.join(",")}[outv]`);
+      }
       if (manifest.audio.length) {
         const lanes = audioLanes(manifest.audio);
         invariant(lanes.length <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Frozen manifest exceeds the simultaneous audio limit");
@@ -354,7 +460,7 @@ export class LocalMediaService {
           filters.push(`[${sourceIndex++}:a:0]asplit=${group.indices.length}${group.indices.map(index => `[sourcea${index}]`).join("")}`);
         }
         manifest.audio.forEach((placement, index) => {
-          filters.push(`[sourcea${index}]atrim=start_sample=${placement.startSample}:end_sample=${placement.startSample + placement.durationSamples},asetpts=PTS-STARTPTS,volume=${placement.gainMilliDb / 1000}dB[a${index}]`);
+          filters.push(`[sourcea${index}]atrim=start_sample=${placement.startSample}:end_sample=${placement.startSample + placement.durationSamples},asetpts=PTS-STARTPTS,volume=${placement.gainMilliDb / 1000}dB${placement.fadeOutSamples ? `,afade=t=out:ss=${placement.durationSamples - placement.fadeOutSamples}:ns=${placement.fadeOutSamples}` : ""}[a${index}]`);
         });
         lanes.forEach((indices, lane) => {
           const parts: string[] = []; let cursor = 0, silenceIndex = 0;
@@ -377,8 +483,11 @@ export class LocalMediaService {
       args.push("-filter_complex", filters.join(";"), "-map", "[outv]");
       if (manifest.audio.length) args.push("-map", "[outa]", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2");
       else args.push("-an");
-      args.push("-map_metadata", "-1", "-map_chapters", "-1", "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30", "-fps_mode", "cfr", "-frames:v", String(manifest.totalFrames), "-movflags", "+faststart", "-fs", String(this.limits.maxOutputBytes), output);
-      await this.run(this.ffmpeg, args, signal);
+      // Fix the encoder thread count so repeated renders use the same x264
+      // recipe regardless of the host's available CPUs. Filtering, decoding and
+      // normalization keep their existing single-threaded behavior.
+      args.push("-map_metadata", "-1", "-map_chapters", "-1", "-c:v", "libx264", "-threads", String(RENDER_ENCODER_THREADS), "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30", "-fps_mode", "cfr", "-frames:v", String(manifest.totalFrames), "-movflags", "+faststart", "-fs", String(this.limits.maxOutputBytes), output);
+      await this.run(this.ffmpeg, args, signal, renderTimeoutMs(manifest.totalFrames, this.limits.timeoutMs));
       const probe = await this.inspect(output, signal);
       invariant(probe.video?.frames === manifest.totalFrames && probe.video.width === manifest.width && probe.video.height === manifest.height && probe.video.frameRate === "30/1" && probe.video.codec === "h264", "MEDIA_VALIDATION_FAILED", "Rendered picture does not match frozen frame count or geometry");
       if (manifest.audio.length) {

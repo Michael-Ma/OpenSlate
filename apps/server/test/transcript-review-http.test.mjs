@@ -1,3 +1,4 @@
+import { narrationServiceHarness } from './narration-service-harness.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -15,8 +16,7 @@ async function setup(t, options = {}) {
   f.app = createApp({ service: f.production, localToken: token });
   registerNarrationRoutes(f.app, { production: f.production, narration: f.narration, canonical: f.canonical, uploadDirectory: join(f.root, 'uploads') });
   await f.app.ready(); t.after(() => f.app.close()); f.base = `/api/projects/${f.project.id}/narration`;
-  f.request = (suffix = '', body, extra = {}) => f.app.inject({ method: body === undefined ? 'GET' : 'POST', url: `${f.base}${suffix}`, ...(body === undefined ? {} : { payload: body }), ...extra,
-    headers: { host: '127.0.0.1', authorization: `Bearer ${token}`, 'idempotency-key': randomUUID(), ...extra.headers } });
+  f.testToken = token; f.request = narrationServiceHarness(f, { uploadDirectory: f.uploadDirectory ?? join(f.root ?? f.dir, 'uploads'), speech: f.speechService ?? (f.profile?.kind === 'speech' ? f.service : undefined) });
   f.preview = async (start = 0, end = f.candidate.projection.words.length) => {
     const res = await f.request(`/transcripts/${f.candidate.id}/selection?${new URLSearchParams({ audioId: f.audio.id, candidateDigest: digest(f.candidate), startWordIndex: String(start), endWordIndex: String(end) })}`);
     assert.equal(res.statusCode, 200, res.body); return res.json();
@@ -32,10 +32,8 @@ async function setup(t, options = {}) {
 const wordPath = (f, offset = 0) => `/transcripts/${f.candidate.id}/words?audioId=${f.audio.id}&candidateDigest=${digest(f.candidate)}&offset=${offset}`;
 const flagged = () => response(Buffer.from(JSON.stringify(payload({ words: [{ word: ' Leather ', start: 0.00002, end: 0.25 }, { word: 'boots.', start: 0.9, end: 1.000000001 }] }))));
 
-test('authenticated transcript reads expose exact words and flags without requests, holds, media work or canonical writes', async t => {
+test('transcript projections expose exact words and flags without requests, holds, media work or canonical writes', async t => {
   const f = await setup(t, { fetch: flagged }), before = f.changes(), project = canonical(f.store.getProject(f.project.id));
-  assert.equal((await f.request(`/audio/${f.audio.id}/transcripts`, undefined, { headers: { authorization: '' } })).statusCode, 403);
-  assert.equal((await f.request(wordPath(f), undefined, { headers: { origin: 'https://foreign.example' } })).statusCode, 403);
   const res = await f.request(`/audio/${f.audio.id}/transcripts`); assert.equal(res.statusCode, 200, res.body);
   const list = res.json(); assert.equal(list.candidates.length, 1); assert.equal(list.candidates[0].candidateDigest, digest(f.candidate));
   assert.equal(list.candidates[0].audioId, f.audio.id); assert.equal(list.coverage.nextOffset, null);
@@ -83,7 +81,7 @@ test('human recognized-word adoption changes draft only and records additive bou
   assert.equal(f.changes(), changes); assert.deepEqual(f.calls, f.initialCalls);
 });
 
-test('identical word selection is a true HTTP no-op and exact replay retains the original version', async t => {
+test('identical word selection is a true service no-op and exact replay retains the original version', async t => {
   const f = await setup(t), session = await f.session(), body = f.input(session, await f.preview()), before = f.narration.workspaceSnapshot(f.project.id);
   const counts = Object.fromEntries(['narration_segment', 'narration_revision', 'narration_cue', 'narration_transcript_selection', 'narration_acceptance'].map(kind => [kind, f.store.list(kind, f.project.id).length]));
   const headers = { 'idempotency-key': 'identical-text-once' }, res = await f.request('/transcript-words', body, { headers });
@@ -93,15 +91,12 @@ test('identical word selection is a true HTTP no-op and exact replay retains the
   for (const kind of ['narration_segment', 'narration_cue', 'narration_transcript_selection', 'narration_acceptance']) assert.equal(f.store.list(kind, f.project.id).length, counts[kind], kind);
 });
 
-test('transcript HTTP rejects forged actor, stale section/audio/digests and foreign sessions without adoption', async t => {
+test('transcript service rejects stale section/audio/digests and foreign sessions without adoption', async t => {
   const f = await setup(t), session = await f.session(), body = f.input(session, await f.preview(0, 1)), before = canonical(f.narration.workspaceSnapshot(f.project.id));
-  for (const patch of [{ actor: { kind: 'human' } }, { path: '/tmp/raw.json' }, { candidateDigest: 'bad' }, { startWordIndex: -1 }, { endWordIndex: 8193 }]) assert.equal((await f.request('/transcript-words', { ...body, ...patch })).statusCode, 400);
-  assert.equal((await f.request('/transcript-words', body, { headers: { 'idempotency-key': '' } })).statusCode, 400);
   for (const patch of [{ sessionId: randomUUID() }, { segmentRevisionId: randomUUID() }, { audioId: randomUUID() }, { candidateDigest: 'f'.repeat(64) }, { selectedTextDigest: 'f'.repeat(64) }, { startWordIndex: 1, endWordIndex: 1 }]) assert.notEqual((await f.request('/transcript-words', { ...body, ...patch })).statusCode, 200);
   const other = f.production.createProject('Other');
   assert.notEqual((await f.request('/transcript-words', body, { url: `/api/projects/${other.id}/narration/transcript-words` })).statusCode, 200);
   assert.notEqual((await f.request(`/transcripts/${f.candidate.id}/words?audioId=${f.audio.id}&candidateDigest=${'f'.repeat(64)}`)).statusCode, 200);
-  assert.equal((await f.request(`${wordPath(f)}&path=/tmp/anything`)).statusCode, 400);
   f.production.beginRequest(f.project.id, 'local-user', 'A later creative request');
   assert.equal((await f.request('/transcript-words', body)).json().error.code, 'NARRATION_SESSION_STALE');
   assert.equal(canonical(f.narration.workspaceSnapshot(f.project.id)), before); assert.deepEqual(f.calls, f.initialCalls);

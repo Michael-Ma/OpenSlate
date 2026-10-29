@@ -1,0 +1,1008 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Last Ferry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme: dark;
+  /* grounds, sampled from image 2 */
+  --bar:#1c1d20;            /* top bar, Director column, decision tray */
+  --ground:#141517;         /* workspace ground */
+  --surface:#1d1f23;        /* preview, inspector, cards */
+  --surface-stripe:#202226; /* placeholder stripes */
+  --raised:#24262a;         /* outline-button fill, composer, decision cards */
+  --raised-2:#2c2e33;       /* user bubble, active tab, disabled primary */
+  --chip:#3a3d44;           /* @ chip inside the user bubble */
+  --track:#3c3e42;          /* tracks, strong hairline */
+  --hairline:#33363c;
+  --sunken:#17191b;         /* "Not opened" pill */
+  /* text */
+  --text:#ececee;
+  --text-2:#a3a6ad;
+  --muted:#7d8088;
+  /* the Director's amber: notes and recommendations only */
+  --amber:#f0b24a;
+  --amber-ink:#241a06;
+  --amber-line:#896a34;
+  --amber-surface:#362f25;
+  /* opened */
+  --green:#5fc48a;
+  --green-surface:#253430;
+  --green-line:#417b5c;
+  /* selection and chosen option */
+  --select:#ececee;
+  --select-ink:#141517;
+  /* swatches for the coat decision */
+  --coat-red:#c8102e;
+  --coat-maroon:#6e1423;
+  --focus:#ececee;
+
+  --r-pill:999px;
+  --r-card:14px;
+  --r-big:16px;
+  --font: "Inter", -apple-system, "Segoe UI", sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--ground);color:var(--text);font:400 14px/1.45 var(--font);-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer}
+button:disabled{cursor:not-allowed}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+a{color:var(--text-2)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- shell (image 1 layout) ---------- */
+.app{display:grid;grid-template-columns:392px 1fr;grid-template-rows:52px minmax(0,1fr);height:100vh}
+.topbar{grid-column:1/-1;display:flex;align-items:center;gap:0;background:var(--bar);border-bottom:1px solid var(--hairline);padding:0 18px;min-width:0}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;width:133px;flex:none}
+.logo{width:20px;height:20px;border-radius:6px;background:var(--text);display:grid;place-items:center;flex:none}
+.logo i{display:block;width:12px;height:3px;border-radius:2px;background:var(--bar);box-shadow:0 -4px 0 var(--bar)}
+.film{display:flex;align-items:baseline;gap:10px;min-width:0;width:326px;flex:none}
+.film b{font-size:15px;font-weight:700;white-space:nowrap}
+.film span{color:var(--text-2);font-size:12.5px;white-space:nowrap}
+.tabs{display:flex;gap:4px;align-items:center}
+.tab{border:0;background:none;color:var(--text-2);font-weight:600;font-size:13.5px;padding:6px 13px;border-radius:var(--r-pill)}
+.tab:hover{color:var(--text)}
+.tab[aria-selected="true"]{background:var(--raised-2);color:var(--text);font-weight:700}
+.tab .soon{display:none}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:12.5px;color:var(--text-2);white-space:nowrap}
+.saved{border:1px solid var(--hairline);background:var(--raised);border-radius:var(--r-pill);padding:5px 12px;color:var(--text-2)}
+.gallery{font-size:12px;color:var(--muted);text-decoration:none}
+.gallery:hover{color:var(--text);text-decoration:underline}
+.top-right .dir-toggle{display:none}
+
+/* ---------- Director column ---------- */
+.director{background:var(--bar);border-right:1px solid var(--hairline);display:flex;flex-direction:column;min-height:0}
+.dir-head{height:55px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px 0 124px;border-bottom:1px solid var(--hairline)}
+.avatar{width:26px;height:26px;border-radius:50%;background:var(--raised-2);color:var(--text-2);display:grid;place-items:center;font-size:12px;font-weight:700}
+.dir-head b{font-weight:600}
+.dir-head .scene{margin-left:auto;color:var(--muted);font-size:13px}
+.thread{flex:1;min-height:0;overflow-y:auto;padding:18px 18px 8px;display:flex;flex-direction:column;gap:6px}
+.thread > :first-child{margin-top:auto}
+.byline{font-size:12px;color:var(--muted);margin:10px 0 4px}
+.byline b{color:var(--text);font-weight:700}
+.byline.you{text-align:right}
+.bubble{align-self:flex-end;max-width:90%;margin-left:auto;background:var(--raised-2);border-radius:14px;padding:10px 14px;line-height:1.5}
+.atchip{display:inline-block;background:var(--chip);color:var(--text);font-weight:600;border-radius:6px;padding:0 6px;margin-right:4px}
+.dir-text{line-height:1.55}
+.note{border:1px solid var(--amber-line);background:var(--amber-surface);border-radius:12px;padding:11px 13px 11px 42px;position:relative;line-height:1.5;margin-top:6px}
+.note .letter{position:absolute;left:13px;top:12px}
+.note .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.note.done{border-color:var(--hairline);background:var(--raised);color:var(--text-2)}
+.note .handled{display:block;margin-top:8px;color:var(--green);font-size:12.5px;font-weight:600}
+.letter{text-transform:none;letter-spacing:0;width:20px;height:20px;border-radius:50%;background:var(--amber);color:var(--amber-ink);font-size:12px;font-weight:700;display:inline-grid;place-items:center;flex:none;line-height:1}
+.note.done .letter{background:var(--track);color:var(--text-2)}
+.working{color:var(--muted);font-size:13px}
+.working i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--muted);margin-left:3px;animation:blink 1s infinite}
+.working i:nth-child(2){animation-delay:.2s}.working i:nth-child(3){animation-delay:.4s}
+@keyframes blink{50%{opacity:.25}}
+.scripted{font-size:12px;color:var(--muted);margin-top:4px}
+
+.composer-wrap{padding:8px 16px 16px;flex:none;position:relative}
+.composer{background:var(--raised);border:1px solid var(--hairline);border-radius:var(--r-big);padding:12px 12px 10px 14px}
+.composer textarea{width:100%;background:none;border:0;color:var(--text);font:inherit;font-size:14px;resize:none;height:24px;padding:0;outline:none}
+.composer textarea::placeholder{color:var(--muted)}
+.composer:focus-within{border-color:var(--track)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.chips:empty{display:none}
+.chips .atchip button{background:none;border:0;color:var(--text-2);padding:0 0 0 4px}
+.composer-foot{display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-size:12.5px}
+.at-btn{border:1px solid var(--hairline);background:var(--bar);border-radius:var(--r-pill);padding:1px 8px;color:var(--text-2);font-size:12px}
+.send{margin-left:auto;width:30px;height:30px;border-radius:50%;border:0;background:var(--select);color:var(--select-ink);display:grid;place-items:center}
+.send:disabled{background:var(--raised-2);color:var(--muted)}
+.picker{position:absolute;left:16px;right:16px;bottom:100%;margin-bottom:-2px;background:var(--raised);border:1px solid var(--track);border-radius:12px;padding:6px;max-height:300px;overflow:auto;box-shadow:0 12px 30px rgba(0,0,0,.45);z-index:20}
+.picker h4{margin:6px 8px 4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.picker button{display:flex;width:100%;gap:8px;border:0;background:none;text-align:left;padding:6px 8px;border-radius:8px}
+.picker button:hover,.picker button:focus-visible{background:var(--raised-2)}
+.picker button span{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---------- shared components (image 2) ---------- */
+.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--hairline);background:var(--raised);border-radius:var(--r-pill);padding:5px 13px;font-size:13px;font-weight:600;color:var(--text);white-space:nowrap}
+.pill:hover:not(:disabled){border-color:var(--track);background:#2a2c31}
+.pill.sm{padding:3px 10px;font-size:12.5px}
+.pill.chosen,.pill.primary{background:var(--select);color:var(--select-ink);border-color:var(--select)}
+.pill.chosen:hover:not(:disabled),.pill.primary:hover:not(:disabled){background:#fff}
+.pill.ghost{background:none;border-color:transparent;color:var(--text-2)}
+.pill.ghost:hover{color:var(--text);background:var(--raised)}
+.pill:disabled{background:var(--raised-2);border-color:var(--raised-2);color:var(--muted)}
+.status{display:inline-flex;align-items:center;gap:4px;border-radius:var(--r-pill);padding:2px 10px;font-size:12px;font-weight:600;white-space:nowrap;border:1px solid var(--hairline);background:var(--sunken);color:var(--text-2)}
+.status.ok{background:var(--green-surface);border-color:var(--green-line);color:var(--green)}
+.status.busy{color:var(--text)}
+.anno{display:inline-flex;align-items:center;gap:6px;background:var(--amber);color:var(--amber-ink);border-radius:var(--r-pill);padding:2px 9px 2px 3px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.anno .letter{width:16px;height:16px;font-size:10.5px;background:var(--amber-ink);color:var(--amber)}
+.anno.done{background:var(--raised);color:var(--text-2);border:1px solid var(--hairline)}
+.anno.done .letter{background:var(--track);color:var(--text-2)}
+.badge{background:rgba(20,21,23,.86);color:var(--text);font-weight:700;font-size:12px;border-radius:6px;padding:2px 7px}
+.eyebrow{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;font-weight:700}
+
+/* ---------- workspace ---------- */
+.work{min-width:0;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr) 196px;gap:14px;padding:10px 22px 18px}
+.work.quiet-banner{gap:14px}
+.scene-head{display:flex;align-items:center;gap:12px;min-height:36px}
+.scene-head h1{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+.scene-head .line{color:var(--text-2);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.scene-pills{margin-left:auto;display:flex;gap:6px;flex:none}
+.scene-pills .pill{font-weight:500;font-size:12.5px;padding:4px 11px}
+.scene-pills .pill[aria-pressed="true"]{background:var(--select);color:var(--select-ink);border-color:var(--select);font-weight:600}
+
+/* banner */
+.banner{display:flex;gap:20px;border:1px solid var(--amber-line);background:var(--amber-surface);border-radius:var(--r-big);padding:13px 16px 13px 16px;min-height:153px}
+.banner-main{flex:1;min-width:0}
+.banner .eyebrow{color:var(--amber);display:flex;align-items:center;gap:8px}
+.banner h2{margin:6px 0 1px;font-size:18px;font-weight:700;letter-spacing:-.01em}
+.banner .sub{color:var(--text-2);font-size:13px}
+.banner-actions{width:176px;flex:none;display:flex;flex-direction:column;gap:8px;justify-content:center}
+.banner-actions .pill{justify-content:center;padding:7px 12px}
+.tl{display:grid;grid-template-columns:54px 1fr;gap:4px 0;margin-top:10px;font-size:12px;align-items:center}
+.tl .k{color:var(--muted)}
+.tl .segs{display:flex;gap:3px}
+.seg{height:20px;border-radius:5px;background:var(--track);color:var(--text);font-weight:600;font-size:11.5px;padding:0 7px;display:flex;align-items:center;white-space:nowrap;overflow:hidden}
+.seg.dash{background:none;border:1px dashed var(--track);color:var(--text-2);width:150px}
+.seg.hot{background:var(--amber);color:var(--amber-ink)}
+.swatches{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px}
+.sw{width:13px;height:13px;border-radius:3px;display:inline-block;border:1px solid rgba(255,255,255,.18)}
+.swatches s{color:var(--muted)}
+.edit-line{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.edit-line textarea,.insp textarea,.insp select,.insp input{width:100%;background:var(--raised);border:1px solid var(--track);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:8px 10px;resize:vertical}
+.edit-line .est{font-size:12.5px;color:var(--text-2)}
+.edit-line .est b{color:var(--text)}
+.quiet{display:flex;align-items:center;gap:10px;border:1px solid var(--hairline);background:var(--bar);border-radius:12px;padding:10px 14px;color:var(--text-2);font-size:13px}
+.quiet .ck{color:var(--green);font-weight:700}
+
+/* stage */
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px;min-height:0}
+.preview{position:relative;border-radius:var(--r-big);overflow:hidden;background:var(--surface);border:1px solid var(--hairline);min-height:0}
+.preview .pic{position:absolute;inset:0;overflow:hidden}
+.preview .pic svg,.card .pic svg{width:100%;height:100%;display:block}
+#pv-anim{position:absolute;inset:0;transform-origin:50% 50%;will-change:transform}
+.pv-top{position:absolute;left:12px;top:12px;display:flex;gap:8px;align-items:center;z-index:2}
+.pv-bottom{position:absolute;left:0;right:0;bottom:0;padding:40px 14px 12px;background:linear-gradient(to top,rgba(14,15,17,.92),rgba(14,15,17,.6) 60%,rgba(14,15,17,0));z-index:2}
+.pv-caption{font-size:15px;font-weight:600;margin:0 0 10px;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.scrub{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums}
+.play{width:30px;height:30px;border-radius:50%;border:0;background:var(--track);color:var(--text);display:grid;place-items:center;flex:none}
+.play:hover:not(:disabled){background:#4a4d52}
+.play:disabled{opacity:.4}
+.track{flex:1;height:3px;border-radius:2px;background:var(--track);position:relative}
+.track i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--text);width:0}
+.dashed-frame{position:absolute;inset:0;margin:14px;border:1.5px dashed var(--track);border-radius:12px;display:grid;place-items:center;text-align:center;padding:20px;color:var(--text-2)}
+.dashed-frame b{display:block;color:var(--text);font-size:15px;margin-bottom:6px}
+.making{position:absolute;inset:0;display:grid;place-items:center;background:repeating-linear-gradient(135deg,var(--surface) 0 14px,var(--surface-stripe) 14px 28px);color:var(--text-2);font-size:13px;z-index:1}
+.making .bar{width:120px;height:3px;background:var(--track);border-radius:2px;margin:8px auto 0;overflow:hidden}
+.making .bar i{display:block;height:100%;background:var(--text);width:0}
+
+.insp{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-big);padding:16px 15px 15px;display:flex;flex-direction:column;min-height:0;overflow:auto}
+.insp-title{display:flex;align-items:flex-start;gap:8px}
+.insp h3{margin:0;font-size:21px;font-weight:700;letter-spacing:-.01em;line-height:1.2}
+.insp .framing{color:var(--text-2);font-size:14px;margin-top:2px}
+.insp .at21{margin-left:auto}
+.insp .st{margin:12px 0 6px}
+.rows{display:grid;grid-template-columns:76px 1fr;gap:7px 8px;font-size:13.5px;margin-top:6px}
+.rows dt{color:var(--muted)}
+.rows dd{margin:0}
+.rows dd small{display:block;color:var(--text-2);font-size:12px}
+.insp-actions{margin-top:auto;padding-top:10px;display:flex;flex-direction:column;gap:7px}
+.insp-actions .pill{justify-content:center;padding:7px 10px}
+.insp form{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.insp label{font-size:12px;color:var(--muted)}
+.insp .two{display:flex;gap:6px}
+.insp .two .pill{flex:1;justify-content:center}
+.stale{color:var(--text-2);font-size:12.5px;margin-top:6px}
+
+/* bottom row */
+.row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 230px;grid-template-rows:minmax(0,1fr);gap:12px;min-height:0}
+.card{position:relative;background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-card);padding:8px 8px 9px;display:flex;flex-direction:column;min-width:0}
+.card.sel{border:2px solid var(--select);padding:7px 7px 8px}
+.card .hit{position:absolute;inset:0;border:0;background:none;border-radius:var(--r-card);z-index:1}
+.card .pic{position:relative;height:118px;border-radius:10px;overflow:hidden;background:var(--surface-stripe);flex:none}
+.card .pic .badge{position:absolute;left:8px;top:8px;z-index:2}
+.card .pic.vp .ptxt{padding-bottom:16px}
+.card .pic .ptxt{position:absolute;left:0;right:0;bottom:0;padding:18px 10px 7px;font-size:11.5px;line-height:1.4;color:var(--text);background:linear-gradient(to top,rgba(14,15,17,.88),rgba(14,15,17,0));display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .pic .dashed-frame{margin:0;border-radius:10px;font-size:11.5px;padding:26px 10px 10px;line-height:1.4}
+.callout{position:absolute;right:8px;top:8px;z-index:2;display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+.callout .link{border:0;background:rgba(20,21,23,.86);color:var(--amber);font-size:11.5px;font-weight:600;border-radius:var(--r-pill);padding:2px 9px;text-decoration:underline;text-underline-offset:2px}
+.card .ttl{display:flex;justify-content:space-between;margin-top:8px;font-size:13.5px}
+.card .ttl b{font-weight:700}
+.card .ttl span{color:var(--text-2)}
+.card .stl{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:12px;color:var(--text-2);min-width:0}
+.card .stl span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vprog{position:absolute;left:8px;right:8px;bottom:8px;height:4px;background:rgba(60,62,66,.9);border-radius:2px;z-index:2;overflow:hidden}
+.vprog i{display:block;height:100%;background:var(--text);width:0}
+.card.empty{border-style:dashed;background:none;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px}
+
+.vpanel{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-card);padding:12px 12px 8px;display:flex;flex-direction:column;min-width:0}
+.vpanel .eyebrow{color:var(--text-2);font-size:11px}
+.vsegs{display:flex;gap:4px;margin:8px 0 6px}
+.vsegs i{height:4px;width:22px;border-radius:2px;background:var(--track)}
+.vsegs i.on{background:var(--green)}
+.vcount{font-size:13px;color:var(--text-2)}
+.vcount b{font-size:22px;font-weight:700;color:var(--text);margin-right:5px;letter-spacing:-.01em}
+.vpanel p{margin:2px 0 0;font-size:12px;color:var(--text-2);line-height:1.4}
+.vpanel .go{margin-top:auto;justify-content:center;padding:7px 10px;white-space:normal;text-align:center;line-height:1.3;border-radius:14px}
+.vpanel .why{font-size:11px;color:var(--muted);text-align:center;margin-top:4px;min-height:14px;line-height:1.3}
+
+/* toast */
+.toast{position:fixed;left:calc(392px + 22px + (100vw - 392px - 44px - 266px) / 2);top:292px;transform:translateX(-50%);background:var(--raised);border:1px solid var(--track);border-radius:var(--r-pill);padding:7px 8px 7px 16px;display:flex;align-items:center;gap:12px;font-size:13px;box-shadow:0 10px 28px rgba(0,0,0,.5);z-index:50;max-width:calc(100vw - 32px)}
+.toast[hidden]{display:none}
+.toast .pill{padding:3px 11px}
+
+/* ---------- narrow layout ---------- */
+@media (max-width: 899px){
+  body{overflow-x:hidden;overflow-y:auto}
+  .app{display:block;height:auto}
+  .topbar{position:sticky;top:0;z-index:30;flex-wrap:wrap;height:auto;padding:10px 16px 8px;row-gap:8px}
+  .brand{width:auto;margin-right:12px}
+  .brand .word{display:none}
+  .film{width:auto;flex:1 1 auto;flex-direction:column;gap:0;min-width:0}
+  .film span{font-size:11.5px}
+  .top-right{display:contents}
+  .top-right .dir-toggle{order:4;margin-left:8px}
+  .gallery{order:6;margin-left:auto;padding-left:8px}
+  .top-right .counts,.top-right .saved{display:none}
+  .top-right .dir-toggle{display:inline-flex}
+  .tabs{order:5;flex:1 1 calc(100% - 120px);min-width:0;overflow-x:auto;scrollbar-width:none}
+  .tab{padding:6px 10px}
+  .gallery{font-size:11.5px}
+  .director{position:fixed;inset:0;z-index:40;transform:translateX(-100%);transition:transform .2s ease;width:100%;max-width:420px;box-shadow:0 0 40px rgba(0,0,0,.6);visibility:hidden}
+  .app.dir-open .director{transform:none;visibility:visible}
+  .dir-head{padding:0 12px 0 16px}
+  .dir-close{display:inline-flex !important}
+  .work{display:flex;flex-direction:column;padding:14px 16px 28px;gap:14px}
+  .scene-head{flex-wrap:wrap;gap:4px 10px}
+  .scene-head .line{white-space:normal;width:100%}
+  .scene-pills{margin-left:0;width:100%;overflow-x:auto;padding-bottom:2px}
+  .banner{flex-direction:column;gap:12px;min-height:0}
+  .banner-actions{width:auto;flex-direction:row;flex-wrap:wrap}
+  .banner-actions .pill{flex:1 1 auto}
+  .tl .segs{overflow:hidden}
+  .seg.dash{width:auto;flex:1;min-width:70px}
+  .stage{display:flex;flex-direction:column}
+  .preview{aspect-ratio:16/9;width:100%}
+  .pv-caption{font-size:12.5px;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .pv-top{left:8px;top:8px}
+  .scrub .play{width:26px;height:26px}
+  .pv-bottom{padding:20px 10px 8px}
+  .insp{overflow:visible}
+  .insp-actions{flex-direction:row;flex-wrap:wrap}
+  .insp-actions .pill{flex:1 1 auto}
+  .work > .row{display:flex;flex-direction:column;gap:12px}
+  .cards{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;scroll-padding-left:16px;padding-bottom:6px;margin:0 -16px;padding-left:16px;padding-right:16px}
+  .cards .card{flex:0 0 72%;scroll-snap-align:start}
+  .vpanel .go{margin-top:12px}
+  .toast{left:16px;right:16px;top:auto;bottom:14px;transform:none;border-radius:16px}
+  .toast > span{flex:1}
+}
+@media (min-width: 900px){
+  .cards{display:contents}
+  .dir-close{display:none !important}
+}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important;scroll-behavior:auto !important}
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="topbar">
+    <div class="brand"><span class="logo" aria-hidden="true"><i></i></span><span class="word">OpenSlate</span></div>
+    <div class="film"><b>The Last Ferry</b><span id="meta"></span></div>
+    <nav class="tabs" aria-label="Views" id="tabs"></nav>
+    <div class="top-right">
+      <span class="counts" id="counts">3 scenes · 8 shots</span>
+      <span class="saved">Saved locally</span>
+      <a class="gallery" href="../index.html">All prototypes</a>
+      <button class="pill sm dir-toggle" data-act="toggle-director" aria-controls="director" aria-expanded="false">Director</button>
+    </div>
+  </header>
+
+  <aside class="director" id="director" aria-label="Director">
+    <div class="dir-head">
+      <span class="avatar" aria-hidden="true">D</span><b>Director</b>
+      <span class="scene" id="dir-scene">Scene 2</span>
+      <button class="pill sm dir-close" data-act="toggle-director" style="display:none">Close</button>
+    </div>
+    <div class="thread" id="thread" aria-live="polite"></div>
+    <div class="composer-wrap">
+      <div class="picker" id="picker" hidden></div>
+      <div class="composer">
+        <div class="chips" id="chips"></div>
+        <label class="sr" for="msg">Message to the Director</label>
+        <textarea id="msg" data-field="message" rows="1" placeholder="Reply to the Director…"></textarea>
+        <div class="composer-foot">
+          <button class="at-btn" data-act="at" aria-haspopup="listbox" aria-controls="picker">@</button>
+          <span>a scene or shot to point at it</span>
+          <button class="send" data-act="send" aria-label="Send">
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 12V2M2.5 6.5 7 2l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="work" id="work"></main>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+(function(){
+'use strict';
+const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const SEC_PER_WORD = 0.55; // calibrated so the recorded 13-word line (7.4 s) estimates at about 7.2 s
+
+/* ---------------- sample film ---------------- */
+const shots = [
+  {id:'1.1',scene:1,framing:'Wide',prompt:'The ticket office at closing time, shutters half down, one lamp on.',motion:'Slow pan right',dur:6,narr:null,narrDur:0,kf:'back',opened:true,takes:1,video:'saved'},
+  {id:'1.2',scene:1,framing:'Medium',prompt:'Mara at the counter, sliding coins across.',motion:'Static',dur:5,narr:'One for the morning boat.',narrDur:2.1,kf:'back',opened:true,takes:1,video:'saved'},
+  {id:'1.3',scene:1,framing:'Close-up',prompt:'The clerk stamps the ticket.',motion:'Slow push-in',dur:6,narr:null,narrDur:0,kf:'back',opened:true,takes:1,video:'saved'},
+  {id:'2.1',scene:2,framing:'Wide',prompt:'The empty harbour at dawn, the ferry moored, fog over the water.',motion:'Slow push-in',dur:5,narr:null,narrDur:0,kf:'back',opened:true,takes:1,video:'none'},
+  {id:'2.2',scene:2,framing:'Medium',prompt:'Mara on the pier in her red coat, a ticket in her hand.',motion:'Static, breath visible',dur:4,narr:null,narrDur:0,kf:'back',opened:false,takes:1,coat:'maroon',video:'none'},
+  {id:'2.3',scene:2,framing:'Close-up',prompt:'The ticket’s printed date, “Sunday 31 March”, under Mara’s thumb.',motion:'Slow tilt down',dur:6,narr:'It was the last boat of the season, and I nearly missed it.',narrDur:7.4,kf:'back',opened:false,takes:1,video:'none'},
+  {id:'3.1',scene:3,framing:'Wide',prompt:'The ferry pulls away into the fog.',motion:'Slow pull-back',dur:8,narr:null,narrDur:0,kf:'none',opened:false,takes:0,video:'none'},
+  {id:'3.2',scene:3,framing:'Close-up',prompt:'Mara at the rail, the harbour behind her.',motion:'Static',dur:8,narr:'I didn’t look back.',narrDur:1.6,kf:'none',opened:false,takes:0,video:'none'}
+];
+const scenes = {1:{title:'Closing time',video:'saved'},2:{title:'Harbour at dawn',video:'none'},3:{title:'Departure',video:'none'}};
+
+const state = {
+  tab:'Keyframes', scene:2, sel:{1:'1.1',2:'2.1',3:'3.1'},
+  recA:'open',      // open | making | kept | regenerated
+  recB:'open',      // open | 8s | keep6 | edited
+  doneView:null,    // which recommendation's resolved view the banner is showing
+  narrEdit:false, edit:null, // inspector edit: 'prompt' | 'motion'
+  making:{},        // shotId -> 0..1 keyframe progress
+  videoRun:null,    // {scene, shot, p}
+  play:null,        // {shot, t0, dur, queue}
+  chips:[], messages:[], picker:false, dirOpen:false,
+  undo:null, shots, scenes
+};
+const S = id => shots.find(s => s.id === id);
+const inScene = n => shots.filter(s => s.scene === n);
+const sceneDur = n => inScene(n).reduce((a,s) => a + s.dur, 0);
+const filmDur = () => shots.reduce((a,s) => a + s.dur, 0);
+const fits = s => !s.narr || s.narrDur <= s.dur + 1e-9;
+const resolvedA = () => state.recA === 'kept' || state.recA === 'regenerated';
+const resolvedB = () => state.recB === 'keep6' || fits(S('2.3'));
+const fmt = n => (Math.round(n*10)/10).toString();
+const clock = s => Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0');
+const estimate = text => { const w = (text.trim().match(/\S+/g)||[]).length; return Math.round(w*SEC_PER_WORD*10)/10; };
+const cur = () => S(state.sel[state.scene]);
+
+/* ---------------- pictures (flat SVG, 16:9) ---------------- */
+let uid = 0;
+function pic(s){
+  const u = 'g' + (++uid);
+  const coat = s.coat === 'red' ? '#c8302c' : '#6e1f2b';
+  const sky = (a,b) => `<defs><linearGradient id="${u}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="320" height="180" fill="url(#${u})"/>`;
+  const fog = (y,o) => `<rect x="-10" y="${y}" width="340" height="9" rx="4" fill="#dfe7f0" opacity="${o}"/>`;
+  let b = '';
+  switch(s.id){
+    case '1.1': b = `<rect width="320" height="180" fill="#1f1611"/>
+      <rect x="36" y="26" width="248" height="154" fill="#4a2e1f"/>
+      <rect x="70" y="40" width="180" height="20" rx="2" fill="#2b1b12"/>
+      <text x="160" y="54.5" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="700" letter-spacing="3" fill="#e9b871">TICKETS</text>
+      <rect x="78" y="72" width="164" height="84" fill="#f0b866"/>
+      <rect x="78" y="72" width="164" height="44" fill="#6b4a33"/>
+      ${[78,84,90,96,102,108,114].map(y=>`<rect x="78" y="${y}" width="164" height="1.4" fill="#553826"/>`).join('')}
+      <rect x="78" y="114" width="164" height="3" fill="#3a2518"/>
+      <rect x="96" y="132" width="128" height="24" fill="#c98b45"/>
+      <circle cx="268" cy="70" r="46" fill="#ffcf7a" opacity=".12"/><circle cx="268" cy="70" r="22" fill="#ffcf7a" opacity=".18"/>
+      <rect x="266" y="74" width="4" height="106" fill="#2b1b12"/><circle cx="268" cy="70" r="6" fill="#ffe3a8"/>
+      <rect y="166" width="320" height="14" fill="#24160f"/>`; break;
+    case '1.2': b = `<rect width="320" height="180" fill="#3b2418"/>
+      <rect x="190" y="18" width="110" height="88" fill="#f0b866" opacity=".9"/><rect x="190" y="18" width="110" height="88" fill="none" stroke="#2b1b12" stroke-width="4"/>
+      <circle cx="248" cy="60" r="12" fill="#2b1b12"/><path d="M226 106 q22-36 44 0z" fill="#2b1b12"/>
+      <circle cx="112" cy="62" r="15" fill="#d8a77f"/><path d="M96 58 q16-22 32 0 q-4-12-16-12 q-12 0-16 12z" fill="#2a1712"/>
+      <path d="M78 180 L84 98 q28-14 56 0 L146 180z" fill="#b8322c"/>
+      <path d="M134 104 L196 118 L194 126 L130 116z" fill="#a52b26"/><circle cx="198" cy="121" r="6" fill="#d8a77f"/>
+      <rect y="122" width="320" height="58" fill="#5c3a24"/><rect y="120" width="320" height="5" fill="#7a5032"/>
+      <circle cx="214" cy="121" r="4" fill="#f2c25b"/><circle cx="226" cy="121" r="4" fill="#f2c25b"/><circle cx="238" cy="121.5" r="4" fill="#e3b04a"/>`; break;
+    case '1.3': b = `<rect width="320" height="180" fill="#4a2e1f"/>
+      <circle cx="250" cy="20" r="60" fill="#ffcf7a" opacity=".1"/>
+      <g transform="rotate(-6 160 110)"><rect x="70" y="78" width="180" height="76" rx="4" fill="#f1e3c4"/>
+      <rect x="84" y="92" width="80" height="6" rx="2" fill="#b9a27a"/><rect x="84" y="104" width="60" height="5" rx="2" fill="#cdb995"/>
+      <circle cx="206" cy="118" r="20" fill="none" stroke="#b8322c" stroke-width="3" opacity=".75"/><text x="206" y="122" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="700" fill="#b8322c" opacity=".8">PAID</text></g>
+      <rect x="190" y="36" width="34" height="22" rx="4" fill="#2b1b12"/><rect x="200" y="8" width="14" height="30" rx="5" fill="#3b2418"/>
+      <ellipse cx="207" cy="62" rx="26" ry="11" fill="#d39c74"/><rect x="186" y="56" width="42" height="8" rx="3" fill="#1d120c"/>`; break;
+    case '2.1': b = sky('#6c83a6','#b7c5d6') + `
+      <path d="M0 96 Q60 80 120 92 T240 86 T320 92 V112 H0z" fill="#7f93b0"/>
+      <rect y="108" width="320" height="72" fill="#4c6282"/>
+      ${fog(92,.32)}${fog(102,.22)}
+      <path d="M176 100 H290 L280 118 H186z" fill="#26344a"/><rect x="200" y="86" width="64" height="15" fill="#34465f"/><rect x="226" y="72" width="10" height="15" fill="#26344a"/>
+      ${[206,216,226,236,246,256].map(x=>`<rect x="${x}" y="91" width="5" height="4" fill="#c9d4e2"/>`).join('')}
+      <rect x="0" y="112" width="168" height="8" fill="#2f3d52"/>${[14,52,90,128,160].map(x=>`<rect x="${x}" y="118" width="5" height="24" fill="#2a374a"/>`).join('')}
+      <rect y="122" width="320" height="2" fill="#9fb2c8" opacity=".35"/><rect y="136" width="320" height="1.5" fill="#9fb2c8" opacity=".25"/>
+      ${fog(126,.18)}`; break;
+    case '2.2': b = sky('#6a81a4','#b3c2d4') + `
+      <rect y="96" width="320" height="84" fill="#4c6282"/>${fog(90,.28)}
+      <path d="M90 180 L136 98 H184 L230 180z" fill="#3a4a62"/>${[112,128,146,166].map(y=>`<rect x="${100-(y-98)*0}" y="${y}" width="0" height="0"/>`).join('')}
+      <path d="M126 116 H194 M116 134 H204 M104 156 H216" stroke="#2c394d" stroke-width="2"/>
+      <rect x="150" y="140" width="7" height="26" fill="#1f2633"/><rect x="163" y="140" width="7" height="26" fill="#1f2633"/>
+      <path d="M146 82 H174 L184 146 H136z" fill="${coat}"/>
+      <path d="M172 88 L188 116 L183 119 L168 96z" fill="${coat}"/><rect x="183" y="112" width="10" height="7" rx="1" fill="#eef2f6" transform="rotate(-12 188 115)"/>
+      <circle cx="160" cy="70" r="11" fill="#c9b3a6"/><path d="M149 68 q11-16 22 0 q-2-9-11-9 q-9 0-11 9z" fill="#2a2a33"/>
+      <ellipse cx="180" cy="66" rx="9" ry="5" fill="#eef3f8" opacity=".35"/><ellipse cx="190" cy="62" rx="6" ry="3.5" fill="#eef3f8" opacity=".22"/>`; break;
+    case '2.3': b = `<rect width="320" height="180" fill="#56677e"/>${[0,30,60,90,120,150].map(y=>`<rect y="${y}" width="320" height="1.5" fill="#4a5a70"/>`).join('')}
+      <g transform="rotate(-4 160 90)"><rect x="42" y="34" width="236" height="112" rx="5" fill="#e3e8ee"/>
+      <path d="M86 34 V146" stroke="#9aa8b8" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <text x="100" y="62" font-family="Inter,sans-serif" font-size="9" font-weight="600" letter-spacing="2" fill="#6b7a8e">HARBOUR FERRY</text>
+      <text x="100" y="92" font-family="Inter,sans-serif" font-size="19" font-weight="700" fill="#22303f">SUNDAY 31 MARCH</text>
+      <text x="100" y="112" font-family="Inter,sans-serif" font-size="9" font-weight="600" letter-spacing="1.5" fill="#6b7a8e">DEP 06:40 · SINGLE</text>
+      <text x="64" y="96" font-family="Inter,sans-serif" font-size="12" font-weight="700" fill="#22303f" transform="rotate(-90 64 92)">No 0418</text></g>
+      <ellipse cx="262" cy="160" rx="44" ry="30" fill="#c6a997"/><ellipse cx="246" cy="146" rx="15" ry="10" fill="#dcc3b4"/>
+      <path d="M270 180 Q300 150 320 146 V180z" fill="${coat}"/>`; break;
+    case '3.1': b = sky('#7287a6','#c3cfdc') + `
+      <rect y="100" width="320" height="80" fill="#566c8a"/>${fog(84,.35)}${fog(94,.3)}
+      <path d="M140 100 H184 L180 107 H144z" fill="#3a4a62" opacity=".85"/><rect x="150" y="93" width="22" height="7" fill="#46586f" opacity=".85"/>
+      <path d="M162 108 L110 150 M162 108 L214 150" stroke="#9fb2c8" stroke-width="1.5" opacity=".5"/>
+      ${fog(110,.25)}${fog(128,.18)}
+      <rect y="160" width="320" height="20" fill="#2f3d52"/>${[30,90,150,210,270].map(x=>`<rect x="${x}" y="156" width="5" height="24" fill="#26324a"/>`).join('')}`; break;
+    case '3.2': b = sky('#6f86a8','#bccad9') + `
+      <rect y="92" width="320" height="88" fill="#4c6282"/>${fog(86,.3)}
+      ${[30,48,62,80].map((x,i)=>`<rect x="${x}" y="${78-i%2*6}" width="12" height="${14+i%2*6}" fill="#5b6f8c"/>`).join('')}<circle cx="44" cy="76" r="1.6" fill="#f3d9a0"/><circle cx="70" cy="74" r="1.6" fill="#f3d9a0"/>
+      <path d="M170 180 L176 112 q30-14 60 0 L242 180z" fill="#c8302c"/>
+      <circle cx="206" cy="94" r="17" fill="#c9b3a6"/><path d="M188 90 q18-26 36 0 q-3-15-18-15 q-15 0-18 15z" fill="#2a2a33"/>
+      <rect y="140" width="320" height="6" fill="#26324a"/><rect y="160" width="320" height="4" fill="#26324a"/>${[20,80,140,260,300].map(x=>`<rect x="${x}" y="140" width="4" height="40" fill="#26324a"/>`).join('')}`; break;
+  }
+  return `<svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Keyframe ${s.id}: ${esc(s.prompt)}">${b}</svg>`;
+}
+
+/* ---------------- render ---------------- */
+const $ = id => document.getElementById(id);
+function statusPill(s){
+  if (state.making[s.id] != null) return '<span class="status busy">Making keyframe…</span>';
+  if (s.kf === 'none') return '<span class="status">Not started</span>';
+  if (s.kf === 'stale') return '<span class="status">Keyframe out of date</span>';
+  return s.opened ? '<span class="status ok">✓ Opened</span>' : '<span class="status">Not opened</span>';
+}
+function renderTop(){
+  $('meta').textContent = `${filmDur()} s · 16:9 · 1920 × 1080 · 30 fps`;
+  $('tabs').innerHTML = ['Plan','Keyframes','Assets','Film'].map(t =>
+    `<button class="tab" data-act="tab" data-tab="${t}" aria-selected="${t==='Keyframes'}" ${t!=='Keyframes'?'aria-describedby="nip"':''}>${t}</button>`).join('') +
+    '<span id="nip" class="sr">Not in this prototype</span>';
+  $('dir-scene').textContent = 'Scene ' + state.scene;
+  document.querySelector('.dir-toggle').setAttribute('aria-expanded', String(state.dirOpen));
+  $('app').classList.toggle('dir-open', state.dirOpen);
+}
+function sceneLine(n){
+  const sc = scenes[n], list = inScene(n);
+  let tail;
+  if (sc.video === 'saved') tail = 'video saved';
+  else if (sc.video === 'making') tail = 'making video';
+  else if (list.every(s => s.kf === 'none')) tail = 'not started';
+  else tail = 'keyframes back, no video yet';
+  return `Scene ${n} · ${list.length} shots · ${tail}`;
+}
+function scenePillLabel(n){
+  const sc = scenes[n], list = inScene(n);
+  if (sc.video === 'saved') return 'video saved';
+  if (sc.video === 'making') return 'making video';
+  if (list.every(s => s.kf === 'none')) return 'not started';
+  return n === state.scene ? '' : 'keyframes back';
+}
+
+function bannerHTML(){
+  const s23 = S('2.3'), s22 = S('2.2');
+  const dv = state.doneView;
+  const order = [];
+  if (!resolvedB() || dv === 'b') order.push('b');
+  if (!resolvedA() || dv === 'a') order.push('a');
+  const which = dv && order.includes(dv) ? dv : order[0];
+  if (!which) return `<div class="quiet" role="status"><span class="ck">✓</span><span>Both of the Director’s notes are handled: ${aSummary()} and ${bSummary()}.</span></div>`;
+  const head = (l, done) => `<div class="eyebrow"><span class="letter">${l}</span>${done ? 'Director recommends · done' : 'Director recommends'}</div>`;
+  if (which === 'b'){
+    const done = resolvedB();
+    const px = 15;
+    const seg = (t, sec, hot) => `<span class="seg${hot?' hot':''}" style="width:${sec*px}px">${t}</span>`;
+    if (state.narrEdit){
+      const est = estimate(s23.narr);
+      return `<section class="banner" aria-label="Director recommends">
+        <div class="banner-main">${head('b')}
+          <h2>Edit the 2.3 line to fit ${s23.dur} seconds</h2>
+          <div class="edit-line"><label class="sr" for="narr">Narration for 2.3</label>
+            <textarea id="narr" rows="2">${esc(s23.narr)}</textarea>
+            <span class="est" id="narr-est"></span></div>
+        </div>
+        <div class="banner-actions"><button class="pill chosen" data-act="save-narration">Save line</button><button class="pill" data-act="cancel-narration">Cancel</button></div>
+      </section>`;
+    }
+    if (done && dv === 'b'){
+      const title = state.recB === '8s' ? '2.3 is now 8 seconds; the narration fits'
+        : state.recB === 'keep6' ? '2.3 stays 6 seconds; the line will be cut at 6 s'
+        : state.recB === 'edited' ? `New 2.3 line, about ${fmt(s23.narrDur)} s, fits ${s23.dur} s` : '2.3 now fits its narration';
+      const sub = state.recB === '8s' ? `The film is ${filmDur()} s and Scene 3 starts at ${clock(sceneDur(1)+sceneDur(2))}. No clip existed yet, so this was free.`
+        : state.recB === 'keep6' ? 'The last 1.4 s of the recorded line will not be heard.' : 'The shot length is unchanged; the new line needs recording.';
+      return `<section class="banner" aria-label="Director recommends">
+        <div class="banner-main">${head('b', true)}<h2>${title}</h2><div class="sub">${sub}</div>
+          <div class="tl"><span class="k">Now</span><div class="segs">${seg('2.2 · '+S('2.2').dur+' s')}${seg('2.3 · '+s23.dur+' s', s23.dur, state.recB==='8s')}<span class="seg dash">Scene 3 · from ${clock(sceneDur(1)+sceneDur(2))}</span></div></div>
+        </div>
+        <div class="banner-actions"><button class="pill chosen" data-act="next-rec">${resolvedA() ? 'Done' : 'Next: note a'}</button>${state.undo ? '<button class="pill" data-act="undo">Undo</button>' : ''}</div>
+      </section>`;
+    }
+    return `<section class="banner" aria-label="Director recommends">
+      <div class="banner-main">${head('b')}
+        <h2>Make 2.3 eight seconds so the narration fits</h2>
+        <div class="sub">The recorded line is ${fmt(s23.narrDur)} s; the shot is ${s23.dur} s.</div>
+        <div class="tl">
+          <span class="k">Now</span><div class="segs">${seg('2.2 · '+S('2.2').dur+' s', S('2.2').dur)}${seg('2.3 · '+s23.dur+' s', s23.dur)}<span class="seg dash">Scene 3</span></div>
+          <span class="k">After</span><div class="segs">${seg('2.2 · '+S('2.2').dur+' s', S('2.2').dur)}${seg('2.3 · 8 s', 8, true)}<span class="seg dash">Scene 3 · ${8 - s23.dur} s later</span></div>
+        </div>
+      </div>
+      <div class="banner-actions">
+        <button class="pill chosen" data-act="make-8s">Make 2.3 8 s</button>
+        <button class="pill" data-act="keep-6s">Keep ${s23.dur} s</button>
+        <button class="pill ghost" data-act="edit-narration">Edit narration</button>
+      </div>
+    </section>`;
+  }
+  // a
+  if (state.recA === 'making'){
+    return `<section class="banner" aria-label="Director recommends"><div class="banner-main">${head('a')}
+      <h2>Making a new keyframe for 2.2…</h2><div class="sub">Same prompt with the coat asked for in red. The earlier take is kept.</div>
+      <div class="making" style="position:relative;inset:auto;background:none;place-items:start;margin-top:14px"><div class="bar" style="margin:0"><i data-mk="2.2"></i></div></div></div>
+      <div class="banner-actions"><button class="pill" data-act="open-shot" data-shot="2.2">Open 2.2</button></div></section>`;
+  }
+  if (resolvedA() && dv === 'a'){
+    return `<section class="banner" aria-label="Director recommends"><div class="banner-main">${head('a', true)}
+      <h2>${state.recA === 'kept' ? '2.2 keeps the maroon coat' : '2.2 has a new keyframe with the red coat'}</h2>
+      <div class="sub">${state.recA === 'kept' ? 'The low dawn light stays as it is.' : 'It is a new take, so 2.2 needs opening again. Take 1 is kept.'}</div>
+      <div class="swatches"><span class="sw" style="background:var(--coat-${state.recA==='kept'?'maroon':'red'})"></span><b>${state.recA==='kept'?'Maroon':'Red'}</b><span style="color:var(--text-2)">${state.recA==='kept'?'kept for low light':'take 2'}</span></div></div>
+      <div class="banner-actions"><button class="pill chosen" data-act="next-rec">${resolvedB() ? 'Done' : 'Next: note b'}</button>${state.undo ? '<button class="pill" data-act="undo">Undo</button>' : ''}${state.recA==='regenerated' && !s22.opened ? '<button class="pill" data-act="open-shot" data-shot="2.2">Open 2.2</button>' : ''}</div></section>`;
+  }
+  return `<section class="banner" aria-label="Director recommends">
+    <div class="banner-main">${head('a')}
+      <h2>Regenerate 2.2 if you want the coat red</h2>
+      <div class="sub">In 2.2 the coat came out maroon rather than red. I kept it because the light is low.</div>
+      <div class="swatches"><span class="sw" style="background:var(--coat-red)"></span><s>Red</s><span aria-hidden="true">→</span><span class="sw" style="background:var(--coat-maroon)"></span><b>Maroon</b><span style="color:var(--text-2)">kept for low light</span></div>
+    </div>
+    <div class="banner-actions">
+      <button class="pill chosen" data-act="regen" data-shot="2.2">Regenerate 2.2 · about $0.04</button>
+      <button class="pill" data-act="keep-maroon">Keep maroon</button>
+      <button class="pill ghost" data-act="open-shot" data-shot="2.2">Open 2.2</button>
+    </div>
+  </section>`;
+}
+function aSummary(){ return state.recA === 'kept' ? '2.2 keeps the maroon coat' : '2.2 was regenerated with the red coat'; }
+function bSummary(){ const s = S('2.3'); return state.recB === 'keep6' ? '2.3 stays 6 s with the line cut' : state.recB === 'edited' ? '2.3 has a shorter line' : `2.3 is ${s.dur} s`; }
+
+function previewHTML(s){
+  const mk = state.making[s.id];
+  let inner;
+  if (mk != null) inner = `<div class="making"><div>Making keyframe ${s.id}…<div class="bar"><i data-mk="${s.id}" style="width:${mk*100}%"></i></div></div></div>`;
+  else if (s.kf === 'none') inner = `<div class="dashed-frame"><div><b>No keyframe yet</b>${esc(s.prompt)}</div></div>`;
+  else inner = `<div class="pic"><div id="pv-anim">${pic(s)}</div></div>`;
+  const playing = state.play && state.play.shot === s.id;
+  return `<section class="preview" aria-label="Keyframe preview ${s.id}">
+    ${inner}
+    <div class="pv-top"><span class="badge">${s.id}</span>${s.kf!=='none' && mk==null ? statusPill(s) : ''}</div>
+    <div class="pv-bottom">
+      ${s.kf==='none' && mk==null ? '' : `<p class="pv-caption">${esc(s.framing)}. ${esc(s.prompt)}</p>`}
+      <div class="scrub">
+        <button class="play" data-act="play" aria-label="${playing?'Stop':'Play'} motion preview" ${s.kf==='none'||mk!=null?'disabled':''}>${playing
+          ? '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="1" y="1" width="3" height="8" fill="currentColor"/><rect x="6" y="1" width="3" height="8" fill="currentColor"/></svg>'
+          : '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor"/></svg>'}</button>
+        <span id="pv-t">0:00</span><div class="track" aria-hidden="true"><i id="pv-bar"></i></div><span>${clock(s.dur)}</span>
+      </div>
+    </div>
+  </section>`;
+}
+function inspectorHTML(s){
+  const mk = state.making[s.id] != null;
+  let body;
+  if (state.edit === 'prompt'){
+    body = `<form data-form="prompt"><label for="ed-prompt">Prompt (画面)</label><textarea id="ed-prompt" rows="5">${esc(s.prompt)}</textarea>
+      ${s.kf!=='none' ? '<span class="stale">Saving a changed prompt marks this keyframe out of date.</span>' : ''}
+      <div class="two"><button class="pill chosen" data-act="save-edit">Save</button><button class="pill" type="button" data-act="cancel-edit">Cancel</button></div></form>`;
+  } else if (state.edit === 'motion'){
+    const motions = ['Static','Static, breath visible','Slow push-in','Slow pull-back','Slow pan right','Slow pan left','Slow tilt down'];
+    if (!motions.includes(s.motion)) motions.push(s.motion);
+    body = `<form data-form="motion"><label for="ed-motion">Motion</label><select id="ed-motion">${motions.map(m=>`<option${m===s.motion?' selected':''}>${m}</option>`).join('')}</select>
+      <label for="ed-dur">Duration (seconds)</label><input id="ed-dur" type="number" min="2" max="15" step="1" value="${s.dur}">
+      <div class="two"><button class="pill chosen" data-act="save-edit">Save</button><button class="pill" type="button" data-act="cancel-edit">Cancel</button></div></form>`;
+  } else {
+    let narr = 'None';
+    if (s.narr){
+      const over = !fits(s);
+      const cut = s.id==='2.3' && state.recB==='keep6' && over;
+      narr = `“${esc(s.narr)}”<small>${fmt(s.narrDur)} s${over ? (cut ? ' · cut at '+s.dur+' s' : ' · longer than the shot') : ''}</small>`;
+    }
+    body = `<dl class="rows"><dt>Motion</dt><dd>${esc(s.motion)}</dd><dt>Duration</dt><dd>${s.dur} s</dd><dt>Narration</dt><dd>${narr}</dd>
+      ${s.takes>1 ? `<dt>Takes</dt><dd>${s.takes} <small style="display:inline">· take ${s.takes} shown, earlier kept</small></dd>` : ''}</dl>`;
+  }
+  const stale = s.kf === 'stale';
+  const regenLabel = s.kf === 'none' ? 'Make keyframe · about $0.04' : stale ? 'Regenerate keyframe · about $0.04' : 'Regenerate keyframe';
+  return `<aside class="insp" aria-label="Shot inspector">
+    <div class="insp-title"><div><h3>Shot ${s.id}</h3><div class="framing">${esc(s.framing)}</div></div><button class="pill sm at21" data-act="at-insert" data-ref="${s.id}" aria-label="Point the Director at ${s.id}">@ ${s.id}</button></div>
+    <div class="st">${statusPill(s)}</div>
+    ${body}
+    ${state.edit ? '' : `<div class="insp-actions">
+      <button class="pill" data-act="edit-prompt">Edit prompt</button>
+      <button class="pill" data-act="edit-motion">Edit motion &amp; duration</button>
+      <button class="pill${stale||s.kf==='none'?' primary':''}" data-act="regen" data-shot="${s.id}" ${mk?'disabled':''}>${mk ? 'Making keyframe…' : regenLabel}</button>
+    </div>`}
+  </aside>`;
+}
+function callout(s){
+  if (s.id === '2.2'){
+    if (state.recA === 'open') return `<div class="callout"><span class="anno"><span class="letter">a</span>Coat came out maroon</span><button class="link" data-act="regen" data-shot="2.2">Regenerate 2.2</button></div>`;
+    if (state.recA === 'kept' || state.recA === 'regenerated') return `<div class="callout"><span class="anno done"><span class="letter">a</span>✓ ${state.recA==='kept'?'Kept maroon':'Red, take 2'}</span></div>`;
+  }
+  if (s.id === '2.3'){
+    if (!resolvedB()) return `<div class="callout"><span class="anno"><span class="letter">b</span>Narration ${fmt(s.narrDur)} s, shot ${s.dur} s</span></div>`;
+    return `<div class="callout"><span class="anno done"><span class="letter">b</span>✓ ${state.recB==='keep6'?'Line cut at 6 s':'Line fits'}</span></div>`;
+  }
+  return '';
+}
+function cardHTML(s){
+  const sel = state.sel[state.scene] === s.id;
+  const mk = state.making[s.id];
+  let picture;
+  if (mk != null) picture = `<div class="making" style="font-size:12px"><div>Making…<div class="bar"><i data-mk="${s.id}" style="width:${mk*100}%"></i></div></div></div>`;
+  else if (s.kf === 'none') picture = `<div class="dashed-frame">${esc(s.prompt)}</div>`;
+  else picture = pic(s) + `<span class="ptxt">${esc(s.prompt)}</span>`;
+  const vr = state.videoRun && state.videoRun.scene === s.scene;
+  const showProg = vr && (s.video === 'making' || s.video === 'queued');
+  const motion = s.motion.charAt(0).toLowerCase() + s.motion.slice(1);
+  let tail = motion;
+  if (s.video === 'saved') tail = motion + ' · video saved';
+  else if (s.video === 'making') tail = 'making video…';
+  else if (s.video === 'queued') tail = 'video queued';
+  return `<article class="card${sel?' sel':''}">
+    <button class="hit" data-act="open-shot" data-shot="${s.id}" aria-pressed="${sel}" aria-label="Open shot ${s.id}, ${esc(s.framing)}"></button>
+    <div class="pic${showProg?' vp':''}">${picture}<span class="badge">${s.id}</span>${showProg?`<div class="vprog"><i data-vp="${s.id}" style="width:${(s.vp||0)*100}%"></i></div>`:''}</div>
+    ${callout(s)}
+    <div class="ttl"><b>${s.id} ${esc(s.framing)}</b><span>${s.dur} s</span></div>
+    <div class="stl">${statusPill(s)}<span>${esc(tail)}</span></div>
+  </article>`;
+}
+function panelHTML(n){
+  const list = inScene(n), sc = scenes[n];
+  const opened = list.filter(s => s.opened && s.kf === 'back').length;
+  const segs = `<div class="vsegs" aria-hidden="true">${list.map(s=>`<i class="${s.opened&&s.kf==='back'?'on':''}"></i>`).join('')}</div>`;
+  if (list.every(s => s.kf === 'none' && state.making[s.id] == null)){
+    const cost = (list.length*0.04).toFixed(2);
+    return `<section class="vpanel" aria-label="Scene ${n} keyframes"><div class="eyebrow">Scene ${n} keyframes</div>${segs.replace(/class="on"/g,'')}
+      <div class="vcount"><b>0 of ${list.length}</b>keyframes</div><p>The prompts are written. Make keyframes to see the shots.</p>
+      <button class="pill primary go" data-act="make-keyframes" data-scene="${n}">Make ${list.length} keyframes · about $${cost}</button><div class="why">About $0.04 each</div></section>`;
+  }
+  if (sc.video === 'saved'){
+    return `<section class="vpanel" aria-label="Scene ${n} video"><div class="eyebrow">Scene ${n} video</div>${segs}
+      <div class="vcount"><b>Video saved</b></div><p>${list.length} clips, ${sceneDur(n)} s. Earlier keyframes are kept.</p>
+      <button class="pill primary go" data-act="play-scene" data-scene="${n}">${state.play && state.play.queue ? 'Stop' : '▶ Play Scene '+n}</button><div class="why"></div></section>`;
+  }
+  if (sc.video === 'making'){
+    const r = state.videoRun;
+    return `<section class="vpanel" aria-label="Scene ${n} video"><div class="eyebrow">Scene ${n} video</div>${segs}
+      <div class="vcount"><b>Making video</b></div><p>Clip ${r ? r.idx+1 : 1} of ${list.length}: ${r ? r.shot : ''}. Progress shows on each card.</p>
+      <button class="pill go" disabled>Generating…</button><div class="why">Keep working; nothing else is blocked.</div></section>`;
+  }
+  const unopened = list.filter(s => !(s.opened && s.kf === 'back')).map(s => s.id);
+  const needB = n === 2 && !resolvedB();
+  const ok = !unopened.length && !needB && !list.some(s => state.making[s.id] != null);
+  const cost = (list.length*0.5).toFixed(2);
+  let why = '';
+  if (!ok){
+    const parts = [];
+    if (unopened.length) parts.push(`Open ${listJoin(unopened)}`);
+    if (needB) parts.push(unopened.length ? 'settle b' : 'settle note b so the 2.3 line fits');
+    why = parts.join(' and ') + ' first';
+    why = why.charAt(0).toUpperCase() + why.slice(1);
+  } else why = `${list.length} clips at about $0.50`;
+  const note = unopened.length ? `Open ${listJoin(unopened)} to confirm. Earlier keyframes are kept.` : 'Every frame is opened. Earlier keyframes are kept.';
+  return `<section class="vpanel" aria-label="Scene ${n} video"><div class="eyebrow">Scene ${n} video</div>${segs}
+    <div class="vcount"><b>${opened} of ${list.length}</b>frames opened</div><p>${note}</p>
+    <button class="pill ${ok?'primary':''} go" data-act="confirm-video" data-scene="${n}" ${ok?'':'disabled'} aria-describedby="why${n}">Confirm frames &amp; generate video${ok?' · about $'+cost:''}</button>
+    <div class="why" id="why${n}">${why}</div></section>`;
+}
+const listJoin = a => a.length < 2 ? a.join('') : a.slice(0,-1).join(', ') + ' and ' + a[a.length-1];
+
+function renderWork(){
+  const n = state.scene, s = cur(), list = inScene(n);
+  const pills = [1,2,3].map(k => { const t = scenePillLabel(k); return `<button class="pill" data-act="scene" data-scene="${k}" aria-pressed="${k===n}">${k} ${scenes[k].title}${t?' · '+t:''}</button>`; }).join('');
+  const cards = list.map(cardHTML).join('') + (list.length < 3 ? '<div class="card empty" aria-hidden="true">No more shots in this scene</div>' : '');
+  $('work').innerHTML = `
+    <div class="scene-head"><h1>${scenes[n].title}</h1><span class="line">${sceneLine(n)}</span><nav class="scene-pills" aria-label="Scenes">${pills}</nav></div>
+    ${bannerHTML()}
+    <div class="stage">${previewHTML(s)}${inspectorHTML(s)}</div>
+    <div class="row"><div class="cards">${cards}</div>${panelHTML(n)}</div>`;
+  const ta = $('narr');
+  if (ta){ const upd = () => { const e = estimate(ta.value), d = S('2.3').dur; $('narr-est').innerHTML = `About <b>${fmt(e)} s</b> at ${SEC_PER_WORD} s a word · ${e <= d ? 'fits '+d+' s' : 'still longer than '+d+' s'}`; }; ta.addEventListener('input', upd); upd(); }
+}
+
+function renderThread(){
+  const noteA = () => {
+    const done = resolvedA(), mk = state.recA === 'making';
+    return `<div class="note${done?' done':''}"><span class="letter">a</span>In 2.2 the coat came out maroon rather than red. I kept it because the light is low; regenerate 2.2 if you want it brighter.
+      <div class="row"><button class="pill sm" data-act="open-shot" data-shot="2.2">Open 2.2</button></div>
+      ${mk ? '<span class="handled" style="color:var(--text-2)">Making a new keyframe…</span>' : done ? `<span class="handled">✓ ${state.recA==='kept'?'Kept maroon':'Regenerated: red coat, take 2'}</span>` : ''}</div>`;
+  };
+  const noteB = () => {
+    const done = resolvedB();
+    return `<div class="note${done?' done':''}"><span class="letter">b</span>The narration for 2.3 is 7.4 seconds but the shot is 6 seconds. I suggest making 2.3 8 seconds, which moves Scene 3 two seconds later.
+      <div class="row"><button class="pill sm" data-act="open-shot" data-shot="2.3">Open 2.3</button></div>
+      ${done ? `<span class="handled">✓ ${bSummary().replace(/^2\.3/,'2.3')}</span>` : ''}</div>`;
+  };
+  const extra = state.messages.map(m => m.who === 'you'
+    ? `<div class="byline you"><b>You</b> · ${m.time}</div><div class="bubble">${m.chips.map(c=>`<span class="atchip">@${esc(c)}</span>`).join('')}${esc(m.text)}</div>`
+    : m.working ? `<div class="byline"><b>Director</b> · ${m.time}</div><div class="working">Working<i></i><i></i><i></i></div>`
+    : `<div class="byline"><b>Director</b> · ${m.time}</div><div class="dir-text">${esc(m.text)}</div><div class="scripted">Replies in this prototype are scripted; nothing in the film was changed.</div>`).join('');
+  const th = $('thread');
+  const atBottom = th.scrollHeight - th.scrollTop - th.clientHeight < 40;
+  th.innerHTML = `<div>
+    <div class="byline you"><b>You</b> · 10:42</div>
+    <div class="bubble"><span class="atchip">@Scene 2</span>make the harbour feel colder, more like early morning, and keep Mara’s red coat.</div>
+    <div class="byline"><b>Director</b> · 10:44</div>
+    <div class="dir-text">I rewrote the three Scene 2 prompts with a blue dawn light and kept Mara’s red coat in 2.2. Keyframes for all three shots are back. Two things to check before I make video:</div>
+    ${noteA()}${noteB()}${extra}</div>`;
+  if (atBottom || state._scrollThread){ th.scrollTop = th.scrollHeight; state._scrollThread = false; }
+  $('chips').innerHTML = state.chips.map((c,i)=>`<span class="atchip">@${esc(c)}<button data-act="unchip" data-i="${i}" aria-label="Remove ${esc(c)}">×</button></span>`).join('');
+}
+
+function render(){
+  const a = document.activeElement;
+  const key = a && a.dataset && a.dataset.act ? [a.dataset.act, a.dataset.shot||'', a.dataset.scene||'', a.dataset.tab||''].join('|') : null;
+  renderTop(); renderWork(); renderThread();
+  if (key && !document.activeElement.closest('body') || key && document.activeElement === document.body){
+    const [act,shot,scene,tab] = key.split('|');
+    const el = [...document.querySelectorAll(`[data-act="${act}"]`)].find(e => (e.dataset.shot||'')===shot && (e.dataset.scene||'')===scene && (e.dataset.tab||'')===tab && e.offsetParent !== null);
+    if (el) el.focus({preventScroll:true});
+  }
+}
+
+/* ---------------- toast ---------------- */
+let toastTimer;
+function toast(msg, undo){
+  const t = $('toast');
+  t.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button class="pill" data-act="undo">Undo</button>' : ''}<button class="pill ghost" data-act="toast-close" aria-label="Dismiss">×</button>`;
+  t.hidden = false; clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, undo ? 7000 : 4000);
+}
+
+/* ---------------- actions ---------------- */
+function selectShot(id, open = true){
+  const s = S(id); if (!s) return;
+  stopPlay();
+  state.scene = s.scene; state.sel[s.scene] = id; state.edit = null;
+  if (open && s.kf === 'back' && state.making[id] == null) s.opened = true;
+  render();
+}
+function runProgress(ms, onTick, onDone){
+  const t0 = performance.now();
+  return new Promise(res => {
+    const step = now => { const p = Math.min(1, (now - t0)/ms); onTick(p); if (p < 1) requestAnimationFrame(step); else { onDone && onDone(); res(); } };
+    requestAnimationFrame(step);
+  });
+}
+function regen(id){
+  const s = S(id); if (!s || state.making[id] != null) return Promise.resolve();
+  if (id === '2.2' && state.recA === 'open'){ state.recA = 'making'; state.undo = null; }
+  state.making[id] = 0; s.opened = false; s.video = 'none'; // the frame being replaced no longer counts as opened
+  if (scenes[s.scene].video === 'saved'){ scenes[s.scene].video = 'none'; inScene(s.scene).forEach(x => { if (x.video==='saved') x.video='none'; }); }
+  stopPlay(); render();
+  return runProgress(3000, p => { state.making[id] = p; document.querySelectorAll(`[data-mk="${id}"]`).forEach(el => el.style.width = (p*100)+'%'); }, () => {
+    delete state.making[id];
+    s.takes += 1; s.kf = 'back'; s.opened = false; s.video = 'none';
+    if (id === '2.2' && state.recA === 'making'){ s.coat = 'red'; state.recA = 'regenerated'; state.doneView = 'a'; }
+    render(); toast(`New keyframe for ${id} is back (take ${s.takes}). Open it to confirm.`);
+  });
+}
+function makeKeyframes(n){
+  const list = inScene(n).filter(s => s.kf === 'none');
+  list.forEach(s => state.making[s.id] = 0); render();
+  return runProgress(3000, p => list.forEach(s => { state.making[s.id] = p; document.querySelectorAll(`[data-mk="${s.id}"]`).forEach(el => el.style.width = (p*100)+'%'); }), () => {
+    list.forEach(s => { delete state.making[s.id]; s.kf = 'back'; s.takes = 1; s.opened = false; });
+    render(); toast(`${list.length} keyframes for Scene ${n} are back. Open each one to confirm.`);
+  });
+}
+async function confirmVideo(n){
+  const list = inScene(n);
+  state.undo = null; state.doneView = null; $('toast').hidden = true; // paid video is not undoable; drop any pending note undo
+  scenes[n].video = 'making'; list.forEach(s => { s.video = 'queued'; s.vp = 0; });
+  state.videoRun = {scene:n, idx:0, shot:list[0].id};
+  render();
+  for (let i = 0; i < list.length; i++){
+    const s = list[i]; s.video = 'making'; state.videoRun.idx = i; state.videoRun.shot = s.id; render();
+    await runProgress(reduceMotion() ? 1500 : 2400, p => { s.vp = p; document.querySelectorAll(`[data-vp="${s.id}"]`).forEach(el => el.style.width = (p*100)+'%'); });
+    s.video = 'saved';
+  }
+  scenes[n].video = 'saved'; state.videoRun = null; render();
+  toast(`Scene ${n} video saved: ${list.length} clips, ${sceneDur(n)} s.`);
+}
+
+/* motion preview */
+function motionTransform(motion, p){
+  const m = motion.toLowerCase();
+  if (m.includes('push')) return `scale(${1 + .12*p})`;
+  if (m.includes('pull')) return `scale(${1.12 - .12*p})`;
+  if (m.includes('pan right')) return `scale(1.1) translateX(${4 - 8*p}%)`;
+  if (m.includes('pan left')) return `scale(1.1) translateX(${-4 + 8*p}%)`;
+  if (m.includes('tilt down')) return `scale(1.1) translateY(${4 - 8*p}%)`;
+  if (m.includes('breath')) return `scale(${1.012 + .01*Math.sin(p*Math.PI*4)})`;
+  return 'none';
+}
+let rafId = null;
+function startPlay(id, queue){
+  const s = S(id); if (!s || s.kf === 'none') return;
+  state.play = {shot:id, t0:performance.now(), dur:s.dur*1000, queue:queue||null};
+  render();
+  const step = now => {
+    if (!state.play || state.play.shot !== id) return;
+    const p = Math.min(1, (now - state.play.t0)/state.play.dur);
+    const anim = $('pv-anim'), bar = $('pv-bar'), t = $('pv-t');
+    if (anim) anim.style.transform = reduceMotion() ? 'none' : motionTransform(s.motion, p);
+    if (bar) bar.style.width = (p*100)+'%';
+    if (t) t.textContent = clock(p*s.dur);
+    if (p < 1) rafId = requestAnimationFrame(step);
+    else {
+      const q = state.play.queue; state.play = null;
+      if (q && q.length){ const nx = q.shift(); state.sel[S(nx).scene] = nx; startPlay(nx, q); }
+      else render();
+    }
+  };
+  rafId = requestAnimationFrame(step);
+}
+function stopPlay(){ if (state.play){ state.play = null; cancelAnimationFrame(rafId); } }
+
+const actions = {
+  tab(t){ if (t === 'Keyframes') return; toast(`${t} is not in this prototype. Only Keyframes is built.`); },
+  scene(n){ n = +n; stopPlay(); state.scene = n; state.edit = null; render(); },
+  openShot: id => selectShot(id),
+  make8s(){
+    const s = S('2.3'); state.undo = {kind:'b', dur:s.dur, recB:state.recB};
+    s.dur = 8; state.recB = '8s'; state.doneView = 'b'; state.narrEdit = false; render();
+    toast(`2.3 is 8 s. The film is ${filmDur()} s; Scene 3 starts 2 s later.`, true);
+  },
+  keep6(){
+    state.undo = {kind:'b', dur:S('2.3').dur, recB:state.recB};
+    state.recB = 'keep6'; state.doneView = 'b'; state.narrEdit = false; render();
+    toast(`Keeping 2.3 at ${S('2.3').dur} s. The line will be cut at ${S('2.3').dur} s.`, true);
+  },
+  editNarration(){ state.narrEdit = true; state.doneView = null; if (!resolvedB() || true) { render(); const ta = $('narr'); if (ta){ ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);} } },
+  saveNarration(text){
+    const s = S('2.3'); const ta = $('narr'); text = text != null ? text : (ta ? ta.value : s.narr);
+    text = text.trim(); if (!text) return;
+    const before = {kind:'b', dur:s.dur, recB:state.recB, narr:s.narr, narrDur:s.narrDur};
+    if (text !== s.narr){ s.narr = text; s.narrDur = estimate(text); }
+    state.narrEdit = false;
+    if (fits(s)){ state.recB = 'edited'; state.doneView = 'b'; state.undo = before; render(); toast(`New 2.3 line, about ${fmt(s.narrDur)} s, fits ${s.dur} s.`, true); }
+    else { render(); toast(`The line is still about ${fmt(s.narrDur)} s, longer than ${s.dur} s.`); }
+  },
+  cancelNarration(){ state.narrEdit = false; render(); },
+  keepMaroon(){ state.undo = {kind:'a', recA:state.recA}; state.recA = 'kept'; state.doneView = 'a'; render(); toast('2.2 keeps the maroon coat.', true); },
+  regen: id => regen(id),
+  nextRec(){ state.doneView = null; state.undo = null; render(); },
+  undo(){
+    const u = state.undo; if (!u) return;
+    if (u.kind === 'b'){ const s = S('2.3'); s.dur = u.dur; state.recB = u.recB; if (u.narr){ s.narr = u.narr; s.narrDur = u.narrDur; } }
+    if (u.kind === 'a'){ state.recA = u.recA; }
+    state.undo = null; state.doneView = null; $('toast').hidden = true; render();
+  },
+  confirmVideo: n => confirmVideo(+n || state.scene),
+  makeKeyframes: n => makeKeyframes(+n || state.scene),
+  play(){ const s = cur(); if (state.play && state.play.shot === s.id){ stopPlay(); render(); } else startPlay(s.id); },
+  playScene(n){ if (state.play && state.play.queue){ stopPlay(); render(); return; } const ids = inScene(+n).map(s=>s.id); state.sel[+n] = ids[0]; startPlay(ids[0], ids.slice(1)); },
+  editPrompt(){ state.edit = 'prompt'; render(); $('ed-prompt') && $('ed-prompt').focus(); },
+  editMotion(){ state.edit = 'motion'; render(); $('ed-motion') && $('ed-motion').focus(); },
+  cancelEdit(){ state.edit = null; render(); },
+  saveEdit(){
+    const s = cur();
+    if (state.edit === 'prompt'){
+      const v = $('ed-prompt').value.trim();
+      if (v && v !== s.prompt){ s.prompt = v; if (s.kf === 'back'){ s.kf = 'stale'; s.opened = false; if (scenes[s.scene].video === 'saved'){ scenes[s.scene].video = 'none'; inScene(s.scene).forEach(x => x.video = 'none'); } } state.edit = null; render(); toast(s.kf==='stale' ? `Prompt saved. The ${s.id} keyframe is out of date.` : 'Prompt saved.'); return; }
+    } else if (state.edit === 'motion'){
+      const m = $('ed-motion').value, d = Math.max(2, Math.min(15, Math.round(+$('ed-dur').value || s.dur)));
+      const changed = m !== s.motion || d !== s.dur;
+      s.motion = m; s.dur = d;
+      if (changed && scenes[s.scene].video === 'saved'){ scenes[s.scene].video = 'none'; inScene(s.scene).forEach(x => x.video = 'none'); }
+      state.edit = null; render(); if (changed) toast(`${s.id}: ${m}, ${d} s. The film is ${filmDur()} s.`); return;
+    }
+    state.edit = null; render();
+  },
+  pick(ref){
+    const ta = $('msg');
+    ta.value = ta.value.replace(/@\S*$/, '');
+    if (!state.chips.includes(ref)) state.chips.push(ref);
+    state.picker = false; $('picker').hidden = true; renderThread(); ta.focus();
+  },
+  togglePicker(open){
+    state.picker = open != null ? open : !state.picker;
+    const p = $('picker'); p.hidden = !state.picker;
+    if (state.picker){
+      p.innerHTML = '<h4>Scenes</h4>' + [1,2,3].map(k=>`<button data-act="pick" data-ref="Scene ${k}">Scene ${k}<span>${scenes[k].title}</span></button>`).join('') +
+        '<h4>Shots</h4>' + shots.map(s=>`<button data-act="pick" data-ref="${s.id}">${s.id}<span>${esc(s.framing)} · ${esc(s.prompt)}</span></button>`).join('');
+      p.querySelector('button').focus();
+    }
+  },
+  send(text){
+    const ta = $('msg'); text = (text != null ? text : ta.value).trim();
+    if (!text && !state.chips.length) return;
+    const now = new Date(); const tm = n => String(n).padStart(2,'0');
+    const time = '10:' + tm(45 + state.messages.length);
+    state.messages.push({who:'you', text, chips:state.chips.slice(), time});
+    const reply = {who:'dir', working:true, time:'10:' + tm(46 + state.messages.length)};
+    state.messages.push(reply);
+    ta.value = ''; state.chips = []; state._scrollThread = true; renderThread();
+    setTimeout(() => {
+      reply.working = false;
+      const pointed = state.messages[state.messages.length-2].chips;
+      reply.text = pointed.length ? `Noted for ${pointed.join(', ')}. I would make that change in the prompts and show you new keyframes.` : 'Noted. I would make that change in the prompts and show you new keyframes.';
+      state._scrollThread = true; renderThread();
+    }, 1400);
+  },
+  atInsert(ref){ if (!state.chips.includes(ref)) state.chips.push(ref); state.dirOpen = true; render(); $('msg').focus(); },
+  unchip(i){ state.chips.splice(+i,1); renderThread(); },
+  toggleDirector(){ state.dirOpen = !state.dirOpen; renderTop(); if (state.dirOpen) $('msg').focus({preventScroll:true}); }
+};
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
+  const a = el.dataset.act;
+  if (el.tagName === 'BUTTON' && el.closest('form')) e.preventDefault();
+  switch(a){
+    case 'tab': return actions.tab(el.dataset.tab);
+    case 'scene': return actions.scene(el.dataset.scene);
+    case 'open-shot': if (window.matchMedia('(max-width: 899px)').matches && el.closest('.director')) { state.dirOpen = false; } return actions.openShot(el.dataset.shot);
+    case 'make-8s': return actions.make8s();
+    case 'keep-6s': return actions.keep6();
+    case 'edit-narration': return actions.editNarration();
+    case 'save-narration': return actions.saveNarration();
+    case 'cancel-narration': return actions.cancelNarration();
+    case 'keep-maroon': return actions.keepMaroon();
+    case 'regen': return actions.regen(el.dataset.shot);
+    case 'next-rec': return actions.nextRec();
+    case 'undo': return actions.undo();
+    case 'toast-close': $('toast').hidden = true; return;
+    case 'confirm-video': return actions.confirmVideo(el.dataset.scene);
+    case 'make-keyframes': return actions.makeKeyframes(el.dataset.scene);
+    case 'play': return actions.play();
+    case 'play-scene': return actions.playScene(el.dataset.scene);
+    case 'edit-prompt': return actions.editPrompt();
+    case 'edit-motion': return actions.editMotion();
+    case 'cancel-edit': return actions.cancelEdit();
+    case 'save-edit': return actions.saveEdit();
+    case 'at': return actions.togglePicker();
+    case 'pick': return actions.pick(el.dataset.ref);
+    case 'send': return actions.send();
+    case 'at-insert': return actions.atInsert(el.dataset.ref);
+    case 'unchip': return actions.unchip(el.dataset.i);
+    case 'toggle-director': return actions.toggleDirector();
+  }
+});
+document.addEventListener('submit', e => { e.preventDefault(); actions.saveEdit(); });
+document.addEventListener('click', e => { if (state.picker && !e.target.closest('#picker') && !e.target.closest('[data-act="at"]')) actions.togglePicker(false); }, true);
+const msg = document.getElementById('msg');
+msg.addEventListener('input', () => { if (/(^|\s)@\S*$/.test(msg.value)) { if (!state.picker) actions.togglePicker(true), msg.focus(); } });
+msg.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); actions.send(); } });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape'){ if (state.picker){ actions.togglePicker(false); msg.focus(); } else if (state.dirOpen && window.matchMedia('(max-width: 899px)').matches){ actions.toggleDirector(); } }
+});
+
+window.LastFerry = { state, actions, render };
+render();
+})();
+</script>
+</body>
+</html>

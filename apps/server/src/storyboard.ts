@@ -1,8 +1,15 @@
+import { recordHumanFields } from "./application/human-fields.js";
+import { assertAcceptedNarrationDurationFloor } from "./application/publication-validation.js";
+import { assertUndoUnused, captureMediaUndo, restoreCanonicalUndo, restoreMediaUndo, restoreNarrationWorkspaceUndo, type MediaUndo } from "./storyboard-history.js";
+import { OPENAI_SPEECH_VOICES } from "@openslate/providers";
 import type { FastifyInstance } from "fastify";
-import { digest, invariant, newId, shotIntentDigest } from "@openslate/core";
-import type { ProjectRecord, ShotRecord } from "@openslate/core";
+import { clipAudioDefault, digest, invariant, isClipAudioGain, newId, shotIntentDigest } from "@openslate/core";
+import { editedPrompt } from "./application/shot-prompts.js";
+import type { ProjectRecord, ShotRecord, VisualStyle } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationAudio } from "./narration/types.js";
+import { assertNoRunningAttempts } from "./project-library.js";
+import { projectPersonalVoices, assertPersonalVoiceCurrent } from "./narration/personal-voices.js";
 import type { NodeBinding } from "./execution/engine.js";
 
 type Edit = {
@@ -10,61 +17,57 @@ type Edit = {
   kind:
     | "treatment"
     | "scene"
+    | "sceneTitle"
+    | "deleteScene"
+    | "moveScene"
     | "addScene"
     | "shot"
+    | "shotFields"
     | "addShot"
     | "deleteShot"
+    | "deleteShots"
     | "moveShot"
     | "narration"
     | "undo"
-    | "soundtrack";
+    | "soundtrack"
+    | "shotTiming"
+    | "shotPerformance"
+    | "shotClipAudio"
+    /** Internal only (not on the HTTP route): the person's choice on a Director style card saves this look. */
+    | "visualStyle";
   id?: string;
   sceneId?: string;
   beforeId?: string;
+  fields?: Partial<Pick<ShotRecord, "imagePrompt" | "motion" | "desiredFrames" | "videoPrompt" | "framing" | "purpose" | "action">>;
   field?: string;
   value?: string;
   commandId?: string;
+  withShots?: boolean;
+  /** shotTiming: new lengths for several shots as one command (fit to the song), each 3–15 s. */
+  timings?: Array<{ id: string; desiredFrames: number }>;
+  /** deleteShots: several shots removed as one command, so one Undo restores them all. */
+  ids?: string[];
+  /** visualStyle: the chosen look, without its app-issued revisionId. */
+  style?: Omit<VisualStyle, "revisionId">;
 };
+/** Set when a Director tool or a Director confirmation card ran the person's command. Never changes the edit itself. */
+export type StoryboardEditOrigin = { director: { requestId: string; epochId: string; invocationId: string } | { noteId: string } };
 type SavedEdit = {
   id: string;
   before: ProjectRecord;
   headVersion: number;
   requestId: string;
+  input?: Edit;
+  undo?: MediaUndo;
 };
 const text = { type: "string", minLength: 1, maxLength: 160 };
-/** A direct edit is ordinary writing. Preserve independent prompt details while applying the human's changed direction. */
-function editedPrompt(
-  previous: string,
-  shot: ShotRecord,
-  kind: "image" | "video",
-): string {
-  const header = "OpenSlate current direction:\n",
-    separator = "\nReference details (retain only where consistent):\n";
-  const split = previous.startsWith(header) ? previous.indexOf(separator) : -1;
-  const original =
-    split >= 0 ? previous.slice(split + separator.length) : previous;
-  const direction = [
-    shot.purpose,
-    shot.action,
-    shot.framing,
-    ...(kind === "video" ? [`Camera movement: ${shot.motion}`] : []),
-  ]
-    .filter(Boolean)
-    .join(". ");
-  const next = `${header}${direction}${separator}${original}`;
-  invariant(
-    next.length <= 16000,
-    "VALIDATION_ERROR",
-    "This direction is too long. Shorten it before saving.",
-  );
-  return next;
-}
 /** Human direct manipulation. No model execution, paid grant or automatic generation. */
 export function editStoryboard(
   s: ProductionService,
   projectId: string,
   input: Edit,
   key: string,
+  origin?: StoryboardEditOrigin,
 ) {
   s.recovery.assertWritable(projectId);
   return s.store.command(
@@ -79,12 +82,14 @@ export function editStoryboard(
         "The storyboard changed; reload before saving this edit.",
       );
       invariant(
-        !s.store
+        ["treatment", "scene", "shot", "shotFields", "narration"].includes(input.kind) || !s.store
           .list<{ state: string }>("plan_import", projectId)
           .some((x) => x.state === "pending"),
         "IMPORT_PENDING",
         "Confirm or discard the imported plan before editing.",
       );
+      const undo = captureMediaUndo(s, projectId);
+      let undoing: SavedEdit | undefined;
       let next = structuredClone(before);
       const changed = new Set<string>();
       let global = false;
@@ -119,6 +124,28 @@ export function editStoryboard(
         next.shots
           .filter((x) => x.sceneId === row.id)
           .forEach((x) => changed.add(x.id));
+      } else if (input.kind === "sceneTitle") {
+        const row = next.scenes.find(x => x.id === input.id);
+        invariant(row, "NOT_FOUND", "Scene does not belong to this film.");
+        row.title = value();
+        row.revisionId = newId();
+      } else if (input.kind === "deleteScene") {
+        const row = next.scenes.find(x => x.id === input.id);
+        invariant(row, "NOT_FOUND", "Scene does not belong to this film.");
+        const shots = next.shots.filter(x => x.sceneId === row.id);
+        invariant(!shots.length || input.withShots === true, "SCENE_HAS_SHOTS", "Confirm deletion of this scene and its shots.");
+        assertNoRunningAttempts(s, projectId, new Set(shots.map(x => x.id)));
+        for (const shot of shots) changed.add(shot.id);
+        next.shots = next.shots.filter(x => x.sceneId !== row.id);
+        next.scenes = next.scenes.filter(x => x.id !== row.id);
+        global = true;
+      } else if (input.kind === "moveScene") {
+        const row = next.scenes.find(x => x.id === input.id);
+        invariant(row, "NOT_FOUND", "Scene does not belong to this film.");
+        invariant(!input.beforeId || (input.beforeId !== row.id && next.scenes.some(x => x.id === input.beforeId)), "VALIDATION_ERROR", "Invalid reorder target.");
+        next.scenes = next.scenes.filter(x => x.id !== row.id);
+        next.scenes.splice(input.beforeId ? next.scenes.findIndex(x => x.id === input.beforeId) : next.scenes.length, 0, row);
+        global = true;
       } else if (input.kind === "addScene") {
         next.scenes.push({
           id: newId(),
@@ -137,6 +164,7 @@ export function editStoryboard(
           revisionId: newId(),
           sceneId: input.sceneId!,
           purpose: "New shot",
+          promptState: "placeholder",
           action: "Describe the action",
           framing: "Describe the visual direction",
           motion: "Describe the camera movement",
@@ -148,62 +176,95 @@ export function editStoryboard(
           cueId: null,
         });
         global = true;
-      } else if (input.kind === "shot") {
-        const row = shot(),
-          prior = structuredClone(row);
-        invariant(
-          [
-            "purpose",
-            "action",
-            "framing",
-            "motion",
-            "desiredFrames",
-            "imagePrompt",
-            "videoPrompt",
-          ].includes(input.field ?? ""),
-          "VALIDATION_ERROR",
-          "Unknown shot field.",
-        );
-        if (input.field === "desiredFrames") {
-          const frames = Number(value());
-          invariant(
-            Number.isSafeInteger(frames) && frames >= 90 && frames <= 450,
-            "VALIDATION_ERROR",
-            "Use 3–15 seconds per shot.",
-          );
-          row.desiredFrames = frames;
-        } else
-          row[
-            input.field as
-              | "purpose"
-              | "action"
-              | "framing"
-              | "motion"
-              | "imagePrompt"
-              | "videoPrompt"
-          ] = value();
+      } else if (input.kind === "shot" || input.kind === "shotFields") {
+        const row = shot(), prior = structuredClone(row);
+        const fields = input.kind === "shotFields" ? input.fields : { [input.field ?? ""]: input.field === "desiredFrames" ? Number(value()) : value() };
+        invariant(fields && typeof fields === "object" && !Array.isArray(fields) && Object.keys(fields).length > 0 &&
+          Object.keys(fields).every(field => ["purpose", "action", "framing", "motion", "desiredFrames", "imagePrompt", "videoPrompt"].includes(field)) &&
+          (input.kind !== "shotFields" || input.field === undefined && input.value === undefined),
+          "VALIDATION_ERROR", "Choose one or more supported shot fields.");
+        const names = Object.keys(fields);
+        for (const field of names) {
+          const entry = fields[field as keyof typeof fields];
+          if (field === "desiredFrames") {
+            invariant(typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 90 && entry <= 450,
+              "VALIDATION_ERROR", "Use 3–15 seconds per shot.");
+            row.desiredFrames = entry;
+          } else {
+            invariant(typeof entry === "string" && entry.trim() && entry.length <= 16000,
+              "VALIDATION_ERROR", "Enter a nonempty value.");
+            row[field as "purpose" | "action" | "framing" | "motion" | "imagePrompt" | "videoPrompt"] = entry.trim();
+          }
+        }
+        if (names.some(field => ["action", "framing", "imagePrompt", "videoPrompt"].includes(field))) row.promptState = "ready";
         row.revisionId = newId();
         changed.add(row.id);
-        if (["purpose", "action", "framing"].includes(input.field ?? "")) {
+        // Build derived prompts from the complete new direction once. Explicit prompts win.
+        if (names.some(field => ["purpose", "action", "framing"].includes(field)) && !names.includes("imagePrompt"))
           row.imagePrompt = editedPrompt(prior.imagePrompt, row, "image");
+        if (names.some(field => ["purpose", "action", "framing", "motion"].includes(field)) && !names.includes("videoPrompt"))
           row.videoPrompt = editedPrompt(prior.videoPrompt, row, "video");
-        } else if (input.field === "motion")
-          row.videoPrompt = editedPrompt(prior.videoPrompt, row, "video");
-        const cue = next.cues.find((cue) => cue.id === row.cueId);
+        const cue = next.cues.find(cue => cue.id === row.cueId);
         row.promptIntent = {
-          image:
-            input.field === "videoPrompt"
-              ? prior.promptIntent.image
-              : shotIntentDigest(row, "image", cue),
-          video:
-            input.field === "imagePrompt"
-              ? prior.promptIntent.video
-              : shotIntentDigest(row, "video", cue),
+          image: names.every(field => field === "videoPrompt") ? prior.promptIntent.image : shotIntentDigest(row, "image", cue),
+          video: names.every(field => field === "imagePrompt") ? prior.promptIntent.video : shotIntentDigest(row, "video", cue),
         };
+      } else if (input.kind === "shotTiming") {
+        const timings = input.timings;
+        invariant(Array.isArray(timings) && timings.length > 0 && timings.length <= 64 &&
+          new Set(timings.map(row => row.id)).size === timings.length && input.field === undefined && input.value === undefined,
+          "VALIDATION_ERROR", "Give one length for each of up to 64 distinct shots.");
+        for (const timing of timings) {
+          const row = next.shots.find(x => x.id === timing.id);
+          invariant(row, "NOT_FOUND", "Shot does not belong to this film.");
+          invariant(Number.isSafeInteger(timing.desiredFrames) && timing.desiredFrames >= 90 && timing.desiredFrames <= 450,
+            "VALIDATION_ERROR", "Use 3–15 seconds per shot.");
+          if (row.desiredFrames === timing.desiredFrames) continue;
+          row.desiredFrames = timing.desiredFrames;
+          row.revisionId = newId();
+          const cue = next.cues.find(cue => cue.id === row.cueId);
+          // Length is video intent only: the keyframe's intent and both prompts stay as they are.
+          row.promptIntent = { image: row.promptIntent.image, video: shotIntentDigest(row, "video", cue) };
+          changed.add(row.id);
+        }
+      } else if (input.kind === "shotPerformance") {
+        // Music video: mark a shot as sung to camera (made by lip sync) or ordinary. value "singing" | "none".
+        const row = shot();
+        invariant((input.value === "singing" || input.value === "none") && input.field === undefined,
+          "VALIDATION_ERROR", "Choose singing or none.");
+        if (input.value === "singing") row.performance = "singing"; else delete row.performance;
+        row.revisionId = newId();
+        changed.add(row.id);
+      } else if (input.kind === "shotClipAudio") {
+        // Keep or mute the clip's own sound, or set its level. A mix choice only: the shot's revision, intent and
+        // media stay as they are. field "keep" ("true" | "false"), "gainMilliDb" (-60000..0) or "default" (follow the project).
+        const row = shot(), fallback = clipAudioDefault(next);
+        if (input.field === "keep") {
+          invariant(input.value === "true" || input.value === "false", "VALIDATION_ERROR", "Choose keep or mute.");
+          row.clipAudio = { keep: input.value === "true", ...(row.clipAudio?.gainMilliDb !== undefined ? { gainMilliDb: row.clipAudio.gainMilliDb } : {}) };
+        } else if (input.field === "gainMilliDb") {
+          const gain = Number(input.value);
+          invariant(input.value !== undefined && input.value.trim() !== "" && isClipAudioGain(gain), "VALIDATION_ERROR", "Use a gain between -60 and 0 dB.");
+          row.clipAudio = { keep: row.clipAudio?.keep ?? fallback.keep, gainMilliDb: gain };
+        } else {
+          invariant(input.field === "default" && (input.value === undefined || input.value === ""), "VALIDATION_ERROR", "Unknown clip sound field.");
+          delete row.clipAudio;
+        }
+        global = true;
       } else if (input.kind === "deleteShot") {
         const row = shot();
+        assertNoRunningAttempts(s, projectId, new Set([row.id]));
         changed.add(row.id);
         next.shots = next.shots.filter((x) => x.id !== row.id);
+        global = true;
+      } else if (input.kind === "deleteShots") {
+        const ids = input.ids;
+        invariant(Array.isArray(ids) && ids.length > 0 && ids.length <= 64 && new Set(ids).size === ids.length && input.id === undefined,
+          "VALIDATION_ERROR", "Choose up to 64 distinct shots to delete.");
+        for (const id of ids) invariant(next.shots.some(x => x.id === id), "NOT_FOUND", "Shot does not belong to this film.");
+        assertNoRunningAttempts(s, projectId, new Set(ids));
+        for (const id of ids) changed.add(id);
+        next.shots = next.shots.filter(x => !ids.includes(x.id));
         global = true;
       } else if (input.kind === "moveShot") {
         const row = shot();
@@ -253,16 +314,22 @@ export function editStoryboard(
         else {
           invariant(
             input.field === "voice" &&
-              ["stock", "personal"].includes(input.value ?? ""),
+              ["stock", "personal", ...OPENAI_SPEECH_VOICES].includes(input.value ?? ""),
             "VALIDATION_ERROR",
             "Invalid voice choice.",
           );
-          draft.voice = input.value as "stock" | "personal";
+          if (input.value === "personal") {
+            const ready = projectPersonalVoices(s.store, projectId).filter(x => x.ready);
+            invariant(ready.length > 0, "PERSONAL_VOICE_REQUIRED", "Register a ready personal voice before selecting personal narration.");
+            assertPersonalVoiceCurrent(s.store, projectId, ready[0]!.id);
+          }
+          draft.voice = input.value as NonNullable<ShotRecord["narration"]>["voice"];
         }
         const writingChanged =
           digest(
             before.shots.find((shot) => shot.id === row.id)?.narration ?? null,
           ) !== digest(draft);
+        if (writingChanged) delete row.narrationFit;
         row.narration = draft;
         // The human's no-narration choice detaches this shot only. Canonical recordings remain historical evidence.
         if (draft.mode === "none") row.cueId = null;
@@ -295,6 +362,8 @@ export function editStoryboard(
               "NOT_FOUND",
               "Choose a recording owned by this film.",
             );
+            const label = s.store.get<{ label: string }>("audio_library_label", audio.id);
+            s.store.put("audio_library_label", audio.id, projectId, { label: label?.label ?? "Music", role: "music" });
             next.soundtrack = {
               audioId: audio.id,
               gainMilliDb: next.soundtrack?.gainMilliDb ?? -18000,
@@ -338,18 +407,21 @@ export function editStoryboard(
           next.soundtrack.gainMilliDb = gain;
         }
         global = true;
+      } else if (input.kind === "visualStyle") {
+        invariant(input.style && typeof input.style.styleId === "string", "VALIDATION_ERROR", "Choose a look.");
+        invariant(input.style.anchors.referenceArtifactIds.every(id => next.artifacts.some(a => a.artifactId === id)), "SCOPE_DENIED", "Style references an unknown artifact");
+        next.visualStyle = { ...structuredClone(input.style), revisionId: newId() };
+        global = true;
       } else if (input.kind === "undo") {
         const saved = s.store.get<SavedEdit>(
           "storyboard_edit",
           input.commandId ?? "",
         );
-        invariant(
-          saved &&
-            saved.before.id === projectId &&
-            saved.headVersion === before.headVersion,
-          "REVISION_CONFLICT",
-          "Only the latest unchanged edit can be undone.",
-        );
+        invariant(saved?.before.id === projectId, "UNDO_UNAVAILABLE", "This storyboard command is unavailable.");
+        assertUndoUnused(s, projectId, saved.undo);
+        invariant(saved.headVersion === before.headVersion && s.store.list<SavedEdit>("storyboard_edit", projectId).at(-1)?.id === saved.id && saved.input?.kind !== "undo",
+          "UNDO_UNAVAILABLE", "Only the latest unchanged command can be undone.");
+        undoing = saved;
         next = {
           ...structuredClone(saved.before),
           headVersion: before.headVersion,
@@ -370,101 +442,71 @@ export function editStoryboard(
         "VALIDATION_ERROR",
         "Keep the film within 64 shots and six minutes.",
       );
-      const previous = s.store
-        .list<SavedEdit>("storyboard_edit", projectId)
-        .at(-1);
-      const inherited = previous
-        ? s.store
-            .list<{ ownerId: string; scopeId: string; active: boolean }>(
-              "hold",
-              projectId,
-            )
-            .filter((x) => x.active && x.ownerId === previous.requestId)
-            .map((x) => x.scopeId)
-        : [];
-      const scopes =
-        global || inherited.includes(projectId)
-          ? [projectId]
-          : [...new Set([...changed, ...inherited])].filter(
-              (id) =>
-                before.shots.some((x) => x.id === id) ||
-                before.scenes.some((x) => x.id === id),
-            );
+      const scopes = global ? [projectId] : [...changed];
       const actor = s.beginRequest(
         projectId,
         "local-user",
         `Storyboard edit: ${input.kind}${input.field ? ` ${input.field}` : ""}. Preserve unaffected work and replan only what this edit requires.`,
         {
+          source: "app",
           key: `storyboard:${key}`,
           editing: true,
+          concurrency: "alongside",
+          holdScopeIds: [], // Detached media below determines the exact transient holds.
           scopeIds: scopes.length ? scopes : [projectId],
-          ...(inherited.length
-            ? { continuationRequestId: previous!.requestId }
-            : {}),
         },
       );
-      const request = s.store.get<Record<string, unknown>>(
-        "message",
-        actor.requestId,
-      )!;
-      s.store.put("message", actor.requestId, projectId, {
-        ...request,
-        source: "storyboard",
-      });
       const bindings = s.store
         .list<NodeBinding>("node_binding", projectId)
         .filter(
           (x) => x.state === "active" && x.planId === before.activePlanId,
         );
-      const changedTiming = new Set(
-        next.shots
-          .filter((row) => {
-            const previous = before.shots.find((old) => old.id === row.id);
-            return (
-              previous &&
-              shotIntentDigest(
-                previous,
-                "video",
-                before.cues.find((cue) => cue.id === previous.cueId),
-              ) !==
-                shotIntentDigest(
-                  row,
-                  "video",
-                  next.cues.find((cue) => cue.id === row.cueId),
-                )
-            );
-          })
-          .map((row) => row.id),
-      );
+      const intentChanged = (shotId: string | null | undefined, kind: "image" | "video") => {
+        const old = before.shots.find(shot => shot.id === shotId);
+        const current = next.shots.find(shot => shot.id === shotId);
+        return !!old && !!current &&
+          shotIntentDigest(old, kind, before.cues.find(cue => cue.id === old.cueId)) !==
+          shotIntentDigest(current, kind, next.cues.find(cue => cue.id === current.cueId));
+      };
+      const changedTiming = new Set(next.shots.filter(row => intentChanged(row.id, "video")).map(row => row.id));
+      const effectiveInput = undoing?.input ?? input;
+      const shotFields = effectiveInput.kind === "shotFields" ? Object.keys(effectiveInput.fields ?? {}) :
+        effectiveInput.kind === "shot" ? [effectiveInput.field ?? ""] : effectiveInput.kind === "shotTiming" ? ["desiredFrames"] : null;
+      const mediaChanged = (shotId: string | null | undefined, kind: "image" | "video") => {
+        const old = before.shots.find(shot => shot.id === shotId);
+        const current = next.shots.find(shot => shot.id === shotId);
+        const prompt = kind === "image" ? "imagePrompt" : "videoPrompt";
+        return !old || !current || intentChanged(shotId, kind) || old[prompt] !== current[prompt];
+      };
       const affected = new Set(
         bindings
           .filter(
             (x) =>
-              ["timeline", "render"].includes(x.node.kind) ||
-              input.kind === "treatment" ||
-              (input.kind === "undo" &&
-                (next.brief !== before.brief || next.story !== before.story)) ||
-              (changed.has(x.node.shotId ?? "") &&
+              // The performance flag changes how the next clip is made, never the current media: the shown clip
+              // stays until its lip-synced replacement succeeds.
+              input.kind !== "shotPerformance" && input.kind !== "visualStyle" && (
+              (input.kind !== "sceneTitle" && ["timeline", "render"].includes(x.node.kind)) ||
+              ((input.kind === "treatment" || input.kind === "scene") &&
+                (x.node.kind === "image" || x.node.kind === "video") &&
+                intentChanged(x.node.shotId, x.node.kind)) ||
+              (input.kind !== "treatment" && input.kind !== "scene" && changed.has(x.node.shotId ?? "") &&
+                // Undo may change only a shot's scene or metadata; media follows its exact intent and prompt.
+                (input.kind !== "undo" || (x.node.kind !== "image" && x.node.kind !== "video") ||
+                  mediaChanged(x.node.shotId, x.node.kind)) &&
                 !(
-                  input.kind === "narration" &&
+                  effectiveInput.kind === "narration" &&
                   (x.node.kind === "image" ||
                     (x.node.kind === "video" &&
                       !changedTiming.has(x.node.shotId ?? "")))
                 ) &&
                 !(
-                  input.kind === "shot" &&
-                  ["motion", "desiredFrames", "videoPrompt"].includes(
-                    input.field ?? "",
-                  ) &&
+                  shotFields?.every(field => ["motion", "desiredFrames", "videoPrompt"].includes(field)) &&
                   x.node.kind === "image"
                 ) &&
                 !(
-                  input.kind === "shot" &&
-                  ["imagePrompt", "videoPrompt", "action"].includes(
-                    input.field ?? "",
-                  ) &&
+                  shotFields?.every(field => ["imagePrompt", "videoPrompt", "action"].includes(field)) &&
                   !["image", "video"].includes(x.node.kind)
-                )),
+                ))),
           )
           .map((x) => x.id),
       );
@@ -483,13 +525,28 @@ export function editStoryboard(
             grew = true;
           }
       }
-      for (const b of bindings.filter((x) => affected.has(x.id)))
+      // Hold only shots whose queued media is detached, never music/order/add operations.
+      // The surrounding command transaction rolls back these holds on failure.
+      const holdFree = ["soundtrack", "moveShot", "moveScene", "sceneTitle", "deleteScene", "addScene", "addShot", "shotPerformance", "shotClipAudio", "visualStyle"].includes(input.kind);
+      if (!holdFree)
+        for (const scopeId of new Set(bindings.filter(b => affected.has(b.id) && before.shots.some(shot => shot.id === b.node.shotId)).map(b => b.node.shotId!)))
+          s.engine.setHold(projectId, { scopeId, ownerId: actor.requestId });
+      undo.bindings = bindings.filter(x => affected.has(x.id));
+      for (const b of undo.bindings) {
+        const { retainedTake: _retained, ...detached } = b;
         s.store.put("node_binding", b.id, projectId, {
-          ...b,
+          ...detached,
           candidateId: null,
           outputs: {},
+          ...(Object.values(b.outputs)[0] || b.outdated ? { outdated: {
+            at: new Date().toISOString(),
+            fields: [...new Set([...(Object.keys(b.outputs).length ? [] : b.outdated?.fields ?? []), ...(input.kind === "shotFields" ? Object.keys(input.fields!) : input.kind === "shotTiming" ? ["desiredFrames"] : [input.field ?? input.kind])])],
+            previous: Object.values(b.outputs)[0] ?? b.outdated!.previous,
+          } } : {}),
         });
+      }
       // Existing in-flight attempts retain their durable receipts and cannot publish into detached candidates.
+      assertAcceptedNarrationDurationFloor(next);
       next = s.store.saveProject(
         { ...next, revisionId: newId() },
         before.headVersion,
@@ -497,18 +554,31 @@ export function editStoryboard(
       s.store.insert("project_revision", next.revisionId, projectId, {
         project: next,
       });
+      recordHumanFields(s.store, before, next, actor);
+      if (undoing) {
+        restoreMediaUndo(s, next, undoing.undo);
+        if (undoing.undo) restoreCanonicalUndo(s, next, actor.requestId, undoing.undo);
+        if (undoing.undo) restoreNarrationWorkspaceUndo(s, next.id, actor.requestId, undoing.undo);
+      }
       const id = newId();
       s.store.insert("storyboard_edit", id, projectId, {
         id,
         before,
         headVersion: next.headVersion,
         requestId: actor.requestId,
+        input,
+        undo,
+        ...(origin ? { origin } : {}),
       });
+      for (const hold of s.store.list<{ id: string; ownerId: string; active: boolean }>("hold", projectId))
+        if (hold.active && hold.ownerId === actor.requestId)
+          s.engine.releaseHold(projectId, hold.id, actor.requestId);
       s.store.appendEvent(projectId, "storyboard.edited", {
         commandId: id,
         kind: input.kind,
         headVersion: next.headVersion,
         affectedNodeIds: [...affected],
+        ...(origin ? { origin } : {}),
       });
       return {
         commandId: id,
@@ -535,14 +605,22 @@ export function registerStoryboard(
               enum: [
                 "treatment",
                 "scene",
+                "sceneTitle",
+                "deleteScene",
+                "moveScene",
                 "addScene",
                 "shot",
+                "shotFields",
                 "addShot",
                 "deleteShot",
+                "deleteShots",
                 "moveShot",
                 "narration",
                 "undo",
                 "soundtrack",
+                "shotTiming",
+                "shotPerformance",
+                "shotClipAudio",
               ],
             },
             expectedHeadVersion: { type: "integer", minimum: 0 },
@@ -550,8 +628,16 @@ export function registerStoryboard(
             sceneId: text,
             beforeId: text,
             commandId: text,
+            withShots: { type: "boolean" },
+            ids: { type: "array", minItems: 1, maxItems: 64, uniqueItems: true, items: text },
+            fields: { type: "object", additionalProperties: false, minProperties: 1, properties: {
+              ...Object.fromEntries(["imagePrompt", "motion", "videoPrompt", "framing", "purpose", "action"].map(field => [field, { type: "string", minLength: 1, maxLength: 16000 }])),
+              desiredFrames: { type: "integer", minimum: 90, maximum: 450 },
+            } },
             field: text,
             value: { type: "string", maxLength: 16000 },
+            timings: { type: "array", minItems: 1, maxItems: 64, items: { type: "object", additionalProperties: false, required: ["id", "desiredFrames"],
+              properties: { id: text, desiredFrames: { type: "integer", minimum: 90, maximum: 450 } } } },
           },
         },
       },

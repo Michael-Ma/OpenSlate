@@ -1,6 +1,7 @@
 import { parse } from "@babel/parser";
 import { Worker } from "node:worker_threads";
 import { canonical, digest, DomainError, invariant } from "../common.js";
+import { explicitProjectAspect, KEYFRAME_CANVAS } from "../aspect.js";
 import type {
   ArtifactRef,
   CompileContext,
@@ -31,6 +32,8 @@ export interface SceneOperation {
   nodeId?: string;
   frameNodeId?: string;
   frame?: ArtifactRef;
+  /** Video only: exact reviewed settings that replace the retained ones (a lip-sync shot binds its song segment). */
+  settings?: { [key: string]: JsonValue };
 }
 const fail = (condition: unknown, message: string): void =>
   invariant(condition, "SCENE_PLAN_INVALID", message);
@@ -246,7 +249,8 @@ function verifyBase(
   context: CompileContext,
 ): void {
   // Verify the immutable source and cached operation shape while permitting the selected shot's
-  // newer intent. Unchanged branches still have to match every cached field.
+  // newer intent. Preserved branches keep their exact operation specifications;
+  // a narration-only revision can update their shot metadata without new work.
   const source = declaration(base.source),
     revision = get(arr(source.arguments)[0]!, "baseRevision").value;
   fail(typeof revision === "string", "Saved revision is missing");
@@ -332,6 +336,8 @@ function verifyBase(
               : {}),
             specDigest: old.specDigest,
           }
+        : next?.specDigest === old.specDigest
+        ? { ...next, shotRevisionId: old.shotRevisionId }
         : next;
     fail(
       next && canonical(value) === canonical(old),
@@ -430,8 +436,14 @@ export function composeScenePlan(
               "nodeId",
               "frameNodeId",
               "frame",
+              "settings",
             ].includes(key),
-          ),
+          ) &&
+          (operation.settings === undefined ||
+            (operation.kind === "video" &&
+              operation.settings !== null &&
+              typeof operation.settings === "object" &&
+              !Array.isArray(operation.settings))),
       ),
     "Choose distinct shots for one bounded picture operation",
   );
@@ -594,6 +606,7 @@ export function composeScenePlan(
     intent: Ast,
     frame: Ast,
     deferredImageWork = false,
+    reviewedSettings?: SceneOperation["settings"],
   ): void => {
     const expression = operationCall(node),
       options = resolve(arr(expression.arguments)[1]!),
@@ -644,7 +657,8 @@ export function composeScenePlan(
       duration = prior;
     }
     const settings = json(
-      node.profileId === profile.id ? (node.args.settings ?? {}) : {},
+      reviewedSettings ??
+        (node.profileId === profile.id ? (node.args.settings ?? {}) : {}),
     );
     for (const [name, value] of Object.entries({
       intent,
@@ -686,6 +700,12 @@ export function composeScenePlan(
     const intent = add(call(receiver, "shot", [lit(shot!.id)]), 0),
       existing = chooseNode(base, operation);
     if (operation.kind === "image") {
+      // A Codex keyframe of a project with a chosen format uses that aspect's canvas; otherwise the profile's preference.
+      const aspect =
+          profile!.adapter === "codex-image"
+            ? explicitProjectAspect(working.project)
+            : null,
+        canvas = aspect ? KEYFRAME_CANVAS[aspect] : null;
       const options = {
         intent,
         profile: lit(profile!.id),
@@ -697,7 +717,8 @@ export function composeScenePlan(
         ),
         width: number(
           Number(
-            profile!.configuration?.settings?.width ??
+            canvas?.width ??
+              profile!.configuration?.settings?.width ??
               (existing?.profileId === profile!.id
                 ? existing.args.width
                 : undefined) ??
@@ -706,7 +727,8 @@ export function composeScenePlan(
         ),
         height: number(
           Number(
-            profile!.configuration?.settings?.height ??
+            canvas?.height ??
+              profile!.configuration?.settings?.height ??
               (existing?.profileId === profile!.id
                 ? existing.args.height
                 : undefined) ??
@@ -782,7 +804,7 @@ export function composeScenePlan(
         frame = imageReference(image!);
       }
       if (existing) {
-        updateVideo(existing, shot!, profile!, intent, frame);
+        updateVideo(existing, shot!, profile!, intent, frame, false, operation.settings);
         changed.add(existing.id);
       } else {
         const duration = sceneVideoDurationFrames(shot!, profile!);
@@ -797,6 +819,9 @@ export function composeScenePlan(
                   videoProfile: lit(profile!.id),
                   motionPrompt: lit(shot!.videoPrompt),
                   seconds: number(duration / 30),
+                  ...(operation.settings
+                    ? { settings: json(operation.settings) }
+                    : {}),
                 }),
               ]),
             }),
@@ -812,6 +837,9 @@ export function composeScenePlan(
                 firstFrame: call(receiver, "approvedImage", [frame, review]),
                 prompt: lit(shot!.videoPrompt),
                 seconds: number(duration / 30),
+                ...(operation.settings
+                  ? { settings: json(operation.settings) }
+                  : {}),
               }),
             ]),
           ),
@@ -820,8 +848,7 @@ export function composeScenePlan(
     }
   }
   if (!base) obj(statements.at(-1)).argument = list(outputs);
-  const compiled = compilePlan(printRestrictedPlan(root), working),
-    selectedShots = new Set(operations.map((operation) => operation.shotId));
+  const compiled = compilePlan(printRestrictedPlan(root), working);
   const affected = new Set([...changed, ...changedVideos]);
   for (let pass = 0; pass < (base?.nodes.length ?? 0); pass++)
     for (const node of base!.nodes)
@@ -845,7 +872,7 @@ export function composeScenePlan(
     )
       continue;
     const unchanged =
-      selectedShots.has(old.shotId ?? "") && next!.specDigest === old.specDigest
+      next!.specDigest === old.specDigest
         ? { ...next, shotRevisionId: old.shotRevisionId }
         : next;
     invariant(

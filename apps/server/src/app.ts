@@ -1,12 +1,25 @@
+import { registerDirectorReviewSetting } from "./application/keyframe-review.js";
+import { CODEX_PROTOCOL_VERSION } from "@openslate/director";
+import { safeNativeDiagnostic } from "./application/native-diagnostics.js";
+import { toolVersion } from "./installation-status.js";
+import { registerDirectorProposals } from "./application/director-proposals.js";
+import { registerShotTakes } from "./shot-takes.js";
+import { registerDirectorNotes } from "./application/director-notes.js";
+import { SceneConfirmationRunner, registerSceneConfirmations } from "./scene-confirmations.js";
+import { registerNarrationFit } from "./narration-fit.js";
+import { requiredCommandKey } from "./application/command-key.js";
+import { registerGenerationOverview } from "./generation-overview.js";
+import { GenerationAttemptBlockedError } from "./application/generation-blockers.js";
 import { registerSceneGeneration } from './scene-generation.js';
 import { continueEditsSchema, type ContinueEdits } from './application/pending-edit-continuation.js';
 import { registerStoryboard } from "./storyboard.js";
 import { registerPlanImports } from "./plan-imports.js";
+import { registerProjectLibrary } from "./project-library.js";
 import { registerAssetLibrary } from "./asset-library.js";
-import { registerGenerationPermission } from "./generation-permission.js";
+import { registerCharacters } from "./characters.js";
 import { registerProjectEventStream } from "./application/project-event-stream.js";
 import { registerStudioSessions, type StudioSessions } from "./studio-sessions.js";
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
 import { ProjectModelSettings } from "./application/project-model-settings.js";
 import type { ProjectModelPreviewInput } from "./application/project-model-settings.js";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -14,53 +27,86 @@ import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync }
 import { join, relative, sep } from "node:path";
 import { APP_NAME, DomainError, digest, invariant, newId } from "@openslate/core";
 import type { ActorContext, HealthResponse } from "@openslate/core";
+import type { ControlInput, DirectorAttachmentRef, InstallationStatus, ReleaseAttemptInput, DiscardAttemptInput, RetryLocalAttemptInput } from "@openslate/core/public";
 import { ToolInvocationService } from "./application/tool-invocations.js";
-import { imageMessageContext, selectedDirectorImages } from "./application/director-images.js";
+import { executionControlCommand } from "./application/execution-controls.js";
+import { ExportLauncher } from "./media/export-launcher.js";
+import { attachmentMessageContext, selectedDirectorAttachments, selectedDirectorImages } from "./application/director-images.js";
 import type { SelectedDirectorImage } from "./application/director-images.js";
 import type { ProductionService } from "./application/service.js";
 import type { DirectorSupervisor } from "./application/director-supervisor.js";
 import type { LocalDirectorController, LocalDirectorSelection } from "./application/local-director.js";
-import type { ArtifactRecord, PlanRecord, ReviewSnapshot } from "./execution/engine.js";
+import type { ArtifactRecord, PlanRecord } from "./execution/engine.js";
 import { seedFixture } from "./demo.js";
 import type { DemoCommand } from "./application/fake-director.js";
 import { registerNarrationRoutes } from "./narration/routes.js";
+import { registerStockVoices } from "./narration/shot-recording-routes.js";
 import { registerMediaRoutes } from "./media/routes.js";
 import { registerImageRoutes } from "./media/image-routes.js";
+import { registerDocumentRoutes } from "./media/document-routes.js";
 import { isPublicWebRequest, type WebAssets } from "./web-assets.js";
 import { assertDemoProviderProfiles, InstalledProviderCatalog } from "./application/provider-catalog.js";
-import { registerAllowanceRoutes } from "./application/allowance-routes.js";
 import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
 import { RECOVERY_RELEASE_PATH, recoveryInspectionAllowed, registerRecoveryRoutes } from "./application/recovery-routes.js";
+import { EnvironmentMediaCredentials } from "./application/provider-credentials.js";
+import { GeminiMusicListener } from "./media/music-enrichment.js";
+import { registerMusicEnrichmentRoutes } from "./media/music-enrichment-routes.js";
+import { LocalMusicAnalyzer } from "./media/music-analyzer.js";
 
-interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
+interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: ProductionService; localToken?: string;
+  /** true logs to stdout; a stream receives the same JSON lines (tests). */
+  logger?: boolean | { stream: { write(line: string): void } };
+  /** Log every request and response (off by default: the studio's own refreshes would flood the log). Warnings and errors are always logged. */
+  logRequests?: boolean;
+  /** Host-selected tools, also available when the complete media service could not be installed. */
+  mediaToolPaths?: { ffmpeg: string | null; ffprobe: string | null };
+  /** Browser origins allowed to call the API. Defaults to the dev server and the installed studio. */
+  allowedOrigins?: readonly string[];
   studioSessions?: StudioSessions;
-  allowanceRoutes?: Parameters<typeof registerAllowanceRoutes>[1];
   providerCatalog?: InstalledProviderCatalog;
   webAssets?: WebAssets;
   director?: Pick<DirectorSupervisor, "status" | "enqueue" | "answerQuestion" | "tick">;
   runtimeSettings?: LocalDirectorController;
   narrationRoutes?: Parameters<typeof registerNarrationRoutes>[1];
   imageRoutes?: Parameters<typeof registerImageRoutes>[1];
-  mediaRoutes?: Parameters<typeof registerMediaRoutes>[1] }
+  documentRoutes?: Parameters<typeof registerDocumentRoutes>[1];
+  mediaRoutes?: Parameters<typeof registerMediaRoutes>[1];
+  /** Gemini song analysis; the default reads OPENSLATE_GEMINI_API_KEY by name. null leaves the slot empty. */
+  musicListener?: GeminiMusicListener | null }
+const DEFAULT_ALLOWED_ORIGINS = ["http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:3001", "http://localhost:3001"];
 const string = { type: "string", minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[]) => ({ type: "object", additionalProperties: false, properties, required });
 
 export function createApp(options: AppOptions = {}) {
-  const app = Fastify({ logger: options.logger ?? false, bodyLimit: 3 * 1024 * 1024,
+  const app = Fastify({ logger: options.logger ?? false, logController: new LogController({ disableRequestLogging: !options.logRequests }), bodyLimit: 3 * 1024 * 1024,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
+  const allowedOrigins = options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS;
   const actors = new WeakMap<object, ActorContext>();
   const recovery = options.service ? new InstallationRecoveryGuard(options.service.store) : undefined;
-  const reviewCache = new Map<string, { cursor: number; snapshot: ReviewSnapshot }>();
   const service = () => { invariant(options.service, "SERVICE_UNAVAILABLE", "Application storage is not configured"); return options.service; };
   let defaultProviderCatalog: InstalledProviderCatalog | undefined;
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
-  registerSceneGeneration(app, service, options.narrationRoutes?.narration);
+  registerStockVoices(app, service);
+  registerDirectorNotes(app, service);
+  registerDirectorProposals(app, service);
+  const sceneCommands = options.sceneCommands ?? (options.service ? new SceneConfirmationRunner(options.service, options.narrationRoutes) : undefined);
+  registerSceneGeneration(app, service, options.narrationRoutes?.narration, sceneCommands?.enqueueKeyframes);
+  if (sceneCommands) { registerSceneConfirmations(app, sceneCommands); registerNarrationFit(app, sceneCommands); }
+  registerGenerationOverview(app, service, options.narrationRoutes?.narration);
+  app.post<{ Params: { projectId: string; requestId: string } }>("/api/projects/:projectId/requests/:requestId/release-holds", async request => {
+    const key = requiredCommandKey(request);
+    invariant(request.body === undefined, "VALIDATION_ERROR", "Releasing edit holds takes no body");
+    return service().releaseRequestHolds(request.params.projectId, request.params.requestId, key);
+  });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
       const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED", "CSRF_DENIED", "STUDIO_LINK_EXPIRED"].includes(error.code) ? 403
-        : error.code === "NOT_FOUND" ? 404 : error.code === "SERVICE_UNAVAILABLE" ? 503 : error.code === "VALIDATION_ERROR" ? 400 : 409;
-      void reply.status(status).send({ error: { code: error.code, message: error.message } });
+        : error.code === "NOT_FOUND" ? 404 : error.code === "SERVICE_UNAVAILABLE" ? 503 : ["VALIDATION_ERROR", "IDEMPOTENCY_KEY_REQUIRED"].includes(error.code) ? 400 : 409;
+      const nativeDiagnostic = error.code === "DIRECTOR_SETUP_REQUIRED"
+        ? safeNativeDiagnostic((error.details as { nativeDiagnostic?: unknown } | undefined)?.nativeDiagnostic) : undefined;
+      void reply.status(status).send({ error: { code: error.code, message: error.message,
+        ...(error instanceof GenerationAttemptBlockedError ? { details: error.recovery } : nativeDiagnostic ? { details: { nativeDiagnostic } } : ["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH", "PROPOSAL_PENDING", "GUIDANCE_READ_LIMIT"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
     } else if ((error as { validation?: unknown }).validation) void reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: "Request does not match its schema" } });
     else { app.log.error(error); void reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "The operation could not be completed" } }); }
   });
@@ -68,9 +114,10 @@ export function createApp(options: AppOptions = {}) {
     const host = request.headers.host?.split(":")[0];
     invariant(host === "127.0.0.1" || host === "localhost", "ORIGIN_DENIED", "Use a loopback address");
     const origin = request.headers.origin;
-    invariant(!origin || ["http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:3001", "http://localhost:3001"].includes(origin), "ORIGIN_DENIED", "Origin is not permitted");
+    invariant(!origin || allowedOrigins.includes(origin), "ORIGIN_DENIED", "Origin is not permitted");
+    const requiresCommandKey = request.method === "POST" && ["/api/projects/:projectId/controls", "/api/projects/:projectId/scenes/:sceneId/generate", "/api/projects/:projectId/scenes/:sceneId/confirm", "/api/projects/:projectId/shots/:shotId/narration-fit"].includes(request.routeOptions.url ?? "");
     const commandKey = request.headers["idempotency-key"];
-    invariant(commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
+    invariant(requiresCommandKey || commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
     if (request.routeOptions.url === "/api/health" || isPublicWebRequest(request)) return;
     if (options.studioSessions && request.routeOptions.url === "/api/session" && request.method === "POST") {
       invariant(origin && request.headers["x-openslate-client"] === "studio", "ORIGIN_DENIED", "Pair from the local studio page");
@@ -88,6 +135,7 @@ export function createApp(options: AppOptions = {}) {
       options.studioSessions.authorize(request);
       reply.header("Cache-Control", "no-store");
     }
+    if (requiresCommandKey) requiredCommandKey(request);
     // Pairing/logout are independent of installation recovery and grant no execution authority.
     if (options.studioSessions && ["/api/session", "/api/session/logout", "/api/studio/launch"].includes(request.routeOptions.url ?? "")) return;
     // Authenticate first. The narrow release endpoint is independent of project/model authority;
@@ -98,6 +146,8 @@ export function createApp(options: AppOptions = {}) {
   });
   registerPlanImports(app, service, options.director);
   registerStoryboard(app, service);
+  registerCharacters(app, service);
+  registerShotTakes(app, service);
   app.get<{ Reply: HealthResponse }>("/api/health", async () => ({ name: APP_NAME, status: "ok", stage: "foundation" }));
   options.webAssets?.register(app);
   if (options.studioSessions) registerStudioSessions(app, options.studioSessions, () => {
@@ -109,19 +159,27 @@ export function createApp(options: AppOptions = {}) {
   });
   if (options.service) registerRecoveryRoutes(app, options.service);
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
-  if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
+  // One render registry for the person's Export and the Director's start_export.
+  const exportLauncher = options.mediaRoutes ? options.mediaRoutes.launcher ?? new ExportLauncher(options.mediaRoutes.production, options.mediaRoutes.media) : undefined;
+  if (options.mediaRoutes) registerMediaRoutes(app, { ...options.mediaRoutes, launcher: exportLauncher! });
   if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
-  if (options.allowanceRoutes) {
-    invariant(options.allowanceRoutes.service === options.service, "ALLOWANCE_CONFIGURATION_INVALID", "Spending routes must use this application's service");
-    registerAllowanceRoutes(app, options.allowanceRoutes);
-  }
-  app.get("/api/projects", async () => ({ projects: service().store.listProjects().map(project => ({ id: project.id, name: project.name, headVersion: project.headVersion, activePlanId: project.activePlanId, shotCount: project.shots.length })) }));
-  app.get("/api/providers", async () => providerCatalog().view());
-  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/providers", async request => {
-    const project = service().store.getProject(request.params.projectId);
-    const lock = service().store.get<{ projectId: string; profiles: unknown; providerSelection?: unknown; localExecution?: unknown }>("capability_lock", project.capabilityLockId);
-    invariant(lock?.projectId === project.id, "PROVIDER_CATALOG_INVALID", "The project provider lock is unavailable");
-    return providerCatalog().projectView(lock.profiles, lock.providerSelection, lock.localExecution);
+  if (options.documentRoutes) registerDocumentRoutes(app, options.documentRoutes);
+  registerProjectLibrary(app, service);
+  const musicListener = options.musicListener === null ? undefined : options.musicListener ?? (options.service
+    ? new GeminiMusicListener({ production: options.service, ...(options.narrationRoutes?.narration ? { narration: options.narrationRoutes.narration } : {}), credentials: new EnvironmentMediaCredentials() })
+    : undefined);
+  if (musicListener) registerMusicEnrichmentRoutes(app, musicListener);
+  app.get("/api/providers", async () => ({ ...providerCatalog().view(), ...(musicListener ? { musicListener: musicListener.status() } : {}) }));
+  app.get<{ Reply: InstallationStatus }>("/api/installation/status", async (_request, reply) => {
+    const [codex, mediaTools] = await Promise.all([
+      options.runtimeSettings?.codexStatus() ?? { found: false, version: null, pinnedVersion: CODEX_PROTOCOL_VERSION, signedIn: null },
+      options.mediaRoutes ? options.mediaRoutes.media.media.toolStatus() : Promise.all([
+        toolVersion(options.mediaToolPaths?.ffmpeg, "ffmpeg"), toolVersion(options.mediaToolPaths?.ffprobe, "ffprobe"),
+      ]).then(([ffmpeg, ffprobe]) => ({ ffmpeg: { available: ffmpeg !== null, version: ffmpeg }, ffprobe: { available: ffprobe !== null, version: ffprobe } })),
+    ]);
+    const providersConfigured = providerCatalog().view().profiles.some(p => p.readiness.enabledByHost &&
+      (p.readiness.credential.present === true || ("nativeAccess" in p.readiness && p.readiness.nativeAccess?.configured === true)));
+    return reply.header("Cache-Control", "no-store").send({ codex, mediaTools, providersConfigured });
   });
   const modelSettings = () => new ProjectModelSettings(service(), providerCatalog());
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/settings/models", async request => modelSettings().status(request.params.projectId));
@@ -153,7 +211,6 @@ export function createApp(options: AppOptions = {}) {
     const selection = request.body.profileIds ? providerCatalog().select(request.body.expectedCatalogDigest!, request.body.profileIds) : undefined;
     return service().createProject(request.body.name, selection);
   }));
-  registerGenerationPermission(app, service, options.director);
   registerAssetLibrary(app, service);
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async request => service().snapshot(request.params.projectId));
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director", async request => {
@@ -162,21 +219,11 @@ export function createApp(options: AppOptions = {}) {
   });
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/setup", async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
-    return options.runtimeSettings.settings(request.params.projectId);
+    return options.runtimeSettings.inspectSettings(request.params.projectId);
   });
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/models", async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.models(request.params.projectId);
-  });
-  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/tools", async request => {
-    invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
-    return options.runtimeSettings.tools(request.params.projectId);
-  });
-  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: "2.0.0" | "3.0.0" | "4.0.0" } }>("/api/projects/:projectId/director/tools/upgrade", {
-    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { enum: ["2.0.0", "3.0.0", "4.0.0"] } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
-  }, async request => {
-    invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
-    return options.runtimeSettings.upgradeTools(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
   app.post<{ Params: { projectId: string }; Body: LocalDirectorSelection }>("/api/projects/:projectId/director/setup", {
     schema: { body: object({ mode: { enum: ["fake", "native"] }, binaryPath: { type: "string", maxLength: 4096 }, model: { type: "string", maxLength: 120 }, codexHome: { type: "string", maxLength: 4096 } }, ["mode"]) },
@@ -190,32 +237,42 @@ export function createApp(options: AppOptions = {}) {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.changeSelection(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
-  app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continueEdits?: ContinueEdits; continuationRequestId?: string; resumeFromStopId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[] } }>("/api/projects/:projectId/messages", {
-    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continueEdits: continueEditsSchema, continuationRequestId: string, resumeFromStopId: string, replyToReviewId: string, replyToQuestionId: string,
-      images: { type: "array", minItems: 1, maxItems: 4, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) } }, ["text"]) },
+  registerDirectorReviewSetting(app, service);
+  app.post<{ Params: { projectId: string }; Body: { text?: string; answers?: import("./application/director-supervisor.js").StructuredAnswer[]; scopeIds?: string[]; editing?: boolean; continueEdits?: ContinueEdits; continuationRequestId?: string; resumeFromStopId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[]; attachments?: DirectorAttachmentRef[] } }>("/api/projects/:projectId/messages", {
+    schema: { body: object({ text: { type: "string", minLength: 0, maxLength: 16000 }, answers: { type: "array", minItems: 1, maxItems: 8, items: object({ questionId: string, optionIndex: { type: "integer", minimum: 0, maximum: 9 }, optionLabel: string, text: { type: "string", minLength: 1, maxLength: 16000 } }, ["questionId"]) }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continueEdits: continueEditsSchema, continuationRequestId: string, resumeFromStopId: string, replyToReviewId: string, replyToQuestionId: string,
+      images: { type: "array", minItems: 1, maxItems: 8, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) },
+      attachments: { type: "array", minItems: 1, maxItems: 8, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) } }, []) },
   }, async request => {
+    const text = request.body.text ?? "";
+    invariant(text.trim().length > 0 || request.body.attachments?.length || request.body.answers?.length && request.body.replyToQuestionId, "VALIDATION_ERROR", "Write a message, attach files or answer a pending question");
     invariant(!request.body.resumeFromStopId || (!request.body.replyToQuestionId && !request.body.replyToReviewId), "VALIDATION_ERROR", "Continue stopped work with a fresh conversation message");
     invariant(!request.body.continueEdits || (!request.body.replyToQuestionId && !request.body.replyToReviewId && !request.body.resumeFromStopId && !request.body.continuationRequestId), "VALIDATION_ERROR", "Continue reviewed edits with one fresh covering message");
+    invariant(!request.body.answers || request.body.replyToQuestionId, "VALIDATION_ERROR", "Structured answers require a pending question");
     const images = request.body.images ? selectedDirectorImages(request.body.images) : undefined;
+    const attachments = request.body.attachments ? selectedDirectorAttachments(request.body.attachments) : undefined;
+    const selected = [...(images ?? []), ...(attachments ?? [])];
+    invariant(selected.length <= 8 && new Set(selected.map(item => item.artifactId)).size === selected.length, "DIRECTOR_ATTACHMENTS_INVALID", "Attach at most eight different files to one message");
     invariant(!images || (options.director && options.runtimeSettings && directorMode(request.params.projectId) === "native" && !request.body.replyToQuestionId && !request.body.replyToReviewId), "DIRECTOR_IMAGES_UNAVAILABLE", "Attach references to a new native conversation request");
+    invariant(!attachments || (options.director && options.runtimeSettings && !request.body.replyToQuestionId && !request.body.replyToReviewId), "DIRECTOR_ATTACHMENTS_UNAVAILABLE", "Attach files to a new Director conversation request");
     if (request.body.replyToQuestionId) {
       invariant(options.director && !request.body.replyToReviewId && !request.body.scopeIds && !request.body.continuationRequestId && request.body.editing === undefined, "VALIDATION_ERROR", "Reply to one pending question using its original scope");
-      const actor = options.director.answerQuestion(request.params.projectId, "local-user", request.body.replyToQuestionId, request.body.text, request.headers["idempotency-key"] as string | undefined ?? newId());
+      const actor = options.director.answerQuestion(request.params.projectId, "local-user", request.body.replyToQuestionId, request.body.answers ? { text, answers: request.body.answers } : text, request.headers["idempotency-key"] as string | undefined ?? newId());
       options.director.tick(); return { requestId: actor.requestId, status: "queued", director: directorMode(request.params.projectId) };
     }
     const actor = service().store.transaction(() => {
-      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.text,
-        { ...request.body, contextDigest: imageMessageContext(images, request.body.replyToReviewId), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
-      if (images) options.runtimeSettings!.recordImages(request.params.projectId, actor, images);
+      const actor = service().beginRequest(request.params.projectId, "local-user", text,
+        { ...request.body, contextDigest: attachmentMessageContext(images, attachments, request.body.replyToReviewId), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
+      if (attachments) options.runtimeSettings!.recordAttachments(request.params.projectId, actor, attachments, images);
+      else if (images) options.runtimeSettings!.recordImages(request.params.projectId, actor, images);
       if (!request.body.replyToReviewId) options.director?.enqueue(request.params.projectId, actor);
       return actor;
     });
-    if (request.body.replyToReviewId) return service().replyToReview(request.params.projectId, actor, request.body.replyToReviewId, request.body.text);
+    if (request.body.replyToReviewId) return service().replyToReview(request.params.projectId, actor, request.body.replyToReviewId, text);
     options.director?.tick();
     return { requestId: actor.requestId, status: options.director ? "queued" : "recorded", director: directorMode(request.params.projectId) };
   });
   app.post<{ Params: { projectId: string }; Body: DemoCommand }>("/api/projects/:projectId/demo", {
-    schema: { body: object({ action: { enum: ["create", "close_up", "wide"] }, shotId: string }, ["action"]) },
+    schema: { body: object({ action: { enum: ["create", "close_up", "wide", "review"] }, shotId: string, sceneId: string }, ["action"]) },
   }, async request => {
     invariant(options.director && directorMode(request.params.projectId) === "fake", "ACTOR_DENIED", "The demo is available only with the offline fake director");
     const { projectId } = request.params;
@@ -223,6 +280,14 @@ export function createApp(options: AppOptions = {}) {
     // Dedicated human demo command authorizes bounded fake slots. Ordinary chat never grants generation.
     const result = service().store.command(`local-user:${projectId}:demo`, key, digest(request.body), () => {
       const before = service().store.getProject(projectId);
+      if (request.body.action === "review") {
+        const scene = before.scenes.find(s => s.id === request.body.sceneId);
+        invariant(scene, "SCOPE_DENIED", "Choose a scene in this demo project");
+        const actor = service().beginRequest(projectId, "local-user", "Review this scene in the scripted demonstration.", { source: "app", editing: false, scopeIds: [scene.id], key: `demo:${key}` });
+        service().store.insert("demo_command", actor.requestId, projectId, request.body);
+        const turn = options.director!.enqueue(projectId, actor);
+        return { requestId: actor.requestId, turnId: turn.id, status: "queued", director: "fake" };
+      }
       const lock = service().store.get<{ projectId: string; profiles: unknown }>("capability_lock", before.capabilityLockId);
       invariant(lock?.projectId === projectId, "DEMO_PROVIDER_MISMATCH", "The project provider lock is unavailable");
       assertDemoProviderProfiles(lock.profiles);
@@ -232,7 +297,7 @@ export function createApp(options: AppOptions = {}) {
       const shotIds = request.body.action === "create" ? project.shots.map(shot => shot.id) : [request.body.shotId];
       invariant(shotIds.every(id => id && project.shots.some(shot => shot.id === id)), "VALIDATION_ERROR", "Select a demo shot");
       const text = request.body.action === "create" ? "Create a 2-shot offline demo with sample media." : `Try ${request.body.action === "close_up" ? "a close-up" : "a wide view"} for the selected demo shot.`;
-      const actor = service().beginRequest(projectId, "local-user", text, { scopeIds: request.body.action === "create" ? [projectId] : shotIds as string[], key: `demo:${key}`, contextDigest: digest(request.body) });
+      const actor = service().beginRequest(projectId, "local-user", text, { source: "app", scopeIds: request.body.action === "create" ? [projectId] : shotIds as string[], key: `demo:${key}`, contextDigest: digest(request.body) });
       service().authorize(projectId, actor, (shotIds as string[]).flatMap(scopeId => [{ scopeId, kind: "image" as const }, { scopeId, kind: "video" as const }]), `demo-slots:${actor.requestId}`, request.body.action === "create" ? "initial_slot" : "user_change");
       service().store.insert("demo_command", actor.requestId, projectId, request.body);
       const turn = options.director!.enqueue(projectId, actor);
@@ -248,16 +313,9 @@ export function createApp(options: AppOptions = {}) {
     // Planning may stop at images before a video/review recipe exists. Keep the
     // workspace readable without fabricating an approval snapshot or authority.
     if (!activePlan.compiled.gates.length) return { id: null, projectId, planId: activePlan.id, members: [], headVersion: project.headVersion, revisionId: project.revisionId };
-    let snapshot: ReviewSnapshot | (Omit<ReviewSnapshot, "id"> & { id: null });
-    if (recovery?.isQuarantined()) snapshot = { ...service().engine.inspectReview(projectId), id: null };
-    else {
-      const cursor = service().store.cursor(projectId);
-      let cached = reviewCache.get(projectId);
-      if (!cached || cached.cursor !== cursor) {
-        cached = { cursor, snapshot: service().engine.reviewSnapshot(projectId) }; reviewCache.set(projectId, cached);
-      }
-      snapshot = cached.snapshot;
-    }
+    // Historical plan inspection grants no approval identity, in ordinary use or
+    // during recovery. Durable approval snapshots belong to scene confirmation.
+    const snapshot = { ...service().engine.inspectReview(projectId), id: null };
     const plan = service().store.get<PlanRecord>("plan", snapshot.planId)!;
     const approvals = service().store.list<{ videoNodeId: string; approvalDigest: string }>("approval", projectId);
     return { ...snapshot, headVersion: project.headVersion, revisionId: project.revisionId, members: snapshot.members.map(member => {
@@ -278,25 +336,54 @@ export function createApp(options: AppOptions = {}) {
       const bytes = readFileSync(fd);
       invariant(createHash("sha256").update(bytes).digest("hex") === artifact.artifact.sha256, "ARTIFACT_CORRUPT", "Artifact bytes changed");
       const allowed = ["image/svg+xml", "image/png", "image/jpeg", "video/mp4", "audio/wav", "audio/mpeg"];
-      invariant(allowed.includes(artifact.mimeType), "ARTIFACT_TYPE_UNSUPPORTED", "Artifact is not a supported preview");
+      const document = artifact.artifact.kind === "document" && ["application/pdf", "text/plain", "text/markdown"].includes(artifact.mimeType);
+      invariant(document || allowed.includes(artifact.mimeType), "ARTIFACT_TYPE_UNSUPPORTED", "Artifact is not a supported preview");
+      if (document) {
+        const name = (artifact as ArtifactRecord & { name?: string }).name ?? "document";
+        reply.header("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}`);
+      }
       return reply.header("X-Content-Type-Options", "nosniff").header("Cache-Control", "private, no-store").header("Content-Security-Policy", "sandbox; default-src 'none'").type(artifact.mimeType).send(bytes);
     } finally { closeSync(fd); }
   });
-  app.post<{ Params: { projectId: string }; Body: { snapshotId: string; videoNodeIds: string[] } }>("/api/projects/:projectId/approvals", {
-    schema: { body: object({ snapshotId: string, videoNodeIds: { type: "array", minItems: 1, maxItems: 400, uniqueItems: true, items: string } }, ["snapshotId", "videoNodeIds"]) },
+  app.post<{ Params: { projectId: string }; Body: ControlInput }>("/api/projects/:projectId/controls", {
+    schema: { body: { oneOf: [object({ action: { const: "stop" } }, ["action"]),
+      object({ action: { const: "resume" }, expectedAuthorityId: { anyOf: [string, { type: "null" }] } }, ["action", "expectedAuthorityId"])] } },
   }, async request => {
-    const actor = service().beginRequest(request.params.projectId, "local-user", "Review the displayed keyframes", { editing: false, contextDigest: digest({ snapshotId: request.body.snapshotId, videoNodeIds: [...request.body.videoNodeIds].sort() }), key: `review:${request.headers["idempotency-key"] ?? digest(request.body)}` });
-    return service().approve(request.params.projectId, actor, request.body.snapshotId, request.body.videoNodeIds);
+    const { requestId: _requestId, ...receipt } = executionControlCommand(service(), request.params.projectId, request.body, requiredCommandKey(request));
+    return receipt;
   });
-  app.post<{ Params: { projectId: string }; Body: { action: "pause" | "resume" | "stop" } }>("/api/projects/:projectId/controls", {
-    schema: { body: object({ action: { enum: ["pause", "resume", "stop"] } }, ["action"]) },
+  app.post<{ Params: { projectId: string; attemptId: string }; Body: ReleaseAttemptInput }>("/api/projects/:projectId/attempts/:attemptId/release", {
+    schema: { body: object({ expectedPhase: { enum: ["submission_unknown", "remote_pending"] }, acknowledgeDoubleCharge: { type: "boolean" } }, ["expectedPhase"]) },
   }, async request => {
-    const key = request.headers["idempotency-key"] as string | undefined ?? newId();
-    const result = service().store.command(`local-user:${request.params.projectId}:control`, key, digest(request.body), () => {
-      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.action === "stop" ? "Stop the current conversation and new generation." : request.body.action, { editing: false, key: `control:${key}` });
-      return service().control(request.params.projectId, actor, request.body.action);
+    const key = requiredCommandKey(request);
+    return service().store.command(`local-user:${request.params.projectId}:release-attempt`, key, digest({ attemptId: request.params.attemptId, ...request.body }), () => {
+      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.expectedPhase === "remote_pending"
+        ? "Stop waiting for a job the provider still reports as running; it may still finish and be charged."
+        : "Release an unconfirmed submission; both jobs may be charged.", { source: "app", editing: false, key: `release-attempt:${key}` });
+      return service().releaseAttempt(request.params.projectId, actor, request.params.attemptId, request.body);
     });
-    options.director?.tick(); return result;
+  });
+  app.post<{ Params: { projectId: string; attemptId: string }; Body: DiscardAttemptInput }>("/api/projects/:projectId/attempts/:attemptId/discard", {
+    schema: { body: object({ expectedPhase: { const: "ingesting" }, acknowledgeDiscard: { type: "boolean" } }, ["expectedPhase"]) },
+  }, async request => {
+    const key = requiredCommandKey(request);
+    return service().store.command(`local-user:${request.params.projectId}:discard-attempt`, key, digest({ attemptId: request.params.attemptId, ...request.body }), () => {
+      const actor = service().beginRequest(request.params.projectId, "local-user", "Discard a finished job's unusable output; it stays charged.", { source: "app", editing: false, key: `discard-attempt:${key}` });
+      return service().discardAttempt(request.params.projectId, actor, request.params.attemptId, request.body);
+    });
+  });
+  app.post<{ Params: { projectId: string; attemptId: string }; Body: RetryLocalAttemptInput }>("/api/projects/:projectId/attempts/:attemptId/retry-local", {
+    schema: { body: object({ expectedFailure: { const: "LOCAL_EXECUTION_INTERRUPTED" }, acknowledgeRerender: { type: "boolean" } }, ["expectedFailure"]) },
+  }, async request => {
+    const key = requiredCommandKey(request), scope = `local-user:${request.params.projectId}:retry-local-attempt`;
+    const inputDigest = digest({ attemptId: request.params.attemptId, ...request.body });
+    const replay = service().store.commandReplay(scope, key, inputDigest);
+    if (replay) return replay.result;
+    const checked = await service().checkLocalRetry(request.params.projectId, request.params.attemptId, request.body);
+    return service().store.command(scope, key, inputDigest, () => {
+      const actor = service().beginRequest(request.params.projectId, "local-user", "Render interrupted local work again with the same content.", { source: "app", editing: false, key: `retry-local-attempt:${key}` });
+      return service().retryLocalAttempt(request.params.projectId, actor, checked);
+    });
   });
   if (options.service) registerProjectEventStream(app, { store: options.service.store,
     authorize: request => { if (!request.headers.authorization) options.studioSessions?.authorize(request); } });
@@ -309,8 +396,12 @@ export function createApp(options: AppOptions = {}) {
     request.raw.on("aborted", disconnected); reply.raw.on("close", disconnected);
     const ports = options.narrationRoutes;
     try { return await new ToolInvocationService(service(), {
+      ...(sceneCommands ? { enqueueVoice: sceneCommands.enqueueKeyframes } : {}),
       ...(ports?.ownedTranscription ? { ownedTranscription: ports.ownedTranscription } : {}),
       ...(ports?.narrationSpeech ? { narrationSpeech: ports.narrationSpeech } : {}),
+      ...(ports?.narration ? { mediaNarration: ports.narration } : {}),
+      ...(exportLauncher ? { exports: exportLauncher } : {}),
+      ...(musicListener ? { musicAnalyzers: { local: new LocalMusicAnalyzer(service(), ports?.narration), enrichment: musicListener } } : {}),
     }).invoke(projectId, actor, callId, tool, request.body, { signal: abort.signal }); }
     finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
   });

@@ -6,11 +6,14 @@ import { CODEX_PROTOCOL_VERSION, normalizePermissionProfile, toml, validateOptio
 import type { CodexConfigValue, CodexDirectorOptions, CodexRuntimeLimits } from "./policy.js";
 import { CodexTransport } from "./transport.js";
 import { object, requireRuntime, RuntimeFault } from "./validation.js";
+import { classifyNativeDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
+import type { NativeDiagnostic } from "@openslate/core";
+import { preparePrivateCodexHome } from "./private-home.js";
 
 export interface LocalCodexSetupInput {
   command: { file: string; args?: readonly string[] };
   model: string;
-  /** Existing native homes. OpenSlate never reads or copies their credential files. */
+  /** Existing native homes. OpenSlate only links the selected auth.json; it never reads or copies it. */
   nativeHome: string;
   codexHome: string;
   /** Complete environment apart from HOME/CODEX_HOME, which the explicit fields set. */
@@ -29,9 +32,12 @@ export interface LocalCodexReadiness {
   /** Account-advertised text models supporting this adapter's low reasoning effort. */
   modelChoices?: LocalCodexModelChoice[];
   checks: Record<"binary" | "account" | "model" | "catalog" | "policy", LocalCodexSetupCheck>;
+  /** Only a parsed version, never arbitrary child output or paths. */
+  binaryVersion?: { expectedVersion: string; foundVersion: string | null };
   disabledMcpCount: number;
   disabledSkillCount: number;
   issues: { code: string; message: string }[];
+  nativeDiagnostic?: NativeDiagnostic;
 }
 export interface LocalCodexSetupResult {
   /** Safe for the local UI. It deliberately excludes paths, email, config, env and native diagnostics. */
@@ -73,16 +79,25 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
   "SETUP_COMMAND_INVALID", "Native command arguments are invalid");
   requireRuntime(Object.keys(object(input.env)).length <= 128 && input.env && typeof input.env === "object" && !Array.isArray(input.env),
     "SETUP_ENV_INVALID", "Supply a bounded explicit native environment");
-  const nativeHome = await realpath(input.nativeHome), codexHome = await realpath(input.codexHome);
+  const nativeHome = await realpath(input.nativeHome);
+  let codexHome: string;
+  try { codexHome = await realpath(input.codexHome); }
+  catch (error) {
+    if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? ""))
+      throw new RuntimeFault("SETUP_AUTH_REQUIRED", "Sign in to the selected Codex installation before checking again");
+    throw error;
+  }
   requireRuntime((await stat(nativeHome)).isDirectory() && (await stat(codexHome)).isDirectory(),
     "SETUP_AUTH_HOME_INVALID", "Selected native homes must already exist");
   const projection = await plannedPath(resolve(input.directories.projection));
   const snapshots = await plannedPath(resolve(input.directories.snapshots));
   const storage = await plannedPath(resolve(input.directories.storage));
   const state = await plannedPath(join(storage, "native-state")), logs = await plannedPath(join(storage, "logs"));
+  const home = await plannedPath(join(storage, "director-home"));
   requireRuntime(!overlap(projection, storage) && !overlap(snapshots, storage) &&
     [projection, snapshots, storage].every(path => path !== dirname(path) && !within(path, nativeHome) && !overlap(path, codexHome)) &&
-    within(storage, state) && within(storage, logs) && state !== storage && logs !== storage && !overlap(state, logs),
+    within(storage, state) && within(storage, logs) && state !== storage && logs !== storage && !overlap(state, logs) &&
+    home === join(storage, "director-home") && within(storage, home) && home !== storage && !overlap(home, state) && !overlap(home, logs),
   "SETUP_PATH_OVERLAP", "Application projections and runtime storage must exclude native authentication homes and each other");
   const profile = { filesystem: { ":root": "deny", ":minimal": "read", [projection]: "read", [snapshots]: "read",
     [await realpath(process.execPath)]: "read" }, network: { enabled: false } };
@@ -90,12 +105,14 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
     default_permissions: PROFILE, permissions: { [PROFILE]: profile }, sqlite_home: state, log_dir: logs,
     model: input.model, model_provider: "openai", model_reasoning_effort: "low", approval_policy: "never", web_search: "disabled",
     project_doc_max_bytes: 0, "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none",
+    "skills.bundled.enabled": false,
     check_for_update_on_startup: false, "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
     "features.code_mode_host": true, "features.skip_host_skill_discovery": true, "features.default_mode_request_user_input": true,
   };
   for (const name of DISABLED) config[`features.${name}`] = false;
   const options = validateOptions({ command: structuredClone(input.command), cwd: projection,
-    env: { ...input.env, HOME: nativeHome, CODEX_HOME: codexHome }, model: input.model, runtimeVersion: CODEX_PROTOCOL_VERSION,
+    env: { ...input.env, HOME: nativeHome, CODEX_HOME: home }, privateCodexHome: { home, authSource: join(codexHome, "auth.json") },
+    model: input.model, runtimeVersion: CODEX_PROTOCOL_VERSION,
     policy: { mode: "local", id: PROFILE, runtimeVersion: CODEX_PROTOCOL_VERSION, config },
     ...(input.limits ? { limits: input.limits } : {}) });
   // Make no changes in either native home. Existing directories retain their permissions.
@@ -104,15 +121,20 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
     requireRuntime((await stat(path)).isDirectory() && await realpath(path) === path,
       "SETUP_DIRECTORY_CHANGED", "An application directory changed during setup");
   }
+  await preparePrivateCodexHome(options.privateCodexHome!);
   return options;
 }
-async function verifyVersion(options: ReturnType<typeof validateOptions>, signal: AbortSignal): Promise<void> {
+async function verifyVersion(options: ReturnType<typeof validateOptions>, signal: AbortSignal, readiness: LocalCodexReadiness): Promise<void> {
+  await preparePrivateCodexHome(options.privateCodexHome!);
   await new Promise<void>((yes, no) => {
     execFile(options.command.file, [...(options.command.args ?? []), "--version"], { cwd: options.cwd, env: { ...options.env },
-      timeout: options.limits.requestTimeoutMs, killSignal: "SIGKILL", maxBuffer: 4096, signal }, (error, stdout) => {
-      if (error) no(new RuntimeFault(signal.aborted ? "SETUP_ABORTED" : "SETUP_BINARY_FAILED", "Selected native binary could not be checked"));
-      else if (stdout.trim() !== `codex-cli ${CODEX_PROTOCOL_VERSION}`)
-        no(new RuntimeFault("SETUP_VERSION_MISMATCH", "Select the pinned Codex 0.153.4 installation"));
+      timeout: options.limits.startupTimeoutMs, killSignal: "SIGKILL", maxBuffer: 4096, signal }, (error, stdout) => {
+      if (error) { no(signal.aborted ? new RuntimeFault("SETUP_ABORTED", "Local runtime setup was cancelled") : error.killed && error.signal === "SIGKILL"
+        ? nativeTimeoutFault("SETUP_BINARY_TIMEOUT", "Selected native binary did not respond in time", options.limits.startupTimeoutMs)
+        : new RuntimeFault("SETUP_BINARY_FAILED", "Selected native binary could not be checked", classifyNativeDiagnostic(error))); return; }
+      const version = /^codex-cli (\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.+-]{1,120})?)$/.exec(stdout.trim())?.[1] ?? null;
+      readiness.binaryVersion = { expectedVersion: CODEX_PROTOCOL_VERSION, foundVersion: version };
+      if (version !== CODEX_PROTOCOL_VERSION) no(new RuntimeFault("SETUP_VERSION_MISMATCH", "Select the pinned Codex 0.153.4 installation"));
       else yes();
     });
   });
@@ -120,6 +142,7 @@ async function verifyVersion(options: ReturnType<typeof validateOptions>, signal
 async function session<T>(options: ReturnType<typeof validateOptions>, signal: AbortSignal,
   run: (rpc: (method: string, params: unknown) => Promise<unknown>) => Promise<T>): Promise<T> {
   requireRuntime(!signal.aborted, "SETUP_ABORTED", "Local runtime setup was cancelled");
+  await preparePrivateCodexHome(options.privateCodexHome!);
   const args = [...(options.command.args ?? []), "app-server", "--strict-config",
     ...Object.entries(options.policy.config).flatMap(([key, value]) => ["-c", `${key}=${toml(value)}`])];
   requireRuntime(Buffer.byteLength(args.join("\0")) <= 128 * 1024, "SETUP_CATALOG_LIMIT", "Discovered catalog exceeds the native launch limit");
@@ -130,12 +153,17 @@ async function session<T>(options: ReturnType<typeof validateOptions>, signal: A
         transport.fail(new RuntimeFault("SETUP_INTERACTIVE_DENIED", "Finish native authentication outside OpenSlate before checking again"));
       }
     } });
+  let failed = false;
   try {
     const rpc = (method: string, params: unknown) => transport.request(method, params, signal);
     await rpc("initialize", { clientInfo: { name: "openslate-setup", version: "1" }, capabilities: { experimentalApi: true } });
     transport.notification("initialized");
     return await run(rpc);
-  } finally { await transport.close(); }
+  } catch (error) { failed = true; throw error; }
+  finally {
+    try { await transport.close(); }
+    catch (error) { if (!failed) throw error; /* Preserve the primary safe start failure. */ }
+  }
 }
 function readServers(config: Record<string, unknown>): [string, unknown][] {
   const value = config.mcp_servers;
@@ -198,11 +226,16 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
   const cancellation = new AbortController(); let timedOut = false;
   const abort = () => cancellation.abort(); options.signal?.addEventListener("abort", abort, { once: true });
   // Bounds the complete discovery, including pagination and both native processes.
-  const timer = setTimeout(() => { timedOut = true; cancellation.abort(); }, 60_000);
+  // One version probe and two separate cold, read-only app-server processes.
+  // Each process still shares a single startup deadline across its preparation RPCs.
+  let setupLimitMs = 180_000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     requireRuntime(!options.signal?.aborted, "SETUP_ABORTED", "Local runtime setup was cancelled");
     const runtime = await prepare(structuredClone(supplied));
-    checking = "binary"; await verifyVersion(runtime, cancellation.signal); readiness.checks.binary = "passed";
+    setupLimitMs = runtime.limits.startupTimeoutMs * 3;
+    timer = setTimeout(() => { timedOut = true; cancellation.abort(); }, setupLimitMs);
+    checking = "binary"; await verifyVersion(runtime, cancellation.signal, readiness); readiness.checks.binary = "passed";
     checking = "catalog";
     await session(runtime, cancellation.signal, async rpc => {
       checking = "catalog";
@@ -238,6 +271,7 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
         object(config.analytics).enabled === false && object(config.feedback).enabled === false && object(config.history).persistence === "none" &&
         config.sqlite_home === runtime.policy.config.sqlite_home && config.log_dir === runtime.policy.config.log_dir &&
         config.project_doc_max_bytes === 0 && object(config.features).code_mode_host === true && object(config.features).skip_host_skill_discovery === true &&
+        object(object(config.skills).bundled).enabled === false &&
         object(config.features).default_mode_request_user_input === true &&
         DISABLED.every(name => object(config.features)[name] === false) && object(config.shell_environment_policy).inherit === "none" &&
         object(config.shell_environment_policy).experimental_use_profile === false,
@@ -256,10 +290,11 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
   } catch (error) {
     readiness.checks[checking] = "failed";
     // RuntimeFault messages are locally authored. Never expose an OS error, RPC body or child stderr.
-    const issue = timedOut ? new RuntimeFault("SETUP_TIMEOUT", "Local runtime setup exceeded its time limit") :
+    const issue = timedOut ? nativeTimeoutFault("SETUP_TIMEOUT", "Local runtime setup exceeded its time limit", setupLimitMs) :
       cancellation.signal.aborted ? new RuntimeFault("SETUP_ABORTED", "Local runtime setup was cancelled") :
-      error instanceof RuntimeFault ? error : new RuntimeFault("SETUP_FAILED", "Local runtime setup could not complete; check selected paths and native installation");
+      error instanceof RuntimeFault ? error : new RuntimeFault("SETUP_FAILED", "Local runtime setup could not complete; check selected paths and native installation", classifyNativeDiagnostic(error));
     readiness.issues.push({ code: issue.code, message: issue.message });
+    readiness.nativeDiagnostic = classifyNativeDiagnostic(issue);
     return { readiness };
   } finally { clearTimeout(timer); options.signal?.removeEventListener("abort", abort); }
 }

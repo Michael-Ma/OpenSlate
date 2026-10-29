@@ -5,13 +5,16 @@ import { EnvironmentMediaCredentials } from "../application/provider-credentials
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import type { Store } from "../persistence/store.js";
 import type { Attempt } from "./engine.js";
-import { ExecutionOutputStore } from "./output-store.js";
+import { ExecutionOutputStore, isOutputStoreCapacityError } from "./output-store.js";
 import { assertSpeechFirstDispatch, assertSpeechMappingAdmission, resolveSpeechAdmission } from "./audio-execution-authority.js";
 import { assertSpeechExecutionDispatch, assertSpeechExecutionMapping, assertSpeechExecutionResult, prepareSpeechExecutionRequest } from "./audio-execution-receipts.js";
 import type { SpeechExecutionDispatch, SpeechExecutionMapping, SpeechExecutionObservation, SpeechExecutionResult } from "./audio-execution-receipts.js";
 import { assertPersonalVoiceCurrent } from '../narration/personal-voices.js';
 
 const unknown = (diagnostic: string): ExecutionOutcome => ({ type: "unknown", diagnostic });
+// AudioHttpClient bounds every host's speech POST to this maximum, even if a host selects a shorter timeout.
+const MAX_SUBMIT_TIMEOUT_MS = 120000;
+const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false });
 const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "SPEECH_EXECUTION_CANCELLED", "Speech preparation was cancelled");
 
 /** Explicit host bridge: registration is availability, never a spending allowance or default activation. */
@@ -22,6 +25,8 @@ export class OpenAISpeechExecution implements ExecutionProvider {
   readonly #recovery: InstallationRecoveryGuard;
   readonly #fetch: typeof globalThis.fetch | undefined;
   readonly #timeoutMs: number | undefined;
+  /** Retain charged responses until a durable spool exists, including a deferred local capacity retry. */
+  readonly #returnedBytes = new Map<string, Uint8Array>();
   constructor(options: { store: Store; outputStore: ExecutionOutputStore; credentials: EnvironmentMediaCredentials;
     fetch?: typeof globalThis.fetch; timeoutMs?: number }) {
     invariant(options.outputStore.store === options.store, "SPEECH_EXECUTION_CONFIGURATION", "Speech requires one application store and its owned output store");
@@ -103,17 +108,7 @@ export class OpenAISpeechExecution implements ExecutionProvider {
       // An irreversible marker cannot be turned into a definite local non-dispatch after the fact.
       return unknown("Speech dispatch has no durable outcome; automatic resubmission is disabled");
     }
-    if (bytes) {
-      const result = this.#store.get<SpeechExecutionResult>("speech_execution_result", attempt.id)!;
-      if (result.observation.kind === "completed") {
-        try {
-          const saved = bytes;
-          await this.#outputs.spool(attempt.projectId, result.observation.outputReceiptId, async function* () {
-            for (let offset = 0; offset < saved.byteLength; offset += 1024 * 1024) yield saved.subarray(offset, offset + 1024 * 1024);
-          }, signal ? { signal } : {});
-        } catch { return unknown("Speech completed; owned output storage needs recovery without resubmission"); }
-      }
-    }
+    if (bytes) this.#returnedBytes.set(attempt.id, bytes);
     return this.recover(attempt, signal);
   }
 
@@ -123,7 +118,7 @@ export class OpenAISpeechExecution implements ExecutionProvider {
     const saved = this.#store.get<Attempt>("attempt", attemptId);
     invariant(saved && (!input || input.attemptId === attemptId), "SPEECH_EXECUTION_CONFLICT", "Unknown or mismatched speech attempt");
     const admission = this.admission(structuredClone(input ?? saved.request));
-    return this.recover(admission.attempt, signal);
+    return this.recover(admission.attempt, signal, options.expectedLease);
   }
 
   async poll(_taskId: string, input?: Readonly<ExecutionRequest>, options: ExecutionCallOptions = {}): Promise<ExecutionOutcome> {
@@ -167,7 +162,7 @@ export class OpenAISpeechExecution implements ExecutionProvider {
     }
     return this.recover(admission.attempt, signal);
   }
-  private async recover(attempt: Attempt, signal?: AbortSignal): Promise<ExecutionOutcome> {
+  private async recover(attempt: Attempt, signal?: AbortSignal, lease?: ExecutionCallOptions["expectedLease"]): Promise<ExecutionOutcome> {
     const admission = this.admission(attempt.request);
     const mapping = this.#store.get<SpeechExecutionMapping>("speech_execution_mapping", attempt.id);
     const dispatch = this.#store.get<SpeechExecutionDispatch>("speech_execution_dispatch", attempt.id);
@@ -177,20 +172,45 @@ export class OpenAISpeechExecution implements ExecutionProvider {
       invariant(mapping, "SPEECH_EXECUTION_CONFLICT", "Speech dispatch has no prepared mapping");
       assertSpeechExecutionDispatch(admission.attempt, mapping, dispatch);
     }
-    if (!result) return unknown("Speech dispatch has no durable outcome; automatic resubmission is disabled");
+    if (!dispatch && !result && lease) {
+      // The reconciler's live lease fences every old pre-marker worker. Retain this proof so replay cannot submit it later.
+      this.#store.transaction(() => {
+        if (this.hasDispatchOrResult(attempt.id)) return;
+        const current = this.admission(attempt.request);
+        if (current.attempt.phase !== "submission_unknown" || current.attempt.leaseOwner !== lease.owner
+          || current.attempt.leaseEpoch !== lease.epoch || current.attempt.leaseExpiresAt <= Date.now() || current.reservation.state !== "reserved") return;
+        this.saveResult(current.attempt, { kind: "not_dispatched", code: "LOCAL_CANCELLED" });
+      });
+      if (this.hasDispatchOrResult(attempt.id)) return this.recover(attempt, signal);
+    }
+    const unresolved = (): ExecutionOutcome => dispatch && Date.now() - Date.parse(dispatch.createdAt) >= MAX_SUBMIT_TIMEOUT_MS
+      ? responseLost() : unknown("Speech dispatch has no durable outcome; automatic resubmission is disabled");
+    if (!result) return unresolved();
     const observation = result.observation;
     assertSpeechExecutionResult(admission.attempt, mapping, dispatch, result, observation.kind === "completed"
       ? this.#store.get("execution_output_receipt", observation.outputReceiptId) : undefined);
     if (observation.kind === "not_dispatched" || observation.kind === "rejected") return { type: "rejected", certainty: "not_accepted",
       failureId: `speech-${digest(result).slice(0, 32)}`, technical: observation.kind === "not_dispatched" || observation.source === "local", retryAllowed: false };
-    if (observation.kind === "unknown") return unknown(`Speech submission unresolved: ${observation.code}`);
+    if (observation.kind === "unknown") return unresolved();
     try {
+      const saved = this.#returnedBytes.get(attempt.id);
+      if (saved) {
+        // The paid response must become durable even if the submitting caller is stopped
+        // while it waits for a writer. Publication remains fenced by its original lease.
+        await this.#outputs.spool(attempt.projectId, observation.outputReceiptId, async function* () {
+          for (let offset = 0; offset < saved.byteLength; offset += 1024 * 1024) yield saved.subarray(offset, offset + 1024 * 1024);
+        });
+        this.#returnedBytes.delete(attempt.id);
+      }
       await this.#outputs.recover(attempt.projectId, observation.outputReceiptId, signal ? { signal } : {});
       const completion = await this.#outputs.recoverCompletion(attempt.projectId, attempt.id, signal ? { signal } : {});
       stopped(signal);
       invariant(completion && completion.receiptId === observation.outputReceiptId && completion.vendorTaskId === null && completion.outputs[0].sha256 === observation.result.sha256
         && completion.outputs[0].byteLength === observation.result.byteLength, "SPEECH_EXECUTION_CONFLICT", "Winning speech output differs from its observed returned bytes");
       return completion;
-    } catch { return unknown("Speech completed; owned output storage needs recovery without resubmission"); }
+    } catch (error) {
+      if (isOutputStoreCapacityError(error)) throw error;
+      return unknown("Speech completed; owned output storage needs recovery without resubmission");
+    }
   }
 }

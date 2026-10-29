@@ -12,11 +12,13 @@ import { LocalImageStore } from '../dist/media/local-images.js';
 const ffmpegPath = process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync('/opt/homebrew/bin/ffmpeg') ? '/opt/homebrew/bin/ffmpeg' : '/usr/bin/ffmpeg');
 const ffprobePath = process.env.OPENSLATE_FFPROBE_PATH ?? (existsSync('/opt/homebrew/bin/ffprobe') ? '/opt/homebrew/bin/ffprobe' : '/usr/bin/ffprobe');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-let fixtures, png;
+let fixtures, png, jpeg;
 before(async () => {
   fixtures = await mkdtemp(join(tmpdir(), 'openslate-image-fixture-'));
   await promisify(execFile)(ffmpegPath, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=320x180', '-frames:v', '1', '-threads', '1', join(fixtures, 'image.png')], { timeout: 15000 });
   png = await readFile(join(fixtures, 'image.png'));
+  await promisify(execFile)(ffmpegPath, ['-nostdin', '-v', 'error', '-i', join(fixtures, 'image.png'), '-frames:v', '1', '-threads', '1', join(fixtures, 'image.jpg')], { timeout: 15000 });
+  jpeg = await readFile(join(fixtures, 'image.jpg'));
 });
 after(async () => rm(fixtures, { recursive: true, force: true }));
 function input(bytes = png) { return { bytes, sha256: sha(bytes), mimeType: 'image/png', width: 320, height: 180 }; }
@@ -94,4 +96,14 @@ test('concurrent same-image validations share one immutable publication and clea
   assert.deepEqual(await readdir(join(store.rootDir, 'blobs')), [`${sha(png)}.png`]);
   assert.deepEqual(await readFile(results[0].path), png);
   assert.deepEqual(await readdir(join(store.rootDir, 'tmp')), []);
+});
+
+test('upload dimensions are bounded before any frame-counting decode', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'openslate-image-probe-limit-')), probe = join(directory, 'probe'), marker = join(directory, 'counted');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(probe, `#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nif (!process.argv.includes('-max_pixels') || process.argv[process.argv.indexOf('-max_pixels') + 1] !== '8294400') process.exit(2);\nif (process.argv.includes('-count_frames')) { writeFileSync(${JSON.stringify(marker)}, 'decoded'); process.exit(1); }\nprocess.stdout.write(JSON.stringify({streams:[{codec_type:'video',width:4096,height:4096}]}));\n`, { mode: 0o700 });
+  const store = new LocalImageStore({ rootDir: join(directory, 'images'), ffmpegPath, ffprobePath: probe });
+  await assert.rejects(store.normalizeUpload({ bytes: jpeg, sha256: sha(jpeg) }), error => error.code === 'IMAGE_VALIDATION_FAILED');
+  assert.equal(existsSync(marker), false, 'over-limit image must be rejected before a decode-count probe');
+  assert.deepEqual(await readdir(join(store.rootDir, 'blobs')), []); assert.deepEqual(await readdir(join(store.rootDir, 'tmp')), []);
 });

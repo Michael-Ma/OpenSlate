@@ -1,38 +1,34 @@
 # Studio and review UI
 
-The React studio presents saved production state and sends authenticated human commands. Server projections/revisions own the truth. Component state holds unsaved text, current display and pending command identity; it cannot grant media authority by itself.
+`apps/web/src/main.tsx` boots [the next studio](../../apps/web/src/next/boot.tsx) directly. It is the only web UI; `?ui=next` is unnecessary and the classic tree is retired. The browser reads saved projections and submits authenticated commands. It does not own production state or run the scene-confirmation sequence.
 
 ## Workspace
 
-The left resizable conversation contains scoped chat, @ project resources, concise plan/recovery widgets and inline production tools. The right **Plan / Keyframes / Assets / Film** views present the same saved Scene → Shot hierarchy. Keyframes uses a large selected-shot preview, compact inspector and scene shelves; prompt/edit/reference/regeneration shortcuts share the authenticated operations used in conversation. There is no workflow-dependent duplicate scene gallery. Assets retains owned media. Film auditions picture, accepted narration and music and exposes persisted ordering, plan timing and music placement/gain/mute.
+The shell has a 52 px header, a 392 px Director column and **Plan / Keyframes / Assets / Film** views, plus Start and Settings. Narrow screens use a Director drawer. The dark palette, local Inter, shared controls and per-view styles come from [studio.css](../../apps/web/src/next/ui/studio.css) and the [Last Ferry design](../ai/prototypes/last-ferry/DESIGN.md). The current tree does not use Radix Themes or the earlier Day/Night workbench.
 
-Narration uses a compact shot-scoped script/recording/listen/accept flow, with advanced section/transcript interfaces retained for detailed review. Visual generation has two decisions per scene: create keyframes from the direction, then review exact returned frames/motion/video recipe and start video. Returned clips are available to inspect. Green completion means the current media is saved.
+- **Plan:** brief/story, scene/shot hierarchy, import review and revision-checked edits with Undo.
+- **Keyframes:** selected preview, motion explanation, editable shot fields, scene/shot state, current-frame viewing evidence, earlier takes, narration-fit choices and video confirmation.
+- **Director:** explicit @ scope, saved timestamps/runtime, structured question answers, anchored lettered notes and held proposals with Now/After effects. Selecting a preview does not change the composer target. Application-derived checks are separate from Director recommendations.
+- **Assets:** owned images, clips, audio and exports, filtered by role/scene/shot, with imports and bounded media loading.
+- **Film:** one clock for picture/narration/music, storyboard order/timing, music edits and a single readiness/history/download export surface.
+- **Start/Settings:** film creation/rename/archive, sample path, provider choices, Director setup/review, stock/personal voices, computer status and language.
 
-The compact inline Models tool in the conversation shows Director, Keyframes, Video and Narration, with transcription/accounts/local setup/existing voice identities disclosed on demand. Director choices come from the actual compatible account/runtime catalog. Director/media commands save separately; zero-impact media Save applies the exact current server preview, while actual unfinished changes receive a human impact review. Unknown responses retain their command identity for recovery.
+## Projection and command boundaries
+
+The injected [store](../../apps/web/src/next/store/store.ts), pure [reducer](../../apps/web/src/next/store/reducer.ts), snapshot adapter and selectors normalize server state. [studio-api.ts](../../packages/core/src/studio-api.ts) defines the browser-facing generation, notes, proposals, takes, export, asset and installation shapes. Browser code imports `@openslate/core/public`.
+
+`GET /generation` supplies scene/shot states, blockers, exact targets and estimates. A frame view is recorded only after the actual current image decodes and is shown; hidden prefetch and an old take cannot qualify. That record proves viewing, not generation authority. `POST /scenes/:sceneId/confirm` binds the exact returned frames and freshness digest; the server runner settles narration and starts video with persisted step identities. No browser-local saga is needed. See [application routes](APPLICATION-API.md).
+
+Every write retains its original command identity across an uncertain response. Stop, Continue and release of an unknown attempt are distinct commands; Continue does not revive unsent detached work. Direct edits and proposal decisions can run alongside the Director while protecting later human field edits. Regeneration retains the selected paid output until replacement succeeds. A free earlier-take selection verifies ownership and bytes and invalidates the dependent clip as needed.
 
 ## Browser state and safety
 
-- Shared authenticated project SSE invalidates domain projections; hidden tabs disconnect and streaming failures use backoff/periodic refresh.
-- Unsaved content and pending exact commands survive compatible projection updates; stale revisions prompt refresh/review instead of silent overwrite.
-- Artifact URLs are identity/API/abort gated. An old blob must not flash under a new result's label.
-- Viewport media release, indexed timeline data and bounded audio caching avoid retaining every media file.
-- Long content, empty states, dialogs, keyboard controls and 390px layouts need rendered validation.
+Authenticated SSE invalidates projections, with bounded refresh/reconnect behavior. Per-control selectors and write guards explain offline, expired-session, Stop and restore-quarantine restrictions. Quarantine permits inspection without mutation. Disconnect ends the session and can carry unsent words and place into a new session; it does not resubmit work.
 
-The Director divider supports drag/keyboard, persistent preferred width and container clamping; the composer resizes vertically. Chat uses safe GFM with horizontal table scrolling and no automatic external image loading. Background projection refresh retains connected content/controls and request-owned holds. The concise plan widget retains state-derived Saved / Next details and priority recovery states. [Studio Day/Night](../design/OPENSLATE-LIGHT.md) supplies the accepted Radix foundation, grayscale zones and purple-blue action tokens. Appearance/view changes preserve selection, draft and references. Dated verification belongs in [current evidence](../implementation/STATUS.md).
+The composer stores bounded text/scope/reference context. Pending commands keep exact request identities; restoring a draft alone never POSTs. Credentials and unsent binary uploads are not draft state. Artifact loading checks project/content identity, cancels superseded reads and revokes unused object URLs. One artifact must not flash under another artifact's label. Media caches and view cleanup bound retained files.
 
-## Language
+## Language and checks
 
-The studio supports English and Simplified Chinese with an in-place header/startup selector. It persists only a browser preference, keeps URL theme/view/reference context and updates `html.lang`; project state and execution payloads do not gain a locale field. Static pairs and controlled-copy whitelists cover UI labels, help, accessibility, states and sanitized errors. Original project writing, prompts, scripts, transcripts, provider names and Director messages/questions are retained. See the [language verification](../implementation/OCTOBER-7-LANGUAGE-REVIEW.md).
+English and Simplified Chinese use message IDs, plural-aware formatting and mapped server error codes. A language switch preserves selected objects and unsent work. Creative text, transcripts, provider names and Director replies keep their original language.
 
-## Explanation of reviews
-
-Configured credentials need no separate approval or usage allowance. Scene generation actions request work directly; the second decision reviews the exact returned keyframes and actual motion/video recipe. Videos can be inspected after return without another acceptance gate. Requested speech/transcription has no additional generation-review dialog. Audio acceptance confirms words/recording/range. A guidance upgrade is automatic compatibility maintenance before an eligible fresh turn. Name a concrete missing input or setup issue instead of asking for generic authorization.
-
-## Source and checks
-
-- [App](../../apps/web/src/App.tsx), [typed API](../../apps/web/src/api.ts), [project subscription](../../apps/web/src/project-subscription.ts), [resizable layout](../../apps/web/src/WorkspaceSplit.tsx), [safe Markdown](../../apps/web/src/ChatMarkdown.ts)
-- [Editing](../../apps/web/src/ProjectEditor.tsx), [frame workbench](../../apps/web/src/FrameWorkspace.tsx), [reference composer](../../apps/web/src/ReferenceComposer.tsx), [scoped frame decisions](../../apps/web/src/FrameDecision.tsx), [conversation decisions](../../apps/web/src/ConversationActions.tsx), [inline fields](../../apps/web/src/InlineField.tsx), [shot audio](../../apps/web/src/ShotAudioPanel.tsx), [generation guide](../../apps/web/src/GenerationGuide.tsx), [settings](../../apps/web/src/ProjectSettings.tsx)
-- Shared typography in `apps/web/src/typography.css`; scoped surface/layout styles in web CSS.
-- Web model/command/playback tests plus disposable desktop/narrow-screen review. See [evidence index](../implementation/VALIDATION-EVIDENCE.md).
-
-See the [studio guide](../design/STORYBOARD-STUDIO.md) for current human controls and [status](../implementation/STATUS.md) for accepted scope.
+Node tests cover reducers, adapters, selectors, request replay, state transitions and media guards. `pnpm check:browser` covers rendered desktop/phone behavior against disposable fixtures; it is separate from `pnpm test`. `?fixture=last-ferry` uses a browser fixture transport; `pnpm studio:fixture --film last-ferry` uses the fake-only server seed. Neither is a real-provider test. Actual results and outstanding browser replay belong in [status](../implementation/STATUS.md), not in design claims.

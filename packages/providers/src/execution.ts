@@ -47,13 +47,14 @@ export type ExecutionOutcome =
   | { type: "accepted"; taskId: string }
   | { type: "completed"; taskId: string; outputs: ExecutionOutput[] }
   | ExecutionSpoolCompletion
-  | { type: "failed"; taskId: string; failureId: string; technical: boolean; retryAllowed?: boolean }
+  // Native Codex failures and terminal lost POST replies may have no vendor job id.
+  | { type: "failed"; taskId: string | null; failureId: string; technical: boolean; retryAllowed?: boolean }
   | { type: "rejected"; certainty: "not_accepted"; failureId: string; technical: boolean; retryAllowed?: boolean }
   | { type: "unknown"; diagnostic: string; taskId?: string };
 export interface ExecutionProvider {
   submit(request: ExecutionRequest, options?: ExecutionCallOptions): Promise<ExecutionOutcome>;
   poll(taskId: string, request?: Readonly<ExecutionRequest>, options?: ExecutionCallOptions): Promise<ExecutionOutcome>;
-  /** A missing receipt must remain unknown; this operation must never submit. */
+  /** Reconcile local evidence or a known vendor identity; never submit or discover work by attempt id. */
   lookup(attemptId: string, request?: Readonly<ExecutionRequest>, options?: ExecutionCallOptions): Promise<ExecutionOutcome>;
 }
 export interface ExecutionCallOptions {
@@ -202,7 +203,11 @@ export function normalizeExecutionOutcome(value: unknown, request?: ExecutionReq
       : ["type", "certainty", "failureId", "technical", "retryAllowed"];
     if (!exact(value, fields) || !id(value.failureId) || typeof value.technical !== "boolean"
       || (value.retryAllowed !== undefined && typeof value.retryAllowed !== "boolean")
-      || (value.type === "failed" ? !id(value.taskId) : value.certainty !== "not_accepted")) return invalid();
+      || (value.type === "failed" ? !(id(value.taskId) || value.taskId === null && request?.kind === "image"
+        && request.execution?.adapter === "codex-image" && request.execution.version === "1"
+        && value.technical === false && value.retryAllowed === false
+        || value.taskId === null && value.failureId === "SUBMISSION_RESPONSE_LOST"
+        && value.retryAllowed === false) : value.certainty !== "not_accepted")) return invalid();
     // Missing retryAllowed remains missing for historical evidence; the engine requires explicit true.
     return structuredClone(value) as unknown as ExecutionOutcome;
   }

@@ -24,10 +24,16 @@
     "probe:workflow": "pnpm build && node apps/server/test/six-minute-workflow-smoke.mjs",
     "probe:toolchain": "pnpm build && node apps/server/dist/toolchain-probe.js",
     "setup:test-media": "node scripts/setup-test-media.mjs",
-    "check:toolchain": "node scripts/test-toolchain.mjs"
+    "check:toolchain": "node scripts/test-toolchain.mjs",
+    "check:browser": "pnpm build && node scripts/browser-check.mjs",
+    "studio:fixture": "pnpm build && node scripts/storyboard-review.mjs --fixtures --port 3101",
+    "skills:draft": "pnpm build:packages && node scripts/skills.mjs draft",
+    "skills:release": "pnpm build:packages && node scripts/skills.mjs release",
+    "skills:check": "pnpm build:packages && node scripts/skills.mjs check"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
+    "playwright-core": "1.63.0",
     "typescript": "7.0.2"
   }
 }

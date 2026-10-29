@@ -1,12 +1,24 @@
-import { canonical, digest, invariant, STAGE_CONTRACTS, STAGES, validateStageScope } from "@openslate/core";
-import type { ActorContext } from "@openslate/core";
-import { activateSkills, readActivatedSkillFile, verifySkillLock } from "@openslate/director";
-import type { SkillActivation, SkillCapabilityLock, SkillEnvironment, SkillStageBinding } from "@openslate/director";
+import { canonical, digest, DomainError, invariant, normalizeFilmKind, STAGE_CONTRACTS, STAGES, validateStageScope } from "@openslate/core";
+import type { ActorContext, ProjectRecord } from "@openslate/core";
+import { activateSkills, readActivatedSkillFile, routeSkills, SKILL_LIMITS, verifySkillLock, verifySkillLockRelease } from "@openslate/director";
+import type { SkillActivation, SkillCapabilityLock, SkillEnvironment, SkillReadVia, SkillStageBinding } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 
 export const DIRECTOR_CONTEXT_MAX_BYTES = 1024 * 1024;
 interface LockRecord { id: string; projectId: string; lock: SkillCapabilityLock }
-interface ActivationRecord { id: string; projectId: string; requestId: string; epochId: string; activation: SkillActivation }
+/** snapshotRoot is the trusted root the activation verified against; read_guidance reads from the same snapshots. */
+export interface ActivationRecord { id: string; projectId: string; requestId: string; epochId: string; activation: SkillActivation; snapshotRoot?: string }
+
+/** Closed routing facts from saved state only; never from model arguments. */
+export function directorRoutingConditions(project: ProjectRecord): string[] {
+  const facts: string[] = [];
+  if ((project.characters ?? []).length > 0) facts.push("has_characters");
+  if (project.soundtrack) facts.push("has_soundtrack");
+  if (project.narration.script.trim() || project.shots.some(shot => shot.narration && shot.narration.mode !== "none" && shot.narration.text.trim())) facts.push("narration_planned");
+  if (project.visualStyle) facts.push("has_visual_style");
+  if (normalizeFilmKind(project.filmKind)?.audience === "kids") facts.push("audience:kids");
+  return facts;
+}
 
 /** Server-side context/skill provenance. This does not launch a reasoning process. */
 export class DirectorContextService {
@@ -45,7 +57,8 @@ export class DirectorContextService {
     });
   }
 
-  capture(projectId: string, actor: ActorContext, options: { lockId: string; selectedSkillIds: string[]; stageBindings?: SkillStageBinding[] }) {
+  /** Schema 1 locks select packages explicitly; schema 2 (release) locks are routed from saved state here. */
+  capture(projectId: string, actor: ActorContext, options: { lockId: string; selectedSkillIds?: string[]; stageBindings?: SkillStageBinding[] }) {
     this.service.recovery.assertWritable(projectId, actor.requestId);
     invariant(actor.kind === "director", "ACTOR_DENIED", "Director context must bind an immutable epoch");
     this.service.assertActor(projectId, actor);
@@ -81,8 +94,11 @@ export class DirectorContextService {
     });
     const snapshot = this.service.readContext(projectId, actor);
     invariant(Buffer.byteLength(canonical(snapshot)) <= DIRECTOR_CONTEXT_MAX_BYTES, "CONTEXT_TOO_LARGE", "Context requires a narrower projection; nothing was silently truncated");
-    // File verification stays outside the SQLite write transaction.
-    const activation = activateSkills(record.lock, { ...this.environment, requestId: actor.requestId, contextDigest: digest(snapshot), selectedSkillIds: options.selectedSkillIds,
+    // File verification stays outside the SQLite write transaction. Routing reads the saved film, not the request.
+    const routed = record.lock.schemaVersion === 2 ? this.service.store.getProject(projectId) : null;
+    const routing = routed ? routeSkills(routed.filmKind, verifySkillLockRelease(record.lock, this.environment.snapshotRoot), directorRoutingConditions(routed)) : undefined;
+    const activation = activateSkills(record.lock, { ...this.environment, requestId: actor.requestId, contextDigest: digest(snapshot),
+      ...(options.selectedSkillIds ? { selectedSkillIds: options.selectedSkillIds } : {}), ...(routing ? { routing } : {}),
       ...(options.stageBindings ? { stageBindings: options.stageBindings } : {}) });
     return this.service.store.transaction(() => {
       this.service.assertActor(projectId, actor);
@@ -92,13 +108,18 @@ export class DirectorContextService {
       invariant(priorLock?.projectId === projectId && priorLock.requestId === actor.requestId && priorLock.lockId === record.id, "CAPABILITY_MISMATCH", "A director epoch cannot switch its skill lock");
       const binding = { projectId, requestId: actor.requestId, epochId: actor.epochId };
       this.service.store.insert("director_context", activation.contextSnapshotId, projectId, { id: activation.contextSnapshotId, ...binding, snapshot, contextDigest: activation.contextDigest });
-      this.service.store.insert("skill_activation", activation.activationId, projectId, { id: activation.activationId, ...binding, activation });
+      this.service.store.insert("skill_activation", activation.activationId, projectId, { id: activation.activationId, ...binding, activation, snapshotRoot: this.environment.snapshotRoot });
       this.service.store.appendEvent(projectId, "director.context_captured", { requestId: actor.requestId, epochId: actor.epochId, contextSnapshotId: activation.contextSnapshotId, activationId: activation.activationId, lockId: record.id });
       return { snapshot, activation };
     });
   }
 
-  readSkill(projectId: string, actor: ActorContext, activationId: string, selection: { skillId: string; path: string }) {
+  /**
+   * via "read_guidance" is the Director's own on-demand read: bounded per activation (one Director turn) and recorded
+   * like an injection. The allowance counts distinct files and their bytes; a repeat of a file already read this turn is
+   * recorded with `repeat: true` and is free up to its own cap. A refusal says what was used and how to continue.
+   */
+  readSkill(projectId: string, actor: ActorContext, activationId: string, selection: { skillId: string; path: string }, options: { via?: SkillReadVia } = {}) {
     this.service.recovery.assertWritable(projectId, actor.requestId);
     invariant(actor.kind === "director", "ACTOR_DENIED", "Skill reads must retain their director epoch");
     this.service.assertActor(projectId, actor);
@@ -107,11 +128,34 @@ export class DirectorContextService {
       "SCOPE_DENIED", "Skill activation does not belong to this request and epoch");
     const lock = this.service.store.get<LockRecord>("director_skill_lock", record.activation.lockId);
     invariant(lock?.projectId === projectId, "SCOPE_DENIED", "Skill lock is absent");
-    const read = readActivatedSkillFile(lock.lock, record.activation, this.environment, selection);
+    const guidance = options.via === "read_guidance";
+    const reads = "FROM entities WHERE kind='skill_read' AND project_id=? AND json_extract(body,'$.epochId')=? AND json_extract(body,'$.evidence.activationId')=? AND json_extract(body,'$.via')='read_guidance'";
+    const used = () => this.service.store.db.prepare(`SELECT count(*) AS count, coalesce(sum(json_extract(body,'$.bytes')),0) AS bytes ${reads} AND json_extract(body,'$.repeat') IS NULL`)
+      .get(projectId, actor.epochId, activationId) as { count: number; bytes: number };
+    const repeated = () => !!this.service.store.db.prepare(`SELECT 1 ${reads} AND json_extract(body,'$.evidence.skillId')=? AND json_extract(body,'$.evidence.path')=? LIMIT 1`)
+      .get(projectId, actor.epochId, activationId, selection.skillId, selection.path);
+    const repeats = () => (this.service.store.db.prepare(`SELECT count(*) AS count ${reads} AND json_extract(body,'$.repeat')=1`).get(projectId, actor.epochId, activationId) as { count: number }).count;
+    const limit = (bytes: number, repeat: boolean) => {
+      const prior = used(), kib = (value: number) => Math.ceil(value / 1024);
+      const files = SKILL_LIMITS.guidanceReadsPerActivation, total = SKILL_LIMITS.guidanceReadBytes;
+      const fits = repeat ? repeats() < SKILL_LIMITS.guidanceRepeatReads : prior.count < files && prior.bytes + bytes <= total;
+      if (fits) return;
+      const next = "Continue this turn with the guidance already in your context and the files you read; do not retry read_guidance this turn. "
+        + "The allowance starts again with the person's next message.";
+      throw new DomainError("GUIDANCE_READ_LIMIT", `This turn's guidance allowance is used: ${prior.count} of ${files} files and ${kib(prior.bytes)} of ${kib(total)} KiB`
+        + `${repeat ? `, and ${SKILL_LIMITS.guidanceRepeatReads} repeat reads` : bytes ? `; this file needs ${kib(bytes)} KiB more` : ""}. ${next}`,
+        { readFiles: prior.count, maxFiles: files, readBytes: prior.bytes, maxBytes: total, next });
+    };
+    const repeat = guidance && repeated();
+    if (guidance) limit(0, repeat);
+    const read = readActivatedSkillFile(lock.lock, record.activation, this.environment, selection, options.via ? { via: options.via } : {});
+    const bytes = Buffer.byteLength(read.content);
     return this.service.store.transaction(() => {
       this.service.assertActor(projectId, actor);
       invariant(canonical(this.service.store.get<ActivationRecord>("skill_activation", activationId)?.activation) === canonical(record.activation), "CAPABILITY_MISMATCH", "Skill activation changed during read");
-      this.service.store.insert("skill_read", read.evidence.readId, projectId, { id: read.evidence.readId, projectId, requestId: actor.requestId, epochId: actor.epochId, evidence: read.evidence });
+      if (guidance) limit(bytes, repeat);
+      this.service.store.insert("skill_read", read.evidence.readId, projectId, { id: read.evidence.readId, projectId, requestId: actor.requestId, epochId: actor.epochId, evidence: read.evidence,
+        ...(options.via ? { via: options.via, bytes } : {}), ...(repeat ? { repeat: true } : {}) });
       return read;
     });
   }

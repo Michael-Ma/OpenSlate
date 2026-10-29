@@ -1,0 +1,168 @@
+/*
+ * Assets view (docs/ai/prototypes/last-ferry/assets.html). Only :root tokens. The shared P5 components it
+ * uses (view head, panel, segmented control, select, sheet, progress) are taken from the study's
+ * system.css section 8 and scoped to this view, so they cannot collide with the other views' copies.
+ * Colour roles: neutral greys; white for the chosen tile and the primary action; green for "Current" / "In use";
+ * refusals neutral with an icon and words. No amber: nothing here is the Director's.
+ */
+
+/* ---------- workspace: a column instead of the Keyframes grid ---------- */
+.work.assets-work{display:flex;flex-direction:column;gap:12px;overflow:hidden;padding:10px 22px 18px;min-width:0;min-height:0}
+.assets-work.av-state{display:grid;place-content:center}
+.assets-work .av-message{max-width:440px;text-align:center;color:var(--text-2);font-size:13.5px;line-height:1.5;border:1px dashed var(--track);border-radius:var(--r-big);padding:22px 26px}
+
+/* ---------- view head (system 8.1) ---------- */
+.assets-work .view-head{display:flex;align-items:center;gap:12px;min-height:36px;flex-wrap:wrap;flex:none}
+.assets-work .view-head h1{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+.assets-work .view-head .line{color:var(--text-2);font-size:13.5px;min-width:0}
+.assets-work .view-head .actions{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+/* ---------- shared pieces (system 8.2–8.4, 8.11) ---------- */
+.assets-work .panel{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-big);padding:14px 16px;min-width:0}
+.assets-work .hint{font-size:12px;color:var(--text-2);line-height:1.4}
+.assets-work .field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.assets-work .field > .label{font-size:12px;color:var(--muted)}
+.assets-work .field > .segctl{align-self:flex-start}
+.assets-work .select{background:var(--raised);border:1px solid var(--track);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:8px 10px;min-width:0}
+.assets-work .segctl{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--hairline);background:var(--bar);border-radius:var(--r-pill);max-width:100%;overflow-x:auto;scrollbar-width:none;flex:none}
+.assets-work .segctl::-webkit-scrollbar{display:none}
+.assets-work .segctl button{border:0;background:none;color:var(--text-2);font-weight:600;font-size:12.5px;padding:4px 11px;border-radius:var(--r-pill);white-space:nowrap}
+.assets-work .segctl button:hover:not(:disabled){color:var(--text)}
+.assets-work .segctl button:focus-visible{outline-offset:-2px}
+.assets-work .segctl button[aria-pressed="true"],.assets-work .segctl button[aria-checked="true"]{background:var(--raised-2);color:var(--text)}
+.assets-work .segctl button .n{color:var(--muted);font-weight:500;margin-left:1px}
+.assets-work .progress{height:4px;border-radius:2px;background:var(--track);overflow:hidden;position:relative}
+.assets-work .progress i{position:absolute;top:0;bottom:0;left:0;background:var(--text);border-radius:2px}
+.assets-work .progress.indet i{width:30%;animation:av-indet 1.4s ease-in-out infinite}
+@keyframes av-indet{0%{left:-30%}100%{left:100%}}
+.assets-work a.pill{text-decoration:none}
+.assets-work .linkish{border:0;background:none;padding:0;font:inherit;color:var(--text);text-decoration:underline;text-underline-offset:2px}
+.assets-work .linkish:hover{color:var(--select);text-decoration-thickness:2px}
+
+/* ---------- filters ---------- */
+.assets-work .filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap;flex:none}
+.assets-work .filters .select{width:auto;padding:5px 10px;border-radius:var(--r-pill);font-size:12.5px;background:var(--bar);border-color:var(--hairline)}
+.assets-work .filters .count{margin-left:auto;color:var(--muted);font-size:12.5px}
+
+/* ---------- library: groups beside the detail ---------- */
+.assets-work .lib{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;flex:1;min-height:0}
+.assets-work .groups{overflow:auto;min-height:0;display:flex;flex-direction:column;gap:14px;padding-right:2px}
+.assets-work .group{padding:0;flex:none}
+.assets-work .group > h2{margin:0;padding:11px 16px;font-size:14px;font-weight:700;display:flex;gap:9px;align-items:center;border-bottom:1px solid var(--hairline)}
+.assets-work .group > h2 .meta{color:var(--text-2);font-weight:500;font-size:12.5px}
+.assets-work .sno{width:22px;height:22px;border-radius:7px;background:var(--raised-2);display:grid;place-items:center;font-weight:700;font-size:12px;flex:none}
+.assets-work .shotset{display:grid;grid-template-columns:132px minmax(0,1fr);gap:12px;padding:12px 16px;border-top:1px solid var(--hairline);scroll-margin:12px}
+.assets-work .group > h2 + .shotset{border-top:0}
+.assets-work .shotset.av-former{grid-template-columns:minmax(0,1fr)}
+.assets-work .shotset.flash{outline:2px solid var(--select);outline-offset:-2px;border-radius:4px}
+.assets-work .group.flash{outline:2px solid var(--select);outline-offset:2px}
+.assets-work .shotset .who b{display:block;font-size:13.5px}
+.assets-work .shotset .who span{font-size:12px;color:var(--text-2)}
+.assets-work .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.assets-work .nothing{color:var(--muted);font-size:12.5px;align-self:center}
+.assets-work .empty-state{padding:22px 16px;color:var(--text-2);font-size:13px;line-height:1.5}
+.assets-work .group .empty-state{border-top:1px solid var(--hairline)}
+.assets-work .group > h2 + .empty-state{border-top:0}
+.assets-work .av-truncated{margin:0;padding:0 4px}
+
+/* ---------- tiles ---------- */
+.assets-work .tile{position:relative;border:1px solid var(--hairline);background:var(--bar);border-radius:12px;padding:6px 6px 8px;text-align:left;display:flex;flex-direction:column;gap:6px;min-width:0;color:var(--text);font-size:inherit}
+.assets-work .tile:hover{border-color:var(--track)}
+.assets-work .tile[aria-pressed="true"]{border:2px solid var(--select);padding:5px 5px 7px}
+.assets-work .tile-pic{position:relative;display:block;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:var(--surface-stripe)}
+.assets-work .tile-pic > .av-img,.assets-work .tile-pic > .av-pic-note,.assets-work .tile-pic > .wave{position:absolute;inset:0}
+.assets-work .tile-pic .kind,.assets-work .tile-pic .dur{position:absolute;bottom:5px;font-size:10.5px;font-weight:700;background:rgba(20,21,23,.86);color:var(--text);border-radius:5px;padding:1px 6px;display:inline-flex;align-items:center;gap:3px;line-height:1.45}
+.assets-work .tile-pic .kind{left:5px}
+.assets-work .tile-pic .dur{right:5px}
+.assets-work .tile b{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.assets-work .tile .sub{font-size:11.5px;color:var(--text-2);display:flex;gap:6px;align-items:center;white-space:nowrap;min-width:0;overflow:hidden}
+.assets-work .tile .sub > span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.assets-work .tile .cur{color:var(--green);font-weight:600}
+
+/* pictures, waveforms and placeholders */
+.assets-work .av-img{display:block;width:100%;height:100%;object-fit:cover;user-select:none}
+.assets-work .av-pic-note{display:grid;place-items:center;padding:6px;text-align:center;color:var(--muted);font-size:11.5px}
+.assets-work .av-pic-loading{background:var(--surface-stripe)}
+.assets-work .av-video-face{background:var(--raised);color:var(--text-2)}
+.assets-work .av-video-face svg{width:18px;height:18px}
+.assets-work .av-doc-face{background:var(--raised);color:var(--text-2)}
+.assets-work .wave{display:flex;align-items:center;gap:2px;height:100%;padding:0 8px;background:var(--raised)}
+.assets-work .wave i{flex:1;background:var(--text-2);border-radius:1px;min-width:2px;opacity:.75}
+
+/* ---------- detail ---------- */
+.assets-work .detail{display:flex;flex-direction:column;gap:10px;overflow:auto;padding:14px}
+.assets-work .detail .av-pick{padding:8px 2px}
+.assets-work .big-pic{position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--surface-stripe);flex:none}
+.assets-work .big-pic > .av-img,.assets-work .big-pic > .av-pic-note,.assets-work .big-pic > .wave,.assets-work .big-pic > .av-video{position:absolute;inset:0}
+.assets-work .big-pic .av-anim{position:absolute;inset:0;transform-origin:50% 50%;will-change:transform}
+.assets-work .big-pic .av-anim > *{position:absolute;inset:0}
+.assets-work .av-video{width:100%;height:100%;object-fit:contain;background:var(--ground);display:block}
+.assets-work .big-pic .ph{position:absolute;top:0;bottom:0;width:2px;background:var(--text);left:0}
+.assets-work .detail h3{margin:0;font-size:17px;font-weight:700;letter-spacing:-.01em;line-height:1.3;overflow-wrap:anywhere}
+.assets-work .detail .rows{grid-template-columns:70px 1fr;font-size:13px;margin:0}
+.assets-work .detail .av-row{display:contents}
+.assets-work .detail .acts{display:flex;flex-direction:column;gap:7px;margin-top:auto;padding-top:6px}
+.assets-work .detail .acts .pill{justify-content:center;padding:7px 10px;white-space:normal;text-align:center}
+.assets-work .detail .av-why{text-align:center}
+.assets-work .detail .av-song{display:flex;flex-direction:column;gap:5px;font-size:13px;line-height:1.4;border-top:1px solid var(--hairline);padding-top:8px}
+.assets-work .detail .av-song h4{margin:0;font-size:12px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em}
+.assets-work .detail .av-song p{margin:0}
+.assets-work .detail .av-song .pill{justify-content:center;padding:7px 10px;white-space:normal;text-align:center}
+/* Download keeps focus while its file loads, so it is aria-disabled rather than disabled; it looks the same. */
+.assets-work .acts .pill[aria-disabled="true"],.assets-work .acts .pill.primary[aria-disabled="true"]:hover{background:var(--raised-2);border-color:var(--raised-2);color:var(--muted);cursor:default}
+.assets-work .pill[aria-busy="true"]{cursor:progress}
+.assets-work .playrow{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums;flex:none}
+.assets-work .playrow .track i{transition:none}
+.assets-work .av-note{margin-top:-4px}
+
+/* ---------- sheets (system 8.6): import, and the detail on a phone ---------- */
+.assets-work dialog{color:var(--text);font:inherit}
+.assets-work dialog::backdrop{background:rgba(8,9,10,.62)}
+.assets-work .sheet{margin:0 0 0 auto;height:100vh;max-height:100vh;max-width:100vw;width:min(520px,100vw);border:0;border-left:1px solid var(--track);border-radius:0;background:var(--bar);padding:0;box-shadow:-24px 0 60px rgba(0,0,0,.5)}
+.assets-work .sheet[open]{display:flex;flex-direction:column}
+.assets-work .sheet-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--hairline);flex:none}
+.assets-work .sheet-head h2{margin:0;font-size:17px;font-weight:700}
+.assets-work .sheet-head .pill{margin-left:auto}
+.assets-work .sheet-body{flex:1;min-height:0;overflow:auto;padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+.assets-work .sheet-body > *{flex:none}
+.assets-work .sheet-foot{flex:none;border-top:1px solid var(--hairline);padding:12px 18px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.assets-work .sheet-foot .grow{flex:1;min-width:0;font-size:12px;color:var(--text-2)}
+.assets-work .sheet-foot .pill{padding:7px 14px}
+.assets-work .av-lead{margin:0}
+.assets-work .file-opt{display:flex;gap:10px;align-items:center;border:2px solid var(--select);background:var(--surface);border-radius:12px;padding:7px 11px;color:var(--text);min-width:0}
+.assets-work .file-opt[data-kind="refused"]{border:1px solid var(--track);padding:8px 12px}
+.assets-work .file-opt .name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.assets-work .file-opt span:last-child{color:var(--text-2);font-size:12px;margin-left:auto;white-space:nowrap}
+.assets-work .av-choose{display:flex}
+.assets-work .av-refusal{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--track);background:var(--raised);border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.45;color:var(--text)}
+.assets-work .av-refusal .ic{flex:none;width:18px;height:18px;border-radius:50%;background:var(--text);color:var(--surface);display:grid;place-items:center;font-size:11px;font-weight:800;margin-top:1px}
+.assets-work .av-progress{display:flex;flex-direction:column;gap:7px}
+.assets-work .av-stopped{margin:0}
+.assets-work .av-detail-sheet .sheet-body.detail{padding:16px 18px;gap:12px}
+
+/* ---------- 900–1239 px: a narrower detail, shot names above their tiles (tiles stay at least 150 px) ---------- */
+@media (min-width: 900px) and (max-width: 1239px){
+  .assets-work .lib{grid-template-columns:minmax(0,1fr) 260px}
+  .assets-work .shotset{grid-template-columns:1fr}
+}
+
+/* ---------- phone: one column, two tiles a row, the detail is a sheet ---------- */
+@media (max-width: 899px){
+  .work.assets-work{overflow:visible;padding:14px 16px 28px;min-height:auto}
+  .assets-work .view-head{gap:4px 10px}
+  .assets-work .view-head .line{width:100%;order:3}
+  .assets-work .view-head .actions{margin-left:0;order:4;width:100%}
+  .assets-work .filters .count{margin-left:0;width:100%}
+  .assets-work .lib{grid-template-columns:minmax(0,1fr);flex:none}
+  .assets-work .groups{overflow:visible;padding-right:0}
+  .assets-work .shotset{grid-template-columns:minmax(0,1fr);padding:12px}
+  .assets-work .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .assets-work .group > h2{padding:11px 12px}
+  .assets-work .sheet{width:100vw;border-left:0}
+  .assets-work .sheet-foot .grow{flex:1 1 100%}
+}
+
+@media (prefers-reduced-motion: reduce){
+  .assets-work .progress.indet i{width:100%;left:0;opacity:.35;animation:none}
+  .assets-work .big-pic .av-anim{transform:none !important}
+}

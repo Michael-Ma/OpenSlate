@@ -1,0 +1,1131 @@
+import { filesAfterSend, filesProblem, readyRefs, type ComposerFile } from "./composer-files.ts";
+import type { AssetItem, DirectorGenerationBlock, DirectorGenerationEffect, DirectorNote, DirectorProposal, GenerationOverview, MediaSlot, MessageAttachmentView, ReviewNotesFailure, ShotOverview } from "@openslate/core/public";
+import { priceMsg } from "./price.ts";
+import { generationProgress, type GenerationProgress } from "./generation-progress.ts";
+import type { Locale } from "../../shared/locale-preference.ts";
+import { readAllAssets, type AssetPage } from "./assets.ts";
+import { parseMarkdown, parseRefLink, refLink, type Block, type RefLink } from "./markdown.ts";
+import { noteViews, type NoteView } from "./notes.ts";
+import { isMessageId, type MessageId } from "../i18n/messages.ts";
+import { formatList } from "../i18n/typeset.ts";
+import { errorMsg, nativeDiagnosticMsg } from "../i18n/translate.ts";
+import { queuedToRun } from "./media-state.ts";
+import { msg, type ComposerImage, type ConversationEntry, type DirectorStatus, type Msg, type PendingQuestion, type ProjectSnapshot, type Target, type TurnView } from "./types.ts";
+
+/**
+ * The Director column's view models (thread, questions, composer, picker, Stop). Pure: no React,
+ * no network, no clock except the `now` passed in. Models return message ids, never sentences;
+ * the Director's and the user's own words pass through untouched.
+ */
+
+/** The server's limit for one message (POST /messages, text maxLength). */
+export const MESSAGE_LIMIT = 16000;
+
+// ---- Stop -------------------------------------------------------------------
+
+// Review alone offers no Stop, and neither does a clip waiting for an input that nobody is making (a Scene 3 clip
+// before its keyframes exist): an idle film shows no Stop (GR-13). Other bound queues, including an unclassified
+// wait, can be detached by Stop; this is not evidence that they are currently being made. Already-stopped slots have
+// nothing left to detach.
+const stoppableQueue = (slot: Pick<MediaSlot, "state" | "waiting">, inputMaking: boolean) => slot.state === "queued"
+  && slot.waiting?.code !== "review" && slot.waiting?.code !== "stopped" && (slot.waiting?.code !== "input_pending" || inputMaking);
+const busySlot = (slot: MediaSlot, inputMaking: boolean) => slot.state === "running" || stoppableQueue(slot, inputMaking)
+  || slot.replacement?.state === "running" || !!slot.replacement && stoppableQueue(slot.replacement, inputMaking);
+/** A clip's inputs being made: its keyframe (running or queued to run) or its voice line. */
+const clipInputMaking = (shot: ShotOverview) => shot.keyframe.state === "running" || queuedToRun(shot.keyframe) || shot.narration.state === "making";
+
+/**
+ * Whether Stop has something to stop (GR-13): a running or waiting Director turn, a running or
+ * queued keyframe or clip, or a running scene confirmation. Never while the film is already stopped,
+ * and never merely because shots are still unmade (the old Stop showed while idle).
+ */
+export function canStop(overview: GenerationOverview | null, director: DirectorStatus | null): boolean {
+  if (!overview || overview.stopped) return false;
+  if (director?.status === "running" || director?.status === "waiting_user") return true;
+  if (overview.director.state === "working" || overview.director.state === "waiting_user") return true;
+  if (Object.values(overview.shots).some((shot) => busySlot(shot.keyframe, shot.narration.state === "making") || busySlot(shot.video, clipInputMaking(shot)) || shot.narration.state === "making")) return true;
+  return overview.scenes.some((scene) => scene.confirmation?.state === "running");
+}
+
+// ---- mode line -------------------------------------------------------------------
+
+export interface ModeLine {
+  /** info: a plain muted line; attention: the person has to do something. */
+  tone: "info" | "attention";
+  message: Msg;
+}
+
+export interface ModeContext {
+  /** The thread already says the Director's error, under the request whose turn failed (errorInThread). */
+  errorShown?: boolean;
+  /**
+   * Nothing in the film changes from the Director here: the sample film's scripted Director, with no unfinished edit
+   * holding shots on screen. The studio's own scripted Director can change the film, so it only says its replies are scripted.
+   */
+  filmUnchanged?: boolean;
+}
+
+/**
+ * What the header says about the Director runtime (DC-15). The scripted Director says its replies are
+ * canned; an unconnected one says where to set it up; an error says what to do, once: when the thread already marks
+ * the failed turn in place, the header leaves it to that marker. A working real Director needs no line.
+ */
+export function modeLine(director: DirectorStatus | null, loadError: string | undefined, context: ModeContext = {}): ModeLine | null {
+  if (!director) return loadError ? { tone: "attention", message: msg("director.unreachable") } : null;
+  if (director.status === "error" && !context.errorShown) return { tone: "attention", message: nativeDiagnosticMsg(director.turn?.nativeDiagnostic, "director")
+    ?? (director.turn?.errorCode === "RUNTIME_INSTRUCTIONS_UNEXPECTED" ? errorMsg(director.turn.errorCode) : msg("director.error")) };
+  if (director.mode === "offline" || director.status === "not_connected") return { tone: "attention", message: msg("director.offline") };
+  if (director.mode === "fake") return { tone: "info", message: msg(context.filmUnchanged ? "director.mode.fake" : "director.mode.scripted") };
+  return null;
+}
+
+/**
+ * The tag under a scripted reply. Only the sample film's scripted Director never changes the film; the studio's own
+ * scripted Director can (it makes shots and keyframes), so there the tag says only that the reply is scripted.
+ */
+export const scriptedTag = (mode: "live" | "fixture"): Msg => msg(mode === "fixture" ? "director.scripted_reply" : "director.scripted_reply_plain");
+
+/**
+ * The Director's error is already said in the thread: its current turn failed and that request has an entry, whose
+ * "This reply needs attention" marker carries the reason.
+ */
+export function errorInThread(snapshot: ProjectSnapshot | null, director: DirectorStatus | null): boolean {
+  const requestId = director?.turn?.requestId ?? director?.activeRequestId;
+  if (director?.status !== "error" || !requestId) return false;
+  return failedTurns(snapshot?.turns, director).has(requestId) && !!snapshot?.conversation?.some((entry) => entry.requestId === requestId);
+}
+
+// ---- labels -------------------------------------------------------------------
+
+/** "Scene 2" for a scene id, "2.3" for a shot id, null for the whole film or an id the film no longer has. */
+export function scopeLabel(overview: GenerationOverview | null, id: string): Msg | null {
+  if (!overview) return null;
+  const scene = overview.scenes.find((s) => s.sceneId === id);
+  if (scene) return msg("director.target.scene", { scene: scene.ordinal });
+  const shot = overview.shots[id];
+  if (shot) return msg("director.target.shot", { shot: shot.label });
+  return null;
+}
+
+/** Where a scene or shot sits in the storyboard: a scene before its own shots, each shot at its place in its scene. */
+function storyboardPlace(overview: GenerationOverview, id: string): [number, number] | null {
+  const scene = overview.scenes.find((s) => s.sceneId === id);
+  if (scene) return [scene.ordinal, -1];
+  const shot = overview.shots[id];
+  const owner = shot ? overview.scenes.find((s) => s.sceneId === shot.sceneId) : undefined;
+  return owner ? [owner.ordinal, owner.shotIds.indexOf(id)] : null;
+}
+
+/**
+ * The header's label. Once the composer points somewhere (its @ targets and the shots whose keyframes it shows), it
+ * names that, so the header and the composer's scope line say the same thing; otherwise it follows the view: the
+ * scene in Keyframes, the whole film elsewhere (P5 shell item 9). The places are named in storyboard order, as the
+ * scope line names its shots, whatever order the chips under it were added in ("2.1 and 2.2", never "2.2 and 2.1").
+ */
+export function headerScope(input: {
+  hasFilm: boolean;
+  /** The scene the Keyframes view shows; null in every other view. */
+  sceneOrdinal: number | null;
+  composer: ComposerState;
+  overview: GenerationOverview | null;
+}): HeaderScope {
+  if (!input.hasFilm) return { kind: "view", label: msg("director.scope.no_film") };
+  const overview = input.overview;
+  const ids = [...new Set([...input.composer.targets.map((target) => target.id), ...keyframeShots(input.composer, overview)])];
+  const placed = overview ? ids.flatMap((id) => {
+    const place = storyboardPlace(overview, id);
+    const label = scopeLabel(overview, id);
+    return place && label ? [{ place, label }] : [];
+  }) : [];
+  if (placed.length) {
+    placed.sort((a, b) => a.place[0] - b.place[0] || a.place[1] - b.place[1]);
+    return { kind: "message", labels: placed.map((entry) => entry.label) };
+  }
+  return { kind: "view", label: input.sceneOrdinal !== null ? msg("director.target.scene", { scene: input.sceneOrdinal }) : msg("director.scope.film") };
+}
+
+/** view: what the view shows; message: what the next message points at ("Points at 2.1 and 2.3"), each label a message. */
+export type HeaderScope = { kind: "view"; label: Msg } | { kind: "message"; labels: Msg[] };
+
+// ---- time -------------------------------------------------------------------
+
+const intlLocale = (locale: Locale) => (locale === "zh-CN" ? "zh-CN" : "en-US");
+
+/** "10:42" for a time today, "Oct 13, 10:42" for an earlier day; null when the time is missing or unreadable. */
+export function bylineTime(at: string | undefined, locale: Locale, now: Date): string | null {
+  if (!at) return null;
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return null;
+  const sameDay = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  const options: Intl.DateTimeFormatOptions = sameDay
+    ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }
+    : { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
+  return new Intl.DateTimeFormat(intlLocale(locale), options).format(date);
+}
+
+// ---- text -------------------------------------------------------------------
+
+/** Classic composer links: `[@Shot 2.3](#openslate-ref/...)`. Shown as plain `@Shot 2.3`. */
+const REFERENCE_LINK = /\[(@[^\]\n]{1,180})\]\(#openslate-ref\/[^)\s]*\)/g;
+/** Mentions at the start of a message that only repeat the chips above them. */
+const LEADING_MENTIONS = /^(?:\s*@(?:Scene\s+\d+|Shot\s+\d+\.\d+|\d+\.\d+|第\s*\d+\s*场))+[\s,:;，：]*/i;
+
+/**
+ * The user's words as they should read in the bubble: classic reference links become plain mentions,
+ * and leading mentions are dropped when chips already show what the message points at.
+ */
+export function userText(text: string, hasChips: boolean): string {
+  const plain = text.replace(REFERENCE_LINK, "$1");
+  return (hasChips ? plain.replace(LEADING_MENTIONS, "") : plain).trim();
+}
+
+/** Plain paragraphs, split on blank lines. Never HTML or Markdown: the view renders them as text. */
+export function paragraphs(text: string): string[] {
+  return text.split(/\n[ \t]*\n+/).map((part) => part.trim()).filter(Boolean);
+}
+
+/** Any `[label](#openslate-ref/...)` link in a user's message. */
+const REF_ANYWHERE = /\[([^\]\n]{1,180})\]\((#openslate-ref\/[^)\s]*)\)/g;
+
+export type UserSegment = { kind: "text"; text: string } | { kind: "ref"; ref: RefLink; label: string };
+
+export interface UserMessage {
+  /** Pictures the message showed the Director (its leading picture links), in order, with their names. */
+  pictures: { ref: RefLink; label: string; name: Msg }[];
+  /** The words, with any other reference links as references the view can open. */
+  segments: UserSegment[];
+}
+
+/**
+ * A user's message as the bubble shows it: the leading picture links become picture chips; leading scene and shot
+ * links that only repeat the chips above them (classic messages) and leading plain mentions are dropped when
+ * there are chips; any other reference link stays where it is, as a reference.
+ */
+export function userMessage(text: string, hasChips: boolean, scopeIds: readonly string[] = []): UserMessage {
+  const segments: UserSegment[] = [];
+  let last = 0;
+  for (const match of text.matchAll(REF_ANYWHERE)) {
+    const ref = parseRefLink(match[2]!);
+    if (!ref) continue;
+    if (match.index > last) segments.push({ kind: "text", text: text.slice(last, match.index) });
+    segments.push({ kind: "ref", ref, label: match[1]!.replace(/^@/, "") });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) segments.push({ kind: "text", text: text.slice(last) });
+
+  const pictures: UserMessage["pictures"] = [];
+  while (segments.length) {
+    const first = segments[0]!;
+    if (first.kind === "text" && !first.text.trim()) { segments.shift(); continue; }
+    if (first.kind !== "ref") break;
+    if (first.ref.kind === "image") pictures.push({ ref: first.ref, label: first.label, name: sentPictureName(first.label) });
+    else if (!(hasChips && (first.ref.kind === "project" || scopeIds.includes(first.ref.id)))) break;
+    segments.shift();
+  }
+  const head = segments[0];
+  if (head?.kind === "text") {
+    const trimmed = (hasChips ? head.text.trimStart().replace(LEADING_MENTIONS, "") : head.text).trimStart();
+    if (trimmed) segments[0] = { kind: "text", text: trimmed };
+    else segments.shift();
+  }
+  const tail = segments.at(-1);
+  if (tail?.kind === "text") {
+    const trimmed = tail.text.trimEnd();
+    if (trimmed) segments[segments.length - 1] = { kind: "text", text: trimmed };
+    else segments.pop();
+  }
+  return { pictures, segments };
+}
+
+/**
+ * A sent picture's name, from its link's words (messageText writes them): a shot label ("2.1") was that shot's
+ * keyframe, "image" an imported picture; anything else (a classic reference) is shown as written.
+ */
+export function sentPictureName(label: string): Msg {
+  if (/^\d+\.\d+$/.test(label)) return msg("director.picture.keyframe", { shot: label });
+  if (label === "image") return msg("director.picture.imported");
+  return msg("director.picture.name", { name: label });
+}
+
+/** What a reference in a message leads to: a scene or shot this film still has, or a picture to show. */
+export interface RefView {
+  open: Target | null;
+  picture: { artifactId: string; sha256: string } | null;
+}
+
+export function resolveRef(ref: RefLink, overview: GenerationOverview | null): RefView {
+  if (!overview || ref.projectId !== overview.projectId) return { open: null, picture: null };
+  if (ref.kind === "scene" && overview.scenes.some((scene) => scene.sceneId === ref.id)) return { open: { kind: "scene", id: ref.id }, picture: null };
+  if (ref.kind === "shot" && overview.shots[ref.id]) return { open: { kind: "shot", id: ref.id }, picture: null };
+  if (ref.kind === "image" && ref.sha256) return { open: null, picture: { artifactId: ref.id, sha256: ref.sha256 } };
+  return { open: null, picture: null };
+}
+
+// ---- thread -------------------------------------------------------------------
+
+/** Within this many pixels of its bottom, the thread counts as at its bottom: new content keeps it there. */
+export const THREAD_STICK_PX = 40;
+
+/** The thread's scroll box: its offset, its content's height and its own height. */
+export interface ThreadBox {
+  top: number;
+  height: number;
+  client: number;
+}
+
+/**
+ * What a scroll event on the Director thread means. follow: the reader is at the bottom, and new content keeps them
+ * there. pin: the thread was pinned to its bottom and its content or its room changed since, so the event is the
+ * layout's, not the reader's: a scroll event arrives a frame after the offset moved (a pin, or the browser pulling the
+ * offset in when the content shrank), and by then a note, a held edit or the other language's longer text may have
+ * grown under it; the thread goes back to its bottom. away: the reader scrolled up, and new content waits for them.
+ * `pinned` is the box when the thread was last pinned to its bottom, or null once the reader has scrolled away.
+ */
+export function threadScrolled(box: ThreadBox, pinned: Pick<ThreadBox, "height" | "client"> | null): "follow" | "pin" | "away" {
+  if (box.height - box.top - box.client < THREAD_STICK_PX) return "follow";
+  if (pinned && (pinned.height !== box.height || pinned.client !== box.client)) return "pin";
+  return "away";
+}
+
+/** Where a note's Open pill goes: the anchored shot, or the scene when the note has no shot. */
+export interface NoteOpen {
+  kind: "shot" | "scene";
+  id: string;
+  label: Msg;
+}
+
+/** A lettered Director note under the reply that wrote it (DC-18). An open note offers its choices here and in the Keyframes banner; the first press settles it. */
+export interface ThreadNote {
+  view: NoteView;
+  /**
+   * open: amber; done: settled, neutral with a green line; making: settled by a regenerate still being made, neutral
+   * and without a check; failed: neutral, names the failed regeneration; stale: neutral, says what changed.
+   */
+  tone: "open" | "done" | "making" | "failed" | "stale";
+  opens: NoteOpen[];
+}
+
+/** A reply (or a message without one) whose Director turn failed: says so, with the Director's reason when known. */
+export interface Attention {
+  /** The reason in the interface language, when the error code is one the catalog words. */
+  detail: Msg | null;
+  /** The Director's own words, when the server sent them and the code is not one the catalog words. */
+  text: string | null;
+}
+
+export interface ThreadEntry {
+  id: string;
+  who: "you" | "director";
+  time: string | null;
+  /** The scenes and shots a user message pointed at; empty for the whole film. */
+  chips: Msg[];
+  /** What each chip opens, in the same order. */
+  chipTargets: Target[];
+  /** User messages: one block (line breaks kept). Director messages: plain paragraphs. */
+  paragraphs: string[];
+  /** User messages: the pictures they showed and their words with references. Empty for the Director. */
+  user: UserMessage;
+  /** Director messages: the reply as safe Markdown blocks. Empty for the user. */
+  blocks: Block[];
+  /** A reply from the scripted Director (fixture or fake mode). */
+  scripted: boolean;
+  requestId: string | null;
+  /** Director replies: the notes their turn wrote, in letter order. */
+  notes: ThreadNote[];
+  /** Set on the last entry of a request whose Director turn failed. */
+  attention: Attention | null;
+  /** Application-owned reason an ended automatic review could not save notes, independent of the reply's words. */
+  reviewNotesFailure: Msg | null;
+  /** A person's message: the files it carried. */
+  attachments: MessageAttachmentView[];
+  /** Director replies: the paid work its turn started (keyframes and voice lines, a transcription), priced. */
+  generation: GenerationLine[];
+  /** Director replies: the parts of the request the application refused, with what unblocks them. */
+  blocked: DirectorGenerationBlock[];
+}
+
+export interface GenerationLine {
+  text: Msg;
+  /** Some of it is still being made: Stop can halt what has not been sent. */
+  running: boolean;
+  /** Keyframes: live per-shot progress from the overview, in place of the static line. */
+  progress: GenerationProgress | null;
+  /** A transcription that is no longer running: how it ended (null while running, and for keyframes). */
+  outcome: "ready" | "failed" | "no_answer" | null;
+  /** An unanswered transcription the person can give up on (its attempt), as in the inspector. */
+  release: string | null;
+}
+
+/** A transcription's words follow its live outcome; an older server that sends none keeps "Started…". */
+function transcriptionKey(effect: DirectorGenerationEffect): MessageId {
+  const live = effect.transcription;
+  if (live?.state === "ready") return "director.generation.transcription_done";
+  if (live?.state === "no_answer") return "director.generation.transcription_waiting";
+  if (live?.state === "failed") return live.failure?.code === "SUBMISSION_RESPONSE_LOST" ? "director.generation.transcription_lost"
+    : live.failure?.charged ? "director.generation.transcription_failed_charged" : "director.generation.transcription_failed";
+  return "director.generation.transcription";
+}
+
+/**
+ * "Started 8 keyframes and 2 voice lines in Scenes 1 and 3 · about $0.36". The Director starts keyframes and voice
+ * lines when the person asks for them; the line names what and the price, and says when Stop can still halt it.
+ */
+export function generationLines(effects: readonly DirectorGenerationEffect[] | undefined, overview: GenerationOverview | null, locale: Locale): GenerationLine[] {
+  return (effects ?? []).map((effect) => {
+    const scenes = effect.sceneIds.flatMap((id) => { const scene = overview?.scenes.find((s) => s.sceneId === id); return scene ? [String(scene.ordinal)] : []; });
+    const price = priceMsg(effect.quote, locale);
+    const where = scenes.length ? labelList(scenes, locale) : "";
+    const text = effect.kind === "transcription"
+      ? msg(transcriptionKey(effect), { price: "" })
+      : msg(scenes.length ? "director.generation.keyframes_in" : "director.generation.keyframes", { keyframes: effect.keyframes, voices: effect.voiceLines, scenes: where, count: scenes.length });
+    const running = !!overview && effect.shotIds.some((id) => { const shot = overview.shots[id]; return !!shot && (shot.keyframe.state === "running" || queuedToRun(shot.keyframe) || shot.narration.state === "making"); });
+    const progress = generationProgress(effect, overview, locale);
+    if (effect.kind === "transcription") {
+      // Without a live outcome (an older server) the line stays "Started…" and never offers Stop, as before.
+      const state = effect.transcription?.state;
+      const release = state === "no_answer" ? effect.transcription?.attemptId ?? null : null;
+      return { text: { ...text, messages: { price } }, running: state === "running", progress: null, outcome: !state || state === "running" ? null : state, release };
+    }
+    return { text: { ...text, messages: { price } }, running: progress ? progress.running : running, progress, outcome: null, release: null };
+  });
+}
+
+export interface QuestionItemView {
+  id: string;
+  header: string;
+  question: string;
+  options: { label: string; description: string }[];
+}
+
+export interface QuestionView {
+  id: string;
+  items: QuestionItemView[];
+}
+
+export interface ThreadView {
+  entries: ThreadEntry[];
+  /** Ended automatic reviews without a reply still show their note-save failure. */
+  reviewNotesFailures: { id: string; message: Msg }[];
+  questions: QuestionView[];
+  /** Unfinished Director edits that hold shots (card B13), with Let it go. */
+  held: HeldEdit[];
+  /** The Director is running a turn: show Working… */
+  working: boolean;
+  /** What the running turn is doing, when the server says (DC-16). */
+  activity: Msg | null;
+  /** How the latest turn ended, when it ended without a reply (DC-16). */
+  ending: Msg | null;
+}
+
+const ENDINGS = new Set(["no_reply", "failed", "timeout", "superseded", "interrupted", "owner_lost"]);
+const TOOL_ACTIVITY: Record<string, MessageId> = {
+  read_context: "director.activity.reading",
+  record_notes: "director.activity.notes",
+  propose_change: "director.activity.proposing",
+  prepare_change: "director.activity.proposing",
+  apply_change: "director.activity.changing",
+};
+
+const REVIEW_NOTES_FAILURE: Record<ReviewNotesFailure["reason"], MessageId> = {
+  invalid_anchor: "director.review.notes_unsaved_anchor",
+  invalid_arguments: "director.review.notes_unsaved_arguments",
+  outside_scope: "director.review.notes_unsaved_scope",
+  unseen_keyframe: "director.review.notes_unsaved_keyframe",
+  missing_keep_choice: "director.review.notes_unsaved_keep",
+  unavailable: "director.review.notes_unsaved_unavailable",
+  unknown: "director.review.notes_unsaved_unknown",
+};
+
+/**
+ * Whether the Director's automatic read-only review of new keyframes is running for this scene: the latest turn is a
+ * keyframe review still going, and the Director's scope covers the scene or one of its shots (or names nothing).
+ * While it runs, the scene's check row says the review is under way rather than showing a green all-clear.
+ */
+export function reviewingScene(turns: readonly TurnView[] | undefined, overview: GenerationOverview, sceneId: string): boolean {
+  const latest = turns?.at(-1);
+  if (!latest || latest.action !== "keyframe_review" || (latest.state !== "running" && latest.state !== "queued")) return false;
+  const scope = overview.director.scopeIds;
+  const scene = overview.scenes.find((item) => item.sceneId === sceneId);
+  return !scope.length || scope.includes(sceneId) || !!scene?.shotIds.some((id) => scope.includes(id));
+}
+
+/** What the latest turn says about itself: its current activity while running, or an honest ending. */
+export function turnStatus(turns: readonly TurnView[] | undefined): { activity: Msg | null; ending: Msg | null } {
+  const latest = turns?.at(-1);
+  if (!latest) return { activity: null, ending: null };
+  if (latest.state === "running" || latest.state === "queued") {
+    if (latest.action === "keyframe_review") return { activity: msg("director.activity.review"), ending: null };
+    const id = latest.progress?.state === "started" ? TOOL_ACTIVITY[latest.progress.tool] : undefined;
+    const phase = latest.activity?.state === "started" ? latest.activity.phase : null;
+    return { activity: id ? msg(id) : phase ? msg(phase === "reasoning" ? "director.activity.thinking" : "director.activity.tool")
+      : latest.progress || latest.activity ? msg("director.activity.waiting") : null, ending: null };
+  }
+  const reason = latest.reason ?? "";
+  if (reason === "timeout") return { activity: null, ending: timeoutEnding(latest) };
+  return { activity: null, ending: ENDINGS.has(reason) ? msg(`director.ending.${reason as "no_reply" | "failed" | "timeout" | "superseded" | "interrupted" | "owner_lost"}`) : null };
+}
+
+function timeoutEnding(turn: TurnView): Msg {
+  const effects = turn.effects;
+  if (!effects) return msg("director.ending.timeout");
+  return effects.changesApplied + effects.notesCreated + effects.proposalsHeld === 0 ? msg("director.ending.timeout_empty")
+    : msg("director.ending.timeout_saved", { changes: effects.changesApplied, notes: effects.notesCreated, proposals: effects.proposalsHeld });
+}
+
+/** Elapsed time is a clock, never an invented completion percentage or heartbeat. */
+export function directorElapsed(turns: readonly TurnView[] | undefined, now: Date): Msg | null {
+  const turn = turns?.at(-1);
+  if (!turn || !["queued", "running"].includes(turn.state) || !turn.at) return null;
+  const started = Date.parse(turn.at);
+  return Number.isFinite(started) ? msg("director.activity.elapsed", { seconds: Math.max(0, Math.floor((now.getTime() - started) / 1000)) }) : null;
+}
+
+/** The chosen options as structured answers (DC-17), alongside the readable text. */
+export function structuredAnswers(question: QuestionView, choices: Readonly<Record<string, string>>): { questionId: string; optionIndex: number }[] {
+  return question.items.flatMap((item) => {
+    const index = item.options.findIndex((option) => option.label === choices[item.id]);
+    return index >= 0 ? [{ questionId: item.id, optionIndex: index }] : [];
+  });
+}
+
+/** Questions the person can still answer (state pending and canAnswer not false). */
+export function pendingQuestions(questions: readonly PendingQuestion[] | undefined): QuestionView[] {
+  return (questions ?? [])
+    .filter((question) => question.state === "pending" && question.canAnswer !== false)
+    .map((question) => ({
+      id: question.id,
+      items: question.questions.map((item) => ({ id: item.id, header: item.header, question: item.question, options: item.options.map((option) => ({ ...option })) })),
+    }));
+}
+
+// ---- notes in the thread -------------------------------------------------------------
+
+/** "a" < "b" < … < "z" < "aa": shorter letters first, then alphabetical. */
+export const byLetter = (a: { letter: string }, b: { letter: string }) => a.letter.length - b.letter.length || a.letter.localeCompare(b.letter);
+
+/**
+ * Which Director reply each note sits under, by entry id. A note goes under the last reply of its own
+ * request. Replies without a request id (older servers, the fixture film) fall back: the latest such
+ * reply shows the latest Director turn's notes that no reply claimed. Lists are in letter order.
+ */
+export function threadNotes(conversation: readonly ConversationEntry[], notes: readonly DirectorNote[]): Map<string, DirectorNote[]> {
+  const out = new Map<string, DirectorNote[]>();
+  if (!notes.length) return out;
+  const replies = conversation.filter((entry) => entry.role === "assistant");
+  const lastReply = new Map<string, string>();
+  for (const reply of replies) if (reply.requestId) lastReply.set(reply.requestId, reply.id);
+  const add = (entryId: string, note: DirectorNote) => out.set(entryId, [...(out.get(entryId) ?? []), note]);
+  const unclaimed: DirectorNote[] = [];
+  for (const note of notes) {
+    const entryId = lastReply.get(note.requestId);
+    if (entryId) add(entryId, note);
+    else unclaimed.push(note);
+  }
+  const bare = replies.filter((reply) => !reply.requestId).at(-1);
+  if (bare && unclaimed.length) {
+    // The latest turn: the newest note's turn (ISO times compare as strings; a tie goes to the later note).
+    const newest = unclaimed.reduce((latest, note) => (note.createdAt >= latest.createdAt ? note : latest));
+    for (const note of unclaimed) if (note.turnId === newest.turnId) add(bare.id, note);
+  }
+  for (const [entryId, list] of out) out.set(entryId, [...list].sort(byLetter));
+  return out;
+}
+
+/** Open pills for a note: one per anchored shot that still exists, or its scene when it names no shot. */
+export function noteOpens(view: NoteView, overview: GenerationOverview): NoteOpen[] {
+  const shots = view.shotIds.flatMap((id) => {
+    const shot = overview.shots[id];
+    return shot ? [{ kind: "shot" as const, id, label: msg("note.choice.open", { shot: shot.label }) }] : [];
+  });
+  if (shots.length || view.shotIds.length) return shots;
+  const scene = overview.scenes.find((s) => s.sceneId === view.sceneId);
+  return scene ? [{ kind: "scene", id: scene.sceneId, label: msg("note.choice.open_scene", { scene: scene.ordinal }) }] : [];
+}
+
+/** Replies are read again on every refresh; their Markdown is parsed once per text (a small, bounded cache). */
+const parsed = new Map<string, Block[]>();
+function replyBlocks(text: string): Block[] {
+  const hit = parsed.get(text);
+  if (hit) return hit;
+  const blocks = parseMarkdown(text);
+  if (parsed.size >= 300) parsed.delete(parsed.keys().next().value!);
+  parsed.set(text, blocks);
+  return blocks;
+}
+
+const noteTone = (view: NoteView): ThreadNote["tone"] => (view.state === "resolved"
+  ? view.regeneration === "failed" ? "failed" : view.regeneration && view.regeneration !== "complete" ? "making" : "done"
+  : view.state === "stale" ? "stale" : "open");
+
+export function threadView(
+  snapshot: ProjectSnapshot | null,
+  overview: GenerationOverview | null,
+  director: DirectorStatus | null,
+  locale: Locale,
+  now: Date,
+  proposals: readonly DirectorProposal[] = [],
+): ThreadView {
+  const conversation = snapshot?.conversation ?? [];
+  const placed = overview ? threadNotes(conversation, snapshot?.notes ?? []) : new Map<string, DirectorNote[]>();
+  const notesFor = (entryId: string): ThreadNote[] => {
+    const list = placed.get(entryId);
+    if (!list || !overview) return [];
+    return noteViews(list, overview, proposals).map((view) => ({ view, tone: noteTone(view), opens: noteOpens(view, overview) }));
+  };
+  const noWords: UserMessage = { pictures: [], segments: [] };
+  const entries: ThreadEntry[] = conversation.map((entry) => {
+    const time = bylineTime(entry.at, locale, now);
+    const failed = entry.state === "failed" ? { detail: null, text: null } : null;
+    if (entry.role === "user") {
+      const scoped = [...new Set(entry.scopeIds ?? [])].flatMap((id) => {
+        const label = scopeLabel(overview, id);
+        const kind = overview?.scenes.some((scene) => scene.sceneId === id) ? "scene" as const : "shot" as const;
+        return label ? [{ label, target: { kind, id } }] : [];
+      });
+      const chips = scoped.map((chip) => chip.label);
+      const text = userText(entry.text, chips.length > 0);
+      return { id: entry.id, who: "you", time, chips, chipTargets: scoped.map((chip) => chip.target), paragraphs: text ? [text] : [], user: userMessage(entry.text, chips.length > 0, entry.scopeIds), blocks: [], scripted: false, requestId: entry.requestId ?? null, notes: [], attention: failed, reviewNotesFailure: null, attachments: entry.attachments ?? [], generation: [], blocked: [] };
+    }
+    return { id: entry.id, who: "director", time, chips: [], chipTargets: [], paragraphs: paragraphs(entry.text), user: noWords, blocks: replyBlocks(entry.text), scripted: entry.runtime === "scripted", requestId: entry.requestId ?? null, notes: notesFor(entry.id), attention: failed, reviewNotesFailure: null, attachments: [], generation: [], blocked: [] };
+  });
+  // What each turn started is said under its last reply.
+  const turnsByRequest = new Map<string, TurnView>();
+  for (const turn of snapshot?.turns ?? []) if (turn.effects?.generation?.length || turn.effects?.blocked?.length) turnsByRequest.set(turn.requestId, turn);
+  for (const [requestId, turn] of turnsByRequest) {
+    let index = entries.length - 1;
+    while (index >= 0 && (entries[index]!.who !== "director" || entries[index]!.requestId !== requestId)) index--;
+    if (index >= 0) entries[index] = { ...entries[index]!, generation: generationLines(turn.effects!.generation, overview, locale), blocked: turn.effects!.blocked ?? [] };
+  }
+  // A shot's live state belongs to the newest line that started it; an earlier line keeps its plain summary.
+  const claimed = new Set<string>();
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index]!;
+    if (!entry.generation.some((line) => line.progress)) continue;
+    const generation = [...entry.generation].reverse().map((line) => {
+      if (!line.progress) return line;
+      const ids = line.progress.shots.map((shot) => shot.shotId);
+      const stale = ids.some((id) => claimed.has(id));
+      ids.forEach((id) => claimed.add(id));
+      return stale ? { ...line, progress: null, running: false } : line;
+    }).reverse();
+    entries[index] = { ...entry, generation };
+  }
+  const reviewNotesFailures: ThreadView["reviewNotesFailures"] = [];
+  const latestByRequest = new Map<string, TurnView>();
+  for (const turn of snapshot?.turns ?? []) latestByRequest.set(turn.requestId, turn);
+  for (const turn of latestByRequest.values()) {
+    // The Director can correct a refused batch in the same turn. Its completed save outcome owns the app line.
+    if (turn.action !== "keyframe_review" || ["queued", "running"].includes(turn.state) || !turn.notesSaveFailure) continue;
+    const failure = turn.notesSaveFailure;
+    const message = msg(REVIEW_NOTES_FAILURE[failure.reason] ?? "director.review.notes_unsaved_unknown", { code: failure.code });
+    let index = entries.length - 1;
+    while (index >= 0 && (entries[index]!.who !== "director" || entries[index]!.requestId !== turn.requestId)) index--;
+    if (index >= 0) entries[index] = { ...entries[index]!, reviewNotesFailure: message };
+    else reviewNotesFailures.push({ id: turn.id, message });
+  }
+  // A failed turn marks the last entry of its request (the reply, or the message when there is none).
+  const failures = failedTurns(snapshot?.turns, director);
+  for (const [requestId, attention] of failures) {
+    let index = entries.length - 1;
+    while (index >= 0 && entries[index]!.requestId !== requestId) index--;
+    if (index >= 0) entries[index] = { ...entries[index]!, attention };
+  }
+  const status = turnStatus(snapshot?.turns);
+  const latest = snapshot?.turns?.at(-1);
+  // The marker says it where the reply is; the ending line would only repeat it.
+  const marked = !!latest && failures.has(latest.requestId) && entries.some((entry) => entry.requestId === latest.requestId);
+  const working = director?.status === "running" || overview?.director.state === "working";
+  return { entries, reviewNotesFailures, questions: pendingQuestions(snapshot?.questions), held: heldEdits(overview, snapshot, director), working, ...status, ending: marked ? null : status.ending };
+}
+
+const FAILED_STATES = new Set(["failed", "unknown"]);
+
+/**
+ * The requests whose latest Director turn failed, with what is known about why. Only the current turn (the
+ * Director status) carries an error code and the Director's own words. Safe native metadata stays with its turn.
+ */
+export function failedTurns(turns: readonly TurnView[] | undefined, director: DirectorStatus | null): Map<string, Attention> {
+  const latest = new Map<string, TurnView>();
+  for (const turn of turns ?? []) latest.set(turn.requestId, turn);
+  const out = new Map<string, Attention>();
+  for (const [requestId, turn] of latest) {
+    if (turn.reason === "timeout") { out.set(requestId, { detail: timeoutEnding(turn), text: null }); continue; }
+    if (!FAILED_STATES.has(turn.state)) continue;
+    const current = director?.turn?.requestId === requestId ? director : director?.activeRequestId === requestId && !director.turn ? director : null;
+    // An unconfirmed ending is one the catalog words exactly (the server's own sentence for it is English).
+    if (turn.state === "unknown") { out.set(requestId, { detail: msg("director.attention.unknown"), text: null }); continue; }
+    const code = current?.turn?.errorCode ?? null;
+    const native = nativeDiagnosticMsg(current?.turn?.nativeDiagnostic ?? turn.nativeDiagnostic, "director");
+    const coded = native ?? (code === "RUNTIME_INSTRUCTIONS_UNEXPECTED" ? errorMsg(code)
+      : code && isMessageId(`error.${code}`) ? msg(`error.${code}` as MessageId) : null);
+    const words = current?.message?.trim() || null;
+    const fallback = turn.reason === "timeout" ? msg("director.ending.timeout")
+      : turn.reason === "owner_lost" ? msg("director.ending.owner_lost")
+      : msg("director.ending.failed");
+    out.set(requestId, coded ? { detail: coded, text: null } : words ? { detail: null, text: words } : { detail: fallback, text: null });
+  }
+  return out;
+}
+
+// ---- held edits (card B13) -------------------------------------------------------------
+
+export interface HeldEdit {
+  requestId: string;
+  /** The held shots, in film order. */
+  shotIds: string[];
+  /** Their labels ("3.1"), the film's own words. */
+  labels: string[];
+  /** Why it cannot be let go right now (the Director is still working on it), or null. */
+  blocked: Msg | null;
+}
+
+/**
+ * Unfinished Director edits that hold shots: every queued slot waiting on `edit_pending`, grouped by the request
+ * that holds it. Letting one go (POST .../requests/:requestId/release-holds) ends that edit; the server refuses
+ * while its turn is queued or running, so the button says to wait or Stop first.
+ */
+export function heldEdits(overview: GenerationOverview | null, snapshot: ProjectSnapshot | null, director: DirectorStatus | null): HeldEdit[] {
+  if (!overview) return [];
+  const held = new Map<string, string[]>();
+  const scenes = [...overview.scenes].sort((a, b) => a.ordinal - b.ordinal);
+  for (const scene of scenes)
+    for (const shotId of scene.shotIds) {
+      const shot = overview.shots[shotId];
+      if (!shot) continue;
+      for (const slot of [shot.keyframe, shot.video]) {
+        const requestId = slot.state === "queued" && slot.waiting?.code === "edit_pending" ? slot.waiting.requestId : undefined;
+        if (!requestId) continue;
+        const list = held.get(requestId) ?? [];
+        if (!list.includes(shotId)) list.push(shotId);
+        held.set(requestId, list);
+      }
+    }
+  return [...held].map(([requestId, shotIds]) => {
+    const working = (director?.status === "running" && director.activeRequestId === requestId)
+      || (overview.director.state === "working" && overview.director.requestId === requestId)
+      || !!snapshot?.turns?.some((turn) => turn.requestId === requestId && (turn.state === "queued" || turn.state === "running"));
+    return { requestId, shotIds, labels: shotIds.map((id) => overview.shots[id]!.label), blocked: working ? msg("director.held.working") : null };
+  });
+}
+
+// ---- answers -------------------------------------------------------------------
+
+/**
+ * One free-text answer for the whole question set (the server takes a single string today, DC-17).
+ * A single item sends the chosen label; several items send "header: label" lines. Free text follows.
+ */
+export function composeAnswer(question: QuestionView, choices: Readonly<Record<string, string>>, freeText: string): string {
+  const chosen = question.items.filter((item) => choices[item.id]);
+  const lines = question.items.length === 1
+    ? chosen.map((item) => choices[item.id]!)
+    : chosen.map((item) => `${item.header || item.question}: ${choices[item.id]}`);
+  const extra = freeText.trim();
+  return [lines.join("\n"), extra].filter(Boolean).join("\n\n");
+}
+
+// ---- composer -------------------------------------------------------------------
+
+export interface ComposerChip {
+  target: Target;
+  /** "Removed" when the scene or shot is gone; the chip still shows so it can be removed. */
+  label: Msg;
+  key: string;
+}
+
+export interface ComposerView {
+  chips: ComposerChip[];
+  /** The pictures the message will show the Director, with thumbnails. */
+  pictures: PictureChip[];
+  /**
+   * Shots the message will also point at because it shows their keyframes (the Codex Director is given the current
+   * keyframe of each shot a message points at), labels in film order; empty when the chips already cover them.
+   */
+  pointsAt: string[];
+  /**
+   * The message has no @ target, so its keyframes' shots replace the whole film as its scope: the Director is given
+   * those keyframes but may change only those shots (the server attaches no keyframes to a whole-film message).
+   */
+  narrowed: boolean;
+  canSend: boolean;
+  /** Why sending is not possible right now, when that is not obvious (empty is obvious). */
+  problem: Msg | null;
+  /**
+   * The line beside @: what @ does, or why a message will wait (offline: the draft is kept; stopped: the Director
+   * waits for Continue, and a message sent then does not resume the film). Null with no film open.
+   */
+  hint: Msg | null;
+  /** The composer is off: no film is open, and the Director only works inside a film. */
+  off: boolean;
+}
+
+export const targetKey = (target: Target) => `${target.kind}:${target.id}`;
+
+/**
+ * `reachable` is the shell's write guard (writes reach the studio), not the event stream alone: a stream that is
+ * only reconnecting while reads still work leaves sending on. A stopped film keeps sending on and changes the hint.
+ */
+export function composerView(
+  composer: ComposerState,
+  reachable: boolean,
+  overview: GenerationOverview | null,
+  film: { open: boolean; stopped: boolean } = { open: true, stopped: false },
+  director: DirectorStatus | null = null,
+): ComposerView {
+  const chips = composer.targets.map((target) => ({ target, key: targetKey(target), label: scopeLabel(overview, target.id) ?? msg("director.target.gone") }));
+  const pictures = pictureChips(composer.images ?? [], overview);
+  const pointsAt = keyframeScope(composer, overview);
+  const text = composer.text.trim();
+  const tooLong = (overview ? messageText(composer, overview) : text).length > MESSAGE_LIMIT;
+  // Pictures the Director cannot take now (its mode changed, or a keyframe was replaced) keep the draft but hold Send.
+  const pictureProblem = !pictures.length ? null : pictureRefusal(director) ?? pictures.find((picture) => picture.problem)?.problem ?? null;
+  // Files still uploading hold Send (the hint says so); a failed file or too many attachments is a problem to fix.
+  const files = filesProblem(composer.files, pictures.length);
+  const problem = tooLong ? msg("director.composer.too_long") : pictureProblem ?? (files && !files.waiting ? files.reason : null);
+  const hint = !film.open ? null
+    : !reachable ? msg("director.composer.hint_offline")
+    : files?.waiting ? files.reason
+    : film.stopped ? msg("director.composer.hint_stopped")
+    : msg("director.composer.hint");
+  const narrowed = pointsAt.length > 0 && composer.targets.length === 0;
+  return { chips, pictures, pointsAt, narrowed, canSend: film.open && !!text && !problem && !files && reachable && !composer.sending, problem, hint, off: !film.open };
+}
+
+/** "Keep the whole film": the message's pictures without its keyframes, so it points at the whole film again. */
+export function withoutKeyframes(images: readonly ComposerImage[]): ComposerImage[] {
+  return images.filter((image) => image.source !== "keyframe");
+}
+
+/** The shots whose keyframes the message shows and that no chip already points at (by shot or scene), in storyboard order. */
+function keyframeShots(composer: ComposerState, overview: GenerationOverview | null): string[] {
+  if (!overview) return [];
+  const covered = (shotId: string) => composer.targets.some((target) => target.id === shotId || (target.kind === "scene" && overview.shots[shotId]?.sceneId === target.id));
+  const ids = new Set((composer.images ?? []).flatMap((image) => (image.source === "keyframe" && image.shotId && overview.shots[image.shotId] && !covered(image.shotId) ? [image.shotId] : [])));
+  const order = [...overview.scenes].sort((a, b) => a.ordinal - b.ordinal).flatMap((scene) => scene.shotIds);
+  return order.filter((id) => ids.has(id));
+}
+
+/** The labels of those shots, for the composer's scope line. */
+function keyframeScope(composer: ComposerState, overview: GenerationOverview | null): string[] {
+  return keyframeShots(composer, overview).map((id) => overview!.shots[id]!.label);
+}
+
+/** "3.1 and 3.2", "3.1、3.2 和 3.3": shot labels as one list in the interface language. */
+export function labelList(labels: readonly string[], locale: Locale): string {
+  return formatList(labels, intlLocale(locale));
+}
+
+/** The composer's contents (the store's `composer`). Older callers may leave out the pictures. */
+export interface ComposerState {
+  text: string;
+  targets: readonly Target[];
+  sending: boolean;
+  images?: readonly ComposerImage[];
+  /** Files attached, dropped or pasted into this message (model/composer-files.ts). */
+  files?: readonly ComposerFile[];
+}
+
+/**
+ * The composer once its message was sent: only what was sent goes. The words go (the box is read-only while
+ * sending); an @ target or a picture added while it was sending stays for the next message.
+ */
+export function afterSend(composer: ComposerState, sent: Pick<ComposerState, "text" | "targets" | "images" | "files">): { text: string; targets: Target[]; sending: false; images: ComposerImage[]; files: ComposerFile[] } {
+  const sentTargets = new Set(sent.targets.map(targetKey));
+  const sentImages = new Set((sent.images ?? []).map(pictureKey));
+  return {
+    text: composer.text === sent.text ? "" : composer.text,
+    targets: composer.targets.filter((target) => !sentTargets.has(targetKey(target))),
+    sending: false,
+    images: (composer.images ?? []).filter((image) => !sentImages.has(pictureKey(image))),
+    files: filesAfterSend(composer.files, sent.files),
+  };
+}
+
+// ---- pictures for the Director ------------------------------------------------------------
+
+/** The most pictures one message can show (the server's limit for attached images). */
+export const PICTURE_LIMIT = 4;
+
+export const pictureKey = (image: Pick<ComposerImage, "artifactId" | "sha256">) => `${image.artifactId}:${image.sha256}`;
+
+/**
+ * Why this film's Director cannot be shown pictures right now, or null when it can: only the Codex Director with
+ * FFmpeg on this computer looks at pictures (the server's imageAttachmentsAvailable).
+ */
+export function pictureRefusal(director: DirectorStatus | null): Msg | null {
+  if (!director) return msg("director.picture.unknown");
+  if (director.mode === "fake") return msg("director.picture.scripted");
+  if (director.mode === "offline" || director.status === "not_connected") return msg("director.picture.not_connected");
+  if (director.imageAttachmentsAvailable === false) return msg("director.picture.no_ffmpeg");
+  if (director.imageAttachmentsAvailable !== true) return msg("director.picture.unavailable");
+  return null;
+}
+
+/** A picture offered to the Director from Assets or the Keyframes preview, or why it cannot be shown. */
+export type PictureCandidate = { image: ComposerImage } | { refused: Msg };
+
+/**
+ * An image asset as a picture for the Director: an imported picture, or a shot's current keyframe. Demo stand-ins
+ * and earlier takes are refused with the reason (the Director only sees a shot's current keyframe). Null for
+ * anything that is not a picture.
+ */
+export function pictureFromAsset(item: AssetItem, overview: GenerationOverview | null): PictureCandidate | null {
+  if (item.artifact.kind !== "image") return null;
+  if (item.source === "demo") return { refused: msg("director.picture.demo") };
+  const base = { artifactId: item.artifact.artifactId, sha256: item.artifact.sha256 };
+  // The library keeps no file name for imported pictures (its label is "<film> · upload"), so they are named by kind.
+  if (item.role === "upload") return { image: { ...base, source: "upload", shotId: null, name: "" } };
+  if (item.role !== "keyframe") return null;
+  const shot = item.shotId ? overview?.shots[item.shotId] : undefined;
+  if (!shot) return { refused: msg("director.picture.former") };
+  const current = shot.keyframe.state === "ready" ? shot.keyframe.artifact : undefined;
+  if (!current || current.artifactId !== base.artifactId || current.sha256 !== base.sha256) return { refused: msg("director.picture.earlier_take") };
+  return { image: { ...base, source: "keyframe", shotId: shot.shotId, name: "" } };
+}
+
+/**
+ * The Keyframes preview's picture: the shot's current keyframe. `library` is the shot's keyframes as the asset library
+ * lists them: a current keyframe a demo provider made is refused, as Assets refuses it (the Director is only told
+ * about those, never shown them).
+ */
+export function pictureFromShot(shot: ShotOverview, library: readonly AssetItem[] = []): PictureCandidate {
+  const current = shot.keyframe.state === "ready" ? shot.keyframe.artifact : undefined;
+  if (!current) return { refused: msg("director.picture.no_keyframe", { shot: shot.label }) };
+  const listed = library.find((item) => item.artifact.artifactId === current.artifactId && item.artifact.sha256 === current.sha256);
+  if (listed?.source === "demo") return { refused: msg("director.picture.demo") };
+  return { image: { artifactId: current.artifactId, sha256: current.sha256, source: "keyframe", shotId: shot.shotId, name: "" } };
+}
+
+/** GET /assets for one shot's keyframes (every page); the library says which provider made each one. */
+export const shotKeyframesPath = (shotId: string, offset: number) => `/assets?shotId=${encodeURIComponent(shotId)}&role=keyframe&offset=${offset}`;
+
+/**
+ * The preview's picture, checked against the asset library when it is pressed (the overview does not say whether a
+ * keyframe came from a demo provider). A library that cannot be read refuses for now, with a reason to try again.
+ */
+export async function checkedShotPicture(shot: ShotOverview, readPage: (offset: number) => Promise<AssetPage>): Promise<PictureCandidate> {
+  const plain = pictureFromShot(shot);
+  if ("refused" in plain) return plain;
+  try {
+    const { items } = await readAllAssets(readPage);
+    return pictureFromShot(shot, items);
+  } catch {
+    return { refused: msg("director.picture.check_failed", { shot: shot.label }) };
+  }
+}
+
+/** Add a picture to the message, or say why not: the Director cannot take pictures, it is already there, or four are. */
+export function addPicture(images: readonly ComposerImage[], candidate: PictureCandidate, director: DirectorStatus | null): { images: ComposerImage[]; added: ComposerImage } | { refused: Msg } {
+  if ("refused" in candidate) return candidate;
+  const refusal = pictureRefusal(director);
+  if (refusal) return { refused: refusal };
+  if (images.some((image) => pictureKey(image) === pictureKey(candidate.image))) return { refused: msg("director.picture.already") };
+  if (images.length >= PICTURE_LIMIT) return { refused: msg("director.picture.limit") };
+  return { images: [...images, candidate.image], added: candidate.image };
+}
+
+/** "2.1 keyframe", an imported picture's name, or "Imported image" (numbered when there are several). */
+export function pictureLabel(image: ComposerImage, overview: GenerationOverview | null, number = 0): Msg {
+  if (image.source === "upload") return image.name ? msg("director.picture.name", { name: image.name }) : number ? msg("director.picture.imported_n", { n: number }) : msg("director.picture.imported");
+  const shot = image.shotId ? overview?.shots[image.shotId] : undefined;
+  return shot ? msg("director.picture.keyframe", { shot: shot.label }) : msg("director.picture.keyframe_gone");
+}
+
+export interface PictureChip {
+  key: string;
+  image: ComposerImage;
+  label: Msg;
+  /** Why this picture cannot be sent now (its shot was removed, or has a newer keyframe), or null. */
+  problem: Msg | null;
+}
+
+export function pictureChips(images: readonly ComposerImage[], overview: GenerationOverview | null): PictureChip[] {
+  const nameless = images.filter((image) => image.source === "upload" && !image.name);
+  return images.map((image) => {
+    const number = nameless.length > 1 ? nameless.indexOf(image) + 1 : 0;
+    let problem: Msg | null = null;
+    if (image.source === "keyframe" && overview) {
+      const shot = image.shotId ? overview.shots[image.shotId] : undefined;
+      const current = shot?.keyframe.state === "ready" ? shot.keyframe.artifact : undefined;
+      if (!shot) problem = msg("director.picture.gone");
+      else if (!current || current.artifactId !== image.artifactId || current.sha256 !== image.sha256) problem = msg("director.picture.not_current", { shot: shot.label });
+    }
+    return { key: pictureKey(image), image, label: pictureLabel(image, overview, number), problem };
+  });
+}
+
+/** A link's label without the characters that would end it, short enough for a chip. */
+const linkLabel = (text: string) => text.replace(/[[\]\n\r]+/g, " ").trim().slice(0, 120) || "picture";
+
+/**
+ * The text that is sent: one `[@name](#openslate-ref/…/image/…)` link per picture, in order, before the person's
+ * words. The Director is given the pictures in the same order, and the bubble shows them again from these links.
+ */
+export function messageText(composer: ComposerState, overview: Pick<GenerationOverview, "projectId" | "shots">): string {
+  const text = composer.text.trim();
+  const images = composer.images ?? [];
+  if (!images.length) return text;
+  const links = images.map((image) => {
+    const label = image.source === "upload" ? image.name || "image" : overview.shots[image.shotId ?? ""]?.label ?? "keyframe";
+    return `[@${linkLabel(label)}](${refLink({ projectId: overview.projectId, kind: "image", id: image.artifactId, sha256: image.sha256 })})`;
+  });
+  return `${links.join(" ")}\n\n${text}`;
+}
+
+export interface MessageBody {
+  text: string;
+  scopeIds: string[];
+  editing: true;
+  /** Imported pictures, as the server takes them ({ artifactId, sha256 }, one to four). */
+  images?: { artifactId: string; sha256: string }[];
+  /** Files sent with the message (any kind), saved to Assets first. */
+  attachments?: { artifactId: string; sha256: string }[];
+}
+
+/**
+ * POST /messages for the composer: the targets (and the shots of any keyframes it shows, so the Codex Director is
+ * given those keyframes), or the whole film; imported pictures as images. Null when there is nothing to send.
+ */
+export function messageBody(composer: ComposerState, overview: Pick<GenerationOverview, "projectId" | "shots">): MessageBody | null {
+  if (!composer.text.trim()) return null;
+  const images = composer.images ?? [];
+  const keyframeShots = images.flatMap((image) => (image.source === "keyframe" && image.shotId ? [image.shotId] : []));
+  const scoped = [...new Set([...composer.targets.map((target) => target.id), ...keyframeShots])];
+  const uploads = images.filter((image) => image.source === "upload").map(({ artifactId, sha256 }) => ({ artifactId, sha256 }));
+  const attachments = readyRefs(composer.files);
+  return {
+    text: messageText(composer, overview),
+    scopeIds: scoped.length ? scoped : [overview.projectId],
+    editing: true,
+    ...(uploads.length ? { images: uploads } : {}),
+    ...(attachments.length ? { attachments } : {}),
+  };
+}
+
+// ---- the unsent draft (kept per film in this browser) -----------------------------------------
+
+export interface Draft {
+  text: string;
+  targets: Target[];
+  images: ComposerImage[];
+}
+
+/** localStorage key of a film's unsent draft; the sample film keeps its own, apart from real films. */
+export const draftKey = (projectId: string, mode: "live" | "fixture" = "live") => `openslate.next.${mode === "fixture" ? "sample-draft" : "draft"}.${projectId}`;
+
+const isId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 160;
+
+/** What to keep: null when the composer is empty (the saved draft is then removed). */
+export function draftToSave(composer: ComposerState): Draft | null {
+  const images = [...(composer.images ?? [])];
+  if (!composer.text && !composer.targets.length && !images.length) return null;
+  return { text: composer.text, targets: composer.targets.map((target) => ({ kind: target.kind, id: target.id })), images: images.map((image) => ({ ...image })) };
+}
+
+/** A saved draft read back, checked field by field; anything malformed reads as no draft. */
+export function readDraft(raw: string | null): Draft | null {
+  if (!raw) return null;
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { return null; }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const draft = value as Record<string, unknown>;
+  const { text, targets, images } = draft;
+  // A long draft comes back as it was (the composer then says it is too long and holds Send); only its shape is checked.
+  if (typeof text !== "string") return null;
+  if (!Array.isArray(targets) || targets.length > 400 || !Array.isArray(images) || images.length > PICTURE_LIMIT) return null;
+  const goodTargets = targets.every((target) => !!target && typeof target === "object" && ["scene", "shot"].includes((target as Target).kind) && isId((target as Target).id));
+  const goodImages = images.every((item) => {
+    if (!item || typeof item !== "object") return false;
+    const image = item as ComposerImage;
+    return isId(image.artifactId) && typeof image.sha256 === "string" && /^[a-f0-9]{64}$/.test(image.sha256)
+      && (image.source === "upload" ? image.shotId === null : image.source === "keyframe" && isId(image.shotId))
+      && typeof image.name === "string" && image.name.length <= 300;
+  });
+  if (!goodTargets || !goodImages) return null;
+  const result: Draft = {
+    text,
+    targets: (targets as Target[]).map((target) => ({ kind: target.kind, id: target.id })),
+    images: (images as ComposerImage[]).map(({ artifactId, sha256, source, shotId, name }) => ({ artifactId, sha256, source, shotId, name })),
+  };
+  return draftToSave({ ...result, sending: false }) ? result : null;
+}
+
+// ---- @ picker -------------------------------------------------------------------
+
+export interface PickerItem {
+  key: string;
+  group: "scene" | "shot";
+  target: Target;
+  label: Msg;
+  /** The scene title, or the shot's framing and prompt. The film's own words. */
+  detail: string;
+  /** Extra words the query may match, e.g. "2.2", "scene 2". */
+  keywords: string[];
+}
+
+/** Scenes in order, then shots in scene order, from the overview's own labels. */
+export function pickerItems(overview: GenerationOverview | null): PickerItem[] {
+  if (!overview) return [];
+  const scenes = [...overview.scenes].sort((a, b) => a.ordinal - b.ordinal);
+  const sceneItems: PickerItem[] = scenes.map((scene) => ({
+    key: `scene:${scene.sceneId}`,
+    group: "scene",
+    target: { kind: "scene", id: scene.sceneId },
+    label: msg("director.target.scene", { scene: scene.ordinal }),
+    detail: scene.title,
+    keywords: [`scene ${scene.ordinal}`, `s${scene.ordinal}`, String(scene.ordinal)],
+  }));
+  const shotItems: PickerItem[] = scenes.flatMap((scene) =>
+    scene.shotIds.flatMap((id) => {
+      const shot = overview.shots[id];
+      if (!shot) return [];
+      return [{
+        key: `shot:${id}`,
+        group: "shot" as const,
+        target: { kind: "shot" as const, id },
+        label: msg("director.target.shot", { shot: shot.label }),
+        detail: [shot.framing, shot.imagePrompt].filter(Boolean).join(" · "),
+        keywords: [shot.label, `shot ${shot.label}`],
+      }];
+    }));
+  return [...sceneItems, ...shotItems];
+}
+
+/**
+ * Items whose label, keywords or detail contain the query (case-insensitive). Scenes stay before shots,
+ * so the listed order is the arrow-key order; within each group, label and keyword prefixes come first.
+ */
+export function filterPicker(items: readonly PickerItem[], query: string, label: (message: Msg) => string): PickerItem[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [...items];
+  const rank = (item: PickerItem): number => {
+    const names = [label(item.label), ...item.keywords].map((name) => name.toLowerCase());
+    if (names.some((name) => name.startsWith(q))) return 0;
+    return names.some((name) => name.includes(q)) || item.detail.toLowerCase().includes(q) ? 1 : -1;
+  };
+  const ranked = items.map((item, index) => ({ item, index, rank: rank(item) })).filter((entry) => entry.rank >= 0);
+  const group = (item: PickerItem) => (item.group === "scene" ? 0 : 1);
+  return ranked.sort((a, b) => group(a.item) - group(b.item) || a.rank - b.rank || a.index - b.index).map((entry) => entry.item);
+}
+
+export interface Mention {
+  /** Index of the "@". */
+  start: number;
+  /** The caret. */
+  end: number;
+  query: string;
+}
+
+/** The "@query" being typed just before the caret, if any. An "@" counts at the start or after a space. */
+export function mentionAt(text: string, caret: number): Mention | null {
+  const prefix = text.slice(0, Math.max(0, Math.min(caret, text.length)));
+  const match = /(?:^|\s)@([^\s@]{0,40})$/.exec(prefix);
+  if (!match) return null;
+  const query = match[1] ?? "";
+  return { start: prefix.length - query.length - 1, end: prefix.length, query };
+}
+
+/** Remove the typed "@query" after a pick; returns the new text and where the caret goes. */
+export function removeMention(text: string, mention: Mention | null): { text: string; caret: number } {
+  if (!mention) return { text, caret: text.length };
+  return { text: text.slice(0, mention.start) + text.slice(mention.end), caret: mention.start };
+}

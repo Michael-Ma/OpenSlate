@@ -1,30 +1,41 @@
+import { assertDirectorGenerationAuthority } from "./application/director-generation-authority.js";
+import { assertGenerationJobsResolved } from "./application/generation-blockers.js";
+import { recordDirectorGenerationEffect } from "./application/director-generation-effects.js";
+import { isKeyframeReview } from "./application/keyframe-review.js";
+import { requiredCommandKey } from "./application/command-key.js";
+import { sceneNotes, openBlockingNotes, settleNotesElsewhere } from "./application/director-notes.js";
 import type { FastifyInstance } from "fastify";
-import { assertExpectedHumanRequest } from "./application/expected-human-request.js";
+import { requestScopesIntersect } from "./application/request-scopes.js";
+import { assertExpectedHumanRequest, currentHumanRequestId } from "./application/expected-human-request.js";
 import { sceneNarrationView } from "./scene-narration-view.js";
+import { scenePlanCompositionProject } from "./scene-plan-context.js";
 import type { NarrationService } from "./narration/service.js";
 import {
   canonical,
+  DomainError,
   composeScenePlanIsolated,
   digest,
   invariant,
   newId,
-  shotIntentDigest,
-  shotVideoTiming,
-  sceneVideoDurationFrames,
   snapshotLocalExecution,
 } from "@openslate/core";
 import type {
-  ActorContext,
-  ArtifactRef,
   CompiledPlan,
+  ProjectRecord,
   ProviderProfile,
   SceneOperation,
 } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import { ownedTranscriptionCatalog } from "./narration/owned-transcription-records.js";
+import { quote } from "./generation-quotes.js";
+import { generationTargets, sceneRow } from "./scene-row.js";
+import { confirmationFramesCurrent, sceneConfirmationGuard } from "./scene-confirmation-state.js";
+import type { SceneConfirmationRecord } from "./scene-confirmations.js";
+import type { ReviewSnapshot } from "./execution/engine.js";
 import type { NodeBinding } from "./execution/engine.js";
+import { lipSyncRoute } from "./execution/lip-sync-routing.js";
 
-type Input = {
+export type SceneGenerationInput = {
   headVersion: number;
   revisionId: string;
   expectedRequestId?: string | null;
@@ -32,16 +43,21 @@ type Input = {
   reviewedFrames: { shotId: string; artifactId: string; sha256: string }[];
   reviewedHoldDigest: string;
   reviewedControlAuthorityId: string | null;
-  /** A human keyframe action can address a subset without borrowing authority for its siblings. */
+  /** Human keyframe work or a saved-clip remake can address an exact subset. */
   targetShotIds?: string[];
   regenerate?: boolean;
+  notesDigest?: string;
+  expectedEstimateMicros?: string;
 };
-function sceneView(
+export function sceneView(
   service: ProductionService,
   projectId: string,
   sceneId: string,
+  shared?: { snapshot: ReturnType<ProductionService["snapshot"]>; review: Omit<ReviewSnapshot, "id"> | null; tolerateAlternatives?: boolean },
+  targetShotIds?: string[],
+  ignoredRequestId?: string,
 ) {
-  const snapshot = service.snapshot(projectId),
+  const snapshot = shared?.snapshot ?? service.snapshot(projectId),
     project = snapshot.project,
     store = service.store;
   invariant(
@@ -97,191 +113,29 @@ function sceneView(
         typeof event.payload.holdId === "string"
       )
         holdSequences.set(event.payload.holdId, event.sequence);
-  const review = plan?.gates.length
-    ? service.engine.inspectReview(projectId)
-    : null;
-  const productionReview = (nodeId: string) =>
-    review?.members.find((m) => m.videoNodeId === nodeId) ?? null;
+  const review = shared ? shared.review : plan?.gates.length ? service.engine.inspectReview(projectId) : null;
+  const bindings = store.list<NodeBinding>("node_binding", projectId);
+  const approvals = store.list<{ videoNodeId: string; approvalDigest: string }>("approval", projectId);
+  const fixtures = Object.fromEntries(store.list<{ artifact: import("@openslate/core").ArtifactRef }>("artifact", projectId).map(a => [canonical(a.artifact), service.artifactFixture(projectId, a.artifact)]));
   const rows = project.shots
     .filter((s) => s.sceneId === sceneId)
-    .map((shot) => {
-      const cue = project.cues.find((c) => c.id === shot.cueId);
-      const images =
-          plan?.nodes.filter(
-            (n) => n.kind === "image" && n.shotId === shot.id,
-          ) ?? [],
-        videos =
-          plan?.nodes.filter(
-            (n) => n.kind === "video" && n.shotId === shot.id,
-          ) ?? [];
-      invariant(
-        images.length <= 1 && videos.length <= 1,
-        "SCENE_SELECTION_REQUIRED",
-        "This shot has multiple active alternatives. Choose its current take in the conversation before generating the scene.",
-      );
-      const imageTarget = images[0],
-        videoTarget = videos[0];
-      const imageCurrent =
-        imageTarget?.intentDigest === shotIntentDigest(shot, "image", cue) &&
-        imageTarget.args.prompt === shot.imagePrompt;
-      const imageOutput = imageCurrent
-        ? snapshot.outputs.find(
-            (o) => o.nodeId === imageTarget.id && o.artifact.kind === "image",
-          )
-        : undefined;
-      const oldProfile = videoTarget
-        ? lock.profiles.find(
-            (p) => p.id === videoTarget.profileId && p.kind === "video",
-          )
-        : undefined;
-      let recipeCurrent =
-        !!videoTarget &&
-        videoTarget.intentDigest === shotIntentDigest(shot, "video", cue) &&
-        videoTarget.args.prompt === shot.videoPrompt;
-      try {
-        recipeCurrent =
-          recipeCurrent &&
-          !!oldProfile &&
-          sceneVideoDurationFrames(shot, oldProfile!, videoTarget) ===
-            videoTarget!.args.durationFrames;
-      } catch {
-        recipeCurrent = false;
-      }
-      const retainedCandidate = videoTarget
-        ? store.get<{ candidateId: string | null }>(
-            "node_binding",
-            videoTarget.id,
-          )?.candidateId
-        : null;
-      const videoProfile =
-        recipeCurrent && retainedCandidate && oldProfile
-          ? oldProfile
-          : profiles.video;
-      let durationFrames = shot.desiredFrames,
-        durationCode: string | null = null;
-      try {
-        durationFrames = sceneVideoDurationFrames(
-          shot,
-          videoProfile,
-          videoTarget,
-        );
-      } catch {
-        durationCode = "PROFILE_INCOMPATIBLE";
-      }
-      const settings =
-        videoTarget?.profileId === videoProfile.id
-          ? (videoTarget.args.settings ?? {})
-          : {};
-      const videoCurrent =
-        !!videoTarget &&
-        videoTarget.profileId === videoProfile.id &&
-        videoTarget.intentDigest === shotIntentDigest(shot, "video", cue) &&
-        videoTarget.args.prompt === shot.videoPrompt &&
-        videoTarget.args.durationFrames === durationFrames;
-      const actualMember =
-        videoCurrent && plan?.gates.length
-          ? productionReview(videoTarget.id)
-          : null;
-      const firstFrame = videoTarget?.inputs.find(
-        (i) => i.destinationPort === "firstFrame",
-      )?.source;
-      // Review the actual retained first frame of an unchanged recipe; reauthored recipes use the current generated frame.
-      const retainedFrame = actualMember?.ready ? actualMember.keyframe : null;
-      const imageComplete = imageTarget ? !!imageOutput : !!retainedFrame;
-      const frame =
-        imageTarget && !imageOutput
-          ? null
-          : (retainedFrame ?? imageOutput?.artifact ?? null);
-      const frameNodeId =
-        retainedFrame && firstFrame?.kind === "output"
-          ? firstFrame.nodeId
-          : retainedFrame && firstFrame?.kind === "artifact"
-            ? null
-            : (imageTarget?.id ?? null);
-      const videoComplete =
-        videoCurrent &&
-        imageComplete &&
-        snapshot.outputs.some(
-          (o) => o.nodeId === videoTarget.id && o.artifact.kind === "video",
-        );
-      const active = snapshot.attempts.filter(
-        (a) =>
-          snapshot.currentAttemptIds.includes(a.id) &&
-          [imageTarget?.id, videoTarget?.id].includes(a.nodeId) &&
-          !["succeeded", "failed"].includes(a.phase),
-      );
-      const last = (nodeId: string | undefined) =>
-        snapshot.attempts
-          .filter(
-            (a) =>
-              a.nodeId === nodeId &&
-              a.candidateId ===
-                store.get<{ candidateId: string | null }>(
-                  "node_binding",
-                  nodeId ?? "",
-                )?.candidateId,
-          )
-          .at(-1);
-      const candidatePending = (nodeId: string | undefined) =>
-        !!nodeId &&
-        !holds.length &&
-        !!store.get<{ candidateId: string | null }>("node_binding", nodeId)
-          ?.candidateId &&
-        !["failed", "succeeded"].includes(last(nodeId)?.phase ?? "");
-      const reviewedVideo =
-        !!actualMember?.approvalDigest &&
-        store
-          .list<{
-            videoNodeId: string;
-            approvalDigest: string;
-          }>("approval", projectId)
-          .some(
-            (a) =>
-              a.videoNodeId === videoTarget?.id &&
-              a.approvalDigest === actualMember.approvalDigest,
-          );
-      const timing = shotVideoTiming(project, shot);
-      return {
-        shotId: shot.id,
-        purpose: shot.purpose,
-        image: frame,
-        imageFixture: frame ? service.artifactFixture(projectId, frame) : null,
-        imageComplete,
-        imageNodeId: imageTarget?.id ?? null,
-        videoNodeId: videoTarget?.id ?? null,
-        frameNodeId,
-        videoComplete,
-        motionPrompt: shot.videoPrompt,
-        plannedFrames: shot.desiredFrames,
-        durationFrames,
-        videoProfileLabel: videoProfile.id,
-        videoSpecDigest:
-          videoCurrent && actualMember?.ready ? videoTarget.specDigest : null,
-        videoSettings: settings,
-        narrationPending: !timing.ready,
-        imagePending:
-          active.some((a) => a.nodeId === imageTarget?.id) ||
-          (!imageOutput && candidatePending(imageTarget?.id)),
-        videoPending:
-          active.some((a) => a.nodeId === videoTarget?.id) ||
-          (!videoComplete &&
-            reviewedVideo &&
-            candidatePending(videoTarget?.id)),
-        blockedCode: active.some((a) => a.phase === "submission_unknown")
-          ? "SUBMISSION_UNKNOWN"
-          : durationCode,
-      };
-    });
+    .map((shot) => sceneRow(shot, { snapshot, plan, lock, profiles, holds, review, bindings, approvals, fixtures,
+      tolerateAlternatives: shared?.tolerateAlternatives ?? false, lipSync: lipSyncRoute(store, project, lock, shot) }));
+  const commandScopes = targetShotIds ?? [sceneId];
+  const intersectsRequest = (requestId?: string) => {
+    const request = requestId
+      ? store.get<{ scopeIds?: string[] }>("message", requestId)
+      : null;
+    return requestId !== ignoredRequestId && !isKeyframeReview(service, requestId) && requestScopesIntersect(project, commandScopes, request?.scopeIds);
+  };
   const busy =
     store
-      .list<{ state: string }>("director_turn", projectId)
-      .some((t) => ["running", "queued"].includes(t.state)) ||
-    snapshot.questions.some(
-      (question) =>
-        (question as { state?: string; canAnswer?: boolean }).state ===
-          "pending" &&
-        (question as { canAnswer?: boolean }).canAnswer !== false,
-    );
+      .list<{ state: string; requestId?: string }>("director_turn", projectId)
+      .some(t => ["running", "queued"].includes(t.state) && intersectsRequest(t.requestId)) ||
+    snapshot.questions.some(question => {
+      const row = question as { state?: string; canAnswer?: boolean; requestId?: string };
+      return row.state === "pending" && row.canAnswer !== false && intersectsRequest(row.requestId);
+    });
   return {
     project,
     plan,
@@ -315,29 +169,41 @@ function sceneView(
     },
   };
 }
+/** Shared freshness digest: the overview must expose the exact legacy confirmation token. */
+export function sceneGenerationView(production: ProductionService, projectId: string, sceneId: string, narration?: NarrationService,
+  captured?: ReturnType<typeof sceneView>, snapshot?: ReturnType<ProductionService["snapshot"]>) {
+  const saved = captured ?? sceneView(production, projectId, sceneId),
+    audio = sceneNarrationView(production, saved.project, sceneId, narration);
+  const rows = saved.view.rows.map(row => {
+    const { measuredSeconds: _measured, fit: _fit, ...legacyNarration } = audio.rows.find(value => value.shotId === row.shotId)!.narration;
+    return { ...row, narration: legacyNarration };
+  });
+  const sceneIntentDigest = digest({ scene: saved.project.scenes.find(scene => scene.id === sceneId), capabilityLock: saved.lock,
+    shots: saved.project.shots.filter(shot => shot.sceneId === sceneId).map(shot => ({ id: shot.id, purpose: shot.purpose, action: shot.action,
+      framing: shot.framing, motion: shot.motion, desiredFrames: shot.desiredFrames, references: shot.referenceArtifactIds,
+      imagePrompt: shot.imagePrompt, videoPrompt: shot.videoPrompt, narration: shot.narration?.mode === "uploaded" && !shot.narration.text.trim()
+        ? { ...shot.narration, text: audio.rows.find(row => row.shotId === shot.id)!.narration.text } : shot.narration ?? null })) });
+  const currentRequestId = currentHumanRequestId((snapshot ?? production.snapshot(projectId)).messages);
+  const openNotes = sceneNotes(production.store, projectId, sceneId).filter(n => n.state === "open");
+  const blockingNotes = openNotes.filter(n => n.blocking);
+  const notesDigest = digest(openNotes);
+  return { ...saved.view, openNotes, blockingNotes, notesDigest, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version, confirmationError: audio.error, narrationEvidence: audio.rows,
+    confirmationDigest: audio.error ? null : digest({ ...saved.view, notesDigest, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version }) };
+}
 export function registerSceneGeneration(
   app: FastifyInstance,
   service: () => ProductionService,
   narration?: NarrationService,
+  enqueueVoice?: EnqueueSceneVoice,
 ) {
   app.get<{ Params: { projectId: string; sceneId: string } }>(
     "/api/projects/:projectId/scenes/:sceneId/generation",
     async (request) => {
-      const production = service(), { projectId, sceneId } = request.params,
-        saved = sceneView(production, projectId, sceneId),
-        audio = sceneNarrationView(production, saved.project, sceneId, narration);
-      const rows = saved.view.rows.map(row => ({ ...row, narration: audio.rows.find(value => value.shotId === row.shotId)!.narration }));
-      const sceneIntentDigest = digest({ scene: saved.project.scenes.find(scene => scene.id === sceneId), capabilityLock: saved.lock,
-        shots: saved.project.shots.filter(shot => shot.sceneId === sceneId).map(shot => ({ id: shot.id, purpose: shot.purpose, action: shot.action,
-          framing: shot.framing, motion: shot.motion, desiredFrames: shot.desiredFrames, references: shot.referenceArtifactIds,
-          imagePrompt: shot.imagePrompt, videoPrompt: shot.videoPrompt, narration: shot.narration?.mode === "uploaded" && !shot.narration.text.trim()
-            ? { ...shot.narration, text: audio.rows.find(row => row.shotId === shot.id)!.narration.text } : shot.narration ?? null })) });
-      const currentRequestId = production.snapshot(projectId).messages.filter(message => message.editing && message.state === "active").at(-1)?.id ?? null;
-      return { ...saved.view, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version, confirmationError: audio.error,
-        confirmationDigest: audio.error ? null : digest({ ...saved.view, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version }) };
+      const { narrationEvidence: _evidence, ...view } = sceneGenerationView(service(), request.params.projectId, request.params.sceneId, narration);
+      return view;
     },
   );
-  app.post<{ Params: { projectId: string; sceneId: string }; Body: Input }>(
+  app.post<{ Params: { projectId: string; sceneId: string }; Body: SceneGenerationInput }>(
     "/api/projects/:projectId/scenes/:sceneId/generate",
     {
       schema: {
@@ -365,6 +231,8 @@ export function registerSceneGeneration(
               items: { type: "string", minLength: 1, maxLength: 160 },
             },
             regenerate: { type: "boolean" },
+            notesDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+            expectedEstimateMicros: { type: "string", pattern: "^(0|[1-9][0-9]*)$", maxLength: 32 },
             reviewedHoldDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
             reviewedControlAuthorityId: {
               type: ["string", "null"],
@@ -390,361 +258,489 @@ export function registerSceneGeneration(
       },
     },
     async (request) => {
-      const production = service(),
-        { projectId, sceneId } = request.params,
-        input = request.body,
-        store = production.store;
-      const key =
-          (request.headers["idempotency-key"] as string | undefined) ?? newId(),
-        scope = `local-user:${projectId}:scene-generation`,
-        commandDigest = digest({ sceneId, ...input });
-      production.recovery.assertWritable(projectId);
-      const replay = store.commandReplay(scope, key, commandDigest);
-      if (replay) return replay.result;
-      invariant(
-        input.kind === "image" ||
-          (input.targetShotIds === undefined && input.regenerate === undefined),
-        "VALIDATION_ERROR",
-        "Video generation reviews the complete named scene",
-      );
-      invariant(
-        !input.regenerate || input.targetShotIds?.length,
-        "VALIDATION_ERROR",
-        "Choose the exact shots whose keyframes should be replaced",
-      );
-      if (input.targetShotIds || input.regenerate)
-        invariant(
-          typeof request.headers["idempotency-key"] === "string" &&
-            request.headers["idempotency-key"].trim().length > 0,
-          "VALIDATION_ERROR",
-          "A command identity is required for a shot keyframe action",
-        );
-      const captured = sceneView(production, projectId, sceneId);
-      invariant(
-        !input.targetShotIds ||
-          input.targetShotIds.every((id) =>
-            captured.view.rows.some((row) => row.shotId === id),
+      return generateScene(service(), request.params.projectId, request.params.sceneId, request.body,
+        requiredCommandKey(request), narration, enqueueVoice ? { enqueueVoice } : {});
+    },
+  );
+}
+
+export type EnqueueSceneVoice = (projectId: string, sceneId: string, shotIds: string[], actor: import("@openslate/core").ActorContext, runId?: string) => void;
+/** Runner receipts bind the reviewed scene and its original authority, not transient film-head tokens. */
+export function sceneGenerationCommandDigest(sceneId: string,
+  input: SceneGenerationInput | Pick<SceneGenerationInput, "kind" | "reviewedFrames" | "regenerate" | "targetShotIds">,
+  actor?: import("@openslate/core").ActorContext): string {
+  return digest(actor ? { sceneId, kind: input.kind, reviewedFrames: input.reviewedFrames, actor,
+    ...(input.regenerate ? { regenerate: true, targetShotIds: input.targetShotIds } : {}) } : { sceneId, ...input });
+}
+
+/** Pure selection validation is applied before stale-state checks so invalid scope always has one refusal code. */
+export function clipRemakeTargets(view: ReturnType<typeof sceneView>["view"], shotIds: string[]) {
+  invariant(shotIds.length >= 1 && shotIds.length <= 4 && new Set(shotIds).size === shotIds.length &&
+    shotIds.every(id => view.rows.some(row => row.shotId === id)), "VALIDATION_ERROR", "Choose 1–4 different shots belonging to this scene");
+  return view.rows.filter(row => shotIds.includes(row.shotId));
+}
+/** The press and overview share every saved-clip prerequisite; this function never creates authority. */
+export function assertClipRemakeReady(production: ProductionService, captured: ReturnType<typeof sceneView>, shotIds: string[], ignoredRequestId?: string) {
+  const { view, project } = captured, store = production.store;
+  const rows = clipRemakeTargets(view, shotIds);
+  invariant(!captured.plan?.nodes.some(node => view.rows.some(row => row.shotId === node.shotId) && ["image", "video"].includes(node.kind) &&
+    captured.plan!.nodes.filter(other => other.kind === node.kind && other.shotId === node.shotId).length > 1), "SCENE_SELECTION_REQUIRED", "Choose each shot's current take before remaking its clip");
+  invariant(rows.every(row => row.videoComplete), "CLIP_NOT_SAVED", "Use this scene's confirm to make clips that are not saved yet");
+  assertGenerationJobsResolved(production, project.id, shotIds);
+  invariant(!rows.some(row => row.imagePending || row.videoPending), "ATTEMPT_EXISTS", "Follow this shot's existing jobs before remaking its clip");
+  invariant(!view.paused, "EXECUTION_PAUSED", "Continue the film before remaking clips");
+  invariant(!view.busy, "WAITING_USER", "Finish the current conversation before remaking these clips");
+  const scopes = new Set([project.id, view.sceneId, ...shotIds, ...rows.flatMap(row => [row.imageNodeId, row.videoNodeId]).filter((id): id is string => !!id)]);
+  invariant(!store.list<{ active: boolean; scopeId: string; ownerId: string }>("hold", project.id).some(hold =>
+    hold.active && scopes.has(hold.scopeId) && hold.ownerId !== ignoredRequestId), "SCOPE_HELD", "Finish the edit holding these shots before remaking their clips");
+  invariant(!store.list<SceneConfirmationRecord>("scene_confirmation", project.id).some(run => run.state === "running" && run.id !== ignoredRequestId &&
+    run.sceneId === view.sceneId && (run.framePins.some(pin => shotIds.includes(pin.shotId)) || run.steps.some(step => step.step !== "done" && shotIds.includes(step.shotId)))),
+  "CONFIRMATION_RUNNING", "Follow these shots' existing confirmation");
+  invariant(openBlockingNotes(store, project.id, view.sceneId).length === 0, "RECOMMENDATION_OPEN", "Settle the blocking Director notes before remaking clips");
+  invariant(rows.every(row => row.image && row.imageComplete && !row.narrationPending && !row.blockedCode && row.motionPrompt.trim()),
+    "SCENE_REVIEW_STALE", "Finish the current keyframe and saved narration before remaking clips");
+  const frames = rows.map(row => ({ shotId: row.shotId, artifactId: row.image!.artifactId, sha256: row.image!.sha256, nodeId: row.frameNodeId }));
+  const opened = store.list<{ principal: string; shotId: string; artifactId: string; sha256: string }>("frame_view", project.id);
+  invariant(frames.every(frame => opened.some(value => value.principal === "local-user" && value.shotId === frame.shotId && value.artifactId === frame.artifactId && value.sha256 === frame.sha256)) &&
+    confirmationFramesCurrent(store, project, frames), "SCENE_REVIEW_STALE", "Open each current approved keyframe before remaking its clip");
+  return rows;
+}
+/** Shared command implementation; durable confirmation uses its original human grants. */
+export async function generateScene(production: ProductionService, projectId: string, sceneId: string,
+  input: SceneGenerationInput, key: string, narration?: NarrationService,
+  options: { actor?: import("@openslate/core").ActorContext; directorActor?: import("@openslate/core").ActorContext; signal?: AbortSignal; enqueueVoice?: EnqueueSceneVoice } = {}) {
+  const store = production.store;
+  const director = options.directorActor;
+  invariant(!director || !options.actor && input.kind === "image", "ORIGIN_NOT_AUTHORIZED", "Director conversations may only start keyframes and their voice lines");
+  const human = director ? assertDirectorGenerationAuthority(production, projectId, director) : undefined;
+  const scope = `local-user:${projectId}:scene-generation`,
+    commandDigest = director ? digest({ sceneId, director, kind: input.kind, targetShotIds: input.targetShotIds ?? null, regenerate: input.regenerate === true })
+      : sceneGenerationCommandDigest(sceneId, input, options.actor);
+  production.recovery.assertWritable(projectId);
+  const replay = store.commandReplay(scope, key, commandDigest);
+  if (replay) return replay.result;
+  invariant(
+    input.kind === "image" ||
+      (input.targetShotIds === undefined && input.regenerate === undefined) ||
+      (input.regenerate === true && !!input.targetShotIds?.length),
+    "VALIDATION_ERROR",
+    "Video generation reviews the complete scene, or remakes 1–4 named saved clips",
+  );
+  invariant(
+    !input.regenerate || input.targetShotIds?.length,
+    "VALIDATION_ERROR",
+    "Choose the exact shots whose media should be replaced",
+  );
+  const captured = sceneView(production, projectId, sceneId, undefined, input.targetShotIds, director?.requestId);
+  invariant(
+    !input.targetShotIds ||
+      input.targetShotIds.every((id) =>
+        captured.view.rows.some((row) => row.shotId === id),
+      ),
+    input.kind === "video" && input.regenerate ? "VALIDATION_ERROR" : "SCOPE_DENIED",
+    "Choose shots belonging to this scene",
+  );
+  const notesDigest = digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open"));
+  const fresh = () => {
+    if (input.kind === "image") invariant(
+      !store.list<SceneConfirmationRecord>("scene_confirmation", projectId).some(row =>
+        row.sceneId === sceneId && row.kind === "video" && row.state === "running"),
+      "CONFIRMATION_RUNNING", "Follow the scene's existing confirmation before replacing its keyframes",
+    );
+    if (input.kind === "video") {
+      invariant(openBlockingNotes(store, projectId, sceneId).length === 0, "RECOMMENDATION_OPEN", "Settle the blocking Director notes before generating video");
+      invariant(digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open")) === (input.notesDigest ?? notesDigest), "SCENE_REVIEW_STALE", "Director notes changed during scene review");
+    }
+    if (director) {
+      invariant(!options.signal?.aborted, "TOOL_CALL_CANCELLED", "Tool invocation was cancelled");
+      assertDirectorGenerationAuthority(production, projectId, director);
+    }
+    else assertExpectedHumanRequest(production, projectId, input.expectedRequestId);
+    const current = sceneView(production, projectId, sceneId, undefined, input.targetShotIds, director?.requestId), now = current.view;
+    if (options.actor) {
+      const confirmation = store.get<SceneConfirmationRecord>("scene_confirmation", options.actor.requestId);
+      invariant(input.kind === "video" && confirmation?.projectId === projectId && confirmation.sceneId === sceneId &&
+        confirmation.kind === "video" && confirmation.state === "running" && canonical(confirmation.actor) === canonical(options.actor) &&
+        (confirmation.regenerate === true) === (input.regenerate === true) && canonical(confirmation.targetShotIds ?? null) === canonical(input.targetShotIds ?? null),
+      "SCENE_REVIEW_STALE", "This scene confirmation is no longer running");
+      invariant(confirmation.sceneIntentDigest === sceneGenerationView(production, projectId, sceneId, narration, current).sceneIntentDigest &&
+        // Each pinned shot still matches its own per-shot dispatch guard (scene titles and siblings are not part of it).
+        !!confirmation.shotGuardDigests && confirmation.framePins.every(pin =>
+          confirmation.shotGuardDigests![pin.shotId] === sceneConfirmationGuard(current.project, pin.shotId, current.lock, pin)) &&
+        confirmationFramesCurrent(store, current.project, confirmation.framePins),
+      "SCENE_REVIEW_STALE", "The reviewed scene changed");
+    } else invariant(
+      now.headVersion === input.headVersion &&
+        now.revisionId === input.revisionId &&
+        now.reviewedHoldDigest === input.reviewedHoldDigest &&
+        now.reviewedControlAuthorityId === input.reviewedControlAuthorityId,
+      "SCENE_REVIEW_STALE",
+      "The scene changed. Review its current frames and direction.",
+    );
+    if (input.kind === "video" && input.regenerate) assertClipRemakeReady(production, current, input.targetShotIds!, options.actor?.requestId);
+    invariant(
+      digest(now.rows) === digest(captured.view.rows),
+      "SCENE_REVIEW_STALE",
+      "Scene work changed while preparing generation. Review its refreshed results.",
+    );
+    if (director) {
+      const requestedIds = input.targetShotIds ?? now.rows.map(row => row.shotId);
+      const request = store.get<{ scopeIds: string[] }>("message", director.requestId)!;
+      invariant(requestedIds.every(id => request.scopeIds.includes(projectId) || request.scopeIds.includes(sceneId) || request.scopeIds.includes(id)),
+        "SCOPE_DENIED", "Generation exceeds this conversation's scope");
+      const scopes = new Set([projectId, sceneId, ...requestedIds]);
+      invariant(!store.list<{ active: boolean; scopeId: string; ownerId: string }>("hold", projectId).some(hold => hold.active && scopes.has(hold.scopeId) && hold.ownerId !== director.requestId),
+        "SCOPE_HELD", "Another request holds this scene's work");
+    }
+    invariant(!now.paused, "EXECUTION_PAUSED", "The film is stopped. Continue before starting new generation.");
+    invariant(
+      !now.busy,
+      "WAITING_USER",
+      "Finish the current conversation before starting this scene",
+    );
+    const pendingRows = now.rows.filter(row =>
+      (!input.targetShotIds || input.targetShotIds.includes(row.shotId)) &&
+      (row.blockedCode === "SUBMISSION_UNKNOWN" || row.imagePending || row.videoPending));
+    if (pendingRows.length) {
+      assertGenerationJobsResolved(production, projectId, pendingRows.map(row => row.shotId));
+      throw new DomainError("ATTEMPT_EXISTS", "Follow the existing scene jobs before starting more work");
+    }
+    return current;
+  };
+  fresh();
+  invariant(captured.view.rows.length > 0, "SCENE_EMPTY", "Add a shot before generating this scene");
+  const audio = sceneNarrationView(production, captured.project, sceneId, narration);
+  const targets = generationTargets(captured.view.rows.map(row => ({ ...row, narration: audio.rows.find(a => a.shotId === row.shotId)!.narration })), input.kind, input.targetShotIds, input.regenerate);
+  if (input.kind === "video" && input.regenerate) invariant(targets.every(row => row.narration.ready), "NARRATION_SPEECH_STALE", "Keep the saved voice line ready before remaking its clip");
+  const selected = targets.filter(row => input.kind !== "image" || input.regenerate || !row.imageComplete);
+  const placeholderIds = captured.project.shots.filter(shot => selected.some(row => row.shotId === shot.id) && shot.promptState === "placeholder").map(shot => shot.id);
+  if (placeholderIds.length) throw new DomainError("DIRECTION_REQUIRED", "Write direction for these shots before generating", { shotIds: placeholderIds });
+  const quotedRows = targets.map(row => ({ ...row, imageComplete: selected.includes(row) ? false : row.imageComplete }));
+  const estimate = quote(captured.lock, quotedRows, input.kind === "image" ? "makeKeyframes" : input.regenerate ? "remakeClip" : "confirmVideo");
+  invariant(input.expectedEstimateMicros === undefined || input.expectedEstimateMicros === estimate.micros,
+    "ESTIMATE_CHANGED", "The estimate changed. Review the current price before generating.");
+  invariant(
+    targets.length > 0 && targets.length <= 64,
+    "ALREADY_COMPLETE",
+    "This scene already has the requested media",
+  );
+  const assertNoDetachedJobs = () => {
+    assertGenerationJobsResolved(production, projectId, selected.map(row => row.shotId));
+  };
+  assertNoDetachedJobs();
+  if (input.kind === "video") {
+    invariant(
+      selected.every(
+        (row) =>
+          row.image &&
+          !row.narrationPending &&
+          !row.blockedCode &&
+          row.motionPrompt.trim(),
+      ),
+      "TIMING_REQUIRED",
+      "Generate the frames and finish any requested narration timing before video",
+    );
+    invariant(
+      input.reviewedFrames.length === selected.length &&
+        new Set(input.reviewedFrames.map((f) => f.shotId)).size ===
+          selected.length &&
+        selected.every((row) =>
+          input.reviewedFrames.some(
+            (f) =>
+              f.shotId === row.shotId &&
+              f.artifactId === row.image!.artifactId &&
+              f.sha256 === row.image!.sha256,
           ),
-        "SCOPE_DENIED",
-        "Choose shots belonging to this scene",
-      );
-      const fresh = () => {
-        assertExpectedHumanRequest(production, projectId, input.expectedRequestId);
-        const now = sceneView(production, projectId, sceneId).view;
-        invariant(
-          now.headVersion === input.headVersion &&
-            now.revisionId === input.revisionId &&
-            now.reviewedHoldDigest === input.reviewedHoldDigest &&
-            now.reviewedControlAuthorityId === input.reviewedControlAuthorityId,
-          "SCENE_REVIEW_STALE",
-          "The scene changed. Review its current frames and direction.",
-        );
-        invariant(
-          digest(now.rows) === digest(captured.view.rows),
-          "SCENE_REVIEW_STALE",
-          "Scene work changed while preparing generation. Review its refreshed results.",
-        );
-        invariant(
-          !now.busy && !now.paused,
-          "WAITING_USER",
-          "Finish the current conversation before starting this scene",
-        );
-        invariant(
-          !now.rows
-            .filter(
-              (row) =>
-                !input.targetShotIds ||
-                input.targetShotIds.includes(row.shotId),
-            )
-            .some(
-              (r) =>
-                r.blockedCode === "SUBMISSION_UNKNOWN" ||
-                r.imagePending ||
-                r.videoPending,
-            ),
-          "ATTEMPT_EXISTS",
-          "Follow the existing scene jobs before starting more work",
-        );
-      };
+        ),
+      "SCENE_REVIEW_STALE",
+      "Approve the exact displayed keyframes for this scene",
+    );
+  } else
+    invariant(
+      input.reviewedFrames.length === 0,
+      "VALIDATION_ERROR",
+      "Keyframe generation reviews storyboard direction",
+    );
+  const voiceLines = targets.filter(row => row.narration.mode === "generated" && !row.narration.ready && !row.narration.recordingCurrent && !row.narration.reusableSpeechTake).length;
+  const actionId = director ? digest({ purpose: "director_scene_generation", key, projectId, requestId: director.requestId, sceneId }) : undefined;
+  const generation = () => director ? recordDirectorGenerationEffect(production, projectId, director, key, {
+    kind: "keyframes", sceneIds: [sceneId], shotIds: targets.map(row => row.shotId), keyframes: selected.length,
+    voiceLines, quote: estimate, at: new Date().toISOString(),
+  }) : undefined;
+  if (input.kind === "image" && !selected.length) {
+    return store.command(scope, key, commandDigest, () => {
       fresh();
-      const selected = captured.view.rows.filter((r) =>
-        input.kind === "image"
-          ? (!input.targetShotIds || input.targetShotIds.includes(r.shotId)) &&
-            (input.regenerate || !r.imageComplete)
-          : !r.videoComplete,
-      );
-      invariant(
-        selected.length > 0 && selected.length <= 64,
-        "ALREADY_COMPLETE",
-        "This scene already has the requested media",
-      );
-      const assertNoDetachedJobs = () => {
-        const nodeIds = new Set(
-          store
-            .list<NodeBinding>("node_binding", projectId)
-            .filter(
-              (binding) =>
-                selected.some((row) => row.shotId === binding.node.shotId) &&
-                ["image", "video"].includes(binding.node.kind),
-            )
-            .map((binding) => binding.id),
-        );
-        invariant(
-          !production.engine
-            .attempts(projectId)
-            .some(
-              (attempt) =>
-                nodeIds.has(attempt.nodeId) &&
-                !["succeeded", "failed"].includes(attempt.phase),
-            ),
-          "ATTEMPT_EXISTS",
-          "Resolve this shot's existing jobs before creating another keyframe",
-        );
-      };
+      const actor = human ?? production.beginRequest(projectId, "local-user", "Make the missing voice lines for this scene's current keyframes.",
+        { source: "app", concurrency: "alongside", holdScopeIds: [], scopeIds: targets.map(r => r.shotId), key: `scene-generation:${key}` });
+      invariant(options.enqueueVoice, "NARRATION_SPEECH_UNAVAILABLE", "Configure narration before making voice lines");
+      options.enqueueVoice(projectId, sceneId, targets.map(r => r.shotId), actor, actionId);
+      const project = store.getProject(projectId);
+      return { projectId, sceneId, kind: input.kind, shotIds: targets.map(r => r.shotId), revisionId: project.revisionId,
+        headVersion: project.headVersion, activePlanId: project.activePlanId, cursor: store.cursor(projectId), ...(director ? { generation: generation() } : {}) };
+    });
+  }
+  const currentAliases = () => ({
+    ...(store.get<{ aliases: Record<string, string> }>(
+      "logical_ids",
+      projectId,
+    )?.aliases ?? {}),
+  });
+  const operations: SceneOperation[] = selected.map((row) => ({
+    shotId: row.shotId,
+    kind: input.kind,
+    profileId:
+      input.kind === "video"
+        ? row.videoProfileLabel
+        : captured.profiles.image.id,
+    ...(input.kind === "video" && row.videoNodeId
+      ? { nodeId: row.videoNodeId }
+      : input.kind === "image" && row.imageNodeId
+        ? { nodeId: row.imageNodeId }
+        : {}),
+    ...(input.kind === "video"
+      ? {
+          frame: row.image!,
+          ...(row.frameNodeId ? { frameNodeId: row.frameNodeId } : {}),
+          // A singing shot binds its reviewed song window; ordinary shots keep their saved settings.
+          ...("lipSync" in row && row.lipSync?.state === "planned" ? { settings: structuredClone(row.videoSettings) as import("@openslate/core").JsonObject } : {}),
+        }
+      : {}),
+  }));
+  let base = captured, prepared: { compiled: CompiledPlan; aliases: Record<string, string> } | undefined;
+  // Composition is free and precedes publication. A runner can rebase over
+  // unrelated publications without removing their saved media or buying again.
+  const limit = options.actor ? 3 : 1;
+  for (let pass = 0; pass < limit; pass++) {
+    const aliases = currentAliases(), aliasDigest = digest(aliases);
+    const compiled = await composeScenePlanIsolated(base.plan, operations, {
+      project: scenePlanCompositionProject(base.project, base.plan, operations, () => store.list<{ project: ProjectRecord }>('project_revision', projectId)),
+      profiles: base.lock.profiles,
+      logicalIds: aliases,
+      allocateId: newId,
+      ...(base.lock.localExecution ? { localExecution: snapshotLocalExecution(base.lock.localExecution) } : {}),
+      transcriptionInputs: ownedTranscriptionCatalog(store, projectId, base.plan),
+    });
+    const latest = fresh();
+    if (!options.actor || latest.project.activePlanId === base.project.activePlanId && digest(currentAliases()) === aliasDigest) {
+      prepared = { compiled, aliases }; break;
+    }
+    base = latest;
+  }
+  invariant(prepared, "SCENE_REVIEW_STALE", "Other scene work kept changing during preparation. Confirm this scene again.");
+  const { compiled, aliases } = prepared;
+  const reviewedNodeIds = operations.map(operation => {
+    const nodes = compiled.nodes.filter(node => node.kind === operation.kind && node.shotId === operation.shotId
+      && (!operation.nodeId || node.id === operation.nodeId));
+    invariant(nodes.length === 1, "SCENE_REVIEW_STALE", "The exact reviewed operation changed during preparation");
+    return nodes[0]!.id;
+  });
+  // The review installs only this scene. A whole-film planning hold is narrowed to its other scenes.
+  return store.transaction(() =>
+    store.command(scope, key, commandDigest, () => {
+      // Another scene may advance while the isolated worker composes. The durable
+      // scene confirmation supplies the fences; publication uses the current head.
+      const publication = fresh();
       assertNoDetachedJobs();
+      for (const hold of store
+        .list<{
+          id: string;
+          scopeId: string;
+          ownerId: string;
+          active: boolean;
+        }>("hold", projectId)
+        .filter((h) => h.active && (!director || h.ownerId === director.requestId))) {
+        if (
+          input.targetShotIds &&
+          (hold.scopeId === projectId ||
+            hold.scopeId === sceneId ||
+            selected.some((row) => row.shotId === hold.scopeId))
+        ) {
+          const owner = store.get<{
+            projectId: string;
+            principalId: string;
+            editing: boolean;
+          }>("message", hold.ownerId);
+          invariant(
+            owner?.projectId === projectId &&
+              owner.principalId === "local-user" &&
+              owner.editing,
+            "SCOPE_DENIED",
+            "This shot action cannot take ownership of another request's pause",
+          );
+        }
+        if (hold.scopeId === projectId) {
+          production.engine.releaseHold(projectId, hold.id, hold.ownerId);
+          for (const scene of publication.project.scenes.filter(
+            (s) => s.id !== sceneId,
+          ))
+            production.engine.setHold(projectId, {
+              scopeId: scene.id,
+              ownerId: hold.ownerId,
+            });
+          if (input.targetShotIds)
+            for (const row of captured.view.rows.filter(
+              (row) =>
+                !selected.some((target) => target.shotId === row.shotId),
+            ))
+              production.engine.setHold(projectId, {
+                scopeId: row.shotId,
+                ownerId: hold.ownerId,
+              });
+        } else if (
+          hold.scopeId === sceneId ||
+          selected.some((row) => row.shotId === hold.scopeId)
+        ) {
+          production.engine.releaseHold(projectId, hold.id, hold.ownerId);
+          if (hold.scopeId === sceneId && input.targetShotIds)
+            for (const row of captured.view.rows.filter(
+              (row) =>
+                !selected.some((target) => target.shotId === row.shotId),
+            ))
+              production.engine.setHold(projectId, {
+                scopeId: row.shotId,
+                ownerId: hold.ownerId,
+              });
+        }
+      }
+      if (options.actor) production.assertActor(projectId, options.actor, true);
+      const actor = human ?? options.actor ?? production.beginRequest(
+        projectId,
+        "local-user",
+        `${input.regenerate ? "Regenerate" : "Generate"} ${input.kind === "image" ? "keyframes" : "video"} for ${input.targetShotIds ? "the selected shots in" : ""} this reviewed scene.`,
+        {
+          editing: true,
+          ...(input.regenerate ? { concurrency: "alongside" as const } : { supersede: "intersecting" as const }),
+          scopeIds: input.targetShotIds
+            ? selected.map((row) => row.shotId)
+            : [sceneId],
+          source: "app",
+          key: `scene-generation:${key}`,
+        },
+      );
+      if (!options.actor) production.authorize(
+        projectId,
+        actor,
+        selected.map((row) => ({ scopeId: row.shotId, kind: input.kind })),
+        `scene:${key}`,
+        "user_change",
+      );
+      if (input.kind === "image" && input.regenerate) settleNotesElsewhere(production, projectId,
+        { kind: "regenerate_keyframe", shotIds: selected.map(row => row.shotId) }, actionId ?? actor.requestId, actor.requestId);
+      if (input.kind === "video" && input.regenerate) settleNotesElsewhere(production, projectId,
+        { kind: "remake_clip", shotIds: selected.map(row => row.shotId) }, actor.requestId, actor.requestId);
+      // Same-spec regeneration still needs a fresh, one-use human grant. Detaching inside
+      // this transaction retains historical receipts and makes publication create that new candidate.
+      // A durable clip confirmation may have recomposed over another scene's publication.
+      const replacementPlanId = input.kind === "video" ? publication.project.activePlanId : captured.project.activePlanId;
+      const retained = input.regenerate ? store.list<NodeBinding>("node_binding", projectId)
+        .filter(b => b.state === "active" && b.planId === replacementPlanId && Object.keys(b.retainedTake?.outputs ?? b.outputs).length &&
+          (input.kind === "image" || selected.some(row => row.videoNodeId === b.id)))
+        .map(b => b.retainedTake ? { ...b, candidateId: b.retainedTake.candidateId, outputs: b.retainedTake.outputs } : b) : [];
+      if (input.regenerate)
+        for (const row of selected) {
+          const nodeId = input.kind === "image" ? row.imageNodeId : row.videoNodeId;
+          if (!nodeId) continue;
+          const binding = store.get<NodeBinding>(
+            "node_binding",
+            nodeId,
+          );
+          invariant(
+            binding?.state === "active" &&
+              binding.planId === replacementPlanId,
+            "SCENE_REVIEW_STALE",
+            "The selected media binding changed",
+          );
+          store.put("node_binding", binding.id, projectId, {
+            ...binding,
+            candidateId: null,
+            outputs: {},
+          });
+        }
+      const applied = production.applyCompiledSceneGeneration(
+        projectId,
+        actor,
+        compiled,
+        aliases,
+        options.actor ? publication.view.headVersion : input.headVersion,
+        digest(captured.lock),
+        input.kind,
+        reviewedNodeIds,
+        // This request may own unfinished edits elsewhere in the film. The
+        // selected holds were already narrowed above; retain the remainder.
+        !!director,
+      );
+      // Publication needs empty execution slots for fresh grants, but presentation keeps
+      // the exact previous take and dependent outputs until replacement success.
+      for (const old of retained) {
+        const current = store.get<NodeBinding>("node_binding", old.id);
+        if (!current || current.planId !== applied.activePlanId) continue;
+        if (current.node.specDigest !== old.node.specDigest) {
+          if (old.node.kind === "video" && selected.some(r => r.shotId === old.node.shotId))
+            store.put("node_binding", old.id, projectId, { ...current, retainedTake: { candidateId: old.candidateId, outputs: old.outputs } });
+          continue;
+        }
+        const replacing = selected.some(r => (input.kind === "image" ? r.imageNodeId : r.videoNodeId) === old.id);
+        if (replacing) store.put("node_binding", old.id, projectId, { ...current,
+          retainedTake: { candidateId: old.candidateId, outputs: old.outputs } });
+        else if (!Object.keys(current.outputs).length) store.put("node_binding", old.id, projectId, {
+          ...current, candidateId: old.candidateId, outputs: old.outputs,
+        });
+      }
+      if (input.kind === "image" && input.regenerate) for (const row of selected.filter(r => !r.imageNodeId && r.image)) {
+        const node = compiled.nodes.find(n => n.kind === "image" && n.shotId === row.shotId);
+        const current = node && store.get<NodeBinding>("node_binding", node.id);
+        if (current) store.put("node_binding", current.id, projectId, { ...current,
+          retainedTake: { candidateId: null, outputs: { image: row.image! } } });
+      }
       if (input.kind === "video") {
+        const displayed = production.engine.reviewSnapshot(projectId),
+          ids = compiled.nodes
+            .filter(
+              (n) =>
+                n.kind === "video" &&
+                selected.some((r) => r.shotId === n.shotId),
+            )
+            .map((n) => n.id);
         invariant(
-          selected.every(
-            (row) =>
-              row.image &&
-              !row.narrationPending &&
-              !row.blockedCode &&
-              row.motionPrompt.trim(),
-          ),
-          "TIMING_REQUIRED",
-          "Generate the frames and finish any requested narration timing before video",
-        );
-        invariant(
-          input.reviewedFrames.length === selected.length &&
-            new Set(input.reviewedFrames.map((f) => f.shotId)).size ===
-              selected.length &&
-            selected.every((row) =>
-              input.reviewedFrames.some(
-                (f) =>
-                  f.shotId === row.shotId &&
-                  f.artifactId === row.image!.artifactId &&
-                  f.sha256 === row.image!.sha256,
+          ids.length === selected.length &&
+            ids.every((id) =>
+              displayed.members.some(
+                (m) =>
+                  m.videoNodeId === id &&
+                  m.ready &&
+                  selected.some(
+                    (r) =>
+                      r.shotId === m.shotId &&
+                      canonical(r.image) === canonical(m.keyframe) &&
+                      compiled.nodes.some(
+                        (n) =>
+                          n.id === id &&
+                          n.args.prompt === r.motionPrompt &&
+                          n.args.durationFrames === r.durationFrames &&
+                          n.profileId === r.videoProfileLabel &&
+                          canonical(n.args.settings ?? {}) ===
+                            canonical(r.videoSettings) &&
+                          (!r.videoSpecDigest ||
+                            n.specDigest === r.videoSpecDigest),
+                      ),
+                  ),
               ),
             ),
           "SCENE_REVIEW_STALE",
-          "Approve the exact displayed keyframes for this scene",
+          "Published video inputs differ from the reviewed scene",
         );
-      } else
-        invariant(
-          input.reviewedFrames.length === 0,
-          "VALIDATION_ERROR",
-          "Keyframe generation reviews storyboard direction",
-        );
-      const aliases = {
-        ...(store.get<{ aliases: Record<string, string> }>(
-          "logical_ids",
-          projectId,
-        )?.aliases ?? {}),
-      };
-      const operations: SceneOperation[] = selected.map((row) => ({
-        shotId: row.shotId,
+        production.approve(projectId, actor, displayed.id, ids);
+      }
+      store.insert("scene_generation_action", actionId ?? actor.requestId, projectId, { requestId: actor.requestId, sceneId, kind: input.kind, regenerate: input.regenerate === true, shotIds: selected.map(r => r.shotId), ...(input.kind === "image" ? { imageNodes: store.list<NodeBinding>("node_binding", projectId).filter(b => b.state === "active" && b.planId === applied.activePlanId && b.node.kind === "image" && selected.some(r => r.shotId === b.node.shotId)).map(b => ({ nodeId: b.id, candidateId: b.candidateId })) } : {}) });
+      if (input.kind === "image") options.enqueueVoice?.(projectId, sceneId, targets.map(row => row.shotId), actor, actionId);
+      return {
+        ...applied,
+        requestId: actor.requestId,
+        sceneId,
         kind: input.kind,
-        profileId:
-          input.kind === "video"
-            ? row.videoProfileLabel
-            : captured.profiles.image.id,
-        ...(input.kind === "video" && row.videoNodeId
-          ? { nodeId: row.videoNodeId }
-          : input.kind === "image" && row.imageNodeId
-            ? { nodeId: row.imageNodeId }
-            : {}),
-        ...(input.kind === "video"
-          ? {
-              frame: row.image!,
-              ...(row.frameNodeId ? { frameNodeId: row.frameNodeId } : {}),
-            }
-          : {}),
-      }));
-      const compiled = await composeScenePlanIsolated(
-        captured.plan,
-        operations,
-        {
-          project: captured.project,
-          profiles: captured.lock.profiles,
-          logicalIds: aliases,
-          allocateId: newId,
-          ...(captured.lock.localExecution
-            ? {
-                localExecution: snapshotLocalExecution(
-                  captured.lock.localExecution,
-                ),
-              }
-            : {}),
-          transcriptionInputs: ownedTranscriptionCatalog(
-            store,
-            projectId,
-            captured.plan,
-          ),
-        },
-      );
-      fresh();
-      // The review installs only this scene. A whole-film planning hold is narrowed to its other scenes.
-      return store.transaction(() =>
-        store.command(scope, key, commandDigest, () => {
-          fresh();
-          assertNoDetachedJobs();
-          for (const hold of store
-            .list<{
-              id: string;
-              scopeId: string;
-              ownerId: string;
-              active: boolean;
-            }>("hold", projectId)
-            .filter((h) => h.active)) {
-            if (
-              input.targetShotIds &&
-              (hold.scopeId === projectId ||
-                hold.scopeId === sceneId ||
-                selected.some((row) => row.shotId === hold.scopeId))
-            ) {
-              const owner = store.get<{
-                projectId: string;
-                principalId: string;
-                editing: boolean;
-              }>("message", hold.ownerId);
-              invariant(
-                owner?.projectId === projectId &&
-                  owner.principalId === "local-user" &&
-                  owner.editing,
-                "SCOPE_DENIED",
-                "This shot action cannot take ownership of another request's pause",
-              );
-            }
-            if (hold.scopeId === projectId) {
-              production.engine.releaseHold(projectId, hold.id, hold.ownerId);
-              for (const scene of captured.project.scenes.filter(
-                (s) => s.id !== sceneId,
-              ))
-                production.engine.setHold(projectId, {
-                  scopeId: scene.id,
-                  ownerId: hold.ownerId,
-                });
-              if (input.targetShotIds)
-                for (const row of captured.view.rows.filter(
-                  (row) =>
-                    !selected.some((target) => target.shotId === row.shotId),
-                ))
-                  production.engine.setHold(projectId, {
-                    scopeId: row.shotId,
-                    ownerId: hold.ownerId,
-                  });
-            } else if (
-              hold.scopeId === sceneId ||
-              selected.some((row) => row.shotId === hold.scopeId)
-            ) {
-              production.engine.releaseHold(projectId, hold.id, hold.ownerId);
-              if (hold.scopeId === sceneId && input.targetShotIds)
-                for (const row of captured.view.rows.filter(
-                  (row) =>
-                    !selected.some((target) => target.shotId === row.shotId),
-                ))
-                  production.engine.setHold(projectId, {
-                    scopeId: row.shotId,
-                    ownerId: hold.ownerId,
-                  });
-            }
-          }
-          const actor = production.beginRequest(
-            projectId,
-            "local-user",
-            `${input.regenerate ? "Regenerate" : "Generate"} ${input.kind === "image" ? "keyframes" : "video"} for ${input.targetShotIds ? "the selected shots in" : ""} this reviewed scene.`,
-            {
-              editing: true,
-              scopeIds: input.targetShotIds
-                ? selected.map((row) => row.shotId)
-                : [sceneId],
-              key: `scene-generation:${key}`,
-            },
-          );
-          production.authorize(
-            projectId,
-            actor,
-            selected.map((row) => ({ scopeId: row.shotId, kind: input.kind })),
-            `scene:${key}`,
-            "user_change",
-          );
-          // Same-spec regeneration still needs a fresh, one-use human grant. Detaching inside
-          // this transaction retains historical receipts and makes publication create that new candidate.
-          if (input.regenerate)
-            for (const row of selected) {
-              if (!row.imageNodeId) continue;
-              const binding = store.get<NodeBinding>(
-                "node_binding",
-                row.imageNodeId,
-              );
-              invariant(
-                binding?.state === "active" &&
-                  binding.planId === captured.project.activePlanId,
-                "SCENE_REVIEW_STALE",
-                "The selected keyframe binding changed",
-              );
-              store.put("node_binding", binding.id, projectId, {
-                ...binding,
-                candidateId: null,
-                outputs: {},
-              });
-            }
-          const applied = production.applyCompiledSceneGeneration(
-            projectId,
-            actor,
-            compiled,
-            aliases,
-            input.headVersion,
-            digest(captured.lock),
-            input.kind,
-          );
-          if (input.kind === "video") {
-            const displayed = production.engine.reviewSnapshot(projectId),
-              ids = compiled.nodes
-                .filter(
-                  (n) =>
-                    n.kind === "video" &&
-                    selected.some((r) => r.shotId === n.shotId),
-                )
-                .map((n) => n.id);
-            invariant(
-              ids.length === selected.length &&
-                ids.every((id) =>
-                  displayed.members.some(
-                    (m) =>
-                      m.videoNodeId === id &&
-                      m.ready &&
-                      selected.some(
-                        (r) =>
-                          r.shotId === m.shotId &&
-                          canonical(r.image) === canonical(m.keyframe) &&
-                          compiled.nodes.some(
-                            (n) =>
-                              n.id === id &&
-                              n.args.prompt === r.motionPrompt &&
-                              n.args.durationFrames === r.durationFrames &&
-                              n.profileId === r.videoProfileLabel &&
-                              canonical(n.args.settings ?? {}) ===
-                                canonical(r.videoSettings) &&
-                              (!r.videoSpecDigest ||
-                                n.specDigest === r.videoSpecDigest),
-                          ),
-                      ),
-                  ),
-                ),
-              "SCENE_REVIEW_STALE",
-              "Published video inputs differ from the reviewed scene",
-            );
-            production.approve(projectId, actor, displayed.id, ids);
-          }
-          return {
-            ...applied,
-            sceneId,
-            kind: input.kind,
-            shotIds: selected.map((r) => r.shotId),
-          };
-        }),
-      );
-    },
+        shotIds: selected.map((r) => r.shotId),
+        ...(director ? { generation: generation() } : {}),
+      };
+    }),
   );
 }

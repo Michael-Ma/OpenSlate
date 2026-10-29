@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EventStreamParser } from '../src/event-stream.ts';
-import { ProjectSubscription, projectSubscription } from '../src/project-subscription.ts';
+import { EventStreamParser } from '../src/shared/event-stream.ts';
+import { ProjectSubscription, projectSubscription } from '../src/shared/project-subscription.ts';
 const bytes=value=>new TextEncoder().encode(value);
 test('SSE decoding preserves split UTF-8, CRLF, multiline data and discards unfinished frames',()=>{
  const events=[],parser=new EventStreamParser(event=>events.push(event)),source=bytes('\ufeff: heartbeat\r\nid: 4\r\nevent: message.recorded\r\ndata: {"text":"鞋"}\r\ndata: second\r\n\r\nid: 5\ndata: unfinished');
@@ -62,4 +62,13 @@ test('cross-project and malformed event identities cannot enter the cursor',()=>
 test('projectless subscription performs no stream or periodic work but permits focus refresh for installation state',async()=>{
  const f=fixture(),sub=new ProjectSubscription(f.api,'',{visibility:f.visibility,focus:f.visibility,now:()=>0,setTimer:(fn,ms)=>setTimeout(fn,ms),clearTimer:id=>clearTimeout(id)}),off=sub.subscribe(()=>{});
  assert.equal(f.calls.length,0);off();assert.equal(f.listeners.size,0);
+});
+test('connect now tries a stream that is waiting for its next retry at once, and reads again',async()=>{
+ const f=fixture(),off=f.subscription.subscribe(()=>{});f.calls[0].options.onOpen();await f.tick(150);
+ f.calls[0].reject(Error('lost'));await f.tick(1000);f.calls[1].reject(Error('lost'));await f.tick(10);assert.equal(f.calls.length,2,'the second retry waits 2 s');
+ const revision=f.subscription.getSnapshot().revision;
+ f.subscription.connectNow();assert.equal(f.calls.length,3,'connect now does not wait');
+ f.subscription.connectNow();assert.equal(f.calls.length,3,'one stream at a time');
+ await f.tick(150);assert.equal(f.subscription.getSnapshot().revision,revision+1);
+ f.visibility.hidden=true;f.listeners.get('visibilitychange')();f.subscription.connectNow();assert.equal(f.calls.length,3,'a hidden tab stays disconnected');off();
 });

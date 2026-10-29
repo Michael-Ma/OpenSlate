@@ -1,4 +1,4 @@
-import { fault, identity, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
+import { beforeDispatch, fault, identity, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
 import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorStartOptions } from "./types.js";
 
 export type FakeDirectorOutcome = Pick<DirectorRunResult, "status" | "text"> &
@@ -21,7 +21,7 @@ export class FakeDirectorRuntime implements DirectorRuntime {
       "RUNTIME_CONFIG_INVALID", "Fake runtime timeout is invalid");
   }
   async start(supplied: DirectorRunInput, options: DirectorStartOptions = {}): Promise<DirectorRunResult> {
-    const input = validateInput(supplied); const base = identity(input);
+    const input = beforeDispatch(() => validateInput(supplied)); const base = identity(input);
     if (options.signal?.aborted) return { ...base, status: "interrupted", text: "", dispatched: false };
     const controller = new AbortController();
     let rejectStop!: (error: RuntimeFault) => void;

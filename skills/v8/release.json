@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "release": "8.0.0",
+  "toolContract": "7.0.0",
+  "core": [
+    "production",
+    "plan-authoring"
+  ],
+  "packages": [
+    {
+      "id": "production",
+      "version": "8.0.0",
+      "packageDigest": "d486cdc4f9d533ac63f242dc555da305c6cdcaa803b71531c2802a5433e44981"
+    },
+    {
+      "id": "plan-authoring",
+      "version": "8.0.0",
+      "packageDigest": "fb0496a034e90ca6f8d183a4ffc33676b0b444cffa6061f7f59864ed825f6ed5"
+    },
+    {
+      "id": "craft-story",
+      "version": "8.0.0",
+      "packageDigest": "6177ecbadd29aea0a24a44bd4a8627c2ff6856fac260b6d7d018b8894de9b332"
+    },
+    {
+      "id": "craft-comedy",
+      "version": "8.0.0",
+      "packageDigest": "9ccc192283779abe589a1b1ab018207f99bdad7ac5c1e77820a96f790e611c03"
+    },
+    {
+      "id": "craft-visual-style",
+      "version": "8.0.0",
+      "packageDigest": "7be76b13a60a33ca2709275f065ffb391c826fe5590de74f340b79725999193b"
+    },
+    {
+      "id": "craft-style-prompting",
+      "version": "8.0.0",
+      "packageDigest": "760707fcf30925b2c65985e7748908a3416b62eec5ca60e447f9da83f52d10c6"
+    },
+    {
+      "id": "craft-shot-prompting",
+      "version": "8.0.0",
+      "packageDigest": "c38354ddda6ffe8c8a32b3a0e8bf051c04ec55b715590de5f6f49c2cc6e1a5ad"
+    },
+    {
+      "id": "craft-characters",
+      "version": "8.0.0",
+      "packageDigest": "b463edf6cabf9be0666bc7bca222f932f742a03cf6af9b0be74dba68bb0f6f30"
+    },
+    {
+      "id": "craft-continuity-review",
+      "version": "8.0.0",
+      "packageDigest": "33241d63694d1d632cd587f59cf294ecf84cdab226c6f1c6b9a960b4a82a70da"
+    },
+    {
+      "id": "craft-narration",
+      "version": "8.0.0",
+      "packageDigest": "df781f0a70910acba6e94f2d7a130da83c5fc45aca559c0fab2ef9b6298f94eb"
+    },
+    {
+      "id": "craft-music-timing",
+      "version": "8.0.0",
+      "packageDigest": "2e8e30b948d5d04e762756f8632b64a891cb0544f9d29c06b6ff875a5846f182"
+    },
+    {
+      "id": "craft-performance",
+      "version": "8.0.0",
+      "packageDigest": "4230f64bd67e3da846e6ac0ed686896c53f5c146ff869394218d38f70a32e275"
+    },
+    {
+      "id": "type-social",
+      "version": "8.0.0",
+      "packageDigest": "62a229f4ba3e249509d55a43daabde117b42df92d62f6fbc65c95123381ab67b"
+    },
+    {
+      "id": "type-music-video",
+      "version": "8.0.0",
+      "packageDigest": "c07b1bb29da9a9a0a5bdae21ad1200b2e7836227732f660da1f9f7c19139e2a1"
+    },
+    {
+      "id": "type-commercial",
+      "version": "8.0.0",
+      "packageDigest": "18f20d84eb7ff79ac9f26cd817badc7343d61e507625e8a7e46b565b82fa8f2a"
+    },
+    {
+      "id": "type-explainer",
+      "version": "8.0.0",
+      "packageDigest": "61fc07aaa42bf4efc23a15eb39e85ac86f80cc25f373ab5d9ef041998069172a"
+    },
+    {
+      "id": "type-narrative",
+      "version": "8.0.0",
+      "packageDigest": "f84136e33e1fb1a9d02b157daaf7c9e10a37ad53e4a086470d08343cd8023cd7"
+    },
+    {
+      "id": "type-narrated-story",
+      "version": "8.0.0",
+      "packageDigest": "7315e838bbe72431090f47603daa658854c8f28e1d778faabed999920bb26f6a"
+    },
+    {
+      "id": "type-showcase",
+      "version": "8.0.0",
+      "packageDigest": "7b26feede6bd3cb5025717edf7fb2c25c0d11ac3f8166b169591e6a42b3e4fb5"
+    },
+    {
+      "id": "type-documentary",
+      "version": "8.0.0",
+      "packageDigest": "c44dcf8871178b32616fa91f5229329410f8a600385011e8d023d1a7ee3ae649"
+    },
+    {
+      "id": "type-trailer",
+      "version": "8.0.0",
+      "packageDigest": "93d422ca6749203b8167999a16e9714f30089fcc899db81c10802943b0213993"
+    },
+    {
+      "id": "format-social-vertical",
+      "version": "8.0.0",
+      "packageDigest": "530905dfc95de010b57bb1c2d93b68b877b1bee6177622ad7d0016a1c95101d8"
+    }
+  ],
+  "routes": {
+    "general": "fallback",
+    "undecided": "fallback",
+    "narrative": "type-narrative",
+    "music_video": "type-music-video",
+    "commercial": "type-commercial",
+    "social": "type-social",
+    "explainer": "type-explainer",
+    "documentary": "type-documentary",
+    "showcase": "type-showcase",
+    "trailer": "type-trailer",
+    "narrated_story": "type-narrated-story",
+    "other": "fallback"
+  },
+  "fallback": {
+    "kind": "general",
+    "inject": [
+      "craft-story",
+      "craft-visual-style",
+      "craft-shot-prompting"
+    ]
+  },
+  "inject": [
+    {
+      "package": "production",
+      "path": "references/current-contract.md"
+    },
+    {
+      "package": "production",
+      "path": "references/notes.md"
+    }
+  ],
+  "budget": {
+    "injectedWords": 10000,
+    "entryWords": {
+      "core": 1600,
+      "type": 1100,
+      "craft": 600,
+      "format": 700
+    },
+    "referenceWords": 2500
+  }
+}

@@ -4,7 +4,9 @@ import { normalizePermissionProfile, toml, validateOptions } from "./policy.js";
 import type { CodexConfigValue, CodexDirectorOptions } from "./policy.js";
 import { CodexTransport, timeout, type RpcMessage } from "./transport.js";
 import { prepareDirectorImages } from "./images.js";
-import { fault, identity, object, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
+import { beforeDispatch, fault, identity, object, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
+import { classifyNativeDiagnostic, instructionSourcesDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
+import { preparePrivateCodexHome } from "./private-home.js";
 import type { DirectorQuestion, DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent, DirectorStartOptions } from "./types.js";
 
 const SERVER = "openslate";
@@ -70,12 +72,21 @@ export class CodexDirectorRuntime implements DirectorRuntime {
   readonly id = "codex-app-server";
   #options: ReturnType<typeof validateOptions>;
   #projects = new Set<string>();
+  #closed = false;
+  #closing: Promise<void> | undefined;
+  #transports = new Set<CodexTransport>();
+  #stops = new Set<() => void>();
 
   constructor(options: CodexDirectorOptions) { this.#options = validateOptions(options); }
 
   async start(supplied: DirectorRunInput, options: DirectorStartOptions = {}): Promise<DirectorRunResult> {
-    const input = validateInput(supplied); const base = identity(input);
-    requireRuntime(!this.#projects.has(input.projectId), "RUNTIME_BUSY", "This project already has an active director run");
+    const input = beforeDispatch(() => {
+      requireRuntime(!this.#closed, "RUNTIME_CLOSED", "Director runtime is shutting down");
+      const input = validateInput(supplied);
+      requireRuntime(!this.#projects.has(input.projectId), "RUNTIME_BUSY", "This project already has an active director run");
+      return input;
+    });
+    const base = identity(input);
     this.#projects.add(input.projectId);
     const config = this.#options; const secrets = [input.bridge.credential, ...Object.values(config.env).filter(value => value.length >= 12)];
     let nativeThreadId: string | undefined; let nativeTurnId: string | undefined;
@@ -84,11 +95,13 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     let interruptionRequested = false;
     let delivery: Promise<void> = Promise.resolve(); let queued = 0; let deliveryFailed = false;
     const messages: { text: string; phase: string }[] = []; const early: RpcMessage[] = [];
+    const activeItems = new Map<string, "reasoning" | "tool">();
     const cancellation = new AbortController();
     let resolveTerminal!: () => void; const terminal = new Promise<void>(resolve => { resolveTerminal = resolve; });
     let resolveStop!: () => void; const stopping = new Promise<void>(resolve => { resolveStop = resolve; });
     const stop = (reason: RuntimeFault) => { if (!stopReason) { stopReason = reason; cancellation.abort(); resolveStop(); } };
     const abort = () => stop(new RuntimeFault("RUNTIME_ABORTED", "Director run was cancelled"));
+    this.#stops.add(abort);
     const emit = (event: DirectorRuntimeEvent) => {
       if (!options.onEvent || deliveryFailed) return;
       if (++queued > config.limits.eventQueue) { stop(new RuntimeFault("RUNTIME_EVENT_LIMIT", "Runtime event consumer is too slow")); return; }
@@ -98,10 +111,11 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       }).catch(() => { deliveryFailed = true; stop(new RuntimeFault("RUNTIME_EVENT_CONSUMER_FAILED", "Runtime event consumer failed")); }).finally(() => { queued--; });
     };
     options.signal?.addEventListener("abort", abort, { once: true });
-    const runTimer = setTimeout(() => stop(new RuntimeFault("RUNTIME_RUN_TIMEOUT", "Director run exceeded its time limit")), config.limits.runTimeoutMs);
+    const runTimer = setTimeout(() => stop(nativeTimeoutFault("RUNTIME_RUN_TIMEOUT", "Director run exceeded its time limit", config.limits.runTimeoutMs)), config.limits.runTimeoutMs);
     let result: DirectorRunResult | undefined;
     try {
       requireRuntime(!options.signal?.aborted, "RUNTIME_ABORTED", "Director run was cancelled");
+      if (config.privateCodexHome) await preparePrivateCodexHome(config.privateCodexHome);
       const images = await prepareDirectorImages(input.images, config.cwd);
       await this.verifyVersion(cancellation.signal);
       if (stopReason) throw stopReason;
@@ -133,6 +147,19 @@ export class CodexDirectorRuntime implements DirectorRuntime {
         }
         const eventTurnId = params.turnId ?? object(params.turn).id;
         if (eventTurnId !== nativeTurnId) return;
+        if (message.method === "item/started" || message.method === "item/completed") {
+          const item = object(params.item), type = item.type;
+          const phase = type === "reasoning" ? "reasoning"
+            : ["mcpToolCall", "dynamicToolCall", "codeModeToolCall"].includes(String(type)) ? "tool" : null;
+          if (phase && typeof item.id === "string" && item.id.length <= 300) {
+            if (message.method === "item/started") {
+              requireRuntime(activeItems.size < config.limits.eventQueue || activeItems.has(item.id), "RUNTIME_EVENT_LIMIT", "Too many simultaneous native items");
+              activeItems.set(item.id, phase);
+            } else activeItems.delete(item.id);
+            const activePhase = [...activeItems.values()].includes("tool") ? "tool" : activeItems.size ? "reasoning" : null;
+            emit({ ...base, kind: "activity", phase: activePhase ?? phase, state: activePhase ? "started" : "completed" });
+          }
+        }
         if (message.method === "item/completed") {
           const item = object(params.item);
           if (item.type === "agentMessage" && typeof item.text === "string") {
@@ -153,6 +180,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       transport = new CodexTransport({ command: config.command.file, args: [...(config.command.args ?? []), "app-server", "--strict-config",
         ...Object.entries(launch).flatMap(([key, value]) => ["-c", `${key}=${toml(value)}`])],
       cwd: config.cwd, env: { ...config.env }, limits: config.limits, secrets, onMessage });
+      this.#transports.add(transport);
       const rpc = (method: string, params: unknown) => {
         if (stopReason) return Promise.reject(stopReason);
         return transport!.request(method, params, cancellation.signal);
@@ -175,10 +203,13 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       requireRuntime(typeof thread.id === "string" && (!input.resumeThreadId || thread.id === input.resumeThreadId), "RUNTIME_PROTOCOL_INVALID", "Native thread identity differs from request");
       nativeThreadId = thread.id;
       requireRuntime(object(opened.activePermissionProfile).id === config.policy.id, "RUNTIME_POLICY_MISMATCH", "Native runtime did not select the configured permission profile");
-      requireRuntime(Array.isArray(opened.instructionSources) && opened.instructionSources.length === 0, "RUNTIME_INSTRUCTIONS_UNEXPECTED", "Unexpected inherited native instructions");
+      if (!Array.isArray(opened.instructionSources) || opened.instructionSources.length !== 0)
+        throw new RuntimeFault("RUNTIME_INSTRUCTIONS_UNEXPECTED", "Unexpected inherited native instructions",
+          instructionSourcesDiagnostic(opened.instructionSources, config.env.HOME));
       await this.catalog(transport, nativeThreadId, input, cancellation.signal);
       emit({ ...base, kind: "runtime_started", nativeThreadId });
       await delivery; if (stopReason) throw stopReason;
+      transport.finishStartup();
       dispatched = true;
       const started = object(await rpc("turn/start", { threadId: nativeThreadId,
         input: [{ type: "text", text: input.text }, ...input.skills.map(skill => ({ type: "skill", ...skill })), ...images],
@@ -201,27 +232,41 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       }
       const status = terminalStatus ?? (dispatched ? "unknown" : problem.code === "RUNTIME_ABORTED" ? "interrupted" : "failed");
       result = { ...base, status, text: this.finalText(messages), dispatched,
-        ...(nativeThreadId ? { nativeThreadId } : {}), ...(nativeTurnId ? { nativeTurnId } : {}), error: { code: problem.code, message: problem.message } };
+        ...(nativeThreadId ? { nativeThreadId } : {}), ...(nativeTurnId ? { nativeTurnId } : {}), error: { code: problem.code, message: problem.message, nativeDiagnostic: classifyNativeDiagnostic(problem) } };
     } finally {
       clearTimeout(runTimer); options.signal?.removeEventListener("abort", abort);
       if (transport) {
         try { await transport.close(); }
         catch {
-          const error = { code: "RUNTIME_CLEANUP_FAILED", message: "Native process cleanup was not confirmed" };
+          const error = { code: "RUNTIME_CLEANUP_FAILED", message: "Native process cleanup was not confirmed",
+            ...(!dispatched && result?.error?.nativeDiagnostic?.category === "native_instructions_unexpected"
+              ? { nativeDiagnostic: result.error.nativeDiagnostic } : {}) };
           result = { ...base, ...result, text: result?.text ?? "", dispatched, status: dispatched ? "unknown" : "failed", error };
           emit({ ...base, kind: "diagnostic", ...error });
         }
         const diagnostic = transport.diagnostics();
         if (diagnostic && stopReason) emit({ ...base, kind: "diagnostic", code: "RUNTIME_STDERR", message: diagnostic });
+        this.#transports.delete(transport);
       }
-      await delivery; this.#projects.delete(input.projectId);
+      await delivery; this.#projects.delete(input.projectId); this.#stops.delete(abort);
     }
     if (deliveryFailed || stopReason?.code === "RUNTIME_EVENT_LIMIT") {
       result = { ...base, ...result, text: result?.text ?? "", dispatched, status: dispatched ? "unknown" : "failed",
-        error: { code: "RUNTIME_EVENT_CONSUMER_FAILED", message: "Runtime events were not completely delivered" } };
+        error: { code: "RUNTIME_EVENT_CONSUMER_FAILED", message: "Runtime events were not completely delivered",
+          ...(!dispatched && result?.error?.nativeDiagnostic?.category === "native_instructions_unexpected"
+            ? { nativeDiagnostic: result.error.nativeDiagnostic } : {}) } };
     }
     requireRuntime(result, "RUNTIME_FAILED", "Director runtime produced no result");
     return result;
+  }
+  /** Close process groups concurrently with interruption, before a host deadline expires. */
+  close(): Promise<void> {
+    if (this.#closing) return this.#closing;
+    this.#closed = true;
+    for (const stop of this.#stops) stop();
+    return this.#closing = Promise.allSettled([...this.#transports].map(transport => transport.close())).then(results => {
+      requireRuntime(results.every(result => result.status === "fulfilled"), "RUNTIME_CLEANUP_FAILED", "Native process cleanup was not confirmed");
+    });
   }
   private finalText(messages: { text: string; phase: string }[]): string {
     const final = messages.filter(message => message.phase === "final");
@@ -231,10 +276,12 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     const value = this.#options;
     return new Promise((resolve, reject) => {
       execFile(value.command.file, [...(value.command.args ?? []), "--version"], {
-        cwd: value.cwd, env: { ...value.env }, timeout: value.limits.requestTimeoutMs, killSignal: "SIGKILL", maxBuffer: 4096,
+        cwd: value.cwd, env: { ...value.env }, timeout: value.limits.startupTimeoutMs, killSignal: "SIGKILL", maxBuffer: 4096,
         ...(signal ? { signal } : {}),
       }, (error, stdout) => {
-        if (error) reject(new RuntimeFault(signal?.aborted ? "RUNTIME_ABORTED" : "RUNTIME_VERSION_FAILED", "Pinned native version could not be checked"));
+        if (error) reject(signal?.aborted ? new RuntimeFault("RUNTIME_ABORTED", "Director run was cancelled") : error.killed && error.signal === "SIGKILL"
+          ? nativeTimeoutFault("RUNTIME_VERSION_TIMEOUT", "Pinned native version did not respond in time", value.limits.startupTimeoutMs)
+          : new RuntimeFault("RUNTIME_VERSION_FAILED", "Pinned native version could not be checked", classifyNativeDiagnostic(error)));
         else if (stdout.trim() !== `codex-cli ${value.runtimeVersion}`) reject(new RuntimeFault("RUNTIME_VERSION_MISMATCH", "Native binary does not match the pinned version"));
         else resolve();
       });
@@ -247,6 +294,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
       "features.code_mode_host": true, "features.skip_host_skill_discovery": true,
       "features.default_mode_request_user_input": true,
+      "skills.bundled.enabled": false,
       "skills.config": [...(Array.isArray(this.#options.policy.config["skills.config"])
         ? this.#options.policy.config["skills.config"].filter(value => object(value).enabled === false &&
           !input.skills.some(skill => skill.path === object(value).path)) : []),
@@ -279,6 +327,8 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       "RUNTIME_POLICY_MISMATCH", "Effective native permissions differ from the exact configured profile");
     const features = object(config.features);
     requireRuntime(features.code_mode_host === true && features.default_mode_request_user_input === true && DISABLED.every(name => features[name] === false), "RUNTIME_CONFIG_MISMATCH", "Native capability configuration differs from expected settings");
+    requireRuntime(object(object(config.skills).bundled).enabled === false,
+      "RUNTIME_CONFIG_MISMATCH", "Bundled native instructions must remain disabled");
     const data = object(await transport.request("skills/list", { cwds: [this.#options.cwd], forceReload: true }, signal)).data;
     requireRuntime(Array.isArray(data), "RUNTIME_PROTOCOL_INVALID", "Native skill catalog is missing");
     const found: { name: unknown; path: unknown }[] = [];

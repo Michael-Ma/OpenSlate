@@ -1,0 +1,12 @@
+# Card B24: the Director's automatic review cannot save its notes
+
+Read `docs/ai/uiux-plan/codex/RULES.md` first and follow it (sandboxed: no git, no Chrome or browser checks; you may edit browser scenarios, the lead runs them). This card may edit `apps/server`, `packages/*` (not frozen skill or catalog packages: report instead) and `apps/web` logic and catalogs; the lead owns visual design and is changing the Keyframes check row in parallel, so stay out of `keyframes/CheckBanner.tsx`, `keyframes/KeyframesView.tsx` and the CSS files. Do not edit `docs/implementation/STATUS.md`; report in `docs/ai/uiux-plan/codex/reports/B24-review-notes.md`.
+
+In LIVE-3 (`docs/ai/live-test-20261016c/`, especially `REPORT.md`, `25-video-running-note-refusal.png` and `26-film-poster-before-play.png`) the Director's automatic read-only review of the two new keyframes ended with: "Notes could not be saved because the application rejected the note payload." No structured notes were persisted. The retained data `$HOME/openslate-live-test-20261016c` may be READ for diagnosis under the B22 rules (never `.env*`, `secrets/`, `~/.codex` auth or tokens; no private text copied beyond short redacted excerpts).
+
+1. Find the exact rejection: the tool call the review made (name, argument shape, which field failed), the server's validation code and message, and why the model's payload did not match (schema too strict, a field the guidance does not describe, a limit, an anchor or shot reference format, the review's read-only mode refusing a write it is supposed to make, or something else).
+2. Fix the cause so a review records its notes: align the tool schema, the guidance and the validation, and make a refused note come back to the Director with a precise, actionable reason it can correct within the same turn. Keep the notes contract (5.0.0) compatible; if a frozen package must change, report the proposal instead.
+3. When a review cannot save its notes, the person sees a plain line saying the review's notes were not saved and why (en and zh), rather than only the Director's own prose.
+4. Tests first: the exact payload shape from the live run (redacted) must be accepted or refused with a precise reason; a review turn that saves notes end to end on the fake runtime; the person-facing line.
+
+Checks: `pnpm build`, touched tests, `node scripts/run-tests.mjs apps/web/test/*.test.mjs apps/web/test/next/*.test.mjs`, the full `pnpm test`, `pnpm -r typecheck`. Report with the RULES headings: the cause with redacted evidence, the fix, tests.

@@ -54,8 +54,10 @@ export function assertViggleMappingAdmission(admission: ViggleAdmission, mapping
     && mapping.estimatedMicros === admission.reservation.micros, "Viggle mapping lost its exact retained admission evidence");
   const frame = admission.frame;
   fail(frame && canonical(mapping.firstFrame) === canonical(viggleFramePin(frame))
-    && canonical(mapping.transport.firstFrame) === canonical({ sha256: frame.artifact.artifact.sha256, byteLength: frame.artifact.byteLength,
-      width: frame.artifact.width, height: frame.artifact.height, mediaType: "image/png" }), "Viggle mapping lost its exact approved PNG evidence");
+    && (mapping.firstFrameCrop
+      ? mapping.firstFrameCrop.sourceWidth === frame.artifact.width && mapping.firstFrameCrop.sourceHeight === frame.artifact.height
+      : canonical(mapping.transport.firstFrame) === canonical({ sha256: frame.artifact.artifact.sha256, byteLength: frame.artifact.byteLength,
+        width: frame.artifact.width, height: frame.artifact.height, mediaType: "image/png" })), "Viggle mapping lost its exact approved PNG evidence");
 }
 
 /** Keyed replay is bounded before hydration; initial approval selection is bounded and only runs once. */

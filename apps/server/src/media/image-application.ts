@@ -6,16 +6,17 @@ import type { ActorContext, ArtifactRef } from "@openslate/core";
 import type { ProductionService } from "../application/service.js";
 import type { ArtifactRecord } from "../execution/engine.js";
 import { LocalImageStore } from "./local-images.js";
+import { validateUploadName } from "./upload-name.js";
 
 export const PNG_IMPORT_MAX_BYTES = 32 * 1024 * 1024;
-export interface ImportImageInput { expectedHeadVersion: number; key: string; bytes: Uint8Array; sha256: string }
+export interface ImportImageInput { expectedHeadVersion: number; key: string; bytes: Uint8Array; sha256: string; name?: string }
 export interface ImportedImage { artifact: ArtifactRef; revisionId: string; headVersion: number; width: number; height: number; byteLength: number }
 export interface SuppliedImageArtifact extends ArtifactRecord {
   mimeType: "image/png"; fixture: false; attemptId: null; origin: "supplied_image";
   byteLength: number; width: number; height: number; physicalDurationSeconds: null;
   validationDigest: string; importId: string;
 }
-interface ImportIntent { id: string; projectId: string; artifactId: string; requestId: string; expectedHeadVersion: number; sha256: string; byteLength: number; width: number; height: number }
+interface ImportIntent { id: string; projectId: string; artifactId: string; requestId: string; expectedHeadVersion: number; sha256: string; byteLength: number; width: number | null; height: number | null; name?: string }
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const inside = (root: string, path: string) => { const rel = relative(root, path); return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)); };
 const receipt = (value: ImportedImage): ImportedImage => ({ artifact: value.artifact, revisionId: value.revisionId, headVersion: value.headVersion, width: value.width, height: value.height, byteLength: value.byteLength });
@@ -39,15 +40,18 @@ export class ImageApplicationService {
     const authority = structuredClone(actor), signal = options.signal;
     this.authorize(projectId, authority);
     invariant(!signal?.aborted, "MEDIA_CANCELLED", "Reference image import cancelled");
-    invariant(input && typeof input === "object" && Object.keys(input).every(key => ["expectedHeadVersion", "key", "bytes", "sha256"].includes(key)) &&
+    invariant(input && typeof input === "object" && Object.keys(input).every(key => ["expectedHeadVersion", "key", "bytes", "sha256", "name"].includes(key)) &&
       Number.isSafeInteger(input.expectedHeadVersion) && input.expectedHeadVersion >= 0 && typeof input.key === "string" && input.key.length > 0 && input.key.length <= 160,
     "VALIDATION_ERROR", "Use a bounded image import command and current project version");
-    invariant(input.bytes instanceof Uint8Array && input.bytes.byteLength > 32 && input.bytes.byteLength <= PNG_IMPORT_MAX_BYTES, "IMAGE_INPUT_INVALID", "Choose a PNG image of at most 32 MiB");
+    validateUploadName(input.name);
+    invariant(input.bytes instanceof Uint8Array && input.bytes.byteLength > 32 && input.bytes.byteLength <= PNG_IMPORT_MAX_BYTES, "IMAGE_INPUT_INVALID", "Choose a PNG, JPEG, WebP or HEIC image of at most 32 MiB");
     // Snapshot all mutable caller data before file validation yields.
     const bytes = Buffer.from(input.bytes), hash = input.sha256, key = input.key, expectedHeadVersion = input.expectedHeadVersion;
+    const name = input.name === undefined ? {} : { name: input.name };
     invariant(typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash) && sha(bytes) === hash, "IMAGE_DIGEST_MISMATCH", "Image bytes differ from the upload receipt");
-    const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20);
-    const request = { expectedHeadVersion, sha256: hash, byteLength: bytes.length, width, height };
+    const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const width = png ? bytes.readUInt32BE(16) : null, height = png ? bytes.readUInt32BE(20) : null;
+    const request = { expectedHeadVersion, sha256: hash, byteLength: bytes.length, width, height, ...name };
     const intent = this.store.transaction(() => {
       this.authorize(projectId, authority);
       const reserved = this.store.command<ImportIntent>(`${authority.principalId}:${projectId}:image_import`, key, digest({ authority, request }), () => {
@@ -61,9 +65,9 @@ export class ImageApplicationService {
     });
     const prior = this.store.get<ImportedImage>("image_import_receipt", intent.id);
     if (prior) return receipt(prior);
-    const stored = await this.images.ingest({ bytes, sha256: hash, mimeType: "image/png", width, height }, signal ? { signal } : {});
+    const stored = await this.images.normalizeUpload({ bytes, sha256: hash }, signal ? { signal } : {});
     invariant(!signal?.aborted, "MEDIA_CANCELLED", "Reference image import cancelled");
-    invariant(stored.sha256 === hash && stored.byteLength === bytes.length && stored.width === width && stored.height === height &&
+    invariant((!png || (stored.sha256 === hash && stored.byteLength === bytes.length && stored.width === width && stored.height === height)) &&
       inside(this.artifactRoot, realpathSync(stored.path)), "IMAGE_INTEGRITY_ERROR", "Validated reference differs from its import intent or managed location");
     return this.store.transaction(() => {
       this.authorize(projectId, authority);
@@ -71,15 +75,15 @@ export class ImageApplicationService {
       const completed = this.store.get<ImportedImage>("image_import_receipt", intent.id); if (completed) return receipt(completed);
       const project = this.store.getProject(projectId);
       invariant(project.headVersion === expectedHeadVersion, "REVISION_CONFLICT", "Project changed while validating the image");
-      const artifact: ArtifactRef = { artifactId: intent.artifactId, sha256: hash, kind: "image" };
+      const artifact: ArtifactRef = { artifactId: intent.artifactId, sha256: stored.sha256, kind: "image" };
       const record: SuppliedImageArtifact = { id: intent.artifactId, projectId, artifact, path: stored.path, mimeType: "image/png", fixture: false, attemptId: null,
-        origin: "supplied_image", byteLength: stored.byteLength, width, height, physicalDurationSeconds: null, validationDigest: stored.validationDigest, importId: intent.id };
+        origin: "supplied_image", byteLength: stored.byteLength, width: stored.width, height: stored.height, physicalDurationSeconds: null, validationDigest: stored.validationDigest, importId: intent.id, ...name };
       this.store.insert("artifact", record.id, projectId, record);
       const saved = this.store.saveProject({ ...project, revisionId: newId(), artifacts: [...project.artifacts, artifact] }, project.headVersion);
       this.store.insert("project_revision", saved.revisionId, projectId, { project: saved });
-      const result: ImportedImage = { artifact, revisionId: saved.revisionId, headVersion: saved.headVersion, width, height, byteLength: stored.byteLength };
+      const result: ImportedImage = { artifact, revisionId: saved.revisionId, headVersion: saved.headVersion, width: stored.width, height: stored.height, byteLength: stored.byteLength };
       this.store.insert("image_import_receipt", intent.id, projectId, result);
-      this.store.appendEvent(projectId, "image.imported", { artifactId: artifact.artifactId, revisionId: saved.revisionId, sha256: hash });
+      this.store.appendEvent(projectId, "image.imported", { artifactId: artifact.artifactId, revisionId: saved.revisionId, sha256: stored.sha256 });
       return result;
     });
   }
