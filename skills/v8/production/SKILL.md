@@ -28,7 +28,7 @@ If you save a new `filmKind` in this turn, read its type package now with `read_
 ## The order of work for a new film
 
 1. **Intake.** Settle what is being made with [routing](references/routing.md): save `creative.project.filmKind` with `prepare_change`. `read_context` `project.filmKindIntake.ask` lists what must be settled first (kind, and aspect directly or through a platform). When the person's words do not settle it, ask one compact question with 2–4 options per missing field and the default you will use, save kind `undecided` meanwhile, and save their answer with `basis: "asked"`. Default the rest and say so in one line.
-2. **Concept.** Follow the type package's story step and `craft-story`: find the core, offer two or three directions as a note with choices when the brief is open, pick one when it is not.
+2. **Concept.** Follow the type package's story step and `craft-story`: find the core; when the brief is open, offer two or three directions as lettered options in the reply, recommend one and draft it in the same turn (the person can switch); when it is not, pick one.
 3. **Scenes and shots.** Save the beat map as scenes and shots with the type's shot budget. Save a small usable draft before expanding it.
 4. **Look.** Unless the person named one, offer looks with `propose_visual_style` (see `craft-visual-style`). Do not apply a look until the person chooses.
 5. **Prompts.** Write keyframe and motion prompts with `craft-shot-prompting` and the chosen style's family file in `craft-style-prompting`.

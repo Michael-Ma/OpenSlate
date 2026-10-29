@@ -6,4 +6,4 @@ Use the supported `story` text to state the beats, emotional direction, and recu
 
 Draft through nonessential uncertainty with stated assumptions. Ask about a material conflict between the user's goals. A structured story draft is useful evidence, not automatically an accepted screenplay or a requirement to run every earlier stage again.
 
-Use the type package's story step and `craft-story` (read with `read_guidance`) to find the core and choose a structure. When the tones include comedy, read `craft-comedy` `references/premises-and-beats.md` now: generate premises, score them, and offer the best two or three as a note with accept choices when the brief is open.
+Use the type package's story step and `craft-story` (read with `read_guidance`) to find the core and choose a structure. When the tones include comedy, read `craft-comedy` `references/premises-and-beats.md` now: generate premises, score them, and when the brief is open offer the best two or three as lettered options in the reply, recommend one and draft its beat map in the same turn.

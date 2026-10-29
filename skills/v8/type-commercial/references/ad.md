@@ -23,8 +23,8 @@ Pick one; state it in the story:
 ## Scenes and shots
 
 - 15 s: 1–2 scenes, 4–7 shots. 30 s: 2–4 scenes, 7–12 shots. 60 s: 3–6 scenes, 12–20 shots.
-- Shot lengths 1–3 s in the body, 3–5 s for the hero product shot and end card.
-- Untrimmed 6 s clips make ads feel slow: a 30 s spot becomes 5 shots. Prefer shorter used lengths in `desiredFrames` (see shot budget); otherwise make each shot carry visible motion and a clear idea.
+- Shot lengths 3–4 s in the body (the shortest a shot can be), 4–6 s for the hero product shot and end card.
+- Each shot is at least 3 s (90 frames); Film cuts every clip to its `desiredFrames`. A 30 s spot is 7–9 shots at 3–4 s; give the body visible motion and save longer holds for the hero and end card.
 
 ## Pacing
 

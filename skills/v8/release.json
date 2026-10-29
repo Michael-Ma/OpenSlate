@@ -10,7 +10,7 @@
     {
       "id": "production",
       "version": "8.0.0",
-      "packageDigest": "58a9dccaa92f1c1e3c15d35774de708c3c0408da497f885024a3e4b3fe5c55f2"
+      "packageDigest": "d486cdc4f9d533ac63f242dc555da305c6cdcaa803b71531c2802a5433e44981"
     },
     {
       "id": "plan-authoring",
@@ -80,7 +80,7 @@
     {
       "id": "type-commercial",
       "version": "8.0.0",
-      "packageDigest": "757a5a23d747c76e8f048a373c990367ce3ad44ce24af1938bc198f8e5fd9480"
+      "packageDigest": "18f20d84eb7ff79ac9f26cd817badc7343d61e507625e8a7e46b565b82fa8f2a"
     },
     {
       "id": "type-explainer",
@@ -90,7 +90,7 @@
     {
       "id": "type-narrative",
       "version": "8.0.0",
-      "packageDigest": "d24b22ec55d179cbe6ee26817fc916d8e1a6db98a707e19b926e400ed0dbb60d"
+      "packageDigest": "f84136e33e1fb1a9d02b157daaf7c9e10a37ad53e4a086470d08343cd8023cd7"
     },
     {
       "id": "type-narrated-story",
@@ -110,7 +110,7 @@
     {
       "id": "type-trailer",
       "version": "8.0.0",
-      "packageDigest": "64fb51ee2297e6a56114ed87edef5ee89229ec126f8274b76b08ee65af5f1786"
+      "packageDigest": "93d422ca6749203b8167999a16e9714f30089fcc899db81c10802943b0213993"
     },
     {
       "id": "format-social-vertical",

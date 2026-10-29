@@ -20,7 +20,7 @@ Tell one story with a character who wants something, meets resistance, and chang
 - One scene per location/time change or dramatic beat. 30–90 s micro-short: 2–4 scenes. 3 min: 5–8 scenes.
 - 3–8 shots per scene. Build each scene from establishing → coverage (medium, close) → reaction/insert → exit or button.
 - A dialogue-free beat needs at least one shot of action and one of reaction; the reaction is where meaning lands.
-- 3 min at about 4 s used per shot: 35–45 shots. Without trimming, 25–30 at 6 s and slower rhythm.
+- 3 min at about 4 s used per shot: 35–45 shots; at 6 s, 25–30 shots and a slower rhythm.
 
 ## Pacing
 

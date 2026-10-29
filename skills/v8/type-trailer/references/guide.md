@@ -18,9 +18,9 @@ Make people want something that is not yet available: a film, series, game, book
 
 ## Scenes and shots
 
-- Trailers are montage; scenes are acts. 2 min trailer: 35–60 shots, most 1–3 s. Teaser 30 s: 6–12 shots.
+- Trailers are montage; scenes are acts. 2 min trailer: 30–40 shots, most 3–4 s (the shortest a shot can be). Teaser 30 s: 6–9 shots.
 - Mix: establishing world shots, character close-ups, action peaks, title cards (finishing).
-- Without trimming, a 6 s-per-shot trailer feels slow; prefer short teasers (5–8 shots) with strong motion, or plan shorter used lengths and clip windows (see shot budget).
+- Shots are at least 3 s, so a trailer's fastest rhythm comes from 3 s cuts plus motion peaks inside clips (a hit, a turn, a light flash); short teasers (5–8 shots) with strong motion work best.
 
 ## Pacing
 
