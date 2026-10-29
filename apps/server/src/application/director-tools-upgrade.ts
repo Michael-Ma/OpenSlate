@@ -45,7 +45,7 @@ export class DirectorToolSettings {
   }
   status(projectId: string) {
     const saved = this.latest(projectId);
-    return { currentVersion: saved?.lock.compatibility.toolContract ?? "6.0.0", lockId: saved?.id ?? null,
+    return { currentVersion: saved?.lock.compatibility.toolContract ?? currentShippedToolContract(this.releases), lockId: saved?.id ?? null,
       lockDigest: saved?.lock.lockDigest ?? null, availableVersion: currentShippedToolContract(this.releases),
       upgradeAvailable: !!saved && !isCurrentShippedDirectorGuidance(saved.lock, this.releases), busy: this.busy(projectId) };
   }

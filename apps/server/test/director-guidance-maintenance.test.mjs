@@ -49,11 +49,14 @@ test('current host amendments leave every V1–V5 film-planning guidance output 
     assert.doesNotMatch(JSON.stringify(guidance), /confirm_video|Confirm in this chat/);
   }
 });
+/** These tests pin the 6.0.0/V7 era; v8 release behaviour is covered in director-skills-v8 and director-guidance-release. */
+const V7_ERA = [];
+
 function writable(path) { chmodSync(path, 0o700); for (const entry of readdirSync(path, { withFileTypes: true })) if (entry.isDirectory()) writable(join(path, entry.name)); }
 function fixture(t, start, overrides = {}) {
   const root = mkdtempSync(join(tmpdir(), 'openslate-guidance-maintenance-')), store = new Store(join(root, 'app.sqlite'));
   const provider = new FakeProvider(join(root, 'fake.sqlite')), service = new ProductionService(store, new Engine(store, provider, { artifactDir: join(root, 'artifacts') }));
-  const calls = [], config = { repositoryRoot, dataDirectory: root, endpoint: 'http://127.0.0.1:3001',
+  const calls = [], config = { repositoryRoot, dataDirectory: root, endpoint: 'http://127.0.0.1:3001', releases: V7_ERA,
     setup: async () => ({ readiness: { status: 'ready' }, runtimeOptions: {} }),
     makeRuntime: () => ({ id: 'codex-app-server', start: async (input, options) => {
       calls.push(input); await options.onEvent({ ...input, kind: 'runtime_started', nativeThreadId: `fixture-${input.turnId}` });
@@ -61,8 +64,8 @@ function fixture(t, start, overrides = {}) {
     } }), ...overrides };
   const director = new LocalDirectorController(service, config), project = service.createProject('Guidance fixture');
   const configuration = { repositoryRoot, snapshotRoot: join(root, 'native', project.id, 'workspace', '.agents', 'skills'), runtimeId: 'codex-app-server' };
-  const settings = new DirectorToolSettings(service, () => configuration);
-  const prepareInput = createDirectorInput(service, { ...configuration, endpoint: config.endpoint, freshTurnGuidance: settings });
+  const settings = new DirectorToolSettings(service, () => configuration, () => false, V7_ERA);
+  const prepareInput = createDirectorInput(service, { ...configuration, endpoint: config.endpoint, freshTurnGuidance: settings, releases: V7_ERA });
   t.after(async () => { await director.close(); provider.close(); store.close(); writable(root); rmSync(root, { recursive: true, force: true }); });
   const install = version => { const saved = createDirectorSkillLock(configuration, version); new DirectorContextService(service, saved.environment).bootstrapLock(project.id, saved.lock); return saved; };
   const fresh = text => {
@@ -189,7 +192,7 @@ test('predecessor verification uses shipped pins and its snapshots when reposito
   cpSync(join(repositoryRoot, 'skills', 'v5'), join(checkout, 'skills', 'v5'), { recursive: true });
   cpSync(join(repositoryRoot, 'skills', 'v7'), join(checkout, 'skills', 'v7'), { recursive: true });
   writeFileSync(join(checkout, 'skills', 'v5', 'production', 'references', 'audio-proposals.md'), 'A changed checkout must not change a saved snapshot.\n');
-  const settings = new DirectorToolSettings(f.service, () => ({ ...f.configuration, repositoryRoot: checkout }));
+  const settings = new DirectorToolSettings(f.service, () => ({ ...f.configuration, repositoryRoot: checkout }), () => false, V7_ERA);
   const successor = settings.currentForFreshTurn(f.project.id, current.bridge.actor, current.turn.id);
   assert.equal(successor.compatibility.toolContract, '6.0.0'); assert.deepEqual(f.store.get('director_skill_lock', saved.lock.id).lock, saved.lock);
 });
@@ -273,7 +276,7 @@ test('changed predecessor snapshot bytes and setup configuration fail before ins
   assert.throws(() => f.prepareInput(current.turn, current.human, current.bridge), { code: 'SKILL_SNAPSHOT_INVALID' });
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 1);
   const g = fixture(t); g.install('3.0.0'); const next = g.fresh('Verify setup'); let count = 0;
-  const settings = new DirectorToolSettings(g.service, () => (++count === 1 ? g.configuration : { ...g.configuration, runtimeId: 'changed-runtime' }));
+  const settings = new DirectorToolSettings(g.service, () => (++count === 1 ? g.configuration : { ...g.configuration, runtimeId: 'changed-runtime' }), () => false, V7_ERA);
   assert.throws(() => settings.currentForFreshTurn(g.project.id, next.bridge.actor, next.turn.id), { code: 'DIRECTOR_TOOLS_STALE' });
   assert.equal(g.store.list('director_skill_lock', g.project.id).length, 1);
 });
@@ -382,11 +385,11 @@ test('K1 preserves the exact earlier 6.0.0 catalog and V7 package identity along
     { id: 'plan-authoring', packageDigest: 'a618b775c426712398ede04c0db8d36b647792adbd3ae1dff263507b19498fdf' },
     { id: 'production', packageDigest: '545d188a97105db9f78d43c5f8ebd260357a537b036e670fdef9158ee6fd80e8' },
   ]);
-  verifyShippedDirectorGuidance(previous, f.configuration);
-  assert.equal(isCurrentShippedDirectorGuidance(previous), false);
+  verifyShippedDirectorGuidance(previous, f.configuration, V7_ERA);
+  assert.equal(isCurrentShippedDirectorGuidance(previous, V7_ERA), false);
   const current = createDirectorSkillLock(f.configuration, '6.0.0').lock;
-  verifyShippedDirectorGuidance(current, f.configuration);
-  assert.equal(isCurrentShippedDirectorGuidance(current), true);
+  verifyShippedDirectorGuidance(current, f.configuration, V7_ERA);
+  assert.equal(isCurrentShippedDirectorGuidance(current, V7_ERA), true);
   const pins = SHIPPED_DIRECTOR_GUIDANCE.filter(row => row.toolContract === '6.0.0');
   assert.equal(pins.length, 6);
   assert.equal(pins[0].handlerDigest, earlierV7.catalog.digest);
@@ -409,8 +412,8 @@ test('N1 retains the exact pre-N1 6.0.0/V7 identity for saved-project upgrades',
     { id: 'plan-authoring', packageDigest: '14457cba9db0ea8ecfc28231193e318b2586ee4bbeb4377e25937733bcf8611b' },
     { id: 'production', packageDigest: '5cb88af3ef85c23898a60901c91406f1874cd179a9312abc890f80904353baa1' },
   ]);
-  verifyShippedDirectorGuidance(previous, f.configuration);
-  assert.equal(isCurrentShippedDirectorGuidance(previous), false);
+  verifyShippedDirectorGuidance(previous, f.configuration, V7_ERA);
+  assert.equal(isCurrentShippedDirectorGuidance(previous, V7_ERA), false);
   assert.ok(SHIPPED_DIRECTOR_GUIDANCE.some(row => row.toolContract === '6.0.0'
     && row.handlerDigest === beforeN1V7.catalog.digest
     && row.planAuthoringDigest === previous.skills[0].packageDigest
@@ -427,15 +430,15 @@ test('P1 retains the exact pre-P1 6.0.0/V7 branch identity for saved-project upg
     { id: 'plan-authoring', packageDigest: 'e1c2d030049e99717e8c3efc977677de1501d4fd1d19f898ce547f0f3e1cb1aa' },
     { id: 'production', packageDigest: '7ef5d5d27cd5b78eac5979cd2468de67c130239d495755abbdee97323eda4fba' },
   ]);
-  verifyShippedDirectorGuidance(previous, f.configuration);
-  assert.equal(isCurrentShippedDirectorGuidance(previous), false);
+  verifyShippedDirectorGuidance(previous, f.configuration, V7_ERA);
+  assert.equal(isCurrentShippedDirectorGuidance(previous, V7_ERA), false);
   assert.ok(SHIPPED_DIRECTOR_GUIDANCE.some(row => row.toolContract === '6.0.0'
     && row.handlerDigest === beforeP1V7.catalog.digest
     && row.planAuthoringDigest === previous.skills[0].packageDigest
     && row.productionDigest === previous.skills[1].packageDigest));
   const current = createDirectorSkillLock(f.configuration, '6.0.0').lock;
-  verifyShippedDirectorGuidance(current, f.configuration);
-  assert.equal(isCurrentShippedDirectorGuidance(current), true);
+  verifyShippedDirectorGuidance(current, f.configuration, V7_ERA);
+  assert.equal(isCurrentShippedDirectorGuidance(current, V7_ERA), true);
   assert.equal(toolCatalog('6.0.0').names.includes('accept_proposal'), true);
   assert.equal(toolCatalog('6.0.0').names.includes('reject_proposal'), true);
 });
@@ -451,8 +454,8 @@ test('T1 retains the exact pre-T1 catalog, V7 package and host guidance bytes fo
     { id: 'plan-authoring', packageDigest: '57fd9fcbc92d113833ce7442d07effdc60e288959988d492c1ddec7a821d0397' },
     { id: 'production', packageDigest: 'be899af306b76045e4969e173deca16534a44b40eb880d7384fad46ee568f81f' },
   ]);
-  verifyShippedDirectorGuidance(previous, f.configuration);
-  assert.equal(isCurrentShippedDirectorGuidance(previous), false);
+  verifyShippedDirectorGuidance(previous, f.configuration, V7_ERA);
+  assert.equal(isCurrentShippedDirectorGuidance(previous, V7_ERA), false);
   assert.ok(SHIPPED_DIRECTOR_GUIDANCE.some(row => row.toolContract === '6.0.0'
     && row.handlerDigest === beforeT1V7.catalog.digest
     && row.planAuthoringDigest === previous.skills[0].packageDigest
@@ -471,8 +474,8 @@ test('T2 retains the exact pre-T2 catalog, V7 package and host guidance bytes fo
     { id: 'plan-authoring', packageDigest: '6ed8cdca8f26c0e62506bde0e46e41f41a62525060c8a1e5b038c7af41faf1bb' },
     { id: 'production', packageDigest: 'f4e3a71c5b62c75ab647c9ebc109bc93fe98bce8f682893467917856febca562' },
   ]);
-  verifyShippedDirectorGuidance(previous, f.configuration);
-  assert.equal(isCurrentShippedDirectorGuidance(previous), false);
+  verifyShippedDirectorGuidance(previous, f.configuration, V7_ERA);
+  assert.equal(isCurrentShippedDirectorGuidance(previous, V7_ERA), false);
   assert.ok(SHIPPED_DIRECTOR_GUIDANCE.some(row => row.toolContract === '6.0.0'
     && row.handlerDigest === beforeT2V7.catalog.digest
     && row.planAuthoringDigest === previous.skills[0].packageDigest
@@ -528,7 +531,7 @@ for (const [label, snapshot] of [['pre-K1', earlierV7], ['pre-N1', beforeN1V7], 
   });
   const fresh = f.fresh('Make keyframes for the whole film');
   const input = f.prepareInput(fresh.turn, fresh.human, fresh.bridge), current = f.store.list('director_skill_lock', f.project.id).at(-1).lock;
-  assert.notEqual(current.id, previous.id); assert.equal(isCurrentShippedDirectorGuidance(current), true);
+  assert.notEqual(current.id, previous.id); assert.equal(isCurrentShippedDirectorGuidance(current, V7_ERA), true);
   assert.equal(JSON.parse(input.context).toolContract.digest, toolCatalog('6.0.0').digest);
   assert.equal(f.store.get('director_epoch_lock', fresh.bridge.actor.epochId).lockId, current.id);
   assert.deepEqual(f.store.get('director_skill_lock', previous.id).lock, previous);
@@ -546,11 +549,11 @@ for (const [label, snapshot] of [['pre-K1', earlierV7], ['pre-N1', beforeN1V7], 
   const input = { expectedLockId: previous.id, expectedLockDigest: previous.lockDigest, targetVersion: '6.0.0' };
   const result = f.settings.upgrade(f.project.id, input, 'explicit-k1-amendment');
   assert.equal(result.upgradeAvailable, false); assert.notEqual(result.lockId, previous.id);
-  assert.equal(isCurrentShippedDirectorGuidance(f.store.get('director_skill_lock', result.lockId).lock), true);
+  assert.equal(isCurrentShippedDirectorGuidance(f.store.get('director_skill_lock', result.lockId).lock, V7_ERA), true);
   assert.deepEqual(f.store.get('director_skill_lock', previous.id).lock, previous);
   assert.deepEqual(f.store.getProject(f.project.id), before);
   const cursor = f.store.cursor(f.project.id);
-  const replay = new DirectorToolSettings(f.service, () => { throw Error('Replay must not reload packages'); });
+  const replay = new DirectorToolSettings(f.service, () => { throw Error('Replay must not reload packages'); }, () => false, V7_ERA);
   assert.deepEqual(replay.upgrade(f.project.id, input, 'explicit-k1-amendment'), result);
   assert.equal(f.store.cursor(f.project.id), cursor); assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2);
   assert.throws(() => f.settings.upgrade(f.project.id, { expectedLockId: result.lockId,

@@ -23,7 +23,8 @@ function fixture(t) {
   const project = service.createProject('Saved shipped guidance'), snapshotRoot = join(root, 'snapshots'), checkout = join(root, 'checkout');
   const configuration = { repositoryRoot, snapshotRoot, runtimeId: 'codex-app-server' }, saved = createDirectorSkillLock(configuration, '4.0.0');
   new DirectorContextService(service, saved.environment).bootstrapLock(project.id, saved.lock);
-  const settings = new DirectorToolSettings(service, () => ({ ...configuration, repositoryRoot: checkout }));
+  // The V7 checkout failures; release v8 source failures are covered in director-guidance-release.
+  const settings = new DirectorToolSettings(service, () => ({ ...configuration, repositoryRoot: checkout }), () => false, []);
   const director = new LocalDirectorController(service, { repositoryRoot, dataDirectory: root, endpoint: 'http://127.0.0.1:3101', defaults: { binaryPath: process.execPath, model: 'offline-fixture' } });
   t.after(async () => { await director.close(); provider.close(); store.close(); writable(root); rmSync(root, { recursive: true, force: true }); });
   const fresh = () => {

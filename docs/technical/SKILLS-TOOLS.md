@@ -16,7 +16,8 @@ From guidance v8 a project locks a **release**, not two packages. `skills/v8/rel
 - A schema 2 lock adds `release: {version, releaseDigest}` and pins every release package. Schema 1 locks verify exactly as before.
 - `routeSkills(filmKind, release, conditions)` is pure: core, then the type package from `filmKindRouteKey` (a null or unshipped type package means the release fallback), its format packages, then the `requires` closure and optional packages whose condition holds. A schema 2 activation records the decision (inputs, digest, selected, reasons) and is recomputed from its inputs on activation.
 - Only the routed packages' `SKILL.md` and the release's `inject` core references go into the Director input; the context lists every locked package with its files. Everything else is read with `read_guidance {package, path?}` (7.0.0, free, read-only, any turn), which reads only packages in the conversation's own lock and records a `skill_read` (`via: "read_guidance"`), at most 24 reads and 120 KiB per conversation. Codex enables only the routed entries.
-- Fresh native turns upgrade any shipped identity to the latest row of `SHIPPED_DIRECTOR_RELEASES` once one is appended; until then they stay on the current 6.0.0 identity. Word budgets in `release.json` are a CI check (`skillReleaseBudget`), not a runtime one.
+- Release v8 (`8.0.0`, contract `7.0.0`) is the latest row of `SHIPPED_DIRECTOR_RELEASES`: new films lock it, and fresh native turns upgrade any shipped identity to it. Word budgets in `release.json` are a CI check (`skillReleaseBudget`), not a runtime one; the shipped-release test also lints non-core packages for permission and decision calls.
+- Contract 7.0.0 adds `propose_visual_style`: a whole-film style card whose option the person picks; the pick saves that look as `project.visualStyle` with an internal, undoable storyboard command (see [the v8 UI contracts](../ai/ui-v8/contracts.md)).
 
 ## Model-facing tools
 

@@ -39,7 +39,7 @@ function fixture(t) {
 test("tool status is read-only and new projects use the current contract without an upgrade", async t => {
   const f = fixture(t), project = f.service.createProject("New project"), cursor = f.store.cursor(project.id);
   const status = f.director.tools(project.id);
-  assert.deepEqual(status, { currentVersion: "6.0.0", lockId: null, lockDigest: null, availableVersion: "6.0.0", upgradeAvailable: false, busy: false });
+  assert.deepEqual(status, { currentVersion: "7.0.0", lockId: null, lockDigest: null, availableVersion: "7.0.0", upgradeAvailable: false, busy: false });
   assert.equal(f.store.cursor(project.id), cursor); assert.equal(f.store.list("director_skill_lock", project.id).length, 0);
 });
 test("explicit upgrade installs one successor while preserving old locks, canonical state and edit authority", async t => {

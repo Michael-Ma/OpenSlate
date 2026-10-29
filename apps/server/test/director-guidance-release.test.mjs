@@ -170,7 +170,6 @@ function upgradeFixture(t) {
 
 test('with no shipped release, fresh native turns keep upgrading within 6.0.0 exactly as before', t => {
   const f = upgradeFixture(t);
-  assert.deepEqual(SHIPPED_DIRECTOR_RELEASES, [], 'no v8 release ships yet');
   const turn = freshTurn(f, { runtimeId: 'codex-app-server' }), input = f.prepare(turn, f.settings([]));
   assert.equal(input.bridge.toolContractVersion, '6.0.0');
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 1, 'the current V7 identity needs no successor');

@@ -17,9 +17,9 @@ export type ToolName = typeof ALL_TOOL_NAMES[number];
 export const TOOL_CONTRACT_VERSION = "1.0.0";
 export const SUPPORTED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0", "7.0.0"] as const);
 export type ToolContractVersion = typeof SUPPORTED_TOOL_CONTRACTS[number];
-/** Contracts that shipped guidance packages lock. 7.0.0 is implemented but no shipped skill package declares it yet. */
+/** Contracts that shipped two-package guidance locks. 7.0.0 ships as guidance release v8 (SHIPPED_DIRECTOR_RELEASES in the server). */
 export const RELEASED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"] as const);
-export const CURRENT_TOOL_CONTRACT: ToolContractVersion = "6.0.0";
+export const CURRENT_TOOL_CONTRACT: ToolContractVersion = "7.0.0";
 /** Ordered contract comparison; later contracts keep every earlier behaviour unless they say otherwise. */
 export function toolContractAtLeast(version: string | undefined, minimum: ToolContractVersion): boolean {
   const index = (SUPPORTED_TOOL_CONTRACTS as readonly string[]).indexOf(version ?? "1.0.0");

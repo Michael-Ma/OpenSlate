@@ -2,6 +2,10 @@
 
 Reconciled October 16, 2026 (feature branch after the B18 merge, including B1–B18). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
+## October 28 Director guidance release v8 — shipped on contract 7.0.0
+
+`skills/v8` ships 22 schema 2 packages pinned by one `release.json` (core production and plan-authoring, ten craft, nine type, one format package). Every film-kind@1 kind routes to its type package; only `undecided` and `other` fall back. `SHIPPED_DIRECTOR_RELEASES` now holds the v8 row, so new films lock v8/7.0.0 and saved V7 films upgrade on their next eligible fresh native turn; already-bound epochs keep their lock. Contract 7.0.0 gained `propose_visual_style` (a style card whose chosen option saves `project.visualStyle` with an undoable command) before its digest was frozen. Tests that pin 6.0.0-era transitions now pass the release list `[]` explicitly. Offline only: no provider, model or Codex call, and port 3001 was not used. Worst-case injection is 7,318 of 10,000 words.
+
 ## October 27 N2 image-worker home — offline regression fix
 
 Codex image readiness, preparation and new image processes now use setup's verified private home, exact sign-in descriptor and environment identity. Generated-image path ingestion follows that home. Saved configuration V2 binds the private root; immutable V1 configurations keep their original environment/output root for read-only recovery, with no new turn or history relabelling. Private-home changes are checked again before held-turn dispatch, and existing history remains readable after sign-out without repairing its sign-in link. Other native entry points were audited with no additional home mismatch found.

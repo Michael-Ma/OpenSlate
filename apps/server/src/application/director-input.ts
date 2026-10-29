@@ -6,7 +6,7 @@ const MUSIC_POLICY = (version: string): string => version === "7.0.0"
   : " Generating new music and other paid generation stay human-confirmed actions. Choosing an existing owned recording as the film's music is free, but this conversation's tools cannot set it: point the person to Film › Change music.";
 /** Release locks inject only routed entries; everything else is one read_guidance call away. */
 const GUIDANCE_INSTRUCTIONS = " Injected guidance is each routed package's SKILL.md and the core references in references. Every other file, and every package in the guidance list, is read with read_guidance {package, path} when its SKILL.md or the work calls for it; it is free and read-only. Read only what the current step needs. If you set a new filmKind in this turn, read its type package with read_guidance now; the next turn routes it automatically.";
-const CONTRACT_SEVEN_INSTRUCTIONS = " Contract 7.0.0 runs the person's own free commands directly: set_soundtrack, move_shot, move_scene, createScenes/createShots beforeId, start_export, undo_edit and control_execution stop (send stop last; it ends this conversation). Report their returned commandId so the person can undo. delete_shots, delete_scene, use_take and control_execution resume only write a confirmation card; nothing changes until the person clicks it, never on a chat reply. analyze_music is free and read-only; call it before planning a film to a song. At intake set creative.project.filmKind with prepare_change. read_context project.filmKindIntake.ask lists what must be settled before planning (kind, and aspect directly or through a platform); when the person's words do not settle it, ask one compact question with options and the default you will use, save kind undecided meanwhile, then save their answer with basis asked. Default the rest and say so in one line; save a visualStyle only after the person chose or named it. Character changes and make_character_sheets follow their tool descriptions.";
+const CONTRACT_SEVEN_INSTRUCTIONS = " Contract 7.0.0 runs the person's own free commands directly: set_soundtrack, move_shot, move_scene, createScenes/createShots beforeId, start_export, undo_edit and control_execution stop (send stop last; it ends this conversation). Report their returned commandId so the person can undo. delete_shots, delete_scene, use_take and control_execution resume only write a confirmation card, and propose_visual_style a style card of two or three looks; nothing changes until the person clicks it, never on a chat reply. analyze_music is free and read-only; call it before planning a film to a song. At intake set creative.project.filmKind with prepare_change. read_context project.filmKindIntake.ask lists what must be settled before planning (kind, and aspect directly or through a platform); when the person's words do not settle it, ask one compact question with options and the default you will use, save kind undecided meanwhile, then save their answer with basis asked. Default the rest and say so in one line; save a visualStyle only after the person chose or named it. Character changes and make_character_sheets follow their tool descriptions.";
 import { projectRequest } from "./request-source.js";
 import type { RequestRecord } from "./service.js";
 import { canonical, invariant, toolCatalog } from "@openslate/core";
@@ -21,9 +21,10 @@ import { filmPlanningGuidance } from "./film-planning-guidance.js";
 import { createDirectorSkillLock, directorSkillEnvironment } from "./director-capabilities.js";
 import { createCurrentShippedDirectorSkillLock } from "./director-shipped-guidance.js";
 import type { DirectorToolSettings } from "./director-tools-upgrade.js";
+import type { ShippedReleaseGuidance } from "./director-shipped-guidance.js";
 
 /** Load/version once, activate against fresh canonical state on every request. */
-export function createDirectorInput(service: ProductionService, options: { repositoryRoot: string; snapshotRoot: string; endpoint: string; runtimeId?: string; defaultToolContract?: ToolContractVersion; freshTurnGuidance?: DirectorToolSettings }): NonNullable<SupervisorOptions["prepareInput"]> {
+export function createDirectorInput(service: ProductionService, options: { repositoryRoot: string; snapshotRoot: string; endpoint: string; runtimeId?: string; defaultToolContract?: ToolContractVersion; freshTurnGuidance?: DirectorToolSettings; /** Shipped release rows; tests of earlier eras pass []. */ releases?: readonly ShippedReleaseGuidance[] }): NonNullable<SupervisorOptions["prepareInput"]> {
   const defaultVersion = toolCatalog(options.defaultToolContract ?? "6.0.0").version;
   return (turn, human, bridge): DirectorRunInput => {
     if (bridge.actor.kind !== "director") throw new Error("Director actor required");
@@ -34,7 +35,7 @@ export function createDirectorInput(service: ProductionService, options: { repos
     invariant(!epochLock || lock, "CAPABILITY_MISMATCH", "Pinned director skill lock is missing");
     if (!epochLock && options.freshTurnGuidance) lock = options.freshTurnGuidance.currentForFreshTurn(turn.projectId, bridge.actor, turn.id);
     if (!lock) {
-      const created = defaultVersion === "6.0.0" ? createCurrentShippedDirectorSkillLock(options) : createDirectorSkillLock(options, defaultVersion); lock = created.lock;
+      const created = defaultVersion === "6.0.0" ? createCurrentShippedDirectorSkillLock(options, options.releases) : createDirectorSkillLock(options, defaultVersion); lock = created.lock;
       new DirectorContextService(service, created.environment).bootstrapLock(turn.projectId, lock);
     }
     const audioRequests = lock.skills.length > 0 && lock.skills.every(skill => Number(skill.version.split(".")[0]) >= 5);

@@ -19,7 +19,7 @@ function writable(path){chmodSync(path,0o755);for(const item of readdirSync(path
 function fixture(t,{toolContract='5.0.0'}={}){
   const root=mkdtempSync(join(tmpdir(),'openslate-workspace-')),store=new Store(join(root,'app.sqlite')),provider=new FakeProvider(join(root,'provider.sqlite'));
   const engine=new Engine(store,provider,{artifactDir:join(root,'artifacts')}),service=new ProductionService(store,engine);
-  const director=new DirectorSupervisor(service,new FakeWorkflowDirector(service),{mode:'fake',prepareInput:createDirectorInput(service,{repositoryRoot:fileURLToPath(new URL('../../../',import.meta.url)),snapshotRoot:join(root,'skills'),endpoint:'http://127.0.0.1:3001',defaultToolContract:toolContract})});
+  const director=new DirectorSupervisor(service,new FakeWorkflowDirector(service),{mode:'fake',prepareInput:createDirectorInput(service,{repositoryRoot:fileURLToPath(new URL('../../../',import.meta.url)),snapshotRoot:join(root,'skills'),endpoint:'http://127.0.0.1:3001',defaultToolContract:toolContract,releases:[]})});
   const token=randomBytes(32).toString('base64url'),app=createApp({service,director,localToken:token});
   const req=(method,url,payload,key='')=>app.inject({method,url,payload,headers:{host:'127.0.0.1',authorization:`Bearer ${token}`,...(key?{'idempotency-key':key}:{})}});
   t.after(async()=>{await director.close();await app.close();store.close();provider.close();writable(root);rmSync(root,{recursive:true,force:true});});

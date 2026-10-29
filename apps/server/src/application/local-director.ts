@@ -20,7 +20,7 @@ import { DirectorToolSettings } from "./director-tools-upgrade.js";
 import type { DirectorToolsUpgrade } from "./director-tools-upgrade.js";
 import type { ProductionService } from "./service.js";
 import { createDirectorSkillLock } from "./director-capabilities.js";
-import { createCurrentShippedDirectorSkillLock, currentShippedToolContract } from "./director-shipped-guidance.js";
+import { createCurrentShippedDirectorSkillLock, currentShippedToolContract, SHIPPED_DIRECTOR_RELEASES, type ShippedReleaseGuidance } from "./director-shipped-guidance.js";
 import type { SkillCapabilityLock } from "@openslate/director";
 import { snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
 import { readCodexStartupTimeout, readDirectorRunTimeout } from "./director-run-config.js";
@@ -45,6 +45,8 @@ interface SavedCodexCheck {
 }
 export interface LocalDirectorOptions {
   repositoryRoot: string; dataDirectory: string; endpoint: string;
+  /** Shipped guidance releases (default: SHIPPED_DIRECTOR_RELEASES). Tests of the 6.0.0 era pass []. */
+  releases?: readonly ShippedReleaseGuidance[];
   /** Finite trusted host turn deadline; defaults to the runtime's three minutes. */
   runTimeoutMs?: number;
   /** Trusted host cold native startup deadline; never accepted from a browser command. */
@@ -87,8 +89,8 @@ export class LocalDirectorController {
     this.toolSettings = new DirectorToolSettings(service, projectId => this.mode(projectId) === "native"
       ? { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "native", projectId, "workspace", ".agents", "skills"), runtimeId: "codex-app-server" }
       : { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), runtimeId: "fake-workflow-v1" },
-      projectId => this.configuring.has(projectId));
-    const fakeInput = createDirectorInput(service, { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), endpoint: config.endpoint });
+      projectId => this.configuring.has(projectId), config.releases ?? SHIPPED_DIRECTOR_RELEASES);
+    const fakeInput = createDirectorInput(service, { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), endpoint: config.endpoint, ...(config.releases ? { releases: config.releases } : {}) });
     this.fake = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake", projectFilter: id => this.mode(id) === "fake", prepareInput: async (turn, human, bridge, preparation) => {
       let input = await fakeInput(turn, human, bridge);
       if (service.store.get("request_attachment_selection", turn.requestId)) {
@@ -274,8 +276,8 @@ export class LocalDirectorController {
         snapshotRoot: selection.mode === "native" ? join(this.config.dataDirectory, "native", projectId, "workspace", ".agents", "skills") : join(this.config.dataDirectory, "skill-snapshots"),
         runtimeId: selection.mode === "native" ? "codex-app-server" : "fake-workflow-v1" };
       const replacement = changedMode && oldLock ? (oldLock.lock.compatibility.toolContract === "6.0.0"
-        ? createCurrentShippedDirectorSkillLock(replacementConfiguration, []) : oldLock.lock.compatibility.toolContract === currentShippedToolContract()
-          ? createCurrentShippedDirectorSkillLock(replacementConfiguration) : createDirectorSkillLock(replacementConfiguration, oldLock.lock.compatibility.toolContract as ToolContractVersion)).lock : null;
+        ? createCurrentShippedDirectorSkillLock(replacementConfiguration, []) : oldLock.lock.compatibility.toolContract === currentShippedToolContract(this.config.releases)
+          ? createCurrentShippedDirectorSkillLock(replacementConfiguration, this.config.releases) : createDirectorSkillLock(replacementConfiguration, oldLock.lock.compatibility.toolContract as ToolContractVersion)).lock : null;
       store.transaction(() => {
         this.service.recovery.assertWritable(projectId);
         store.command(scope, key, requestDigest, () => {
@@ -387,7 +389,7 @@ export class LocalDirectorController {
         throw new DomainError("DIRECTOR_SETUP_REQUIRED", "Codex setup checks did not pass. Verify the selected binary, model and existing Codex sign-in.",
           { nativeDiagnostic: safeNativeDiagnostic(result.readiness.nativeDiagnostic) ?? { category: "native_unknown" } });
       const runtime = this.config.makeRuntime?.(result) ?? new CodexDirectorRuntime(result.runtimeOptions);
-      const input = createDirectorInput(this.service, { repositoryRoot: this.config.repositoryRoot, snapshotRoot: snapshots, endpoint: this.config.endpoint, runtimeId: "codex-app-server", freshTurnGuidance: this.toolSettings });
+      const input = createDirectorInput(this.service, { repositoryRoot: this.config.repositoryRoot, snapshotRoot: snapshots, endpoint: this.config.endpoint, runtimeId: "codex-app-server", freshTurnGuidance: this.toolSettings, ...(this.config.releases ? { releases: this.config.releases } : {}) });
       return { runtime, input, readiness: result.readiness, runtimeOptions: result.runtimeOptions };
     })();
     this.prepared.set(key, pending); void pending.catch(() => this.prepared.delete(key)); return pending;

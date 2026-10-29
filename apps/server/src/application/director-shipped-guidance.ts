@@ -42,8 +42,11 @@ export interface ShippedReleaseGuidance {
   handlerDigest: string;
   releaseDigest: string;
 }
-// Append a row when skills/v8 ships; the latest row becomes the fresh-turn upgrade target. Never replace a pin.
-export const SHIPPED_DIRECTOR_RELEASES: readonly ShippedReleaseGuidance[] = [];
+// The latest row is the fresh-turn upgrade target and the identity new projects lock. Never replace a pin; any change to
+// skills/v8 ships as a new package minor, a new release version and a new row.
+export const SHIPPED_DIRECTOR_RELEASES: readonly ShippedReleaseGuidance[] = [
+  { toolContract: "7.0.0", guidanceVersion: "8.0.0", handlerDigest: "e99bf5bd4b04cff07732a2997fb25fe0e052b8efbc893514a307ec163871dc92", releaseDigest: "da01dfb4cb255b5f5de38c097da5c9a9a3c95bc0a0a1809ce0f5126b39dab3b2" },
+];
 for (const identity of SHIPPED_DIRECTOR_RELEASES) Object.freeze(identity);
 Object.freeze(SHIPPED_DIRECTOR_RELEASES);
 
