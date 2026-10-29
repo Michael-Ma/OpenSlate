@@ -1,0 +1,22 @@
+[
+  {
+    "toolContract": "7.0.0",
+    "guidanceVersion": "8.0.0",
+    "handlerDigest": "e99bf5bd4b04cff07732a2997fb25fe0e052b8efbc893514a307ec163871dc92",
+    "releaseDigest": "da01dfb4cb255b5f5de38c097da5c9a9a3c95bc0a0a1809ce0f5126b39dab3b2"
+  },
+  {
+    "toolContract": "7.0.0",
+    "guidanceVersion": "8.0.1",
+    "handlerDigest": "e99bf5bd4b04cff07732a2997fb25fe0e052b8efbc893514a307ec163871dc92",
+    "releaseDigest": "8663b6a96e5cfa5b40c5a616ae316d4c64f72dc0750bdc6627cfc2c89a0935e0"
+  },
+  {
+    "toolContract": "7.0.0",
+    "guidanceVersion": "8.0.2",
+    "handlerDigest": "e99bf5bd4b04cff07732a2997fb25fe0e052b8efbc893514a307ec163871dc92",
+    "releaseDigest": "c1509e31ab84582f29e147aea7adb3de6d2951b5f116eeb836d1ca0a395c0802",
+    "note": "Align package versions with their last content-changing release; instruction bytes unchanged.",
+    "realign": true
+  }
+]

@@ -12,6 +12,7 @@ import { ProductionService } from '../dist/application/service.js';
 import { ToolInvocationService } from '../dist/application/tool-invocations.js';
 import { DirectorContextService } from '../dist/application/director-context.js';
 import { createDirectorSkillLock } from '../dist/application/director-capabilities.js';
+import { SHIPPED_DIRECTOR_RELEASES } from '../dist/application/director-shipped-guidance.js';
 import { createDirectorInput } from '../dist/application/director-input.js';
 import { createApp } from '../dist/app.js';
 
@@ -80,7 +81,7 @@ test('old locks and unbound old epochs cannot acquire v2 capabilities from model
   await assert.rejects(r.tools.invoke(other.id, unbound.actor, 'new-tool', 'revise_narration_draft', { expectedVersion: 0, patch: { add: [draft('x')] } }), { code: 'NOT_FOUND' });
 });
 
-test('new projects default to the shipped v8.0.1 release on contract 7.0.0 and existing epochs retain their selected lock', async t => {
+test('new projects default to the latest shipped release and existing epochs retain their selected lock', async t => {
   const f = fixture(t, '1.0.0'), successor = createDirectorSkillLock(f.config, '2.0.0');
   new DirectorContextService(f.service, successor.environment).installLock(f.project.id, f.human, successor.lock);
   const same = f.input({ id: 'same-turn', projectId: f.project.id, requestId: f.human.requestId }, f.human, f.bridge);
@@ -89,7 +90,9 @@ test('new projects default to the shipped v8.0.1 release on contract 7.0.0 and e
   assert.equal(f.activate('Fresh request after explicit upgrade').runInput.bridge.toolContractVersion, '2.0.0');
   const project = f.service.createProject('New default'), human = f.service.beginRequest(project.id, 'human', 'Hello', { editing: false }), bridge = f.service.openEpoch(project.id, human);
   const fresh = f.input({ id: 'new-turn', projectId: project.id, requestId: human.requestId }, human, bridge);
-  assert.equal(fresh.bridge.toolContractVersion, '7.0.0'); assert.equal(f.store.list('director_skill_lock', project.id).at(-1).lock.release.version, '8.0.1'); assert.equal(f.store.list('hold', project.id).length, 0);
+  const latest = SHIPPED_DIRECTOR_RELEASES.at(-1);
+  assert.equal(fresh.bridge.toolContractVersion, latest.toolContract);
+  assert.deepEqual(f.store.list('director_skill_lock', project.id).at(-1).lock.release, { version: latest.guidanceVersion, releaseDigest: latest.releaseDigest }); assert.equal(f.store.list('hold', project.id).length, 0);
 });
 
 test('draft command replay survives restart and old versions cannot append duplicate sections', async t => {

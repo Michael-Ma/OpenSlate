@@ -1,6 +1,6 @@
 import { digest, FILM_KIND_KINDS, invariant, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, STAGES, toolCatalog, toolContractAtLeast, toolHandlerId } from "@openslate/core";
 import type { ToolContractVersion } from "@openslate/core";
-import { createSkillLock, createSkillReleaseLock, loadSkillCatalog, loadSkillRelease, SKILL_RELEASE_MIN_MAJOR } from "@openslate/director";
+import { createSkillLock, createSkillReleaseLock, loadSkillCatalog, loadSkillRelease, skillReleaseDirectory, SKILL_RELEASE_MIN_MAJOR } from "@openslate/director";
 import type { SkillCapabilityLock, SkillEnvironment } from "@openslate/director";
 import { join } from "node:path";
 
@@ -34,11 +34,7 @@ const stagePrompts = () => STAGES.map(stage => ({ id: `production/${stage}@1`, s
  * release of that major is a new, complete directory named by its full version (skills/v8.0.1), because a shipped
  * release directory is never edited in place.
  */
-export function releaseDirectory(guidanceVersion: string): string {
-  invariant(/^[0-9]+(\.[0-9]+\.[0-9]+)?$/.test(guidanceVersion), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported guidance release");
-  const [major, minor, patch] = guidanceVersion.split(".");
-  return minor === undefined || (minor === "0" && patch === "0") ? `skills/v${major}` : `skills/v${guidanceVersion}`;
-}
+export const releaseDirectory = skillReleaseDirectory;
 
 /**
  * Trusted configuration helper for multi-package releases (guidance v8 and later): every release package is locked,

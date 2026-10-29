@@ -12,7 +12,7 @@ import { Store } from '../dist/persistence/store.js';
 import { Engine } from '../dist/execution/engine.js';
 import { ProductionService } from '../dist/application/service.js';
 import { createDirectorInput } from '../dist/application/director-input.js';
-import { createDirectorSkillLock, releaseDirectory } from '../dist/application/director-capabilities.js';
+import { createDirectorReleaseLock, createDirectorSkillLock, releaseDirectory } from '../dist/application/director-capabilities.js';
 import { DirectorContextService } from '../dist/application/director-context.js';
 import { DirectorToolSettings } from '../dist/application/director-tools-upgrade.js';
 import { ToolInvocationService } from '../dist/application/tool-invocations.js';
@@ -52,13 +52,13 @@ function freshFilm(t) {
   return f;
 }
 
-test('8.0.1 is the latest shipped release: both rows are pinned, only four packages changed, and new films lock it', t => {
+test('historical 8.0.0 and 8.0.1 rows stay pinned; new films lock the latest release', t => {
   // Pin test: the exact shipped rows. Never edit a row; append a successor.
-  assert.deepEqual(SHIPPED_DIRECTOR_RELEASES.map(row => ({ ...row })), [
+  assert.deepEqual(SHIPPED_DIRECTOR_RELEASES.slice(0, 2).map(row => ({ ...row })), [
     { toolContract: '7.0.0', guidanceVersion: '8.0.0', handlerDigest: 'e99bf5bd4b04cff07732a2997fb25fe0e052b8efbc893514a307ec163871dc92', releaseDigest: 'da01dfb4cb255b5f5de38c097da5c9a9a3c95bc0a0a1809ce0f5126b39dab3b2' },
     { toolContract: '7.0.0', guidanceVersion: '8.0.1', handlerDigest: 'e99bf5bd4b04cff07732a2997fb25fe0e052b8efbc893514a307ec163871dc92', releaseDigest: '8663b6a96e5cfa5b40c5a616ae316d4c64f72dc0750bdc6627cfc2c89a0935e0' },
   ]);
-  const row = SHIPPED_DIRECTOR_RELEASES.at(-1), release = releaseJson(), before = releaseJson(previous);
+  const row = SHIPPED_DIRECTOR_RELEASES.find(row => row.guidanceVersion === '8.0.1'), release = releaseJson(), before = releaseJson(previous);
   assert.equal(row.releaseDigest, digest(release), 'skills/v8.0.1/release.json is the pinned release');
   assert.equal(SHIPPED_DIRECTOR_RELEASES[0].releaseDigest, digest(before), 'skills/v8 is unchanged');
   assert.equal(row.handlerDigest, toolCatalog('7.0.0').digest);
@@ -76,7 +76,8 @@ test('8.0.1 is the latest shipped release: both rows are pinned, only four packa
   const root = mkdtempSync(join(tmpdir(), 'openslate-v801-pin-')); t.after(() => { writable(root); rmSync(root, { recursive: true, force: true }); });
   const configuration = { repositoryRoot, snapshotRoot: join(root, 'skills') };
   const { lock } = createCurrentShippedDirectorSkillLock(configuration);
-  assert.deepEqual(lock.release, { version: '8.0.1', releaseDigest: row.releaseDigest });
+  const latest = SHIPPED_DIRECTOR_RELEASES.at(-1);
+  assert.deepEqual(lock.release, { version: latest.guidanceVersion, releaseDigest: latest.releaseDigest });
   assert.ok(isCurrentShippedDirectorGuidance(lock) && isShippedDirectorRelease(lock));
   verifyShippedDirectorGuidance(lock, configuration);
   // The 8.0.0 lock still verifies from its snapshots and is a shipped, no longer current, identity.
@@ -175,7 +176,7 @@ test('a saved 8.0.0 film moves to 8.0.1 on its next fresh native turn; the 8.0.0
   const v800 = createDirectorSkillLock(configuration, '7.0.0');
   assert.equal(v800.lock.release.version, '8.0.0');
   new DirectorContextService(f.service, v800.environment).bootstrapLock(f.project.id, v800.lock);
-  const settings = new DirectorToolSettings(f.service, () => configuration);
+  const settings = new DirectorToolSettings(f.service, () => configuration, () => false, SHIPPED_DIRECTOR_RELEASES.slice(0, 2));
   assert.equal(settings.status(f.project.id).upgradeAvailable, true);
   const turn = f.turn('Continue the film.', 'codex-app-server', { ...configuration, freshTurnGuidance: settings });
   assert.equal(turn.input.bridge.toolContractVersion, '7.0.0');
@@ -183,4 +184,28 @@ test('a saved 8.0.0 film moves to 8.0.1 on its next fresh native turn; the 8.0.0
   assert.equal(locks.length, 2); assert.equal(locks.at(-1).lock.release.version, '8.0.1');
   assert.deepEqual(f.store.get('director_skill_lock', v800.lock.id).lock, v800.lock);
   assert.equal(settings.status(f.project.id).upgradeAvailable, false);
+});
+
+
+test('an 8.0.1 lock still verifies and upgrades once on a fresh native turn while its bound epoch keeps its lock', t => {
+  const f = freshFilm(t), configuration = { repositoryRoot, snapshotRoot: join(f.root, 'native-skills'), runtimeId: 'codex-app-server' };
+  const row = SHIPPED_DIRECTOR_RELEASES.find(row => row.guidanceVersion === '8.0.1');
+  const previous = createDirectorReleaseLock(configuration, row.toolContract, row.guidanceVersion, row.releaseDigest);
+  verifyShippedDirectorGuidance(previous.lock, configuration);
+  new DirectorContextService(f.service, previous.environment).bootstrapLock(f.project.id, previous.lock);
+  const bound = f.turn('Continue with the saved lock.', 'codex-app-server', configuration);
+  assert.equal(bound.context.toolContract.lockId, previous.lock.id);
+  const settings = new DirectorToolSettings(f.service, () => configuration);
+  assert.equal(settings.status(f.project.id).upgradeAvailable, true);
+  const turn = f.turn('Fresh turn after the release.', 'codex-app-server', { ...configuration, freshTurnGuidance: settings });
+  const latest = SHIPPED_DIRECTOR_RELEASES.at(-1), locks = f.store.list('director_skill_lock', f.project.id);
+  assert.equal(locks.length, 2);
+  assert.deepEqual(locks.at(-1).lock.release, { version: latest.guidanceVersion, releaseDigest: latest.releaseDigest });
+  assert.deepEqual(f.store.get('director_skill_lock', previous.lock.id).lock, previous.lock);
+  const boundRow = f.store.get('director_epoch_lock', bound.bridge.actor.epochId);
+  assert.equal(boundRow.lockId, previous.lock.id);
+  assert.equal(settings.status(f.project.id).upgradeAvailable, false);
+  f.turn('Another fresh turn.', 'codex-app-server', { ...configuration, freshTurnGuidance: settings });
+  assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2);
+  assert.notEqual(turn.context.toolContract.lockId, previous.lock.id);
 });
