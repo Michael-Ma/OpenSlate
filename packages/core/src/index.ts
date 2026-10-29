@@ -20,4 +20,5 @@ export * from "./proposal-preview.js";
 export * from "./characters.js";
 export * from "./film-kind.js";
 export * from "./aspect.js";
+export * from "./clip-fit.js";
 export * from "./clip-audio.js";

@@ -1,4 +1,4 @@
-import { canonical, digest, DomainError, invariant, newId } from "@openslate/core";
+import { canonical, clipFit, digest, DomainError, invariant, newId } from "@openslate/core";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ActorContext, ArtifactRef } from "@openslate/core";
 import type { ProductionService } from "../application/service.js";
@@ -143,7 +143,8 @@ export class MediaApplicationService {
     const fixtureVideo = new Map<string, SuppliedMedia>();
     for (const clip of capture.fixtureClips) {
       const source = await this.whenMediaAvailable(() => fixtureSource(this.store, this.media, projectId, clip.artifact, clip.durationFrames), assertCurrent);
-      renderInput.clips.push({ source, startFrame: 0, durationFrames: clip.durationFrames, fit: "contain" });
+      renderInput.clips.push({ source, startFrame: 0, durationFrames: clip.durationFrames,
+        fit: clipFit(source.probe.video?.width ?? 0, source.probe.video?.height ?? 0, renderInput.width, renderInput.height, capture.chosenFormat) });
       fixtureVideo.set(clip.artifact.artifactId, source);
     }
     const fixtureAudioSources = new Map<string, Awaited<ReturnType<typeof fixtureSource>>>();

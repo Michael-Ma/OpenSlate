@@ -78,6 +78,10 @@
 .film-work .player .fv-still { object-fit: contain; background: var(--ground); }
 .film-work .fv-still-wait { width: 100%; height: 100%; background: var(--surface-stripe); }
 .film-work .fv-clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: transparent; z-index: 1; }
+/* A clip close to the film's shape is shown as the export renders it (clip-fit.ts): the film frame, centred and filled,
+   with the clip centre-cropped into it. The film-shaped box (aspect-ratio set inline) is sized from the clip and never
+   exceeds the player. */
+.film-work .fv-clip[data-fit="cover"] { inset: 0; margin: auto; width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: cover; }
 .film-work .player .dashed-frame { background: var(--surface); }
 .film-work .music-on { display: inline-flex; align-items: center; gap: 6px; background: rgba(20,21,23,.78); border-radius: var(--r-pill); padding: 2px 9px; font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
 .film-work .music-on.lost { color: var(--text-2); font-weight: 500; }

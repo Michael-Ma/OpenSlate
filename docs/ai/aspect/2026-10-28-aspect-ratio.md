@@ -30,6 +30,8 @@
 
 - 导出默认短边 720：视频是 768p 生成，1080×1920 只是放大，没有多出细节，所以默认取 720×1280。Director 写的 `p.render(...)` 仍然可以显式给 `width/height`（例如 1080×1920），显式值优先。
 - 9:16 的关键帧是 1024×1536（2:3），不是严格的 9:16。gpt-image 没有 9:16 画布；Viggle 按 `aspect_ratio` 出片时会自行适配首帧。
+- **Viggle 出片尺寸为什么不一样**：请求里已经是 `aspect_ratio=9:16`，但 H3 以首帧为条件，并按自己的分辨率档位（短边 768，长边是 64 的倍数）取整，所以同一个 9:16 项目实际拿到 768×1152、768×1216、768×1344 这样介于 2:3 和 9:16 之间的片子（IG 验收运行 `~/openslate-ig-test` 的 4 个 `media_source` 就是这三种）。我们无法让它严格输出 9:16，除非先把首帧裁成 9:16 再上传（会改变请求 digest，留作后续）。
+- **导出的填充方式**（`packages/core/src/clip-fit.ts`）：有显式画幅的项目，片子宽高比和成片比例相差在 1.25 倍以内时用 `cover`（居中裁切铺满，2:3→9:16 约 1.185 倍），超过就仍用 `contain`（整幅加黑边，例如横片放进竖片、方片放进竖片）。完全一致的尺寸仍记为 `contain`。没有选画幅的旧项目全部 `contain`，冻结的导出 manifest 逐字节不变。storyboard 导出和 demo 片源都用同一规则；Director 写的 timeline/render 节点不变。
 
 ## 3. 关键帧：`codex-image-turn-v2`
 
@@ -70,6 +72,7 @@
 - 模型函数（`apps/web/src/next/model/film-export.ts`）：`filmFrame(overview)` 给出画幅和导出尺寸；`frameAspectAttr(overview)` 给 Keyframes / Film 工作区的 `data-aspect`（只在 9:16、1:1 时设置）。
 - Film 顶部那行时长前面显示画幅（`data-act="film-aspect"`，例如 “9:16 · 20 s · 6 shots …”）；Export 面板的尺寸行前也显示画幅（`data-act="export-aspect"`），尺寸显示 720 × 1280。旧项目不显示画幅，和原来一样。
 - 预览形状：沿用现有 `object-fit: contain` 的做法。竖屏和方形项目的关键帧卡片、Keyframes 舞台、takes、Film 播放器和时间线缩略图都显示完整画面，不再裁成 16:9；窄屏下 Film 播放器改成 9:16 / 1:1 的框，高度不超过 70vh。16:9 项目的框不变。
+- Film 播放器里的成片 clip 按导出同一规则显示：`loadedmetadata` 后用 `clipFit(videoWidth, videoHeight, frame)` 算出 `data-fit`；`cover` 时 video 变成一个成片比例的框（inline `aspect-ratio`），居中、不超过播放器，`object-fit: cover`，和导出画面一致。关键帧静图仍是 `contain`。
 - 这部分刻意做得很少，ui-v8 在做其他 UI。
 
 ## 8. 测试

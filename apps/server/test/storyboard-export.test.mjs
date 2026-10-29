@@ -382,6 +382,31 @@ test('the export follows the film aspect: a 9:16 film renders 720 x 1280, a film
   assert.equal(probe.stdout.trim(), '720,1280');
 });
 
+test('a 9:16 film crops near-shape clips to fill the frame, keeps other shapes whole, and a film without a format keeps contain', async t => {
+  const f = await fixture(t, { narration: false, soundtrack: false });
+  // A 2:3 clip, the shape Viggle returns for a 2:3 first frame (768 x 1152), stands in for the first shot's clip.
+  const portrait = join(inputs, `portrait-${newId()}.mp4`);
+  await execute(ffmpeg, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=96x144:r=30:d=1', '-an', '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', portrait]);
+  const id = newId(), source = await f.media.importMedia({ artifactId: id, path: portrait, kind: 'video' }), ref = { artifactId: id, kind: 'video', sha256: source.sha256 };
+  f.store.insert('artifact', id, f.project.id, { artifact: ref, fixture: false, path: (await f.media.verifiedSource(source)).path, mimeType: 'video/mp4', physicalDurationSeconds: 1 });
+  f.store.insert('media_source', id, f.project.id, { source, requestId: 'test-source' });
+  const node = f.plan.nodes.find(n => n.kind === 'video' && n.shotId === f.shots[0].id);
+  f.store.put('node_binding', node.id, f.project.id, { ...f.store.get('node_binding', node.id), outputs: { video: ref } });
+  // No format chosen: every clip stays whole, exactly as before.
+  const legacy = captureStoryboard(f.store, f.project.id);
+  assert.deepEqual(legacy.input.clips.map(clip => clip.fit), ['contain', 'contain', 'contain']); assert.equal(legacy.chosenFormat, false);
+  f.mutate(project => { project.filmKind = { version: 'film-kind@1', kind: 'social', format: { platform: 'ig_reels', aspect: '9:16' } }; });
+  const vertical = captureStoryboard(f.store, f.project.id);
+  assert.deepEqual(vertical.input.clips.map(clip => clip.fit), ['cover', 'contain', 'contain'], '2:3 is within 1.25x of 9:16; 16:9 is not');
+  const job = await f.prepare('vertical-fit'); assert.deepEqual(job.manifest.clips.map(clip => clip.fit), ['cover', 'contain', 'contain']);
+  const result = await f.service.run(f.project.id, f.actor, job.id), row = f.store.get('artifact', result.artifact.artifactId);
+  // 9 x 16 samples per frame: the cropped portrait clip reaches the top edge; the landscape clip keeps black bars there.
+  const p = await pixels(row.path, '9:16'), frame = 9 * 16 * 3, top = 4 * 3;
+  assert.ok(p[top] > 150 && p[top + 2] < 80, `first shot fills the top edge (${p.slice(top, top + 3).join(',')})`);
+  const second = 30 * frame + top;
+  assert.ok(p[second] < 40 && p[second + 1] < 40 && p[second + 2] < 40, `second shot is letterboxed (${p.slice(second, second + 3).join(',')})`);
+});
+
 test("the Director's start_export is not blocked by its own conversation's edit hold, but still is by the person's and other requests' holds", async t => {
   const f = await fixture(t, { narration: false, soundtrack: false });
   const launcher = new ExportLauncher(f.production, f.service); t.after(() => launcher.close());

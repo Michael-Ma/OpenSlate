@@ -1,4 +1,4 @@
-import { canonical, digest, invariant, projectExportSize, shotIntentDigest, shotVideoTiming } from "@openslate/core";
+import { canonical, clipFit, digest, explicitProjectAspect, invariant, projectExportSize, shotIntentDigest, shotVideoTiming } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan } from "@openslate/core";
 import type { ExportReadiness, ExportRecord } from "@openslate/core/public";
 import type { NodeBinding } from "../execution/engine.js";
@@ -28,12 +28,16 @@ export interface StoryboardCapture {
   fixtureAudio: FixtureAudio[];
   /** Kept clip sound, mixed at freeze time (clip-audio.ts). Empty for a film whose clip sound is muted. */
   clipAudio: ClipAudioCapture;
+  /** The person chose the film's format: near-shape clips crop to fill the frame (clip-fit.ts). */
+  chosenFormat: boolean;
 }
 
 /** SQL-only capture, shared by readiness, freeze and final publication. No Director timeline is needed. */
 export function captureStoryboard(store: Store, projectId: string): StoryboardCapture {
   return store.transaction(() => {
     const project = store.getProject(projectId), cuts = storyboardAudioCuts(project);
+    // A film with a chosen format crops near-shape clips to fill its frame; legacy films keep "contain" (clip-fit.ts).
+    const frame = projectExportSize(project), chosen = explicitProjectAspect(project) !== null;
     const shots = cuts.map(cut => project.shots.find(shot => shot.id === cut.shotId)!);
     const plan = project.activePlanId ? store.get<{ projectId: string; compiled: CompiledPlan }>("plan", project.activePlanId) : undefined;
     const bindings = store.list<NodeBinding>("node_binding", projectId);
@@ -80,7 +84,8 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
         inputs.push({ nodeId: node?.id ?? null, port: "video", artifact: ref });
         if (node) dependencyNodeIds.add(node.id);
         if (artifact.fixture) fixtureClips.push({ artifact: ref, durationFrames: shot.desiredFrames });
-        else if (source) clips.push({ source: source.source, startFrame: 0, durationFrames: shot.desiredFrames, fit: "contain" });
+        else if (source) clips.push({ source: source.source, startFrame: 0, durationFrames: shot.desiredFrames,
+          fit: clipFit(source.source.probe.video?.width ?? 0, source.source.probe.video?.height ?? 0, frame.width, frame.height, chosen) });
       }
       shotFingerprints.push({ id: shot.id, revisionId: shot.revisionId, frames: shot.desiredFrames, intent: shot.promptIntent.video, clip: ref ?? null, ...clipAudioFingerprint(project, shot) });
       const timing = shotVideoTiming(project, shot);
@@ -146,7 +151,7 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
     return { readiness: { ready: !blockers.length, demo, seconds: totalFrames / 30, blockers },
       target: { kind: "storyboard", revisionId: project.revisionId, headVersion: project.headVersion, demo, film, inputs,
         dependencyNodeIds: [...dependencyNodeIds].sort(), scopeIds: [projectId, ...project.scenes.map(s => s.id), ...shots.map(s => s.id)].sort() },
-      input: { projectId, targetRevisionId: project.revisionId, ...projectExportSize(project), clips, audio, ...(demo ? { demo: true as const } : {}) }, fixtureClips, fixtureAudio, clipAudio };
+      input: { projectId, targetRevisionId: project.revisionId, ...frame, clips, audio, ...(demo ? { demo: true as const } : {}) }, fixtureClips, fixtureAudio, clipAudio, chosenFormat: chosen };
   });
 }
 export function changedFilm(previous: FilmFingerprint, current: FilmFingerprint): ExportRecord["outdatedBy"] {

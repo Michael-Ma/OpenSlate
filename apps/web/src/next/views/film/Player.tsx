@@ -1,9 +1,10 @@
-import type { StudioArtifactRef } from "@openslate/core/public";
+import { clipFit, type ClipFit, type StudioArtifactRef } from "@openslate/core/public";
 import { useEffect, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { useArtifactUrl } from "../../media/useArtifactUrl.ts";
 import { clipTarget, syncMedia } from "../../model/film-audio.ts";
 import type { FilmClock } from "../../model/film-clock.ts";
+import type { FilmFrame } from "../../model/film-export.ts";
 import { lineAt, musicLostAt, musicOn, nextTime, previousTime, shotAt, type FilmMusic, type FilmShot, type FilmTimeline } from "../../model/film.ts";
 import { clock as formatClock, motionKind, motionTransform } from "../../model/motion.ts";
 import { useClockPaint, useClockValue, useReducedMotion } from "./clock-hooks.ts";
@@ -15,6 +16,8 @@ interface Props {
   demo: boolean;
   /** Live: finished clips play as video. Fixture: their keyframes play with the motion preview. */
   live: boolean;
+  /** The film's frame; a chosen format crops near-shape clips to fill it, as the export does (clip-fit.ts). */
+  frame?: FilmFrame;
 }
 
 const PlayIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor" /></svg>;
@@ -34,7 +37,7 @@ export function Still({ artifact, alt }: { artifact: StudioArtifactRef; alt: str
  * music indicator, with a scrubber. Keyframe-only shots show a dimmed still; shots with nothing made show
  * their prompt in a dashed frame.
  */
-export function Player({ timeline, clock, music, demo, live }: Props) {
+export function Player({ timeline, clock, music, demo, live, frame }: Props) {
   const { t } = useI18n();
   const reduced = useReducedMotion();
   const index = useClockValue(clock, (time) => shotAt(timeline, time)?.index ?? -1);
@@ -91,7 +94,7 @@ export function Player({ timeline, clock, music, demo, live }: Props) {
       ) : shot ? (
         <div className="dashed-frame"><div><b>{t("film.player.no_keyframe")}</b>{shot.prompt}</div></div>
       ) : null}
-      {shot && playClip && shot.clip ? <Clip key={shot.shotId} shot={shot} videoRef={video} onFailed={() => setClipFailed(shot.shotId)} /> : null}
+      {shot && playClip && shot.clip ? <Clip key={shot.shotId} shot={shot} frame={frame} videoRef={video} onFailed={() => setClipFailed(shot.shotId)} /> : null}
       {live && nextClip ? <Prefetch artifact={nextClip} /> : null}
       <div className="pv-top">
         {shot ? <span className="badge">{shot.label}</span> : null}
@@ -142,8 +145,10 @@ export function Player({ timeline, clock, music, demo, live }: Props) {
 }
 
 /** A finished clip (live studio), muted: the film's sound is the narration and the music. */
-function Clip({ shot, videoRef, onFailed }: { shot: FilmShot; videoRef: RefObject<HTMLVideoElement | null>; onFailed(): void }) {
+function Clip({ shot, frame, videoRef, onFailed }: { shot: FilmShot; frame: FilmFrame | undefined; videoRef: RefObject<HTMLVideoElement | null>; onFailed(): void }) {
   const source = useArtifactUrl(shot.clip);
+  // The export's rule, decided from the clip's own size once it is known: "cover" shows the film frame filled.
+  const [fit, setFit] = useState<ClipFit>("contain");
   const failed = useRef(onFailed);
   failed.current = onFailed;
   // A clip that cannot be loaded falls back to its keyframe with the motion preview.
@@ -151,7 +156,9 @@ function Clip({ shot, videoRef, onFailed }: { shot: FilmShot; videoRef: RefObjec
   // Until it plays, a clip shows its keyframe (a clip's first frame can be black, and a loading one is empty).
   const poster = useArtifactUrl(shot.keyframe);
   if (source.status !== "ready") return null;
-  return <video ref={videoRef} className="fv-clip" src={source.url} poster={poster.status === "ready" ? poster.url : undefined} muted playsInline preload="auto" aria-hidden="true" onError={onFailed} />;
+  return <video ref={videoRef} className="fv-clip" data-fit={fit} src={source.url} poster={poster.status === "ready" ? poster.url : undefined} muted playsInline preload="auto" aria-hidden="true" onError={onFailed}
+    style={fit === "cover" && frame ? { aspectRatio: `${frame.width} / ${frame.height}` } : undefined}
+    onLoadedMetadata={(event) => setFit(frame ? clipFit(event.currentTarget.videoWidth, event.currentTarget.videoHeight, frame.width, frame.height, frame.chosen) : "contain")} />;
 }
 
 /** Loads an artifact into the shared cache and shows nothing. */

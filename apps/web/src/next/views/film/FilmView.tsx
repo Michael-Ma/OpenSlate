@@ -326,7 +326,7 @@ function FilmWorkspace() {
       </div>
       {updating ? <p className="hint" role="status">{t("error.PROJECTION_CHANGED")}</p> : null}
       <div className="film-stage">
-        <Player timeline={timeline} clock={clock} music={music} demo={demo} live={live} />
+        <Player timeline={timeline} clock={clock} music={music} demo={demo} live={live} frame={frame} />
         <ExportPanel
           overview={overview}
           view={exportsRes.data}
