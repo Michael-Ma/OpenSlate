@@ -62,7 +62,7 @@ test('v8 (8.0.0) stays pinned: release, handler and package digests match the ch
   assert.equal(row.releaseDigest, digest(release), 'skills/v8/release.json is the pinned release');
   assert.equal(row.handlerDigest, toolCatalog('7.0.0').digest, 'the 7.0.0 catalog is frozen at its shipped digest');
   for (const pin of release.packages) assert.equal(packageDigest(join(shipped, pin.id)), pin.packageDigest, `${pin.id} matches its release pin`);
-  assert.equal(currentShippedToolContract(), '7.0.0');
+  assert.equal(currentShippedToolContract(), SHIPPED_DIRECTOR_RELEASES.at(-1).toolContract);
   const root = mkdtempSync(join(tmpdir(), 'openslate-v8-pin-')); t.after(() => { writable(root); rmSync(root, { recursive: true, force: true }); });
   const { lock } = createDirectorSkillLock({ repositoryRoot, snapshotRoot: join(root, 'skills') }, '7.0.0');
   assert.equal(lock.schemaVersion, 2); assert.deepEqual(lock.release, { version: '8.0.0', releaseDigest: row.releaseDigest });
@@ -73,13 +73,13 @@ test('v8 (8.0.0) stays pinned: release, handler and package digests match the ch
   assert.deepEqual(Object.entries(release.routes).filter(([, owner]) => owner === 'fallback').map(([kind]) => kind).sort(), ['general', 'other', 'undecided']);
 });
 
-test('a new film locks v8 on contract 7.0.0 and routes the IG skit to type-social, comedy and the vertical format', async t => {
+test('a new film locks the latest release and routes the IG skit to type-social, comedy and the vertical format', async t => {
   const f = freshFilm(t);
   f.store.saveProject({ ...f.saved(), filmKind: { version: 'film-kind@1', kind: 'social', subtype: 'skit', tones: ['comedy'],
     format: { platform: 'ig_reels', aspect: '9:16', targetSeconds: 20, lengthBand: 'up_to_30s' }, audience: 'general', source: 'generated',
     basis: { kind: 'stated', subtype: 'inferred', tones: 'stated', platform: 'inferred', aspect: 'default', lengthBand: 'stated', audience: 'default', source: 'default' } } }, f.saved().headVersion);
   const turn = f.turn('a 20 s funny social video to post on IG, to make people laugh');
-  assert.equal(turn.input.bridge.toolContractVersion, '7.0.0');
+  assert.equal(turn.input.bridge.toolContractVersion, SHIPPED_DIRECTOR_RELEASES.at(-1).toolContract);
   const lock = f.store.list('director_skill_lock', f.project.id).at(-1).lock;
   assert.equal(lock.schemaVersion, 2); assert.equal(lock.release.version, SHIPPED_DIRECTOR_RELEASES.at(-1).guidanceVersion);
   assert.deepEqual(turn.context.guidance.routing.selected, ['production', 'plan-authoring', 'type-social', 'format-social-vertical', 'craft-story', 'craft-comedy', 'craft-visual-style', 'craft-shot-prompting']);
@@ -133,13 +133,13 @@ test('a saved V7 film moves to the shipped v8 release on its next fresh native t
   const v7 = createDirectorSkillLock(configuration, '6.0.0');
   new DirectorContextService(f.service, v7.environment).bootstrapLock(f.project.id, v7.lock);
   const settings = new DirectorToolSettings(f.service, () => configuration);
-  assert.equal(settings.status(f.project.id).upgradeAvailable, true); assert.equal(settings.status(f.project.id).availableVersion, '7.0.0');
+  assert.equal(settings.status(f.project.id).upgradeAvailable, true); assert.equal(settings.status(f.project.id).availableVersion, SHIPPED_DIRECTOR_RELEASES.at(-1).toolContract);
   const human = f.service.beginRequest(f.project.id, 'local-user', 'Continue the film.', { editing: true }), bridge = f.service.openEpoch(f.project.id, human);
   const turn = { id: newId(), projectId: f.project.id, requestId: human.requestId, epochId: bridge.actor.epochId, runtimeId: 'codex-app-server', state: 'running', dispatched: false,
     nativeThreadId: null, nativeTurnId: null, owner: null, leaseExpiresAt: 0, errorCode: null, createdAt: '2026-10-28T00:00:00.000Z', updatedAt: '2026-10-28T00:00:00.000Z' };
   f.store.insert('director_turn', turn.id, f.project.id, turn);
   const input = createDirectorInput(f.service, { ...configuration, endpoint: 'http://127.0.0.1:3101', freshTurnGuidance: settings })(turn, human, bridge);
-  assert.equal(input.bridge.toolContractVersion, '7.0.0');
+  assert.equal(input.bridge.toolContractVersion, SHIPPED_DIRECTOR_RELEASES.at(-1).toolContract);
   const locks = f.store.list('director_skill_lock', f.project.id);
   assert.equal(locks.length, 2); assert.equal(locks.at(-1).lock.release.releaseDigest, SHIPPED_DIRECTOR_RELEASES.at(-1).releaseDigest);
   assert.deepEqual(f.store.get('director_skill_lock', v7.lock.id).lock, v7.lock);

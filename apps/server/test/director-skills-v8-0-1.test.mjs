@@ -118,7 +118,7 @@ test('8.0.1 consolidates the intake reads: the acceptance run’s first turn nee
     }
   // The first turn of the 20 s IG skit, read for read (skill_read rows of ~/openslate-ig-test, mapped to 8.0.1 paths).
   const f = freshFilm(t), turn = f.turn('a 20 s funny IG Reels video, 9:16, 4 shots of 5 s');
-  assert.equal(turn.input.bridge.toolContractVersion, '7.0.0');
+  assert.equal(turn.input.bridge.toolContractVersion, SHIPPED_DIRECTOR_RELEASES.at(-1).toolContract);
   const reads = [['production', 'references/routing.md'], ['plan-authoring', 'references/grammar.md'], ['craft-comedy', 'SKILL.md'], ['type-social', 'SKILL.md'],
     ['format-social-vertical', 'SKILL.md'], ['craft-comedy', 'SKILL.md'], ['type-social', 'SKILL.md'], ['format-social-vertical', 'SKILL.md'],
     ['craft-comedy', 'references/premises-and-beats.md'], ['craft-shot-prompting', 'references/prompts.md'], ['craft-visual-style', 'references/looks.md'],

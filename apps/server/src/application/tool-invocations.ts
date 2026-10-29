@@ -273,7 +273,7 @@ export class ToolInvocationService {
         case 'accept_proposal': case 'reject_proposal': value = decideProposal(this.service, projectId, actor, id,
           parsed.arguments as unknown as { proposalId: string }, parsed.name === 'accept_proposal' ? 'accept' : 'reject'); break;
         case "propose_change": value = proposeChange(this.service, projectId, actor, id, parsed.arguments as unknown as { patch: ProposalPatch }); break;
-        case "record_notes": value = recordNotes(this.service, projectId, actor, id, parsed.arguments as unknown as { notes: NoteInput[] }); break;
+        case "record_notes": value = recordNotes(this.service, projectId, actor, id, parsed.arguments as unknown as { notes: NoteInput[] }, selected.catalog.version); break;
         // A free card like record_notes: allowed in discuss-only turns; only the person's choice saves a look.
         case "propose_visual_style": value = recordStyleProposal(this.service, projectId, actor, id, parsed.arguments as unknown as StyleProposalInput); break;
         case "read_context": value = parsed.arguments.section === "characters"
@@ -281,7 +281,7 @@ export class ToolInvocationService {
           : this.service.readContext(projectId, actor, parsed.arguments); break;
         case "prepare_change": {
           const creative = (parsed.arguments as unknown as ChangeProposal).creative;
-          if (selected.catalog.version === "7.0.0" && hasCharacterPatchFields(creative)) {
+          if (toolContractAtLeast(selected.catalog.version, "7.0.0") && hasCharacterPatchFields(creative)) {
             value = applyCharacterChange({ service: this.service, projectId, actor, invocationId: id, ...(signal ? { signal } : {}) }, characterChange(parsed.arguments as unknown as ChangeProposal));
             break;
           }
@@ -494,7 +494,7 @@ export class ToolInvocationService {
             }
           }
         }
-        if (!receipt && call.toolContractVersion === '7.0.0' && catalogMatches) receipt = contractSevenReceipt(store, projectId, call);
+        if (!receipt && toolContractAtLeast(call.toolContractVersion, '7.0.0') && catalogMatches) receipt = contractSevenReceipt(store, projectId, call);
         if (call.state === "started") this.finish(call.id, projectId, "unresolved", null, { code: "TOOL_CALL_UNRESOLVED", message: "Owning turn ended before its tool result was recorded" });
         store.insert("tool_reconciliation", call.id, projectId, { id: call.id, requestId: call.requestId, epochId,
           state: receipt ? "effect_confirmed" : "needs_followup", receipt, receiptDigest: receipt ? digest(receipt) : null });

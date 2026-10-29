@@ -18,5 +18,12 @@
     "releaseDigest": "c1509e31ab84582f29e147aea7adb3de6d2951b5f116eeb836d1ca0a395c0802",
     "note": "Align package versions with their last content-changing release; instruction bytes unchanged.",
     "realign": true
+  },
+  {
+    "toolContract": "7.1.0",
+    "guidanceVersion": "8.1.0",
+    "handlerDigest": "b9b0e85b36087a948dfa987ea5095e16e919fb9d3de6d3be91605c189e531f5f",
+    "releaseDigest": "f1811aab89074a932a24f25ac6cf3334d48e2d14ac206d4cf262e8ba1868ad13",
+    "note": "Remake named saved clips with their approved keyframes; confirm video only for clips still to make."
   }
 ]

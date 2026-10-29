@@ -62,8 +62,32 @@ function fixture(t, { toolContract = '6.0.0' } = {}) {
     candidates: store.list('candidate', project.id), grants: store.list('grant', project.id),
     confirmations: store.list('scene_confirmation', project.id), budget: engine.budget(project.id), outputs: engine.outputs(project.id) });
   t.after(async () => { await app.close(); store.close(); provider.close(); writable(root); rmSync(root, { recursive: true, force: true }); });
-  return { store, service, project, readyScene, run };
+  const saveScene = async (sceneId = 'scene-0') => {
+    await readyScene(sceneId);
+    const overview = (await http('GET', '/generation')).json(), scene = overview.scenes.find(row => row.sceneId === sceneId);
+    const saved = await http('POST', `/scenes/${sceneId}/confirm`, { confirmationDigest: scene.confirmationDigest,
+      reviewedFrames: scene.videoTargets.map(shotId => ({ shotId, artifactId: overview.shots[shotId].keyframe.artifact.artifactId, sha256: overview.shots[shotId].keyframe.artifact.sha256 })) });
+    assert.equal(saved.statusCode, 200, saved.body);
+    // This fixture's application has no asynchronous confirmation runner. Advance
+    // its persisted video confirmation with the same runner used by the app.
+    const { SceneConfirmationRunner } = await import('../dist/scene-confirmations.js');
+    const runner = new SceneConfirmationRunner(service);
+    for (let i = 0; i < 8; i++) { await runner.advance(); await finish(); }
+    assert.equal((await http('GET', '/generation')).json().shots[scene.shotIds[0]].video.state, 'ready');
+  };
+  return { store, service, project, readyScene, saveScene, run };
 }
+
+for (const text of ["Remake only 1.1's video, keep its keyframe", 'Redo the clip for shot-0']) test(`7.1 scripted named clip remake offers a human choice without spending: ${text}`, async t => {
+  const f = fixture(t, { toolContract: '7.1.0' }); await f.saveScene();
+  const { result, turn, notes } = await f.run({ text });
+  assert.equal(result.status, 'completed'); assert.match(result.text, /clip remake choice is ready/);
+  assert.equal(notes.length, 1); assert.deepEqual(notes[0].anchor, { shotIds: ['shot-0'] });
+  assert.deepEqual(notes[0].choices, [{ kind: 'remake_clip', shotIds: ['shot-0'] }, { kind: 'reply' }]);
+  const calls = f.store.list('tool_invocation', f.project.id).filter(call => call.requestId === turn.requestId);
+  assert.deepEqual(calls.map(call => call.tool), ['read_context', 'record_notes']);
+  assert.ok(calls.every(call => call.state === 'succeeded'));
+});
 
 test('V6 scripted video request offers an in-scope ready scene confirmation in chat without spending', async t => {
   const f = fixture(t); await f.readyScene(); await f.readyScene('scene-1');

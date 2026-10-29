@@ -1,5 +1,5 @@
-import { canonical, digest, DomainError, invariant, newId } from '@openslate/core';
-import type { ActorContext, DirectorNote, NoteChoice, ProjectRecord, ResolveNoteInput, ReviewNotesFailure, StyleProposalView, VisualStyle } from '@openslate/core';
+import { canonical, digest, DomainError, invariant, newId, toolContractAtLeast } from '@openslate/core';
+import type { ActorContext, DirectorNote, NoteChoice, ProjectRecord, ResolveNoteInput, ReviewNotesFailure, StyleProposalView, ToolContractVersion, VisualStyle } from '@openslate/core';
 import type { FastifyInstance } from 'fastify';
 import type { Store } from '../persistence/store.js';
 import type { ProductionService, RequestRecord } from './service.js';
@@ -8,6 +8,8 @@ import type { SceneConfirmationRecord } from '../scene-confirmations.js';
 import { requiredCommandKey } from './command-key.js';
 import { applyConfirmationCard } from './director-edits.js';
 import { editStoryboard } from '../storyboard.js';
+import { sceneView } from '../scene-generation.js';
+import { generationTargets } from '../scene-row.js';
 
 export type NoteInput = Pick<DirectorNote, 'anchor' | 'kind' | 'blocking' | 'text' | 'seenKeyframe' | 'choices'>;
 interface NoteBasis { projectId: string; invocationId: string; argumentsDigest: string; requestId: string; epochId: string; shots: { id: string; revisionId: string; digest?: string }[] }
@@ -41,7 +43,7 @@ export function sceneNotes(store: Store, projectId: string, sceneId: string): Di
 export function openBlockingNotes(store: Store, projectId: string, sceneId: string): DirectorNote[] {
   return sceneNotes(store, projectId, sceneId).filter(note => note.state === 'open' && note.blocking);
 }
-export function recordNotes(service: ProductionService, projectId: string, actor: ActorContext, invocationId: string, input: { notes: NoteInput[] }) {
+export function recordNotes(service: ProductionService, projectId: string, actor: ActorContext, invocationId: string, input: { notes: NoteInput[] }, toolVersion: ToolContractVersion = '7.0.0') {
   return service.store.transaction(() => {
     service.assertActor(projectId, actor);
     invariant(actor.kind === 'director', 'ACTOR_DENIED', 'Notes require a Director epoch');
@@ -67,13 +69,26 @@ export function recordNotes(service: ProductionService, projectId: string, actor
             && (proposal.patch.updateScenes ?? []).every(s => s.id === anchor.sceneId), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/proposalId`, 'Link an owned proposal within this note anchor. Use the proposalId returned by propose_change.');
         }
         if (choice.kind === 'edit_field') check(ids.has(choice.shotId), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/shotId`, 'Edit choice must target an anchored shot. Use an ID from this note anchor.');
-        if (choice.kind === 'confirm_video') check(project.scenes.some(scene => scene.id === choice.sceneId)
-          && (anchor.sceneId === choice.sceneId || !anchor.sceneId && shots.length > 0 && shots.every(shot => shot.sceneId === choice.sceneId)),
-          'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/sceneId`, 'Video confirmation must target the anchored scene or the scene containing all anchored shots. Record separate notes for different scenes.');
-        if (choice.kind === 'regenerate_keyframe') {
+        if (choice.kind === 'confirm_video') {
+          check(project.scenes.some(scene => scene.id === choice.sceneId)
+            && (anchor.sceneId === choice.sceneId || !anchor.sceneId && shots.length > 0 && shots.every(shot => shot.sceneId === choice.sceneId)),
+            'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/sceneId`, 'Video confirmation must target the anchored scene or the scene containing all anchored shots. Record separate notes for different scenes.');
+          if (toolContractAtLeast(toolVersion, '7.1.0')) check(generationTargets(sceneView(service, projectId, choice.sceneId).view.rows, 'video').length > 0,
+            'SCENE_VIDEO_SAVED', 'unavailable', `choices/${choiceIndex}`, 'This scene has no clips still to make. Offer remake_clip {shotIds} for the saved shots the person named; it keeps their current approved keyframes. Only a human press starts the remake.');
+        }
+        if (choice.kind === 'regenerate_keyframe' || choice.kind === 'remake_clip') {
+          if (choice.kind === 'remake_clip') check(toolContractAtLeast(toolVersion, '7.1.0'), 'VALIDATION_ERROR', 'invalid_arguments', `choices/${choiceIndex}/kind`, 'remake_clip requires tool contract 7.1.0.');
           check(choice.shotIds.every(id => ids.has(id)), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/shotIds`, 'Regeneration choice must target anchored shots. Use IDs from this note anchor.');
           check(new Set(shots.filter(shot => choice.shotIds.includes(shot.id)).map(shot => shot.sceneId)).size === 1,
             'VALIDATION_ERROR', 'invalid_arguments', `choices/${choiceIndex}/shotIds`, 'Regeneration choice must target shots from one scene. Record separate choices or notes for shots in different scenes.');
+          if (choice.kind === 'remake_clip') {
+            check(choice.shotIds.length >= 1 && choice.shotIds.length <= 4 && new Set(choice.shotIds).size === choice.shotIds.length,
+              'VALIDATION_ERROR', 'invalid_arguments', `choices/${choiceIndex}/shotIds`, 'Name 1 to 4 distinct shots in one scene.');
+            const sceneId = project.shots.find(shot => shot.id === choice.shotIds[0])!.sceneId;
+            const rows = sceneView(service, projectId, sceneId).view.rows.filter(row => choice.shotIds.includes(row.shotId));
+            check(rows.every(row => row.videoComplete), 'CLIP_NOT_SAVED', 'unavailable', `choices/${choiceIndex}/shotIds`, 'Every remake shot must already have a saved clip. Use the scene confirm_video choice for clips still to make.');
+            check(rows.every(row => row.imageComplete && row.image), 'KEYFRAME_NOT_READY', 'unavailable', `choices/${choiceIndex}/shotIds`, 'Every remake shot needs its current ready keyframe. Make and review the keyframe first.');
+          }
         }
       }
       check(!input.blocking || input.choices.some(c => c.kind === 'accept'), 'VALIDATION_ERROR', 'missing_keep_choice', 'choices', 'Blocking notes must offer an accept choice with a short keep label.');
@@ -193,12 +208,12 @@ function saveResolution(service: ProductionService, projectId: string, note: Dir
 
 /** Call within the effect's command, before it changes the note's anchored evidence. */
 export function settleNotesElsewhere(service: ProductionService, projectId: string,
-  effect: { kind: 'confirm_video'; sceneId: string } | { kind: 'regenerate_keyframe'; shotIds: string[] }, resultRef: string, requestId: string): void {
+  effect: { kind: 'confirm_video'; sceneId: string } | { kind: 'regenerate_keyframe' | 'remake_clip'; shotIds: string[] }, resultRef: string, requestId: string): void {
   for (const note of directorNotes(service.store, projectId)) {
     if (note.state !== 'open') continue;
     const choiceIndex = note.choices.findIndex(choice => effect.kind === 'confirm_video'
       ? choice.kind === 'confirm_video' && choice.sceneId === effect.sceneId
-      : choice.kind === 'regenerate_keyframe' && choice.shotIds.every(id => effect.shotIds.includes(id)));
+      : choice.kind === effect.kind && choice.shotIds.every(id => effect.shotIds.includes(id)));
     if (choiceIndex < 0) continue;
     saveResolution(service, projectId, note, { choiceIndex, resultRef, at: new Date().toISOString(), elsewhere: true }, requestId);
   }
@@ -260,6 +275,16 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
       invariant(result && request?.projectId === projectId && request.principalId === 'local-user' && request.source === 'app'
         && action?.regenerate && choice.shotIds.every(id => result.shotIds.includes(id) && action.shotIds.includes(id))
         && events.some(e => e.kind === 'message.recorded' && e.payload.requestId === input.resultRef && e.sequence > noteSequence), 'NOTE_RESULT_INVALID', 'Link the human keyframe generation request');
+    } else if (choice.kind === 'remake_clip') {
+      const confirmation = store.get<SceneConfirmationRecord>('scene_confirmation', input.resultRef ?? '');
+      const request = confirmation ? store.get<RequestRecord>('message', confirmation.actor.requestId) : null;
+      invariant(confirmation?.projectId === projectId && confirmation.kind === 'video' && confirmation.regenerate === true
+        && confirmation.actor.kind === 'human' && confirmation.actor.principalId === 'local-user' && confirmation.actor.requestId === confirmation.id
+        && request?.projectId === projectId && request.principalId === 'local-user' && request.source === 'app'
+        && choice.shotIds.every(id => confirmation.targetShotIds?.includes(id))
+        && events.some(e => e.kind === 'message.recorded' && e.payload.requestId === confirmation.id && e.sequence > noteSequence)
+        && events.some(e => e.kind === 'scene.confirmation_changed' && e.payload.confirmationId === confirmation.id && e.sequence > noteSequence),
+        'NOTE_RESULT_INVALID', 'Link the later human remake confirmation of these saved clips');
     } else if (choice.kind === 'edit_field') {
       const edit = store.get<{ before: ProjectRecord; requestId: string; headVersion: number }>('storyboard_edit', input.resultRef ?? '');
       const request = edit ? store.get<RequestRecord>('message', edit.requestId) : null;

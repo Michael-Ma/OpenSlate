@@ -20,7 +20,7 @@ async function fixture(t, options = {}) {
   const f = await confirmationFixture(t, { modes: ['none'], ...options });
   const snapshotRoot = mkdtempSync(join(tmpdir(), 'openslate-chat-confirm-skills-'));
   t.after(() => { writable(snapshotRoot); rmSync(snapshotRoot, { recursive: true, force: true }); });
-  const saved = createDirectorSkillLock({ repositoryRoot, snapshotRoot }, '6.0.0');
+  const saved = createDirectorSkillLock({ repositoryRoot, snapshotRoot }, options.toolContract ?? '6.0.0');
   verifySkillLock(saved.lock, saved.environment);
   const contexts = new DirectorContextService(f.production, saved.environment);
   contexts.bootstrapLock(f.project.id, saved.lock);
@@ -32,7 +32,8 @@ async function fixture(t, options = {}) {
     const bridge = f.production.openEpoch(f.project.id, human), turnId = randomUUID();
     f.store.insert('director_turn', turnId, f.project.id,
       { id: turnId, projectId: f.project.id, requestId: human.requestId, epochId: bridge.actor.epochId, state: 'completed' });
-    contexts.capture(f.project.id, bridge.actor, { lockId: saved.lock.id, selectedSkillIds: ['production', 'plan-authoring'] });
+    contexts.capture(f.project.id, bridge.actor, { lockId: saved.lock.id,
+      ...(saved.lock.schemaVersion === 2 ? {} : { selectedSkillIds: ['production', 'plan-authoring'] }) });
     return { human, bridge, turnId };
   };
   f.tools = new ToolInvocationService(f.production, { narrationSpeech: f.narrationSpeech, enqueueVoice: f.runner.enqueueKeyframes });
@@ -62,6 +63,70 @@ async function regenerateBody(f, shotIds) {
     reviewedHoldDigest: view.reviewedHoldDigest, reviewedControlAuthorityId: view.reviewedControlAuthorityId,
     targetShotIds: shotIds, regenerate: true };
 }
+
+async function saveClips(f) {
+  await f.ready();
+  await f.call('POST', '/scenes/scene-0/confirm', await f.confirmBody()).then(f.ok);
+  await f.tick(10);
+  assert.ok(Object.values((await f.overview()).shots).every(shot => shot.video.state === 'ready'));
+}
+
+for (const toolContract of ['7.0.0', '7.1.0']) test(`${toolContract} saved-scene note grammar preserves its exact confirm/remake policy`, async t => {
+  const f = await fixture(t, { toolContract }); await saveClips(f);
+  const turn = f.openTurn(), remake = f.note({ choices: [{ kind: 'remake_clip', shotIds: ['shot-0'] }] });
+  const before = paidState(f), purchases = f.provider.acceptedCount();
+  if (toolContract === '7.1.0') {
+    const [note] = await f.record(turn, [remake]);
+    assert.deepEqual(note.choices, [{ kind: 'remake_clip', shotIds: ['shot-0'] }]);
+    await assert.rejects(f.record(turn), error => error.code === 'SCENE_VIDEO_SAVED'
+      && /remake_clip.*shots the person named.*human press/.test(error.message));
+  } else {
+    assert.equal((await f.record(turn))[0].choices[0].kind, 'confirm_video');
+    await assert.rejects(f.record(turn, [remake]), { code: 'VALIDATION_ERROR' });
+  }
+  assert.deepEqual(paidState(f), before); assert.equal(f.provider.acceptedCount(), purchases);
+});
+
+test('7.1.0 remake notes require saved in-scope clips, ready frames and one scene, with atomic refusal', async t => {
+  const f = await fixture(t, { toolContract: '7.1.0', modes: ['none', 'none'] }); await f.ready();
+  let turn = f.openTurn();
+  const note = shotIds => f.note({ choices: [{ kind: 'remake_clip', shotIds }] });
+  await assert.rejects(f.record(turn, [note(['shot-0'])]), { code: 'CLIP_NOT_SAVED' });
+  await f.call('POST', '/scenes/scene-0/confirm', await f.confirmBody()).then(f.ok); await f.tick(10);
+  turn = f.openTurn();
+  for (const invalid of [note(['missing-shot']), note(['shot-0', 'shot-0']), note(['shot-0', 'shot-1', 'missing-shot'])]) {
+    await assert.rejects(f.record(turn, [note(['shot-0']), invalid]), error => ['SCOPE_DENIED', 'VALIDATION_ERROR'].includes(error.code));
+    assert.equal(f.store.list('director_note', f.project.id).length, 0, 'invalid batches save no partial note');
+  }
+  const project = f.store.getProject(f.project.id);
+  project.scenes.push({ ...project.scenes[0], id: 'scene-foreign', title: 'Other scene' });
+  project.shots[1].sceneId = 'scene-foreign';
+  f.store.saveProject(project, project.headVersion);
+  turn = f.openTurn();
+  await assert.rejects(f.record(turn, [f.note({ anchor: { shotIds: ['shot-0', 'shot-1'] }, choices: [{ kind: 'remake_clip', shotIds: ['shot-0', 'shot-1'] }] })]), { code: 'VALIDATION_ERROR' });
+  const foreign = f.openTurn({ scopeIds: ['shot-0'] });
+  await assert.rejects(f.record(foreign, [f.note({ anchor: { shotIds: ['shot-1'] }, choices: [{ kind: 'remake_clip', shotIds: ['shot-1'] }] })]), { code: 'SCOPE_DENIED' });
+});
+
+test('a Keyframes clip remake press settles only covered remake notes without settling frame-remake choices', async t => {
+  const f = await fixture(t, { toolContract: '7.1.0', modes: ['none', 'none'] }); await saveClips(f);
+  const [all, subset, keyframe] = await f.record(f.openTurn(), [
+    f.note({ choices: [{ kind: 'remake_clip', shotIds: ['shot-0', 'shot-1'] }] }),
+    f.note({ choices: [{ kind: 'reply' }, { kind: 'remake_clip', shotIds: ['shot-0'] }] }),
+    f.note({ choices: [{ kind: 'regenerate_keyframe', shotIds: ['shot-0'] }] }),
+  ]);
+  const view = await f.overview(), shot = view.shots['shot-0'];
+  const receipt = await f.call('POST', '/scenes/scene-0/remake-clips', {
+    targetShotIds: ['shot-0'], confirmationDigest: view.scenes[0].confirmationDigest,
+    reviewedFrames: [{ shotId: 'shot-0', artifactId: shot.keyframe.artifact.artifactId, sha256: shot.keyframe.artifact.sha256 }],
+    expectedEstimateMicros: shot.quotes.remakeClip.micros,
+  }).then(f.ok);
+  const settled = f.findNote(subset.noteId);
+  assert.equal(settled.state, 'resolved'); assert.equal(settled.resolution.elsewhere, true);
+  assert.equal(settled.resolution.choiceIndex, 1); assert.equal(settled.resolution.resultRef, receipt.confirmationId);
+  assert.equal(f.findNote(all.noteId).state, 'open'); assert.equal(f.findNote(keyframe.noteId).state, 'open');
+  assert.equal((await f.resolve(subset, { choiceIndex: 1, resultRef: receipt.confirmationId })).json().error.code, 'NOTE_ALREADY_SETTLED');
+});
 
 test('confirm_video choices stay inside their scene anchor and do not replace a blocking keep choice', async t => {
   const f = await fixture(t, { modes: ['none', 'none'] });

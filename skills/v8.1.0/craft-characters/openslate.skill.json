@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 2,
+  "id": "craft-characters",
+  "version": "8.1.0",
+  "role": "craft",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/sheets.md",
+    "references/wardrobe.md"
+  ],
+  "compatibility": {
+    "toolContract": "7.1.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "make_character_sheets",
+    "prepare_change",
+    "read_context",
+    "read_guidance"
+  ],
+  "requires": [],
+  "optional": []
+}

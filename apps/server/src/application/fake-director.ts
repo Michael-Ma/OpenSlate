@@ -82,6 +82,13 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     // This bounded script only recognizes an explicit request to make video. The
     // application still owns readiness and the later human confirmation press.
     const wantsVideo = /\b(?:make|generate|create|start)\s+(?:(?:a|the|scene)\s+)*(?:videos?|clips?)\b/i.test(request.text);
+    const wantsClipRemake = /\b(?:remake|redo|regenerate)\b[\s\S]*\b(?:videos?|clips?)\b|\b(?:videos?|clips?)\b[\s\S]*\b(?:remake|redo|regenerate)\b/i.test(request.text);
+    const remakeShots = !command && toolContractAtLeast(input.bridge.toolContractVersion, "7.1.0") && wantsClipRemake && request.editing
+      ? Object.values(new GenerationOverviewReader(this.service).read(input.projectId).shots).filter(shot =>
+        (request.scopeIds.includes(input.projectId) || request.scopeIds.includes(shot.sceneId) || request.scopeIds.includes(shot.shotId))
+        && shot.video.state === "ready" && shot.keyframe.state === "ready"
+        && [shot.label, shot.shotId].some(name => new RegExp(`(?:^|[^\\w.])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.])`).test(request.text)))
+      : [];
     const readyScenes = (!command || command.action === "review") && toolContractAtLeast(input.bridge.toolContractVersion, "6.0.0") && wantsVideo
       && (request.editing || isKeyframeReview(this.service, input.requestId))
       ? new GenerationOverviewReader(this.service).read(input.projectId).scenes.filter(scene =>
@@ -89,7 +96,13 @@ export class FakeWorkflowDirector implements DirectorRuntime {
         && scene.state === "keyframes_back" && scene.confirmationDigest !== null && scene.videoTargets.length > 0
         && scene.blockers.every(blocker => blocker.code === "director_working"))
       : [];
-    if (readyScenes.length) {
+    if (remakeShots.length >= 1 && remakeShots.length <= 4 && new Set(remakeShots.map(shot => shot.sceneId)).size === 1) {
+      await invoke("record_notes", { notes: [{ anchor: { shotIds: remakeShots.map(shot => shot.shotId) }, kind: "recommendation", blocking: false,
+        text: "Scripted demo: remake these saved clips from the same approved keyframes, saved video recipe and voice lines. Press the remake choice in this chat or in Keyframes.",
+        choices: [{ kind: "remake_clip", shotIds: remakeShots.map(shot => shot.shotId) }, { kind: "reply" }],
+      }] });
+      text = "Scripted demo: your clip remake choice is ready. Press it in the chat or in Keyframes to keep the approved keyframes and make new clips.";
+    } else if (readyScenes.length) {
       for (let offset = 0; offset < readyScenes.length; offset += 6) await invoke("record_notes", { notes: readyScenes.slice(offset, offset + 6).map(scene => ({
         anchor: request.scopeIds.includes(input.projectId) || request.scopeIds.includes(scene.sceneId)
           ? { sceneId: scene.sceneId } : { shotIds: scene.shotIds.filter(id => request.scopeIds.includes(id)) },
