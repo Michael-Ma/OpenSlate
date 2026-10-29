@@ -1,7 +1,8 @@
 import { canonical, DomainError, invariant, toolHandlerId } from "@openslate/core";
 import type { ToolContractVersion } from "@openslate/core";
-import { verifySkillLock } from "@openslate/director";
-import type { SkillCapabilityLock } from "@openslate/director";
+import { readFileSync } from "node:fs";
+import { parseShippedSkillReleases, skillStagePrompts, verifySkillLock } from "@openslate/director";
+import type { ShippedReleaseGuidance, SkillCapabilityLock } from "@openslate/director";
 import { createDirectorReleaseLock, createDirectorSkillLock, directorSkillEnvironment } from "./director-capabilities.js";
 import type { DirectorSkillConfiguration } from "./director-capabilities.js";
 
@@ -34,24 +35,9 @@ export const SHIPPED_DIRECTOR_GUIDANCE: readonly ShippedGuidance[] = [
 for (const identity of SHIPPED_DIRECTOR_GUIDANCE) Object.freeze(identity);
 Object.freeze(SHIPPED_DIRECTOR_GUIDANCE);
 
-/** A shipped multi-package release (schema 2 lock), keyed by its release digest instead of two package columns. */
-export interface ShippedReleaseGuidance {
-  toolContract: ToolContractVersion;
-  /** The release version, for example "8.0.0". */
-  guidanceVersion: string;
-  handlerDigest: string;
-  releaseDigest: string;
-}
-// The latest row is the fresh-turn upgrade target and the identity new projects lock. Never replace a pin; any change to
-// a shipped release ships as a new package minor, a new release version (a new skills/v<version> directory, see
-// releaseDirectory) and a new row.
-// 8.0.1: propose, wait for acceptance, then make keyframes; intake references consolidated (fewer read_guidance calls).
-export const SHIPPED_DIRECTOR_RELEASES: readonly ShippedReleaseGuidance[] = [
-  { toolContract: "7.0.0", guidanceVersion: "8.0.0", handlerDigest: "e99bf5bd4b04cff07732a2997fb25fe0e052b8efbc893514a307ec163871dc92", releaseDigest: "da01dfb4cb255b5f5de38c097da5c9a9a3c95bc0a0a1809ce0f5126b39dab3b2" },
-  { toolContract: "7.0.0", guidanceVersion: "8.0.1", handlerDigest: "e99bf5bd4b04cff07732a2997fb25fe0e052b8efbc893514a307ec163871dc92", releaseDigest: "8663b6a96e5cfa5b40c5a616ae316d4c64f72dc0750bdc6627cfc2c89a0935e0" },
-];
-for (const identity of SHIPPED_DIRECTOR_RELEASES) Object.freeze(identity);
-Object.freeze(SHIPPED_DIRECTOR_RELEASES);
+/** Release identities are append-only data; invalid installations fail before accepting a turn. */
+export type { ShippedReleaseGuidance } from "@openslate/director";
+export const SHIPPED_DIRECTOR_RELEASES = parseShippedSkillReleases(readFileSync(new URL("../../../../skills/shipped-releases.json", import.meta.url), "utf8"));
 
 const handlerMatches = (lock: SkillCapabilityLock, toolContract: ToolContractVersion, handlerDigest: string) =>
   lock.bindings.some(binding => binding.kind === "handler" && binding.id === toolHandlerId(toolContract) && binding.digest === handlerDigest);
@@ -108,9 +94,6 @@ export function verifyShippedDirectorGuidance(lock: SkillCapabilityLock, configu
   const skills = verifySkillLock(lock, environment);
   const production = skills.find(skill => skill.id === "production");
   invariant(production, "DIRECTOR_GUIDANCE_UNSUPPORTED", "This film's Director guidance does not match any version this OpenSlate ships.");
-  const prompts = production.files.flatMap(file => {
-    const stage = /^references\/stages\/([a-z_]+)\.md$/.exec(file.path)?.[1];
-    return stage ? [{ id: `production/${stage}@1`, skillId: "production", path: file.path, sha256: file.sha256 }] : [];
-  }).sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  const prompts = skillStagePrompts(production);
   invariant(canonical(lock.prompts) === canonical(prompts), "DIRECTOR_GUIDANCE_UNSUPPORTED", "This film's Director guidance does not match any version this OpenSlate ships.");
 }

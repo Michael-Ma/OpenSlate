@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "id": "craft-narration",
+  "version": "8.0.0",
+  "role": "craft",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/writing.md"
+  ],
+  "compatibility": {
+    "toolContract": "7.0.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "prepare_narration_speech",
+    "prepare_recording_transcription",
+    "read_guidance",
+    "revise_narration_draft"
+  ],
+  "requires": [],
+  "optional": []
+}

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "id": "type-explainer",
+  "version": "8.0.0",
+  "role": "type",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/concept.md",
+    "references/tutorial.md"
+  ],
+  "compatibility": {
+    "toolContract": "7.0.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "read_guidance"
+  ],
+  "routes": {
+    "kinds": [
+      "explainer"
+    ],
+    "subtypes": [
+      "concept",
+      "tutorial",
+      "training",
+      "other"
+    ]
+  },
+  "requires": [
+    "craft-story",
+    "craft-narration",
+    "craft-visual-style",
+    "craft-shot-prompting"
+  ],
+  "optional": [
+    {
+      "id": "craft-characters",
+      "when": "has_characters"
+    }
+  ]
+}

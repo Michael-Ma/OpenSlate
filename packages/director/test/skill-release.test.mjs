@@ -96,7 +96,6 @@ for (const [label, options, expected] of [
   ["required chains deeper than two", { packages: mutate((p, all) => {
     all.push({ ...p["craft-characters"], id: "craft-deep", files: { "SKILL.md": "---\nname: craft-deep\ndescription: Deep.\n---\n" } });
     p["craft-characters"].requires = ["craft-deep"]; p["craft-story"].requires = ["craft-characters"]; }) }, "SKILL_RELEASE_INVALID"],
-  ["a package outside the release major", { packages: mutate(p => { p["craft-story"].version = "9.0.0"; }) }, "SKILL_RELEASE_INVALID"],
   ["a release below major 8", { release: { release: "7.1.0" } }, "SKILL_PACKAGE_INVALID"],
   ["routes on a craft package", { packages: mutate(p => { p["craft-story"].routes = { kinds: ["explainer"] }; }) }, "SKILL_PACKAGE_INVALID"],
   ["a type package without routes", { packages: mutate(p => { delete p["type-music-video"].routes; }) }, "SKILL_PACKAGE_INVALID"],
@@ -122,6 +121,13 @@ for (const [label, options, expected] of [
   if (tamper) tamper(f.written.root);
   assert.throws(() => f.load({ ...(expectedReleaseDigest ? { expectedReleaseDigest } : {}), ...(environment ?? {}) }), { code: expected });
   assert.equal(existsSync(f.environment.snapshotRoot), false, "nothing is published when a release is invalid");
+});
+
+test("a major release retains unchanged packages from an earlier release major", t => {
+  const f = fixture(t, { release: { release: "9.0.0" } });
+  const loaded = f.load();
+  assert.equal(loaded.release.release, "9.0.0");
+  assert.ok(loaded.release.packages.every(pin => pin.version === "8.0.0"));
 });
 
 const film = (kind, extra = {}) => ({ version: "film-kind@1", kind, ...extra });

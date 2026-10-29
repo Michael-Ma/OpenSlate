@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 2,
+  "id": "type-narrative",
+  "version": "8.0.0",
+  "role": "type",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/kids-story.md",
+    "references/short.md"
+  ],
+  "compatibility": {
+    "toolContract": "7.0.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "read_guidance"
+  ],
+  "routes": {
+    "kinds": [
+      "narrative"
+    ],
+    "subtypes": [
+      "short",
+      "micro_drama",
+      "kids_story",
+      "visual_poem",
+      "other"
+    ]
+  },
+  "requires": [
+    "craft-story",
+    "craft-characters",
+    "craft-visual-style",
+    "craft-shot-prompting"
+  ],
+  "optional": [
+    {
+      "id": "craft-narration",
+      "when": "narration_planned"
+    },
+    {
+      "id": "craft-music-timing",
+      "when": "has_soundtrack"
+    }
+  ]
+}

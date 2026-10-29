@@ -9,7 +9,7 @@ export const SKILL_LIMITS = Object.freeze({ packages: 32, files: 64, fileBytes: 
   // read_guidance allowance per Director turn (one activation): distinct files and their bytes. Reading a file again in the
   // same turn is free up to guidanceRepeatReads, so a Director that re-reads after a long tool chain never runs dry.
   guidanceReadsPerActivation: 32, guidanceReadBytes: 192 * 1024, guidanceRepeatReads: 32 });
-/** Every package in a release shares the release major; v8 is the first multi-package release. */
+/** v8 is the first multi-package release. Package versions track their last content change. */
 export const SKILL_RELEASE_MIN_MAJOR = 8;
 export const SKILL_ROLES = Object.freeze(["core", "type", "craft", "format"] as const);
 export type SkillRole = typeof SKILL_ROLES[number];
@@ -310,10 +310,53 @@ function prepare(rootPath: string, snapshot = false): Prepared {
     bytes.set(file, buffer);
   }
   const native = frontmatter(utf8(bytes.get("SKILL.md")!), man.id);
-  const files = [...bytes].sort(([left], [right]) => compare(left, right)).map(([file, buffer]) => ({ path: file, sha256: sha(buffer), bytes: buffer.length }));
+  const files = packageFileIdentities(bytes);
   const packageDigest = digest({ schemaVersion: 1, files });
   return { manifest: man, ...native, files, bytes, packageDigest, sourceRoot: root };
 }
+/** The same byte identity used by package loading; release planning never invents a second digest. */
+function packageFileIdentities(bytes: ReadonlyMap<string, Buffer>): SkillFileIdentity[] {
+  return [...bytes].sort(([left], [right]) => compare(left, right)).map(([file, buffer]) => ({ path: file, sha256: sha(buffer), bytes: buffer.length }));
+}
+export type SkillPackageFiles = Readonly<Record<string, string>>;
+export function skillPackageDigest(files: SkillPackageFiles): string {
+  return digest({ schemaVersion: 1, files: packageFileIdentities(new Map(Object.entries(files).map(([path, source]) => [path, Buffer.from(source)]))) });
+}
+/** Read and validate authoring bytes without creating snapshots or writing the source. */
+export function readSkillPackageFiles(root: string): SkillPackageFiles {
+  return Object.fromEntries([...prepare(root).bytes].map(([path, bytes]) => [path, bytes.toString("utf8")]));
+}
+function skillPackageWithField(files: SkillPackageFiles, field: "version" | "toolContract", value: string): SkillPackageFiles {
+  version(value);
+  const source = files[MANIFEST]; check(source !== undefined, "Missing package manifest");
+  manifest(json(utf8(Buffer.from(source))));
+  // Both fields occur exactly once in the manifest schema. Decode escaped keys, but retain every other byte.
+  const replacement = source.replace(/("(?:[^"\\]|\\.)*"\s*:\s*)("(?:[^"\\]|\\.)*")/g, (match, prefix: string) => {
+    const key = JSON.parse(prefix.slice(0, prefix.lastIndexOf(":")).trim()) as string;
+    return key === field ? `${prefix}${JSON.stringify(value)}` : match;
+  });
+  return { ...files, [MANIFEST]: replacement };
+}
+export function skillPackageWithVersion(files: SkillPackageFiles, nextVersion: string): SkillPackageFiles {
+  return skillPackageWithField(files, "version", nextVersion);
+}
+export function skillPackageWithToolContract(files: SkillPackageFiles, contract: string): SkillPackageFiles {
+  return skillPackageWithField(files, "toolContract", contract);
+}
+/** Exact stage prompt inventory used by shipped Director lock verification and release validation. */
+export function skillStagePrompts(skill: Pick<ResolvedSkill, "id" | "files">): LockedSkillPrompt[] {
+  return skill.files.flatMap(file => {
+    const stage = /^references\/stages\/([a-z_]+)\.md$/.exec(file.path)?.[1];
+    return stage ? [{ id: `${skill.id}/${stage}@1`, skillId: skill.id, path: file.path, sha256: file.sha256 }] : [];
+  }).sort((left, right) => compare(left.id, right.id));
+}
+export function skillPackageContentDigest(files: SkillPackageFiles): string {
+  return skillPackageDigest(skillPackageWithVersion(files, "0.0.0"));
+}
+/** Strict bounded parsers shared by startup, the authoring command and its pure planner. */
+export function parseSkillRelease(source: string): SkillReleaseManifest { return releaseManifest(json(utf8(Buffer.from(source)))); }
+export function parseSkillData(source: string): unknown { return json(utf8(Buffer.from(source))); }
+
 function identity(prepared: Prepared, root: string): ResolvedSkill {
   return { id: prepared.manifest.id, version: prepared.manifest.version, name: prepared.name, description: prepared.description, packageDigest: prepared.packageDigest, immutableRoot: root, entryPath: join(root, "SKILL.md"), manifest: prepared.manifest, files: prepared.files };
 }
@@ -459,14 +502,12 @@ function releaseManifest(value: unknown): SkillReleaseManifest {
 function releaseGraph(release: SkillReleaseManifest, manifests: readonly SkillManifest[], routeKinds?: readonly string[]): Record<string, SkillGraphNode> {
   const fail = (message: string) => { throw new DomainError("SKILL_RELEASE_INVALID", message); };
   const byId = new Map(manifests.map(item => [item.id, item]));
-  const major = release.release.split(".")[0];
   if (byId.size !== manifests.length || byId.size !== release.packages.length) fail("Release packages and manifests differ");
   const graph: Record<string, SkillGraphNode> = {};
   for (const pin of release.packages) {
     const man = byId.get(pin.id);
     if (!man || man.version !== pin.version) fail(`Release pin ${pin.id} does not match its package version`);
     if (man!.schemaVersion !== 2) fail(`Release package ${pin.id} needs a schema 2 manifest`);
-    if (pin.version.split(".")[0] !== major) fail(`Release package ${pin.id} must use major version ${major}`);
     if (man!.compatibility.toolContract !== release.toolContract) fail(`Release package ${pin.id} declares a different tool contract`);
     graph[pin.id] = { role: man!.role!, requires: [...man!.requires!], optional: man!.optional!.map(item => ({ ...item })), ...(man!.routes ? { routes: man!.routes } : {}) };
   }
@@ -516,7 +557,7 @@ export function verifySkillReleaseSnapshot(snapshotRoot: string, releaseDigest: 
   try {
     check(canonical(inventory(target, true)) === canonical([SNAPSHOT, RELEASE].sort()), "Release snapshot contains unexpected files", "SKILL_SNAPSHOT_INVALID");
     const bytes = read(target, RELEASE, SKILL_LIMITS.releaseBytes); const source = utf8(bytes);
-    const release = releaseManifest(json(source));
+    const release = releaseManifest(json(utf8(Buffer.from(source))));
     const metadata = object(json(utf8(read(target, SNAPSHOT, SKILL_LIMITS.snapshotBytes))), ["schemaVersion", "kind", "releaseDigest", "sha256"]);
     check(metadata.schemaVersion === 1 && metadata.kind === "release" && metadata.releaseDigest === releaseDigest && metadata.sha256 === sha(bytes)
       && source === canonical(release) && digest(release) === releaseDigest, "Published release snapshot has changed", "SKILL_SNAPSHOT_INVALID");
@@ -554,7 +595,7 @@ function publishRelease(release: SkillReleaseManifest, releaseDigest: string, ro
 
 /**
  * Loads a release directory: release.json plus exactly one package directory per pin. Validates pins and digests,
- * one contract, a closed acyclic dependency graph, route coverage and the shared major version, then snapshots
+ * one contract, a closed acyclic dependency graph, route coverage, then snapshots
  * every package and the release itself. Word budgets are a CI check (skillReleaseBudget), not a runtime one.
  */
 export function loadSkillRelease(options: SkillEnvironment & { releaseRoot: string; expectedReleaseDigest?: string; routeKinds?: readonly string[] }): SkillRelease {
