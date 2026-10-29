@@ -3,8 +3,8 @@ import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
-import { assertExecutionRequest, describeViggleH3Request, ViggleH3Provider, registerExecutionProvider } from "@openslate/providers";
-import type { ExecutionCallOptions, ExecutionOutcome, ExecutionProvider, ExecutionRequest, ViggleH3Request, ViggleH3Resolution, ViggleH3Quality, ViggleH3SubmitResult } from "@openslate/providers";
+import { assertExecutionRequest, centerCropPng, describeViggleH3Request, ViggleH3Provider, registerExecutionProvider } from "@openslate/providers";
+import type { ExecutionCallOptions, ExecutionOutcome, ExecutionProvider, ExecutionRequest, PngCenterCrop, ViggleH3Request, ViggleH3Resolution, ViggleH3Quality, ViggleH3SubmitResult } from "@openslate/providers";
 import { EnvironmentMediaCredentials } from "../application/provider-credentials.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { Store } from "../persistence/store.js";
@@ -92,12 +92,13 @@ export class ViggleH3Execution implements ExecutionProvider {
     try {
       const savedMapping = this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id);
       const admission = resolveViggleAdmission(this.#store, request, savedMapping), frame = resolveViggleFrame(this.#store, attempt, savedMapping?.firstFrame);
-      stopped(signal); prepared = await this.prepare(attempt, signal, frame); stopped(signal);
+      stopped(signal); const preparation = await this.prepare(attempt, signal, frame, savedMapping); stopped(signal);
+      prepared = preparation.request;
       const proposed: ViggleH3ExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
         profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile, capabilityLockId: admission.capabilityLock.id,
         capabilityLockDigest: digest(admission.capabilityLock), allowanceId: (admission.allowance?.id ?? null), allowanceDigest: (admission.allowance ? digest(admission.allowance) : null),
         consumptionDigest: (admission.consumption ? digest(admission.consumption) : null), estimatedMicros: admission.reservation.micros, firstFrame: viggleFramePin(frame),
-        transport: describeViggleH3Request(prepared) };
+        ...(preparation.crop ? { firstFrameCrop: preparation.crop } : {}), transport: describeViggleH3Request(prepared) };
       assertViggleH3ExecutionMapping(attempt, proposed);
       mapping = this.#store.transaction(() => {
         this.dispatchable(attempt, expected);
@@ -376,7 +377,8 @@ export class ViggleH3Execution implements ExecutionProvider {
     return { type: "accepted", taskId: observation.taskId };
   }
 
-  private async prepare(attempt: Attempt, signal: AbortSignal | undefined, captured: ViggleFrameEvidence): Promise<ViggleH3Request> {
+  private async prepare(attempt: Attempt, signal: AbortSignal | undefined, captured: ViggleFrameEvidence,
+    savedMapping?: ViggleH3ExecutionMapping): Promise<{ request: ViggleH3Request; crop?: PngCenterCrop }> {
     const request = attempt.request, configuration = request.profile!.configuration;
     const admission = resolveViggleAdmission(this.#store, request, this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id));
     assertViggleH3OperationOptions(admission.profile, request.args);
@@ -398,10 +400,14 @@ export class ViggleH3Execution implements ExecutionProvider {
       && bytes.readUInt32BE(16) === record.width && bytes.readUInt32BE(20) === record.height,
     "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG dimensions differ from their validated record");
     assertViggleH3FirstFrameAspect(request.args, record.width, record.height);
-    return { prompt: String(request.args.prompt), durationSeconds: Number(request.args.durationFrames) / 30,
+    const aspectRatio = viggleH3RequestAspect(request.args, request.profile!);
+    // A saved mapping is an immutable byte recipe. Never upgrade a pre-crop preparation on restart.
+    const upload = savedMapping && !Object.hasOwn(savedMapping, "firstFrameCrop") ? { bytes } : centerCropPng(bytes, aspectRatio);
+    const width = upload.crop?.width ?? record.width!, height = upload.crop?.height ?? record.height!;
+    return { ...(upload.crop ? { crop: upload.crop } : {}), request: { prompt: String(request.args.prompt), durationSeconds: Number(request.args.durationFrames) / 30,
       resolution: configuration.settings!.resolution as ViggleH3Resolution, quality: configuration.settings!.quality as ViggleH3Quality,
-      aspectRatio: viggleH3RequestAspect(request.args, request.profile!), watermark: false,
-      firstFrame: { bytes, sha256: reference.sha256, width: record.width!, height: record.height!,
-        byteLength: bytes.length, mediaType: "image/png" } };
+      aspectRatio, watermark: false,
+      firstFrame: { bytes: upload.bytes, sha256: createHash("sha256").update(upload.bytes).digest("hex"), width, height,
+        byteLength: upload.bytes.length, mediaType: "image/png" } } };
   }
 }

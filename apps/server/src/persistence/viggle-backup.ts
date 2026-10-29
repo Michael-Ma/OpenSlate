@@ -1,5 +1,5 @@
 import { canonical, digest, invariant } from "@openslate/core";
-import { describeViggleH3Request } from "@openslate/providers";
+import { centerCropPng, describeViggleH3Request } from "@openslate/providers";
 import type { ExecutionSpoolOutput } from "@openslate/providers";
 import type { Attempt, ArtifactRecord } from "../execution/engine.js";
 import type { ViggleAuthorityStore } from "../execution/viggle-h3-authority.js";
@@ -30,9 +30,13 @@ export function viggleBackupClosure(reader: ViggleAuthorityStore, readJson: (pat
       const bytes = await readArtifact(frame), transport = mapping.transport;
       invariant(transport.firstFrame && !transport.lastFrame && transport.mode === "first_frame",
         "BACKUP_REFERENCE_INVALID", "Initial Viggle application mapping requires its reviewed first frame");
+      // Backups retain the approved source, not an extra cropped artifact. Reproduce only the recorded upload recipe.
+      const upload = mapping.firstFrameCrop ? centerCropPng(bytes, transport.aspectRatio) : { bytes };
+      invariant(!mapping.firstFrameCrop || upload.crop && canonical(upload.crop) === canonical(mapping.firstFrameCrop),
+        "BACKUP_REFERENCE_INVALID", "Viggle crop recipe differs from its reviewed source bytes");
       const reconstructed = describeViggleH3Request({ prompt: String(attempt.request.args.prompt), quality: transport.quality,
         durationSeconds: transport.durationSeconds, resolution: transport.resolution, aspectRatio: transport.aspectRatio,
-        watermark: false, ...(transport.seed === undefined ? {} : { seed: transport.seed }), firstFrame: { ...transport.firstFrame, bytes } });
+        watermark: false, ...(transport.seed === undefined ? {} : { seed: transport.seed }), firstFrame: { ...transport.firstFrame, bytes: upload.bytes } });
       invariant(canonical(reconstructed) === canonical(transport), "BACKUP_REFERENCE_INVALID", "Viggle multipart bytes differ from the retained request");
     }
     checked.add(attemptId);

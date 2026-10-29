@@ -1,8 +1,8 @@
 import { configuredProviderUse, providerAdmissionRequest, allowanceMappingMatches } from "./provider-use.js";
 import { canonical, digest, frameMatchesAspect, invariant, isProjectAspect, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { JsonObject, ProviderProfile } from "@openslate/core";
-import { describeViggleH3Request, VIGGLE_H3_ADAPTER_VERSION, VIGGLE_H3_LIMITS, viggleH3MetadataDigest } from "@openslate/providers";
-import type { ViggleH3AspectRatio, ViggleH3Description, ViggleH3Diagnostic, ViggleH3PollResult, ViggleH3SubmitResult } from "@openslate/providers";
+import { describeViggleH3Request, pngCenterCropDimensions, VIGGLE_H3_ADAPTER_VERSION, VIGGLE_H3_LIMITS, viggleH3MetadataDigest } from "@openslate/providers";
+import type { PngCenterCrop, ViggleH3AspectRatio, ViggleH3Description, ViggleH3Diagnostic, ViggleH3PollResult, ViggleH3SubmitResult } from "@openslate/providers";
 import type { Attempt } from "./engine.js";
 import { assertOutputReceiptIdentity } from "./output-store.js";
 import type { OutputReceipt } from "./output-store.js";
@@ -14,6 +14,8 @@ export interface ViggleH3ExecutionMapping extends Identity {
   capabilityLockId: string; capabilityLockDigest: string;
   allowanceId: string | null; allowanceDigest: string | null; consumptionDigest: string | null; estimatedMicros: string;
   firstFrame: { artifactId: string; artifactDigest: string; approvalId: string; approvalDigest: string; snapshotId: string; snapshotDigest: string };
+  /** Omission in a saved mapping permanently selects the legacy, uncropped upload bytes. */
+  firstFrameCrop?: PngCenterCrop;
   transport: ViggleH3Description;
 }
 export interface ViggleH3ExecutionDispatch extends Identity { mappingDigest: string; bodySha256: string; allowanceId: string | null; createdAt: number }
@@ -40,8 +42,8 @@ export function viggleH3Fields(value: unknown, keys: string[], optional: string[
     && Reflect.ownKeys(value).every(key => typeof key === "string" && [...keys, ...optional].includes(key)
       && Object.hasOwn(Object.getOwnPropertyDescriptor(value, key)!, "value")), "VIGGLE_H3_EXECUTION_CONFLICT", "Unsupported Viggle receipt fields");
 }
-function base(attempt: Attempt, value: Identity, extras: string[], observation = false): void {
-  viggleH3Fields(value, ["id", "version", "projectId", "attemptId", "requestDigest", ...extras]);
+function base(attempt: Attempt, value: Identity, extras: string[], observation = false, optional: string[] = []): void {
+  viggleH3Fields(value, ["id", "version", "projectId", "attemptId", "requestDigest", ...extras], optional);
   invariant(value.version === 1 && (observation ? viggleH3Hash(value.id) : value.id === attempt.id) && value.projectId === attempt.projectId
     && value.attemptId === attempt.id && value.requestDigest === digest(attempt.request) && attempt.request.kind === "video"
     && attempt.request.execution?.adapter === "viggle-h3" && attempt.request.execution.version === "1"
@@ -93,7 +95,16 @@ export function assertViggleH3OperationOptions(profile: ProviderProfile, args: J
   } catch { invariant(false, "VIGGLE_H3_PREFLIGHT_INVALID", "Unsupported Viggle operation options"); }
 }
 export function assertViggleH3ExecutionMapping(attempt: Attempt, mapping: ViggleH3ExecutionMapping): void {
-  base(attempt, mapping, ["profileDigest", "profileDefinitionDigest", "profileDefinition", "capabilityLockId", "capabilityLockDigest", "allowanceId", "allowanceDigest", "consumptionDigest", "estimatedMicros", "firstFrame", "transport"]);
+  // Validate this optional nested object before base() canonically measures the receipt; never invoke crop accessors.
+  const cropField = Object.getOwnPropertyDescriptor(mapping, "firstFrameCrop");
+  if (cropField) {
+    invariant(Object.hasOwn(cropField, "value"), "VIGGLE_H3_EXECUTION_CONFLICT", "Unsupported Viggle crop field");
+    const crop = cropField.value as PngCenterCrop;
+    viggleH3Fields(crop, ["recipe", "sourceWidth", "sourceHeight", "width", "height"]);
+    invariant(crop.recipe === "center-crop-v1" && [crop.sourceWidth, crop.sourceHeight, crop.width, crop.height].every(value => integer(value, 1, 8192))
+      && crop.sourceWidth * crop.sourceHeight <= 8_294_400, "VIGGLE_H3_EXECUTION_CONFLICT", "Unsupported Viggle crop dimensions");
+  }
+  base(attempt, mapping, ["profileDigest", "profileDefinitionDigest", "profileDefinition", "capabilityLockId", "capabilityLockDigest", "allowanceId", "allowanceDigest", "consumptionDigest", "estimatedMicros", "firstFrame", "transport"], false, ["firstFrameCrop"]);
   assertViggleH3ExecutionProfile(mapping.profileDefinition, attempt);
   assertViggleH3OperationOptions(mapping.profileDefinition, attempt.request.args);
   const request = attempt.request, config = request.profile!.configuration, description = mapping.transport;
@@ -117,12 +128,19 @@ export function assertViggleH3ExecutionMapping(attempt: Attempt, mapping: Viggle
     && id(mapping.firstFrame.approvalId) && id(mapping.firstFrame.snapshotId) && [mapping.firstFrame.artifactDigest, mapping.firstFrame.approvalDigest, mapping.firstFrame.snapshotDigest].every(viggleH3Hash),
   "VIGGLE_H3_EXECUTION_CONFLICT", "H3 mapping must preserve the pinned model, exact duration and reviewed first frame");
   const image = description.firstFrame!; viggleH3Fields(image, ["sha256", "width", "height", "byteLength", "mediaType"]);
+  const crop = mapping.firstFrameCrop;
+  if (crop) {
+    const expected = pngCenterCropDimensions(crop.sourceWidth, crop.sourceHeight, description.aspectRatio);
+    invariant(expected && canonical(crop) === canonical(expected)
+      && image.width === crop.width && image.height === crop.height && image.sha256 !== request.inputs[0]!.sha256,
+    "VIGGLE_H3_EXECUTION_CONFLICT", "H3 crop differs from its deterministic exact-shape recipe");
+  }
   const { requestDigest, bodySha256, bodyByteLength, ...metadata } = description;
-  invariant(image.sha256 === request.inputs[0]!.sha256 && viggleH3Hash(image.sha256) && image.mediaType === "image/png"
+  invariant((crop || image.sha256 === request.inputs[0]!.sha256) && viggleH3Hash(image.sha256) && image.mediaType === "image/png"
     && integer(bodyByteLength, image.byteLength, VIGGLE_H3_LIMITS.requestBytes) && viggleH3Hash(bodySha256)
     && requestDigest === viggleH3MetadataDigest(request.args.prompt, metadata),
   "VIGGLE_H3_EXECUTION_CONFLICT", "H3 transport metadata differs from its exact owned PNG");
-  assertViggleH3FirstFrameAspect(request.args, image.width, image.height);
+  assertViggleH3FirstFrameAspect(request.args, crop?.sourceWidth ?? image.width, crop?.sourceHeight ?? image.height);
   // The body hash includes encoded bytes: Store cannot reconstruct it from an artifact hash alone.
 }
 export function assertViggleH3ExecutionDispatch(attempt: Attempt, mapping: ViggleH3ExecutionMapping, dispatch: ViggleH3ExecutionDispatch): void {

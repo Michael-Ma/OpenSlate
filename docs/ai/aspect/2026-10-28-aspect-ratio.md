@@ -18,20 +18,22 @@
   - `other` → `16:9`。
   - `projectFormat(project).requested` 会保留原来要的比例（比如 `"4:5"`），之后界面要提示 “4:5 按 1:1 出片” 时可以用。
 - **旧项目不变**：没选过格式的项目（没有 `filmKind`、`filmKind` 是字符串、或者有 `kind` 但没有 `format`）读出来是 16:9，但 `explicitProjectAspect()` 返回 `null`。规划层只在画幅是显式选择时才改尺寸和参数；没有显式画幅时，节点参数、`specDigest`、`graphDigest`、执行请求、回执和导出都和以前完全一样（有测试覆盖）。
+  - F1 的例外仅在新 Viggle 上传准备：按 attempt 的实际比例裁切（也可能来自 profile），因此新 mapping / transport 会记录新字节；已有 mapping 和其回执不变。规划参数、源关键帧和导出不受这项上传转换影响。
 
 ## 2. 各环节尺寸
 
-| 画幅 | 关键帧（Codex） | 视频（Viggle `aspect_ratio`） | 导出 |
-|---|---|---|---|
-| 未选格式（旧项目） | 1024×1024，`codex-image-turn-v1` | 来自 profile 设置（通常 16:9） | 1280×720 |
-| 16:9 | 1536×1024，`codex-image-turn-v2` | `16:9` | 1280×720 |
-| 9:16 | 1024×1536，`codex-image-turn-v2` | `9:16` | 720×1280 |
-| 1:1 | 1024×1024，`codex-image-turn-v2` | `1:1` | 720×720 |
+| 画幅 | 关键帧（Codex，原始审阅素材） | Viggle 新 attempt 上传首帧 | 视频（Viggle `aspect_ratio`） | 导出 |
+|---|---|---|---|---|
+| 未选格式（旧项目） | 1024×1024，`codex-image-turn-v1` | 按 profile 的 9:16 / 16:9 居中裁切，其他比例不裁 | 来自 profile 设置（通常 16:9） | 1280×720 |
+| 16:9 | 1536×1024，`codex-image-turn-v2` | 1536×864 | `16:9` | 1280×720 |
+| 9:16 | 1024×1536，`codex-image-turn-v2` | 864×1536 | `9:16` | 720×1280 |
+| 1:1 | 1024×1024，`codex-image-turn-v2` | 原始字节不变 | `1:1` | 720×720 |
 
 - 导出默认短边 720：视频是 768p 生成，1080×1920 只是放大，没有多出细节，所以默认取 720×1280。Director 写的 `p.render(...)` 仍然可以显式给 `width/height`（例如 1080×1920），显式值优先。
-- 9:16 的关键帧是 1024×1536（2:3），不是严格的 9:16。gpt-image 没有 9:16 画布；Viggle 按 `aspect_ratio` 出片时会自行适配首帧。
-- **Viggle 出片尺寸为什么不一样**：请求里已经是 `aspect_ratio=9:16`，但 H3 以首帧为条件，并按自己的分辨率档位（短边 768，长边是 64 的倍数）取整，所以同一个 9:16 项目实际拿到 768×1152、768×1216、768×1344 这样介于 2:3 和 9:16 之间的片子（IG 验收运行 `~/openslate-ig-test` 的 4 个 `media_source` 就是这三种）。我们无法让它严格输出 9:16，除非先把首帧裁成 9:16 再上传（会改变请求 digest，留作后续）。
+- 9:16 的关键帧是 1024×1536（2:3），不是严格的 9:16。gpt-image 没有 9:16 画布；审阅和存储仍保留整张关键帧，Viggle 上传前才按下述规则裁切。
+- **Viggle 历史出片尺寸为什么不一样**：请求里已经是 `aspect_ratio=9:16`，但 H3 以首帧为条件，并按自己的分辨率档位（短边 768，长边是 64 的倍数）取整，所以同一个 9:16 项目实际拿到 768×1152、768×1216、768×1344 这样介于 2:3 和 9:16 之间的片子（IG 验收运行 `~/openslate-ig-test` 的 4 个 `media_source` 就是这三种）。**F1 后续已完成（2026-10-29）**：新 Viggle 准备先把首帧裁成目标比例，再计算上传 metadata digest 和 multipart `bodySha256`。离线测试验证了上传；尚未据此声称真实 H3 输出必定严格为 9:16。
 - **导出的填充方式**（`packages/core/src/clip-fit.ts`）：有显式画幅的项目，片子宽高比和成片比例相差在 1.25 倍以内时用 `cover`（居中裁切铺满，2:3→9:16 约 1.185 倍），超过就仍用 `contain`（整幅加黑边，例如横片放进竖片、方片放进竖片）。完全一致的尺寸仍记为 `contain`。没有选画幅的旧项目全部 `contain`，冻结的导出 manifest 逐字节不变。storyboard 导出和 demo 片源都用同一规则；Director 写的 timeline/render 节点不变。
+- export / Film 的 cover-fit 保留为安全网：旧片和旧 mapping 仍可能是近似比例，服务商也可能按分辨率档位取整。F1 不改变导出逻辑，不重新生成历史视频。
 
 ## 3. 关键帧：`codex-image-turn-v2`
 
@@ -50,6 +52,11 @@
 ## 4. 视频
 
 - Viggle：视频节点在显式画幅时参数里多一个 `aspect`（只对 `viggle-h3` adapter 加）。服务端用 `viggleH3RequestAspect(args, profile)` 决定发出的 `aspect_ratio`：有 `aspect` 用它，没有就用 profile 的 `aspectRatio`（旧请求不变）。`aspect` 在 `request.args` 里，所以进入请求 digest 和 `specDigest`；transport 描述里本来就有 `aspectRatio`，因此 `requestDigest` / `bodySha256` 也跟着变。旧 attempt 没有这个字段，mapping 检查对它们和以前一样。
+- **F1 上传裁切**：`packages/providers/src/png-center-crop.ts` 的纯 Node `centerCropPng`，由 `ViggleH3Execution.prepare` 调用。9:16 / 16:9 取最大、边长均为偶数的精确比例矩形：设约分后的比例为 p:q，k = 2 × floor(min(W/p, H/q) / 2)，尺寸为 p×k、q×k；左、上偏移各取 floor((原边长−新边长)/2)，奇数差额留在右、下。1024×1536 左右各裁 80 px，1536×1024 上下各裁 80 px。已精确匹配、1:1 和其他 provider 比例不重编码，上传原始字节。
+- PNG 解码有压缩字节、像素、chunk 数和解压长度上限，支持合法 PNG 色彩类型/位深、全部五种 filter 和 Adam7。裁切保留原色彩类型/位深及必要的 PLTE/tRNS，丢弃其余附属 chunk；输出非交错、每行 filter 0、单 IDAT，固定 zlib level 9 / Z_FIXED / windowBits 15 / memLevel 8。`center-crop-v1` 的编码参数与规则不可原地修改；开发/运行校验采用固定 Node 24.15.0，裁切不调用 FFmpeg。
+- mapping 可选 `firstFrameCrop: { recipe: "center-crop-v1", sourceWidth, sourceHeight, width, height }` 解释上传；`transport.firstFrame` 的尺寸、SHA 和长度绑定裁切 PNG，`bodySha256` 绑定实际 multipart。`viggleFramePin`、approval、snapshot、源 artifact 和源 SHA 不变。receipt 校验 recipe 与最大精确矩形；admission / lineage 再把 sourceWidth/sourceHeight 对回原审阅素材，dispatch 继续绑定整个 mapping digest。
+- **历史恢复**：已经保存且没有 `firstFrameCrop` 的 mapping 永远走未裁切路径，包括首次发送前崩溃后的重新准备；描述、multipart 和 body SHA 逐字节沿用。已 dispatch 的 attempt 直接 replay / reconcile，绝不因新增裁切重新 POST；未知提交仍按现有规则处理。`fake-video-v1` 不经过这个 adapter，无需裁切。
+- 安装备份保留原始审阅 PNG；`viggle-backup.ts` 在 export / inspect / restore 时仅对带裁切记录的 mapping 重建裁切字节，再完整核对 transport / multipart SHA。没有记录的旧 mapping 仍直接用原图；两条路径均有实际同根目录备份/恢复测试，不需要额外保存裁切 artifact。
 - 首帧形状检查：`assertViggleH3FirstFrameAspect`（`viggle-h3-receipts.ts`）。带 `aspect` 的请求，首帧宽高比和目标比例相差超过 1.2 倍就拒绝（`VIGGLE_H3_FIRST_FRAME_ASPECT`），在准备阶段发生，记录为 `LOCAL_INPUT_INVALID`，**不会 POST、不花钱**。容差 1.2 允许 2:3 关键帧配 9:16、3:2 配 16:9，拒绝方图配 9:16、横图配竖片。没有 `aspect` 的旧请求不做这个检查（旧项目本来就是方形关键帧配 16:9 视频）。
 - fal H3 Max lip-sync（`packages/providers/src/fal-h3-lipsync.ts`）：请求只有 `image_url`、`audio_url`、`resolution`，**没有 aspect 参数**，输出跟随图片比例（图片比例要求在 0.4–2.5 之间）。所以对口型镜头的画幅由关键帧决定：9:16 项目的关键帧是 1024×1536，出片就是竖的。本次没有改 fal 路由。
 - MiniMax H3 直连（`minimax-h3.ts`）也是 `aspectRatio: "input_image"`，跟随首帧。
@@ -82,6 +89,8 @@
 - `packages/director/test/codex-image.test.mjs`：v2 竖图 turn 只发一次 `turn/start`，文本带 1024x1536 和 v2 policy。
 - `apps/server/test/codex-image-execution.test.mjs`：9:16 项目的 attempt 以 v2 1024×1536 执行、对账、reconcile 成功；旧项目仍是 v1 1024×1024；预检拒绝 v1 下的非方图和不匹配画布。
 - `apps/server/test/viggle-h3-execution.test.mjs`：9:16 项目 multipart 里 `aspect_ratio=9:16`、竖首帧通过；旧项目仍发 profile 的 16:9；横首帧配 9:16 在 POST 前被拒；`aspect: "4:5"` 预检拒绝。
+- F1：`packages/providers/test/png-center-crop.test.mjs` 覆盖两种画幅、奇数尺寸和真实居中像素、原样透传、确定性、全部 PNG filter / 色彩类型 / 位深、Adam7、透明度及损坏/越界拒绝；`apps/server/test/viggle-h3-frame-crop.test.mjs` 检查 864×1536 / 1536×864 multipart、两次准备和重启后的完整描述/body SHA、历史 mapping 原字节恢复、receipt / spool lineage 篡改拒绝、裁切上传丢失回复不重复提交。原有 Viggle 恢复与完整性测试不变。
+- F1 离线验证（2026-10-29）：新增 43 个测试，原测试无改写/删除/禁用；build 通过，五文件定向测试 113/113，全套 `pnpm test` 4,505 通过、0 失败、1 个可选 native probe 跳过（共 4,506），五个 workspace typecheck 全部通过。裁切与旧 mapping 均通过实际 backup / inspect / same-root restore；没有真实服务商调用、浏览器或提交。
 - `apps/server/test/storyboard-export.test.mjs`：旧项目 1280×720，9:16 项目 720×1280，实际渲染并 ffprobe 验证。
 - `apps/web/test/next/film-export.test.mjs`：`filmFrame` / `frameAspectAttr`。
 
