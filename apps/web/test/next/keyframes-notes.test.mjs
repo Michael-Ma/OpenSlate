@@ -157,3 +157,17 @@ test('a settled or unavailable proposal lists no changes', () => {
   const stale = proposals.map(p => ({ ...p, state: 'stale', staleReason: 'SHOT_CHANGED' }));
   assert.deepEqual(noteBanner(noteViews(lastFerryNotes(), overview, stale).find(v => v.letter === 'b'), overview, stale, 'en-US').changes, []);
 });
+
+test('a video confirm offered for a scene whose clips are all saved says why it is off, not "Play Scene 1"', () => {
+  const { overview, proposals } = golden();
+  const saved = overview.scenes.find(s => s.state === 'video_saved');
+  const note = {
+    noteId: 'n-saved', letter: 'c', kind: 'recommendation', state: 'open', text: 'Remake only 1.1.', anchor: { text: '1.1' }, blocking: false,
+    sceneId: saved.sceneId, regeneration: null, settled: null,
+    choices: [{ label: { text: 'Confirm' }, chosen: false, action: { kind: 'confirm_video', noteId: 'n-saved', choiceIndex: 0, sceneId: saved.sceneId } }],
+  };
+  const action = noteBanner(note, overview, proposals, 'en-US').actions[0];
+  assert.equal(action.enabled, false);
+  assert.equal(en(action.reason), `Every clip in Scene ${saved.ordinal} is already saved. To redo one, ask the Director for a new clip of that shot.`);
+  assert.equal(zh(action.reason), `第 ${saved.ordinal} 场的视频都已保存。要重做某个镜头，请让导演为那个镜头生成新视频。`);
+});

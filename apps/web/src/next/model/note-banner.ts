@@ -179,7 +179,11 @@ function choiceAction(note: NoteView, index: number, overview: GenerationOvervie
       const scene = overview.scenes.find((s) => s.sceneId === action.sceneId);
       const panel = scene ? videoPanel(overview, scene, locale) : null;
       const ready = panel?.action === "confirm" && panel.enabled;
-      const reason = !base.enabled || !panel ? null : panel.action === "confirm" ? panel.reason : panel.label;
+      // A saved scene has nothing left to confirm; its panel offers Play, which is no reason. Say what to do instead.
+      const reason = !base.enabled || !panel || !scene ? null
+        : panel.action === "confirm" ? panel.reason
+          : panel.action === "play" ? msg("note.why.video_saved", { scene: scene.ordinal })
+            : panel.reason ?? panel.label;
       return { ...base, price: ready ? panel.price : null, enabled: base.enabled && ready, reason };
     }
     default: return base;

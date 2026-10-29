@@ -26,6 +26,7 @@
 .banner h2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 /* A number stays on one line with its unit ("6 s"), in the title and the line under it. */
 .banner .keep { white-space: nowrap; }
+.banner .note-why { margin: 6px 0 0; color: var(--text-2); font-size: 12.5px; line-height: 1.35; }
 /* A held proposal's changes, Now → After: field names in one column, values in the other. */
 :is(.banner, .note) .chg-wrap { margin: 8px 0 0; }
 :is(.banner, .note) .chg { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 12px; row-gap: 4px; font-size: 12.5px; line-height: 1.4; }

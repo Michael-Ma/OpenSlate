@@ -17,6 +17,7 @@ export const notes = {
   "note.callout.wait_clip": { en: "Wait for {shot}'s clip to finish.", zh: "请等 {shot} 的视频生成完。" },
   "note.callout.wait_keyframe": { en: "Wait for {shot}'s keyframe to finish.", zh: "请等 {shot} 的关键帧生成完。" },
   "note.blocking": { en: "Settle before making video", zh: "生成视频前需要处理" },
+  "note.why.video_saved": { en: "Every clip in Scene {scene} is already saved. To redo one, ask the Director for a new clip of that shot.", zh: "第 {scene} 场的视频都已保存。要重做某个镜头，请让导演为那个镜头生成新视频。" },
   "note.anchor.shots": { en: "{shots}", zh: "{shots}" },
   "note.anchor.scene": { en: "Scene {scene}", zh: "第 {scene} 场" },
   "note.anchor.film": { en: "Whole film", zh: "整部影片" },
