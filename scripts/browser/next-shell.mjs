@@ -798,6 +798,8 @@ export const scenarios = [
       // Compact puts the two edits side by side, shortened only when the words cannot fit, to words that still name the
       // duration; the name keeps them all. Chinese has the room for the whole label.
       await page.setViewportSize({ width: 1024, height: 900 });
+      // The inspector settles its fit a frame after the resize; read it once it has.
+      await page.waitForFunction(() => document.querySelector(".insp")?.getAttribute("data-fit") === "compact", null, { timeout: 5000 }).catch(() => {});
       const readPair = () => page.evaluate(() => {
         const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
         const motion = document.querySelector(".insp-actions [data-act='edit-motion']");
