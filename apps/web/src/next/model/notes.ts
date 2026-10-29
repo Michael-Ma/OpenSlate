@@ -113,10 +113,21 @@ export function regenerationSummary(overview: GenerationOverview, shotIds: reado
 
 const failedClip = (shot: GenerationOverview["shots"][string]) => (shot.video.replacement ?? shot.video).state === "failed";
 
+const clipWorking = (shot: GenerationOverview["shots"][string]) =>
+  isWorking(shot.video) || shot.video.replacement?.state === "queued" || shot.video.replacement?.state === "running";
+
 /**
- * How a new-clip press stands: the old clip stays current until the new one is saved, so "made" needs the clip slot
- * ready with no replacement left in flight, and a failed replacement says so (the old clip is still there).
+ * How a new-clip press stands. The old clip stays current until the new one is saved, so "complete" needs the clip
+ * slot ready with no replacement left in flight; a failed replacement is "failed" (the old clip is still there).
  */
+export function clipRemakeState(overview: GenerationOverview, shotIds: readonly string[]): RegenerationState {
+  const shots = shotIds.map((id) => overview.shots[id]).filter((shot) => !!shot);
+  if (shots.some(failedClip)) return "failed";
+  if (shots.some(shotHasNoAnswer)) return "waiting";
+  if (shots.some(clipWorking)) return "making";
+  return shots.length === shotIds.length && shots.length > 0 && shots.every((shot) => shot.video.state === "ready" && !shot.video.replacement) ? "complete" : "waiting";
+}
+
 export function clipRemakeSummary(overview: GenerationOverview, shotIds: readonly string[]): Msg {
   const shots = shotIds.map((id) => overview.shots[id]).filter((shot) => !!shot);
   const names = labels(overview, shotIds);
@@ -124,9 +135,8 @@ export function clipRemakeSummary(overview: GenerationOverview, shotIds: readonl
   if (unanswered.length) return msg("scene.unknown_outcome", { shots: unanswered.map((shot) => shot.label).join(", ") });
   const failed = shots.filter(failedClip);
   if (failed.length) return msg("note.settled.clip_failed", { shots: failed.map((shot) => shot.label).join(", ") });
-  if (shots.some((shot) => isWorking(shot.video) || (shot.video.replacement?.state === "queued" || shot.video.replacement?.state === "running"))) return msg("note.settled.clip_making", { shots: names });
-  const done = shots.length === shotIds.length && shots.every((shot) => shot.video.state === "ready" && !shot.video.replacement);
-  return msg(done ? "note.settled.clip_made" : "note.settled.waiting", { shots: names });
+  const state = clipRemakeState(overview, shotIds);
+  return msg(state === "making" ? "note.settled.clip_making" : state === "complete" ? "note.settled.clip_made" : "note.settled.clip_waiting", { shots: names });
 }
 
 function fromMessage(choice: NoteChoice | undefined, proposals: readonly DirectorProposal[]): DirectorProposal | undefined {
@@ -192,7 +202,9 @@ export function noteViews(notes: readonly DirectorNote[], overview: GenerationOv
   return notes.map((note) => {
     const where = anchorOf(note, overview);
     const resolvedChoice = note.state === "resolved" && note.resolution ? note.choices[note.resolution.choiceIndex] : undefined;
-    const regeneration = resolvedChoice?.kind === "regenerate_keyframe" ? regenerationState(overview, resolvedChoice.shotIds) : null;
+    // A paid remake settles its note when it starts, not when its new keyframe or clip comes back.
+    const regeneration = resolvedChoice?.kind === "regenerate_keyframe" ? regenerationState(overview, resolvedChoice.shotIds)
+      : resolvedChoice?.kind === "remake_clip" ? clipRemakeState(overview, resolvedChoice.shotIds) : null;
     return {
       noteId: note.noteId,
       letter: note.letter,
@@ -205,7 +217,7 @@ export function noteViews(notes: readonly DirectorNote[], overview: GenerationOv
         label: choiceLabel(choice, overview, proposals),
         action: action(note, choice, index),
         chosen: note.resolution?.choiceIndex === index,
-        paid: choice.kind === "regenerate_keyframe" || choice.kind === "confirm_video",
+        paid: choice.kind === "regenerate_keyframe" || choice.kind === "confirm_video" || choice.kind === "remake_clip",
       })),
       settled: note.state === "stale" ? staleMsg(note, overview, where) : resolvedChoice ? settledMsg(resolvedChoice, overview, proposals) : null,
       regeneration,

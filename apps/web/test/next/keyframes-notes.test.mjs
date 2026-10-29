@@ -215,3 +215,18 @@ test('a settled new-clip note says the clip is being made, failed (old clip kept
   shot.video = { ...shot.video, replacement: { state: 'failed' } };
   assert.equal(said(), `The new clip failed for ${shot.label}. The earlier clip is kept.`);
 });
+
+test('a settled new-clip note stays neutral while the clip is made: no check until it is saved', () => {
+  const { overview, proposals } = golden();
+  const id = overview.scenes.find(s => s.state === 'video_saved').shotIds[0], shot = overview.shots[id];
+  const raw = { noteId: 'r2', letter: 'e', kind: 'recommendation', state: 'resolved', text: 'New clip?', anchor: { shotIds: [id] }, blocking: false,
+    createdAt: '2026-10-29T00:00:00.000Z', resolution: { choiceIndex: 0, at: '2026-10-29T00:00:01.000Z', resultRef: 'c1' }, choices: [{ kind: 'remake_clip', shotIds: [id] }, { kind: 'reply' }] };
+  shot.video = { ...shot.video, replacement: { state: 'running' } };
+  const making = noteViews([raw], overview, proposals).find(v => v.noteId === 'r2');
+  assert.deepEqual([making.regeneration, en(making.settled)], ['making', `Making a new clip for ${shot.label}…`]);
+  assert.equal(noteCallout(making, id, overview, 'en-US').done, false);
+  delete shot.video.replacement;
+  const done = noteViews([raw], overview, proposals).find(v => v.noteId === 'r2');
+  assert.deepEqual([done.regeneration, en(done.settled)], ['complete', `Settled: new clip for ${shot.label} saved`]);
+  assert.equal(noteCallout(done, id, overview, 'en-US').done, true);
+});

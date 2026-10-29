@@ -53,6 +53,7 @@ export const notes = {
   "note.settled.regeneration_failed": { en: "Regeneration failed for {shots}.", zh: "{shots} 重新生成失败。" },
   "note.settled.regenerating": { en: "Regenerating {shots}…", zh: "正在重新生成 {shots}…" },
   "note.settled.clip_making": { en: "Making a new clip for {shots}…", zh: "正在为 {shots} 重做视频…" },
+  "note.settled.clip_waiting": { en: "Waiting for the clip status of {shots}.", zh: "等待 {shots} 的视频状态。" },
   "note.settled.clip_made": { en: "Settled: new clip for {shots} saved", zh: "已处理：{shots} 的新视频已保存" },
   "note.settled.clip_failed": { en: "The new clip failed for {shots}. The earlier clip is kept.", zh: "{shots} 的新视频生成失败，原来的视频仍保留。" },
   "note.settled.edited": { en: "Settled: {shot} edited", zh: "已处理：{shot} 已修改" },
