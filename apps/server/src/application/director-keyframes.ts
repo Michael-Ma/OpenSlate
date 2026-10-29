@@ -6,6 +6,7 @@ import { generateScene, sceneView, type EnqueueSceneVoice } from '../scene-gener
 import { assertDirectorGenerationAuthority } from './director-generation-authority.js';
 import { GENERATION_BLOCKER_LIMIT, GenerationAttemptBlockedError, type GenerationAttemptRecovery } from './generation-blockers.js';
 import { recordDirectorGenerationBlock } from './director-generation-blocks.js';
+import { assertNoPendingKeyframeProposal } from './director-proposals.js';
 
 export interface MakeKeyframesInput { sceneIds?: string[]; shotIds?: string[]; regenerate?: boolean }
 export interface DirectorKeyframesReceipt {
@@ -31,6 +32,9 @@ export async function makeDirectorKeyframes(service: ProductionService, projectI
     argumentsDigest: digest(input), complete: false, started: [], refused: [] };
   // A started transport receipt cannot re-enter this function. Keep per-scene progress for reconciliation only.
   invariant(!store.get('director_keyframes_receipt', invocationId), 'TOOL_CALL_UNRESOLVED', 'Reconcile the original keyframe operation');
+  // Propose, wait for the person to accept, then make: never spend a take on a prompt that is about to change.
+  assertNoPendingKeyframeProposal(service, projectId, input.shotIds
+    ?? project.shots.filter(shot => input.sceneIds!.includes(shot.sceneId)).map(shot => shot.id));
   store.insert('director_keyframes_receipt', invocationId, projectId, receipt);
   for (const sceneId of scenes) {
     const targetShotIds = input.shotIds?.filter(id => project.shots.some(shot => shot.id === id && shot.sceneId === sceneId));

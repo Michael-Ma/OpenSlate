@@ -49,6 +49,29 @@ export function rebaseProposal(project: ProjectRecord, proposal: ProposalRecord)
     || Object.entries(proposal.baseSceneRevisions).some(([id, revision]) => !project.scenes.some(s => s.id === id && s.revisionId === revision));
   return changed ? { state: 'stale', staleReason: 'SHOT_CHANGED' } : { state: 'held' };
 }
+/** Shot fields a keyframe is made from: its direction and its image prompt. */
+const KEYFRAME_INPUT_FIELDS = ['purpose', 'action', 'framing', 'desiredFrames', 'imagePrompt'] as const;
+export const PROPOSAL_PENDING_NEXT = 'Wait for the person to accept or reject the proposal on its card. After they accept it, call make_keyframes again for these shots; '
+  + 'the new take then uses the accepted prompt. Shots without an open proposal can be made now.';
+/**
+ * make_keyframes refuses shots whose keyframe inputs an open (held, not yet decided) proposal would change: a take made
+ * now would use the old prompt. Stale, accepted, rejected and undone proposals do not block.
+ */
+export function assertNoPendingKeyframeProposal(service: ProductionService, projectId: string, shotIds: readonly string[]): void {
+  const project = service.store.getProject(projectId), requested = new Set(shotIds);
+  // The same state the person's card shows: a proposal they can no longer accept (stale) never blocks.
+  const pending = service.store.list<ProposalRecord>('director_proposal', projectId).filter(proposal => proposal.state === 'held'
+    && rebaseProposal(project, proposal).state === 'held' && (proposal.patch.updateShots ?? []).some(row => requested.has(row.id))
+    && view(service, proposal).state === 'held')
+    .map(proposal => ({ proposalId: proposal.id, shotIds: (proposal.patch.updateShots ?? [])
+      .filter(row => requested.has(row.id) && KEYFRAME_INPUT_FIELDS.some(field => row[field] !== undefined)).map(row => row.id) }))
+    .filter(row => row.shotIds.length > 0);
+  if (!pending.length) return;
+  const blocked = [...new Set(pending.flatMap(row => row.shotIds))];
+  throw new DomainError('PROPOSAL_PENDING', `An open proposal would change the prompt or direction of ${blocked.length === 1 ? 'this shot' : 'these shots'}; `
+    + `a keyframe made now would use the old prompt. ${PROPOSAL_PENDING_NEXT}`,
+    { shotIds: blocked, proposalIds: pending.map(row => row.proposalId), next: PROPOSAL_PENDING_NEXT });
+}
 function view(service: ProductionService, record: ProposalRecord): DirectorProposal {
   const project = service.store.getProject(record.projectId);
   let state = service.recovery.isImported(record.projectId, 'message', record.requestId)

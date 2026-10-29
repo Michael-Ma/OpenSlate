@@ -106,7 +106,7 @@ export function createApp(options: AppOptions = {}) {
       const nativeDiagnostic = error.code === "DIRECTOR_SETUP_REQUIRED"
         ? safeNativeDiagnostic((error.details as { nativeDiagnostic?: unknown } | undefined)?.nativeDiagnostic) : undefined;
       void reply.status(status).send({ error: { code: error.code, message: error.message,
-        ...(error instanceof GenerationAttemptBlockedError ? { details: error.recovery } : nativeDiagnostic ? { details: { nativeDiagnostic } } : ["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
+        ...(error instanceof GenerationAttemptBlockedError ? { details: error.recovery } : nativeDiagnostic ? { details: { nativeDiagnostic } } : ["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH", "PROPOSAL_PENDING", "GUIDANCE_READ_LIMIT"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
     } else if ((error as { validation?: unknown }).validation) void reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: "Request does not match its schema" } });
     else { app.log.error(error); void reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "The operation could not be completed" } }); }
   });

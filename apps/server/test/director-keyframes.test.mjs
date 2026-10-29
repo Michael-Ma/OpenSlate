@@ -423,3 +423,51 @@ test('aborting a tool during isolated keyframe composition prevents paid publica
   assert.deepEqual(result.started, []); assert.deepEqual(result.refused.map(scene => scene.code), ['TOOL_CALL_CANCELLED']);
   noPaidWork(f); await f.tick(3); noPaidWork(f);
 });
+
+const refusalOf = promise => promise.then(() => assert.fail('expected a refusal'), error => error);
+const propose = (f, patch) => f.tools.invoke(f.project.id, f.bridge.actor, randomUUID(), 'propose_change', { patch });
+
+test('make_keyframes refuses shots an open proposal would re-prompt until the person accepts it, then makes the accepted prompt', async t => {
+  const f = await fixture(t);
+  const proposal = await propose(f, { updateShots: [{ id: 'shot-0', imagePrompt: 'A brand-new close-up prompt for the first shot' }] });
+  assert.equal(proposal.state, 'held');
+  // The same turn, the proposed shot: refused before any paid work, with the next step in the refusal itself.
+  const refusal = await refusalOf(f.invoke({ shotIds: ['shot-0'] }, 'pending-proposal'));
+  assert.equal(refusal.code, 'PROPOSAL_PENDING');
+  assert.match(refusal.message, /old prompt/); assert.match(refusal.message, /Wait for the person to accept/);
+  assert.deepEqual(refusal.details.shotIds, ['shot-0']); assert.deepEqual(refusal.details.proposalIds, [proposal.proposalId]);
+  assert.match(refusal.details.next, /call make_keyframes again/);
+  assert.equal(f.store.get('tool_invocation', digest({ projectId: f.project.id, epochId: f.bridge.actor.epochId, callId: 'pending-proposal' })).error.code, 'PROPOSAL_PENDING');
+  // A scene request that includes the shot is refused for the same reason; nothing was bought or recorded as a block.
+  assert.equal((await refusalOf(f.invoke({ sceneIds: ['scene-0'] }))).code, 'PROPOSAL_PENDING');
+  noPaidWork(f);
+  assert.equal(f.store.list('director_keyframes_receipt', f.project.id).length, 0);
+  assert.deepEqual(f.blocks(), []);
+  // Shots the proposal does not touch can be made now, and a motion-only proposal never holds a keyframe.
+  await propose(f, { updateShots: [{ id: 'shot-2', videoPrompt: 'The camera drifts slowly left' }] });
+  const other = await f.invoke({ sceneIds: ['scene-1'] }, 'other-scene');
+  assert.deepEqual(other.refused, []); assert.deepEqual(other.started.map(row => row.sceneId), ['scene-1']);
+  // The person accepts on the card; a new request makes the shot from the accepted prompt.
+  const accepted = await f.call('POST', `/director/proposals/${proposal.proposalId}/accept`, { previewDigest: f.store.get('director_proposal', proposal.proposalId).previewDigest });
+  assert.equal(accepted.statusCode, 200, accepted.body);
+  assert.equal(f.store.getProject(f.project.id).shots.find(shot => shot.id === 'shot-0').imagePrompt, 'A brand-new close-up prompt for the first shot');
+  Object.assign(f, f.openTurn('Now make the first shot.'));
+  const made = await f.invoke({ shotIds: ['shot-0'] }, 'after-accept');
+  assert.deepEqual(made.refused, []); assert.deepEqual(made.started.map(row => row.sceneId), ['scene-0']);
+});
+
+test('a rejected or stale proposal no longer holds its shot for make_keyframes', async t => {
+  const f = await fixture(t);
+  const proposal = await propose(f, { updateShots: [{ id: 'shot-0', action: 'She turns toward the window' }] });
+  assert.equal((await refusalOf(f.invoke({ shotIds: ['shot-0'] }))).code, 'PROPOSAL_PENDING');
+  const rejected = await f.call('POST', `/director/proposals/${proposal.proposalId}/reject`, {});
+  assert.equal(rejected.statusCode, 200, rejected.body);
+  assert.deepEqual((await f.invoke({ shotIds: ['shot-0'] }, 'after-reject')).refused, []);
+  // The person edits the shot underneath an open proposal: the card turns stale and cannot be accepted, so it holds nothing.
+  const g = await fixture(t);
+  const held = await propose(g, { updateShots: [{ id: 'shot-0', imagePrompt: 'Another prompt entirely' }] });
+  save(g, project => { project.shots[0].revisionId = randomUUID(); project.shots[0].framing = 'Wide'; });
+  const result = await g.invoke({ shotIds: ['shot-0'] }, 'stale-proposal').catch(error => ({ refused: [{ code: error.code }] }));
+  assert.ok(!result.refused.some(row => row.code === 'PROPOSAL_PENDING'), JSON.stringify(result.refused));
+  assert.equal(g.store.get('director_proposal', held.proposalId).state, 'held', 'the stored row stays; only its view is stale');
+});
