@@ -5,7 +5,10 @@ import { DomainError, ALL_TOOL_NAMES, STAGES, canonical, digest, filmKindRouteKe
 import type { FilmKindRouteKey, ToolName } from "@openslate/core";
 
 export const SKILL_LIMITS = Object.freeze({ packages: 32, files: 64, fileBytes: 256 * 1024, manifestBytes: 16 * 1024, snapshotBytes: 32 * 1024, packageBytes: 2 * 1024 * 1024, pathBytes: 192, pathDepth: 8, jsonDepth: 32, jsonValues: 10000, bindings: 128, prompts: 128,
-  releaseBytes: 64 * 1024, dependencyDepth: 2, guidanceReadsPerActivation: 24, guidanceReadBytes: 120 * 1024 });
+  releaseBytes: 64 * 1024, dependencyDepth: 2,
+  // read_guidance allowance per Director turn (one activation): distinct files and their bytes. Reading a file again in the
+  // same turn is free up to guidanceRepeatReads, so a Director that re-reads after a long tool chain never runs dry.
+  guidanceReadsPerActivation: 32, guidanceReadBytes: 192 * 1024, guidanceRepeatReads: 32 });
 /** Every package in a release shares the release major; v8 is the first multi-package release. */
 export const SKILL_RELEASE_MIN_MAJOR = 8;
 export const SKILL_ROLES = Object.freeze(["core", "type", "craft", "format"] as const);

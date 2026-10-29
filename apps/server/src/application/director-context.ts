@@ -1,4 +1,4 @@
-import { canonical, digest, invariant, normalizeFilmKind, STAGE_CONTRACTS, STAGES, validateStageScope } from "@openslate/core";
+import { canonical, digest, DomainError, invariant, normalizeFilmKind, STAGE_CONTRACTS, STAGES, validateStageScope } from "@openslate/core";
 import type { ActorContext, ProjectRecord } from "@openslate/core";
 import { activateSkills, readActivatedSkillFile, routeSkills, SKILL_LIMITS, verifySkillLock, verifySkillLockRelease } from "@openslate/director";
 import type { SkillActivation, SkillCapabilityLock, SkillEnvironment, SkillReadVia, SkillStageBinding } from "@openslate/director";
@@ -114,7 +114,11 @@ export class DirectorContextService {
     });
   }
 
-  /** via "read_guidance" is the Director's own on-demand read: bounded per activation and recorded like an injection. */
+  /**
+   * via "read_guidance" is the Director's own on-demand read: bounded per activation (one Director turn) and recorded
+   * like an injection. The allowance counts distinct files and their bytes; a repeat of a file already read this turn is
+   * recorded with `repeat: true` and is free up to its own cap. A refusal says what was used and how to continue.
+   */
   readSkill(projectId: string, actor: ActorContext, activationId: string, selection: { skillId: string; path: string }, options: { via?: SkillReadVia } = {}) {
     this.service.recovery.assertWritable(projectId, actor.requestId);
     invariant(actor.kind === "director", "ACTOR_DENIED", "Skill reads must retain their director epoch");
@@ -125,20 +129,33 @@ export class DirectorContextService {
     const lock = this.service.store.get<LockRecord>("director_skill_lock", record.activation.lockId);
     invariant(lock?.projectId === projectId, "SCOPE_DENIED", "Skill lock is absent");
     const guidance = options.via === "read_guidance";
-    const used = () => this.service.store.db.prepare("SELECT count(*) AS count, coalesce(sum(json_extract(body,'$.bytes')),0) AS bytes FROM entities WHERE kind='skill_read' AND project_id=? AND json_extract(body,'$.epochId')=? AND json_extract(body,'$.evidence.activationId')=? AND json_extract(body,'$.via')='read_guidance'")
+    const reads = "FROM entities WHERE kind='skill_read' AND project_id=? AND json_extract(body,'$.epochId')=? AND json_extract(body,'$.evidence.activationId')=? AND json_extract(body,'$.via')='read_guidance'";
+    const used = () => this.service.store.db.prepare(`SELECT count(*) AS count, coalesce(sum(json_extract(body,'$.bytes')),0) AS bytes ${reads} AND json_extract(body,'$.repeat') IS NULL`)
       .get(projectId, actor.epochId, activationId) as { count: number; bytes: number };
-    const limit = (bytes: number) => { const prior = used();
-      invariant(prior.count < SKILL_LIMITS.guidanceReadsPerActivation && prior.bytes + bytes <= SKILL_LIMITS.guidanceReadBytes, "GUIDANCE_READ_LIMIT",
-        `This conversation already read ${prior.count} guidance files; at most ${SKILL_LIMITS.guidanceReadsPerActivation} files and ${SKILL_LIMITS.guidanceReadBytes} bytes per conversation. Continue with what you have read.`); };
-    if (guidance) limit(0);
+    const repeated = () => !!this.service.store.db.prepare(`SELECT 1 ${reads} AND json_extract(body,'$.evidence.skillId')=? AND json_extract(body,'$.evidence.path')=? LIMIT 1`)
+      .get(projectId, actor.epochId, activationId, selection.skillId, selection.path);
+    const repeats = () => (this.service.store.db.prepare(`SELECT count(*) AS count ${reads} AND json_extract(body,'$.repeat')=1`).get(projectId, actor.epochId, activationId) as { count: number }).count;
+    const limit = (bytes: number, repeat: boolean) => {
+      const prior = used(), kib = (value: number) => Math.ceil(value / 1024);
+      const files = SKILL_LIMITS.guidanceReadsPerActivation, total = SKILL_LIMITS.guidanceReadBytes;
+      const fits = repeat ? repeats() < SKILL_LIMITS.guidanceRepeatReads : prior.count < files && prior.bytes + bytes <= total;
+      if (fits) return;
+      const next = "Continue this turn with the guidance already in your context and the files you read; do not retry read_guidance this turn. "
+        + "The allowance starts again with the person's next message.";
+      throw new DomainError("GUIDANCE_READ_LIMIT", `This turn's guidance allowance is used: ${prior.count} of ${files} files and ${kib(prior.bytes)} of ${kib(total)} KiB`
+        + `${repeat ? `, and ${SKILL_LIMITS.guidanceRepeatReads} repeat reads` : bytes ? `; this file needs ${kib(bytes)} KiB more` : ""}. ${next}`,
+        { readFiles: prior.count, maxFiles: files, readBytes: prior.bytes, maxBytes: total, next });
+    };
+    const repeat = guidance && repeated();
+    if (guidance) limit(0, repeat);
     const read = readActivatedSkillFile(lock.lock, record.activation, this.environment, selection, options.via ? { via: options.via } : {});
     const bytes = Buffer.byteLength(read.content);
     return this.service.store.transaction(() => {
       this.service.assertActor(projectId, actor);
       invariant(canonical(this.service.store.get<ActivationRecord>("skill_activation", activationId)?.activation) === canonical(record.activation), "CAPABILITY_MISMATCH", "Skill activation changed during read");
-      if (guidance) limit(bytes);
+      if (guidance) limit(bytes, repeat);
       this.service.store.insert("skill_read", read.evidence.readId, projectId, { id: read.evidence.readId, projectId, requestId: actor.requestId, epochId: actor.epochId, evidence: read.evidence,
-        ...(options.via ? { via: options.via, bytes } : {}) });
+        ...(options.via ? { via: options.via, bytes } : {}), ...(repeat ? { repeat: true } : {}) });
       return read;
     });
   }

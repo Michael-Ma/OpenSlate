@@ -121,14 +121,24 @@ test('read_guidance reads any package in the conversation\'s lock, records a ski
   assert.deepEqual(calls.map(call => call.state).sort(), ['failed', 'failed', 'failed', 'failed', 'succeeded', 'succeeded']);
 });
 
-test('read_guidance works in keyframe reviews and stops at the per-conversation read limit', async t => {
+test('read_guidance works in keyframe reviews; repeats in a turn are free up to their own cap, then a clear refusal', async t => {
   const f = seven(t), turn = f.openTurn();
   f.store.insert('keyframe_review_request', turn.human.requestId, f.project.id, { requestId: turn.human.requestId, action: 'keyframe_review', sceneId: 'scene-0', batchDigest: 'offline' });
   assert.equal((await turn.call('read_guidance', { package: 'craft-story' })).package, 'craft-story');
-  for (let index = 1; index < SKILL_LIMITS.guidanceReadsPerActivation; index++) await turn.call('read_guidance', { package: 'craft-characters' });
-  assert.equal(await code(turn.call('read_guidance', { package: 'craft-story' })), 'GUIDANCE_READ_LIMIT');
-  assert.equal(f.store.list('skill_read', f.project.id).filter(row => row.epochId === turn.bridge.actor.epochId && row.via === 'read_guidance').length, SKILL_LIMITS.guidanceReadsPerActivation);
-  // A new conversation starts with a fresh allowance.
+  const first = await turn.call('read_guidance', { package: 'craft-characters' });
+  // Reading a file again in the same turn returns the same bytes and does not use the distinct-file allowance.
+  for (let index = 0; index < SKILL_LIMITS.guidanceRepeatReads; index++)
+    assert.equal((await turn.call('read_guidance', { package: 'craft-characters' })).sha256, first.sha256);
+  const rows = () => f.store.list('skill_read', f.project.id).filter(row => row.epochId === turn.bridge.actor.epochId && row.via === 'read_guidance');
+  assert.equal(rows().filter(row => !row.repeat).length, 2, 'two distinct files counted');
+  assert.equal(rows().filter(row => row.repeat).length, SKILL_LIMITS.guidanceRepeatReads);
+  // Past the repeat cap the refusal is typed, says what was used and how to go on, and records nothing.
+  const refusal = await turn.call('read_guidance', { package: 'craft-story' }).then(() => assert.fail('expected GUIDANCE_READ_LIMIT'), error => error);
+  assert.equal(refusal.code, 'GUIDANCE_READ_LIMIT');
+  assert.match(refusal.message, /This turn's guidance allowance is used: 2 of 32 files/); assert.match(refusal.message, /do not retry read_guidance this turn/);
+  assert.match(refusal.details.next, /person's next message/); assert.equal(refusal.details.maxFiles, SKILL_LIMITS.guidanceReadsPerActivation);
+  assert.equal(rows().length, 2 + SKILL_LIMITS.guidanceRepeatReads);
+  // A new turn starts with a fresh allowance.
   assert.equal((await f.openTurn().call('read_guidance', { package: 'craft-story' })).package, 'craft-story');
 });
 
