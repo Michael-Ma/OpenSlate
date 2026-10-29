@@ -177,7 +177,7 @@ export function sceneRow(shot: ShotRecord, context: {
       ((!imageOutput || !!bindings.find(b => b.id === imageTarget?.id)?.retainedTake) && candidatePending(imageTarget?.id)),
     videoPending:
       active.some((a) => a.nodeId === videoTarget?.id) ||
-      (!videoComplete &&
+      ((!videoComplete || !!bindings.find(b => b.id === videoTarget?.id)?.retainedTake) &&
         reviewedVideo &&
         candidatePending(videoTarget?.id)),
     blockedCode: active.some((a) => a.phase === "submission_unknown")
@@ -196,5 +196,5 @@ export function generationTargets<T extends { shotId: string; imageComplete: boo
 ): T[] {
   return rows.filter(row => kind === "image"
     ? (!targetShotIds || targetShotIds.includes(row.shotId)) && (regenerate || !row.imageComplete || row.narration?.mode === "generated" && !row.narration.ready)
-    : !row.videoComplete);
+    : (!targetShotIds || targetShotIds.includes(row.shotId)) && (regenerate || !row.videoComplete));
 }

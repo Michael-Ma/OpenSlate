@@ -43,7 +43,7 @@ export type SceneGenerationInput = {
   reviewedFrames: { shotId: string; artifactId: string; sha256: string }[];
   reviewedHoldDigest: string;
   reviewedControlAuthorityId: string | null;
-  /** A human keyframe action can address a subset without borrowing authority for its siblings. */
+  /** Human keyframe work or a saved-clip remake can address an exact subset. */
   targetShotIds?: string[];
   regenerate?: boolean;
   notesDigest?: string;
@@ -267,9 +267,43 @@ export function registerSceneGeneration(
 export type EnqueueSceneVoice = (projectId: string, sceneId: string, shotIds: string[], actor: import("@openslate/core").ActorContext, runId?: string) => void;
 /** Runner receipts bind the reviewed scene and its original authority, not transient film-head tokens. */
 export function sceneGenerationCommandDigest(sceneId: string,
-  input: SceneGenerationInput | Pick<SceneGenerationInput, "kind" | "reviewedFrames">,
+  input: SceneGenerationInput | Pick<SceneGenerationInput, "kind" | "reviewedFrames" | "regenerate" | "targetShotIds">,
   actor?: import("@openslate/core").ActorContext): string {
-  return digest(actor ? { sceneId, kind: input.kind, reviewedFrames: input.reviewedFrames, actor } : { sceneId, ...input });
+  return digest(actor ? { sceneId, kind: input.kind, reviewedFrames: input.reviewedFrames, actor,
+    ...(input.regenerate ? { regenerate: true, targetShotIds: input.targetShotIds } : {}) } : { sceneId, ...input });
+}
+
+/** Pure selection validation is applied before stale-state checks so invalid scope always has one refusal code. */
+export function clipRemakeTargets(view: ReturnType<typeof sceneView>["view"], shotIds: string[]) {
+  invariant(shotIds.length >= 1 && shotIds.length <= 4 && new Set(shotIds).size === shotIds.length &&
+    shotIds.every(id => view.rows.some(row => row.shotId === id)), "VALIDATION_ERROR", "Choose 1–4 different shots belonging to this scene");
+  return view.rows.filter(row => shotIds.includes(row.shotId));
+}
+/** The press and overview share every saved-clip prerequisite; this function never creates authority. */
+export function assertClipRemakeReady(production: ProductionService, captured: ReturnType<typeof sceneView>, shotIds: string[], ignoredRequestId?: string) {
+  const { view, project } = captured, store = production.store;
+  const rows = clipRemakeTargets(view, shotIds);
+  invariant(!captured.plan?.nodes.some(node => view.rows.some(row => row.shotId === node.shotId) && ["image", "video"].includes(node.kind) &&
+    captured.plan!.nodes.filter(other => other.kind === node.kind && other.shotId === node.shotId).length > 1), "SCENE_SELECTION_REQUIRED", "Choose each shot's current take before remaking its clip");
+  invariant(rows.every(row => row.videoComplete), "CLIP_NOT_SAVED", "Use this scene's confirm to make clips that are not saved yet");
+  assertGenerationJobsResolved(production, project.id, shotIds);
+  invariant(!rows.some(row => row.imagePending || row.videoPending), "ATTEMPT_EXISTS", "Follow this shot's existing jobs before remaking its clip");
+  invariant(!view.paused, "EXECUTION_PAUSED", "Continue the film before remaking clips");
+  invariant(!view.busy, "WAITING_USER", "Finish the current conversation before remaking these clips");
+  const scopes = new Set([project.id, view.sceneId, ...shotIds, ...rows.flatMap(row => [row.imageNodeId, row.videoNodeId]).filter((id): id is string => !!id)]);
+  invariant(!store.list<{ active: boolean; scopeId: string; ownerId: string }>("hold", project.id).some(hold =>
+    hold.active && scopes.has(hold.scopeId) && hold.ownerId !== ignoredRequestId), "SCOPE_HELD", "Finish the edit holding these shots before remaking their clips");
+  invariant(!store.list<SceneConfirmationRecord>("scene_confirmation", project.id).some(run => run.state === "running" && run.id !== ignoredRequestId &&
+    run.sceneId === view.sceneId && (run.framePins.some(pin => shotIds.includes(pin.shotId)) || run.steps.some(step => step.step !== "done" && shotIds.includes(step.shotId)))),
+  "CONFIRMATION_RUNNING", "Follow these shots' existing confirmation");
+  invariant(openBlockingNotes(store, project.id, view.sceneId).length === 0, "RECOMMENDATION_OPEN", "Settle the blocking Director notes before remaking clips");
+  invariant(rows.every(row => row.image && row.imageComplete && !row.narrationPending && !row.blockedCode && row.motionPrompt.trim()),
+    "SCENE_REVIEW_STALE", "Finish the current keyframe and saved narration before remaking clips");
+  const frames = rows.map(row => ({ shotId: row.shotId, artifactId: row.image!.artifactId, sha256: row.image!.sha256, nodeId: row.frameNodeId }));
+  const opened = store.list<{ principal: string; shotId: string; artifactId: string; sha256: string }>("frame_view", project.id);
+  invariant(frames.every(frame => opened.some(value => value.principal === "local-user" && value.shotId === frame.shotId && value.artifactId === frame.artifactId && value.sha256 === frame.sha256)) &&
+    confirmationFramesCurrent(store, project, frames), "SCENE_REVIEW_STALE", "Open each current approved keyframe before remaking its clip");
+  return rows;
 }
 /** Shared command implementation; durable confirmation uses its original human grants. */
 export async function generateScene(production: ProductionService, projectId: string, sceneId: string,
@@ -287,14 +321,15 @@ export async function generateScene(production: ProductionService, projectId: st
   if (replay) return replay.result;
   invariant(
     input.kind === "image" ||
-      (input.targetShotIds === undefined && input.regenerate === undefined),
+      (input.targetShotIds === undefined && input.regenerate === undefined) ||
+      (input.regenerate === true && !!input.targetShotIds?.length),
     "VALIDATION_ERROR",
-    "Video generation reviews the complete named scene",
+    "Video generation reviews the complete scene, or remakes 1–4 named saved clips",
   );
   invariant(
     !input.regenerate || input.targetShotIds?.length,
     "VALIDATION_ERROR",
-    "Choose the exact shots whose keyframes should be replaced",
+    "Choose the exact shots whose media should be replaced",
   );
   const captured = sceneView(production, projectId, sceneId, undefined, input.targetShotIds, director?.requestId);
   invariant(
@@ -302,7 +337,7 @@ export async function generateScene(production: ProductionService, projectId: st
       input.targetShotIds.every((id) =>
         captured.view.rows.some((row) => row.shotId === id),
       ),
-    "SCOPE_DENIED",
+    input.kind === "video" && input.regenerate ? "VALIDATION_ERROR" : "SCOPE_DENIED",
     "Choose shots belonging to this scene",
   );
   const notesDigest = digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open"));
@@ -325,7 +360,8 @@ export async function generateScene(production: ProductionService, projectId: st
     if (options.actor) {
       const confirmation = store.get<SceneConfirmationRecord>("scene_confirmation", options.actor.requestId);
       invariant(input.kind === "video" && confirmation?.projectId === projectId && confirmation.sceneId === sceneId &&
-        confirmation.kind === "video" && confirmation.state === "running" && canonical(confirmation.actor) === canonical(options.actor),
+        confirmation.kind === "video" && confirmation.state === "running" && canonical(confirmation.actor) === canonical(options.actor) &&
+        (confirmation.regenerate === true) === (input.regenerate === true) && canonical(confirmation.targetShotIds ?? null) === canonical(input.targetShotIds ?? null),
       "SCENE_REVIEW_STALE", "This scene confirmation is no longer running");
       invariant(confirmation.sceneIntentDigest === sceneGenerationView(production, projectId, sceneId, narration, current).sceneIntentDigest &&
         // Each pinned shot still matches its own per-shot dispatch guard (scene titles and siblings are not part of it).
@@ -341,6 +377,7 @@ export async function generateScene(production: ProductionService, projectId: st
       "SCENE_REVIEW_STALE",
       "The scene changed. Review its current frames and direction.",
     );
+    if (input.kind === "video" && input.regenerate) assertClipRemakeReady(production, current, input.targetShotIds!, options.actor?.requestId);
     invariant(
       digest(now.rows) === digest(captured.view.rows),
       "SCENE_REVIEW_STALE",
@@ -374,11 +411,12 @@ export async function generateScene(production: ProductionService, projectId: st
   invariant(captured.view.rows.length > 0, "SCENE_EMPTY", "Add a shot before generating this scene");
   const audio = sceneNarrationView(production, captured.project, sceneId, narration);
   const targets = generationTargets(captured.view.rows.map(row => ({ ...row, narration: audio.rows.find(a => a.shotId === row.shotId)!.narration })), input.kind, input.targetShotIds, input.regenerate);
+  if (input.kind === "video" && input.regenerate) invariant(targets.every(row => row.narration.ready), "NARRATION_SPEECH_STALE", "Keep the saved voice line ready before remaking its clip");
   const selected = targets.filter(row => input.kind !== "image" || input.regenerate || !row.imageComplete);
   const placeholderIds = captured.project.shots.filter(shot => selected.some(row => row.shotId === shot.id) && shot.promptState === "placeholder").map(shot => shot.id);
   if (placeholderIds.length) throw new DomainError("DIRECTION_REQUIRED", "Write direction for these shots before generating", { shotIds: placeholderIds });
   const quotedRows = targets.map(row => ({ ...row, imageComplete: selected.includes(row) ? false : row.imageComplete }));
-  const estimate = quote(captured.lock, quotedRows, input.kind === "image" ? "makeKeyframes" : "confirmVideo");
+  const estimate = quote(captured.lock, quotedRows, input.kind === "image" ? "makeKeyframes" : input.regenerate ? "remakeClip" : "confirmVideo");
   invariant(input.expectedEstimateMicros === undefined || input.expectedEstimateMicros === estimate.micros,
     "ESTIMATE_CHANGED", "The estimate changed. Review the current price before generating.");
   invariant(
@@ -588,23 +626,29 @@ export async function generateScene(production: ProductionService, projectId: st
       );
       if (input.kind === "image" && input.regenerate) settleNotesElsewhere(production, projectId,
         { kind: "regenerate_keyframe", shotIds: selected.map(row => row.shotId) }, actionId ?? actor.requestId, actor.requestId);
+      if (input.kind === "video" && input.regenerate) settleNotesElsewhere(production, projectId,
+        { kind: "remake_clip", shotIds: selected.map(row => row.shotId) }, actor.requestId, actor.requestId);
       // Same-spec regeneration still needs a fresh, one-use human grant. Detaching inside
       // this transaction retains historical receipts and makes publication create that new candidate.
+      // A durable clip confirmation may have recomposed over another scene's publication.
+      const replacementPlanId = input.kind === "video" ? publication.project.activePlanId : captured.project.activePlanId;
       const retained = input.regenerate ? store.list<NodeBinding>("node_binding", projectId)
-        .filter(b => b.state === "active" && b.planId === captured.project.activePlanId && Object.keys(b.retainedTake?.outputs ?? b.outputs).length)
+        .filter(b => b.state === "active" && b.planId === replacementPlanId && Object.keys(b.retainedTake?.outputs ?? b.outputs).length &&
+          (input.kind === "image" || selected.some(row => row.videoNodeId === b.id)))
         .map(b => b.retainedTake ? { ...b, candidateId: b.retainedTake.candidateId, outputs: b.retainedTake.outputs } : b) : [];
       if (input.regenerate)
         for (const row of selected) {
-          if (!row.imageNodeId) continue;
+          const nodeId = input.kind === "image" ? row.imageNodeId : row.videoNodeId;
+          if (!nodeId) continue;
           const binding = store.get<NodeBinding>(
             "node_binding",
-            row.imageNodeId,
+            nodeId,
           );
           invariant(
             binding?.state === "active" &&
-              binding.planId === captured.project.activePlanId,
+              binding.planId === replacementPlanId,
             "SCENE_REVIEW_STALE",
-            "The selected keyframe binding changed",
+            "The selected media binding changed",
           );
           store.put("node_binding", binding.id, projectId, {
             ...binding,
@@ -635,14 +679,14 @@ export async function generateScene(production: ProductionService, projectId: st
             store.put("node_binding", old.id, projectId, { ...current, retainedTake: { candidateId: old.candidateId, outputs: old.outputs } });
           continue;
         }
-        const replacing = selected.some(r => r.imageNodeId === old.id);
+        const replacing = selected.some(r => (input.kind === "image" ? r.imageNodeId : r.videoNodeId) === old.id);
         if (replacing) store.put("node_binding", old.id, projectId, { ...current,
           retainedTake: { candidateId: old.candidateId, outputs: old.outputs } });
         else if (!Object.keys(current.outputs).length) store.put("node_binding", old.id, projectId, {
           ...current, candidateId: old.candidateId, outputs: old.outputs,
         });
       }
-      if (input.regenerate) for (const row of selected.filter(r => !r.imageNodeId && r.image)) {
+      if (input.kind === "image" && input.regenerate) for (const row of selected.filter(r => !r.imageNodeId && r.image)) {
         const node = compiled.nodes.find(n => n.kind === "image" && n.shotId === row.shotId);
         const current = node && store.get<NodeBinding>("node_binding", node.id);
         if (current) store.put("node_binding", current.id, projectId, { ...current,

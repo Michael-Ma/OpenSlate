@@ -10,7 +10,7 @@ import type { NarrationService } from "./narration/service.js";
 import type { NodeBinding, PlanRecord } from "./execution/engine.js";
 import { profileExecutionIdentity, requestExecutionIdentity } from "@openslate/providers";
 import type { DirectorTurn } from "./application/director-supervisor.js";
-import { sceneView, sceneGenerationView } from "./scene-generation.js";
+import { assertClipRemakeReady, sceneView, sceneGenerationView } from "./scene-generation.js";
 import { generationTargets } from "./scene-row.js";
 import { quote, unitQuote } from "./generation-quotes.js";
 import { narrationFitFrames } from "./narration-fit.js";
@@ -171,8 +171,17 @@ export class GenerationOverviewReader {
               audio.failure = attemptMediaFailure(store, speech, profile?.maxRetries ?? 0);
             }
           }
+          let remakeClip: { available: boolean; code?: string };
+          try {
+            assertClipRemakeReady(this.production, sceneView(this.production, projectId, scene.id, { snapshot, review, tolerateAlternatives: true }, [shot.id]), [shot.id]);
+            invariant(row.narration.ready, "NARRATION_SPEECH_STALE", "Keep the saved voice line ready before remaking its clip");
+            remakeClip = { available: true };
+          } catch (error) {
+            if (!(error instanceof DomainError)) throw error;
+            remakeClip = { available: false, code: error.code };
+          }
           overview.shots[shot.id] = { shotId: shot.id, sceneId: scene.id, label: `${index + 1}.${shotIndex + 1}`, framing: shot.framing, purpose: shot.purpose,
-            imagePrompt: shot.imagePrompt, motion: shot.motion, durationFrames: shot.desiredFrames, keyframe: { ...image, opened }, video, narration: audio, quotes: { regenerateKeyframe: quote(captured.lock, [row], "regenerateKeyframe") },
+            imagePrompt: shot.imagePrompt, motion: shot.motion, durationFrames: shot.desiredFrames, keyframe: { ...image, opened }, video, narration: audio, quotes: { regenerateKeyframe: quote(captured.lock, [row], "regenerateKeyframe"), remakeClip: quote(captured.lock, [row], "remakeClip") }, remakeClip,
             ...("lipSync" in row && row.lipSync ? { lipSync: row.lipSync } : {}) };
           if (image.state === "direction_required") blockers.push({ code: "direction_required", shotId: shot.id });
           else if (image.state !== "ready") blockers.push({ code: "keyframe_missing", shotId: shot.id });

@@ -16,7 +16,7 @@ export interface QuoteLock {
   profiles: ProviderProfile[];
   preferredProfileIds?: Partial<Record<"image" | "video" | "speech", string>>;
 }
-export type QuoteKind = "makeKeyframes" | "regenerateKeyframe" | "confirmVideo" | "voice";
+export type QuoteKind = "makeKeyframes" | "regenerateKeyframe" | "remakeClip" | "confirmVideo" | "voice";
 
 function selectedProfile(lock: QuoteLock, kind: ProviderProfile["kind"], id?: string | null): ProviderProfile | undefined {
   const selected = id ?? lock.preferredProfileIds?.[kind as "image" | "video" | "speech"];
@@ -65,7 +65,7 @@ export function quote(lock: QuoteLock, rows: readonly QuoteRow[], kind: QuoteKin
   if (kind === "regenerateKeyframe") units.push(profile("image"));
   for (const row of rows) {
     if (kind === "makeKeyframes" && !row.imageComplete) units.push(profile("image"));
-    if (kind === "confirmVideo" && !row.videoComplete) units.push(videoUnit(profile("video", row.videoProfileLabel), row));
+    if (kind === "remakeClip" || kind === "confirmVideo" && !row.videoComplete) units.push(videoUnit(profile("video", row.videoProfileLabel), row));
     if ((kind === "voice" || kind === "regenerateKeyframe" || kind === "makeKeyframes" || (kind === "confirmVideo" && !row.videoComplete)) &&
       row.narration?.mode === "generated" && !row.narration.ready && !row.narration.recordingCurrent && !row.narration.reusableSpeechTake)
       units.push(profile("speech", row.narration.profileId));

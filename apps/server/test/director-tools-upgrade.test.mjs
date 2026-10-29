@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { digest, newId } from "../../../packages/core/dist/index.js";
+import { CURRENT_TOOL_CONTRACT, digest, newId } from "../../../packages/core/dist/index.js";
 import { FakeProvider } from "../../../packages/providers/dist/index.js";
 import { Store } from "../dist/persistence/store.js";
 import { Engine } from "../dist/execution/engine.js";
@@ -39,7 +39,7 @@ function fixture(t) {
 test("tool status is read-only and new projects use the current contract without an upgrade", async t => {
   const f = fixture(t), project = f.service.createProject("New project"), cursor = f.store.cursor(project.id);
   const status = f.director.tools(project.id);
-  assert.deepEqual(status, { currentVersion: "7.0.0", lockId: null, lockDigest: null, availableVersion: "7.0.0", upgradeAvailable: false, busy: false });
+  assert.deepEqual(status, { currentVersion: CURRENT_TOOL_CONTRACT, lockId: null, lockDigest: null, availableVersion: CURRENT_TOOL_CONTRACT, upgradeAvailable: false, busy: false });
   assert.equal(f.store.cursor(project.id), cursor); assert.equal(f.store.list("director_skill_lock", project.id).length, 0);
 });
 test("explicit upgrade installs one successor while preserving old locks, canonical state and edit authority", async t => {

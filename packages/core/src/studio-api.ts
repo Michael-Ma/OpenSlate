@@ -177,8 +177,10 @@ export interface ShotOverview {
   keyframe: KeyframeSlot;
   video: MediaSlot;
   narration: ShotNarration;
-  /** Exact selected-shot estimate, including a missing voice line. */
-  quotes?: { regenerateKeyframe: PriceQuote };
+  /** Exact selected-shot estimates. A keyframe remake includes missing voice; a clip remake reuses saved voice. */
+  quotes?: { regenerateKeyframe: PriceQuote; remakeClip?: PriceQuote };
+  /** A human may remake this saved clip from its opened current keyframe. Server rechecks on press. */
+  remakeClip?: { available: boolean; code?: string };
   /**
    * Singing shots only (`performance: "singing"`). "planned": the clip is made by lip sync from the keyframe and this
    * shot's song; `video` then reports that clip with the usual states. "unavailable": no ready lip-sync model or no song
@@ -425,6 +427,8 @@ export type NoteChoice =
   | { kind: "accept"; label: string }
   | { kind: "proposal"; proposalId: string }
   | { kind: "regenerate_keyframe"; shotIds: string[] }
+  /** Contract 7.1.0: remake saved clips from their current approved keyframes, only on a human press. */
+  | { kind: "remake_clip"; shotIds: string[] }
   | { kind: "edit_field"; shotId: string; field: "narration" | "imagePrompt" | "motion" }
   | { kind: "reply" }
   /** The person's "Confirm frames & generate video" for this scene, offered in the note (contract 6.0.0). */
@@ -533,6 +537,12 @@ export interface ConfirmSceneInput {
   confirmationDigest: string;
   reviewedFrames: { shotId: string; artifactId: string; sha256: string }[];
   expectedEstimateMicros?: Micros;
+}
+
+/** POST /api/projects/:projectId/scenes/:sceneId/remake-clips. Reuses saved voice; 1–4 saved clips. */
+export interface RemakeClipsInput extends ConfirmSceneInput {
+  targetShotIds: string[];
+  expectedRequestId?: string | null;
 }
 
 /**

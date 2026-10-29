@@ -1,11 +1,12 @@
 import { confirmationFramesCurrent, sceneConfirmationGuard, type ConfirmationFramePin } from "./scene-confirmation-state.js";
 import type { FastifyInstance } from "fastify";
 import { digest, DomainError, invariant } from "@openslate/core";
-import type { ActorContext, ConfirmSceneInput, SceneConfirmationView } from "@openslate/core";
+import type { ActorContext, ConfirmSceneInput, RemakeClipsInput, SceneConfirmationView } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import { requiredCommandKey } from "./application/command-key.js";
 import { settleNotesElsewhere } from "./application/director-notes.js";
-import { generateScene, sceneGenerationCommandDigest, sceneGenerationView, sceneView, type SceneGenerationInput } from "./scene-generation.js";
+import { assertClipRemakeReady, clipRemakeTargets, generateScene, sceneGenerationCommandDigest, sceneGenerationView, sceneView, type SceneGenerationInput } from "./scene-generation.js";
+import { assertExpectedHumanRequest } from "./application/expected-human-request.js";
 import { generationTargets } from "./scene-row.js";
 import { quote } from "./generation-quotes.js";
 import type { NarrationService } from "./narration/service.js";
@@ -39,6 +40,8 @@ export interface SceneConfirmationRecord {
   sceneIntentDigest: string; guardDigest: string; framePins: ConfirmationFramePin[]; frames: ConfirmSceneInput["reviewedFrames"];
   /** Per-shot dispatch guards. Older scene-wide checkpoints require a fresh confirmation. */
   shotGuardDigests?: Record<string, string>;
+  /** A saved-clip remake reuses this exact shot subset and never buys voice lines. */
+  regenerate?: true; targetShotIds?: string[];
   steps: SceneAudioStep[];
   /** Legacy receipt lookup only. New runs never persist film-head tokens. */
   videoInput?: SceneGenerationInput; videoResult?: unknown;
@@ -119,16 +122,30 @@ export class SceneConfirmationRunner {
     "CONFIRMATION_RUNNING", "Follow the scene's existing confirmation");
   }
   confirm(projectId: string, sceneId: string, input: ConfirmSceneInput, key: string): SceneConfirmationView {
+    return this.startVideo(projectId, sceneId, input, key, false);
+  }
+  remakeClips(projectId: string, sceneId: string, input: RemakeClipsInput, key: string): SceneConfirmationView {
+    return this.startVideo(projectId, sceneId, input, key, true);
+  }
+  private startVideo(projectId: string, sceneId: string, input: ConfirmSceneInput | RemakeClipsInput, key: string, remake: boolean): SceneConfirmationView {
     this.production.recovery.assertWritable(projectId);
-    return this.store.command(`local-user:${projectId}:scene-confirm`, key, digest({ sceneId, ...input }), () => {
-      const captured = sceneView(this.production, projectId, sceneId), view = sceneGenerationView(this.production, projectId, sceneId, this.audio?.narration, captured);
-      invariant(input.confirmationDigest === view.confirmationDigest && view.confirmationDigest !== null, "SCENE_REVIEW_STALE", "Review this scene's current frames and recipe");
+    return this.store.command(`local-user:${projectId}:${remake ? "scene-clip-remake" : "scene-confirm"}`, key, digest({ sceneId, ...input }), () => {
+      const targetShotIds = remake ? (input as RemakeClipsInput).targetShotIds : undefined;
+      const captured = sceneView(this.production, projectId, sceneId, undefined, targetShotIds), view = sceneGenerationView(this.production, projectId, sceneId, this.audio?.narration, captured);
+      if (remake) {
+        clipRemakeTargets(captured.view, targetShotIds!);
+        assertExpectedHumanRequest(this.production, projectId, (input as RemakeClipsInput).expectedRequestId);
+      }
+      // The browser echoes the scene's overview token even when unrelated sibling work is busy.
+      const reviewDigest = remake ? sceneGenerationView(this.production, projectId, sceneId, this.audio?.narration).confirmationDigest : view.confirmationDigest;
+      invariant(input.confirmationDigest === reviewDigest && reviewDigest !== null, "SCENE_REVIEW_STALE", "Review this scene's current frames and recipe");
+      if (remake) assertClipRemakeReady(this.production, captured, targetShotIds!);
       invariant(!view.paused, "EXECUTION_PAUSED", "Continue the film before confirming");
       // Refuse before any voice line is bought: an open blocking note would stop the chain at the video step.
       invariant(view.blockingNotes.length === 0, "RECOMMENDATION_OPEN", "Settle the blocking Director notes before confirming");
       invariant(!view.busy, "WAITING_USER", "Finish the current conversation before confirming");
-      this.assertNoOpen(projectId, sceneId);
-      const targets = generationTargets(view.rows, "video");
+      if (!remake) this.assertNoOpen(projectId, sceneId);
+      const targets = generationTargets(view.rows, "video", targetShotIds, remake);
       invariant(targets.length, "ALREADY_COMPLETE", "This scene already has its clips");
       invariant(targets.every(r => !r.imagePending && !r.videoPending && !r.blockedCode && r.image && r.motionPrompt.trim()), "SCENE_REVIEW_STALE", "Finish the current frames before confirming");
       invariant(input.reviewedFrames.length === targets.length && new Set(input.reviewedFrames.map(f => f.shotId)).size === targets.length && targets.every(r =>
@@ -137,20 +154,22 @@ export class SceneConfirmationRunner {
       invariant(input.reviewedFrames.every(f => opened.some(v => v.principal === "local-user" && v.shotId === f.shotId && v.artifactId === f.artifactId && v.sha256 === f.sha256)), "SCENE_REVIEW_STALE", "Open every current frame before confirming");
       const framePins = targets.map(r => ({ shotId: r.shotId, artifactId: r.image!.artifactId, sha256: r.image!.sha256, nodeId: r.frameNodeId }));
       invariant(confirmationFramesCurrent(this.store, this.store.getProject(projectId), framePins), "SCENE_REVIEW_STALE", "The reviewed frame must be a current output of its image binding");
-      const estimate = quote(captured.lock, targets, "confirmVideo");
+      if (remake) invariant(targets.every(row => row.narration.ready), "NARRATION_SPEECH_STALE", "Keep the saved voice line ready before remaking its clip");
+      const estimate = quote(captured.lock, targets, remake ? "remakeClip" : "confirmVideo");
       invariant(input.expectedEstimateMicros === undefined || input.expectedEstimateMicros === estimate.micros, "ESTIMATE_CHANGED", "Review the scene's current estimate");
       this.assertNoVoiceInFlight(projectId, targets.map(r => r.shotId));
-      const actor = this.production.beginRequest(projectId, "local-user", "Confirm the reviewed scene frames, narration and video recipe.",
-        { source: "app", concurrency: "alongside", holdScopeIds: [], scopeIds: [sceneId], key: `scene-confirm:${key}` });
+      const actor = this.production.beginRequest(projectId, "local-user", remake ? "Remake only the selected saved clips, keeping their approved keyframes and saved voice lines." : "Confirm the reviewed scene frames, narration and video recipe.",
+        { source: "app", concurrency: "alongside", holdScopeIds: [], scopeIds: targetShotIds ?? [sceneId], key: `${remake ? "scene-clip-remake" : "scene-confirm"}:${key}` });
       this.production.authorize(projectId, actor, targets.map(r => ({ scopeId: r.shotId, kind: "video" as const })), `confirm:${key}`);
       const project = this.store.getProject(projectId), lock = this.store.get("capability_lock", project.capabilityLockId);
       const shotGuardDigests = Object.fromEntries(framePins.map(pin => [pin.shotId, sceneConfirmationGuard(project, pin.shotId, lock, pin)]));
       const row: SceneConfirmationRecord = { id: actor.requestId, actor, projectId, sceneId, kind: "video", state: "running", createdAt: new Date().toISOString(),
         sceneIntentDigest: view.sceneIntentDigest, guardDigest: digest(shotGuardDigests), shotGuardDigests, framePins, frames: input.reviewedFrames,
-        steps: targets.filter(r => !r.narration.ready).map(r => ({ ...audioStep(this.production, projectId, r), ...(r.narration.mode !== "generated" ? { step: "accept" as const } : {}) })) };
-      this.production.engine.setHold(projectId, { scopeId: sceneId, ownerId: row.id });
+        ...(remake ? { regenerate: true, targetShotIds: targetShotIds! } : {}),
+        steps: remake ? [] : targets.filter(r => !r.narration.ready).map(r => ({ ...audioStep(this.production, projectId, r), ...(r.narration.mode !== "generated" ? { step: "accept" as const } : {}) })) };
+      for (const scopeId of targetShotIds ?? [sceneId]) this.production.engine.setHold(projectId, { scopeId, ownerId: row.id });
       this.save(row);
-      settleNotesElsewhere(this.production, projectId, { kind: "confirm_video", sceneId }, row.id, actor.requestId);
+      settleNotesElsewhere(this.production, projectId, remake ? { kind: "remake_clip", shotIds: targetShotIds! } : { kind: "confirm_video", sceneId }, row.id, actor.requestId);
       return confirmationView(row);
     });
   }
@@ -215,7 +234,8 @@ export class SceneConfirmationRunner {
   }
   private async advanceOne(row: SceneConfirmationRecord) {
     // Publication may have committed just before a crash. Resolve its exact command before checking changed state.
-    const videoCommand = { kind: "video" as const, reviewedFrames: row.frames };
+    const videoCommand = { kind: "video" as const, reviewedFrames: row.frames,
+      ...(row.regenerate ? { regenerate: true, targetShotIds: row.targetShotIds } : {}) };
     if (row.kind === "video" && !row.videoInput) {
       const replay = this.store.commandReplay(`local-user:${row.projectId}:scene-generation`, stepKey(row, "scene", "video"), sceneGenerationCommandDigest(row.sceneId, videoCommand, row.actor));
       if (replay) { this.save({ ...row, state: "done", videoResult: replay.result }); return; }
@@ -333,6 +353,16 @@ export class SceneConfirmationRunner {
 }
 
 export function registerSceneConfirmations(app: FastifyInstance, runner: SceneConfirmationRunner) {
+  app.post<{ Params: { projectId: string; sceneId: string }; Body: RemakeClipsInput }>("/api/projects/:projectId/scenes/:sceneId/remake-clips", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["confirmationDigest", "reviewedFrames", "targetShotIds"], properties: {
+      confirmationDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, expectedEstimateMicros: { type: "string", pattern: "^(0|[1-9][0-9]*)$", maxLength: 32 },
+      expectedRequestId: { type: ["string", "null"], minLength: 1, maxLength: 160 },
+      targetShotIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: { type: "string", minLength: 1, maxLength: 160 } },
+      reviewedFrames: { type: "array", minItems: 1, maxItems: 4, items: { type: "object", additionalProperties: false, required: ["shotId", "artifactId", "sha256"], properties: {
+        shotId: { type: "string", minLength: 1, maxLength: 160 }, artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+      } } },
+    } } },
+  }, async request => runner.remakeClips(request.params.projectId, request.params.sceneId, request.body, requiredCommandKey(request)));
   app.post<{ Params: { projectId: string; sceneId: string }; Body: ConfirmSceneInput }>("/api/projects/:projectId/scenes/:sceneId/confirm", {
     schema: { body: { type: "object", additionalProperties: false, required: ["confirmationDigest", "reviewedFrames"], properties: {
       confirmationDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, expectedEstimateMicros: { type: "string", pattern: "^(0|[1-9][0-9]*)$", maxLength: 32 },

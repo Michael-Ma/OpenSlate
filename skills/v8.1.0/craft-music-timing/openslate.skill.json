@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "id": "craft-music-timing",
+  "version": "8.1.0",
+  "role": "craft",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/cutting.md",
+    "references/plan-fields.md",
+    "references/song-analysis.md"
+  ],
+  "compatibility": {
+    "toolContract": "7.1.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "analyze_music",
+    "read_context",
+    "read_guidance",
+    "set_soundtrack"
+  ],
+  "requires": [],
+  "optional": []
+}
