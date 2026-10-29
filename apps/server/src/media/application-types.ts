@@ -33,6 +33,11 @@ export interface MediaRenderJob {
   createdAt: string; finishedAt: string | null; errorCode: string | null;
   /** Storyboard exports with kept clip sound: what was mixed per shot, and why a clip was skipped. Absent otherwise. */
   clipAudio?: Array<{ shotId: string; state: "mixed" | "skipped"; reason?: "no_audio_stream" | "source_unavailable" | "derivation_failed"; pieces?: number }>;
+  /**
+   * A storyboard export the Director started with start_export: that conversation's own edit holds do not block it.
+   * Any other request's hold still does. Absent for the person's Export and for every earlier job.
+   */
+  directorRequestId?: string;
 }
 export interface MediaPreview {
   id: string; projectId: string; renderJobId: string; artifact: ArtifactRef;

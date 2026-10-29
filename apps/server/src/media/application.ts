@@ -106,8 +106,13 @@ export class MediaApplicationService {
     });
   }
 
-  async prepareExport(projectId: string, actor: ActorContext, input: StartExportInput & { key: string }): Promise<MediaRenderJob> {
-    const request = structuredClone(input), authority = structuredClone(actor);
+  /**
+   * `directorRequestId`: the Director conversation that called start_export. Its own edit holds do not block this export
+   * (its turn holds the timeline while it runs); a hold of any other request, including the person's open edit, does.
+   */
+  async prepareExport(projectId: string, actor: ActorContext, input: StartExportInput & { key: string }, options: { directorRequestId?: string } = {}): Promise<MediaRenderJob> {
+    const request = structuredClone(input), authority = structuredClone(actor), director = options.directorRequestId;
+    invariant(director === undefined || (typeof director === "string" && director.length > 0 && director.length <= 160), "MEDIA_INVALID_INPUT", "Invalid Director request");
     this.validateRequest(request, ["expectedHeadVersion", "key"]);
     const reserved = this.store.transaction(() => {
       this.authorize(projectId, authority);
@@ -116,24 +121,24 @@ export class MediaApplicationService {
         invariant(this.store.getProject(projectId).headVersion === request.expectedHeadVersion, "REVISION_CONFLICT", "Film changed before export");
         const capture = captureStoryboard(this.store, projectId);
         if (!capture.readiness.ready) throw new DomainError("EXPORT_BLOCKED", "Film is not ready to export", capture.readiness);
-        const job = { projectId, target: capture.target };
+        const job = { projectId, target: capture.target, ...(director ? { directorRequestId: director } : {}) };
         this.assertUnpaused(job);
         return { id: newId(), outputArtifactId: newId(), capture };
       });
     });
     const prior = this.store.get<MediaRenderJob>("media_render", reserved.id); if (prior) return prior;
     const pending = this.preparingExports.get(reserved.id); if (pending) return pending;
-    const promise = this.freezeExport(projectId, authority, reserved);
+    const promise = this.freezeExport(projectId, authority, reserved, director);
     this.preparingExports.set(reserved.id, promise);
     try { return await promise; } finally { this.preparingExports.delete(reserved.id); }
   }
 
-  private async freezeExport(projectId: string, authority: ActorContext, reserved: { id: string; outputArtifactId: string; capture: StoryboardCapture }): Promise<MediaRenderJob> {
+  private async freezeExport(projectId: string, authority: ActorContext, reserved: { id: string; outputArtifactId: string; capture: StoryboardCapture }, director?: string): Promise<MediaRenderJob> {
     const { capture } = reserved, renderInput = structuredClone(capture.input);
     const assertCurrent = () => this.store.transaction(() => {
       this.authorize(projectId, authority);
       invariant(canonical(captureStoryboard(this.store, projectId).target) === canonical(capture.target), "REVISION_CONFLICT", "Film changed while freezing export");
-      this.assertUnpaused({ projectId, target: capture.target });
+      this.assertUnpaused({ projectId, target: capture.target, ...(director ? { directorRequestId: director } : {}) });
     });
     const fixtureVideo = new Map<string, SuppliedMedia>();
     for (const clip of capture.fixtureClips) {
@@ -168,7 +173,7 @@ export class MediaApplicationService {
       invariant(canonical(captureStoryboard(this.store, projectId).target) === canonical(capture.target), "REVISION_CONFLICT", "Film changed while freezing export");
       const job: MediaRenderJob = { id: reserved.id, projectId, actor: authority, target: capture.target, manifest, outputArtifactId: reserved.outputArtifactId,
         state: "prepared", ownerToken: null, leaseUntil: null, cancelRequested: false, artifact: null, createdAt: new Date().toISOString(), finishedAt: null, errorCode: null,
-        ...(clipAudio.length ? { clipAudio } : {}) };
+        ...(clipAudio.length ? { clipAudio } : {}), ...(director ? { directorRequestId: director } : {}) };
       this.store.insert("media_render", job.id, projectId, job);
       this.store.appendEvent(projectId, "media.render_prepared", { renderJobId: job.id, manifestDigest: manifest.digest });
       const skipped = clipAudio.filter(entry => entry.state === "skipped");
@@ -351,12 +356,14 @@ export class MediaApplicationService {
     } catch { return false; }
   }
 
-  private assertUnpaused(job: Pick<MediaRenderJob, "projectId" | "target">): void {
+  private assertUnpaused(job: Pick<MediaRenderJob, "projectId" | "target" | "directorRequestId">): void {
     // Storyboard exports spend nothing and have no provider dispatch. Stop still fences generation.
     const storyboard = "kind" in job.target && job.target.kind === "storyboard";
     invariant(storyboard || !this.store.get<{ paused: boolean }>("execution_control", job.projectId)?.paused, "MEDIA_PAUSED", "Project execution is paused");
-    const held = this.store.list<{ scopeId: string; active: boolean }>("hold", job.projectId)
-      .some(hold => hold.active && (job.target.scopeIds.includes(hold.scopeId) || job.target.dependencyNodeIds.includes(hold.scopeId)));
+    // A Director's start_export is not blocked by its own conversation's edit holds (see prepareExport).
+    const held = this.store.list<{ scopeId: string; ownerId: string; active: boolean }>("hold", job.projectId)
+      .some(hold => hold.active && (job.directorRequestId === undefined || hold.ownerId !== job.directorRequestId)
+        && (job.target.scopeIds.includes(hold.scopeId) || job.target.dependencyNodeIds.includes(hold.scopeId)));
     invariant(!held, "MEDIA_HELD", "A timeline dependency is held for editing");
   }
 

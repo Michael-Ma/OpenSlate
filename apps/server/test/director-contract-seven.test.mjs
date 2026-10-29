@@ -272,12 +272,15 @@ test('control_execution stop is the person\'s Stop; resume is a card the person 
 });
 
 test('start_export runs the same export start as the person, under the Director call identity', async t => {
-  const calls = [], exports = { start: async (projectId, input, key) => { calls.push({ projectId, input, key }); return { id: 'export-1', state: 'prepared' }; } };
+  const calls = [], exports = { start: async (projectId, input, key, options) => { calls.push({ projectId, input, key, options }); return { id: 'export-1', state: 'prepared' }; } };
   const f = seven(t, { toolOptions: { exports } });
-  const result = await f.openTurn({ text: 'Export it.' }).call('start_export', {}, 'call-export');
+  const turn = f.openTurn({ text: 'Export it.' });
+  const result = await turn.call('start_export', {}, 'call-export');
   assert.deepEqual(result.export, { id: 'export-1', state: 'prepared' });
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].input, { expectedHeadVersion: f.head() });
+  // The conversation's own edit hold must not block its export (MEDIA_HELD): it names itself; other holds still apply.
+  assert.deepEqual(calls[0].options, { directorRequestId: turn.human.requestId });
   assert.match(calls[0].key, /^director-tool:/);
   assert.equal(await code(f.openTurn({ scopeIds: ['scene-0'] }).call('start_export', {})), 'SCOPE_DENIED');
   assert.equal(calls.length, 1);

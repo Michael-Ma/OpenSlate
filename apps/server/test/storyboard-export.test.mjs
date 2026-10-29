@@ -16,6 +16,7 @@ import { ManagedUploadStore } from '../dist/narration/managed-upload.js';
 import { captureStoryboard } from '../dist/media/storyboard-capture.js';
 import { runDemo } from '../dist/demo.js';
 import { editStoryboard } from '../dist/storyboard.js';
+import { ExportLauncher } from '../dist/media/export-launcher.js';
 import { requireTestToolchain } from '../../../scripts/test-toolchain.mjs';
 
 const execute = promisify(execFile), { tools: { ffmpeg, ffprobe } } = requireTestToolchain();
@@ -379,4 +380,36 @@ test('the export follows the film aspect: a 9:16 film renders 720 x 1280, a film
   const result = await f.service.run(f.project.id, f.actor, job.id), row = f.store.get('artifact', result.artifact.artifactId);
   const probe = await execute(ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', row.path]);
   assert.equal(probe.stdout.trim(), '720,1280');
+});
+
+test("the Director's start_export is not blocked by its own conversation's edit hold, but still is by the person's and other requests' holds", async t => {
+  const f = await fixture(t, { narration: false, soundtrack: false });
+  const launcher = new ExportLauncher(f.production, f.service); t.after(() => launcher.close());
+  const settle = async id => { for (let i = 0; i < 500 && f.store.get('media_render', id)?.state !== 'published'; i++) await new Promise(resolve => setTimeout(resolve, 10)); return f.store.get('media_render', id); };
+  // A Director conversation in an editing turn holds the whole film, as every editing request does.
+  const director = f.production.beginRequest(f.project.id, 'local-user', 'Export it.', { editing: true, source: 'user' });
+  assert.ok(f.store.list('hold', f.project.id).some(hold => hold.active && hold.ownerId === director.requestId && hold.scopeId === f.project.id));
+  // Without naming that conversation (the person's Export), the hold refuses as before.
+  await assert.rejects(launcher.start(f.project.id, { expectedHeadVersion: f.head().headVersion }, 'person-while-director-edits'), code('MEDIA_HELD'));
+  // Naming it, its own hold is waived from prepare through publication.
+  const started = await launcher.start(f.project.id, { expectedHeadVersion: f.head().headVersion }, 'director-export', { directorRequestId: director.requestId });
+  assert.equal(started.state, 'rendering');
+  const job = await settle(started.exportId);
+  assert.equal(job.state, 'published'); assert.equal(job.directorRequestId, director.requestId);
+  assert.ok(f.store.list('hold', f.project.id).some(hold => hold.active && hold.ownerId === director.requestId), 'the conversation keeps its hold');
+  // Another request's hold on any shot still refuses the Director's export, alongside its own.
+  const other = f.engine.setHold(f.project.id, { scopeId: f.shots[1].id, ownerId: 'another-request' });
+  await assert.rejects(launcher.start(f.project.id, { expectedHeadVersion: f.head().headVersion }, 'director-export-2', { directorRequestId: director.requestId }), code('MEDIA_HELD'));
+  f.engine.releaseHold(f.project.id, other.id, 'another-request');
+  // The person opens an edit: their new editing request holds the film, and the Director's export is refused again.
+  const person = f.production.beginRequest(f.project.id, 'local-user', 'Change shot 2.', { editing: true, source: 'app', concurrency: 'alongside' });
+  assert.ok(f.store.list('hold', f.project.id).some(hold => hold.active && hold.ownerId === person.requestId));
+  await assert.rejects(launcher.start(f.project.id, { expectedHeadVersion: f.head().headVersion }, 'director-export-3', { directorRequestId: director.requestId }), code('MEDIA_HELD'));
+  // A hold that appears after the export starts still keeps it from publishing (only the named conversation is waived).
+  f.production.releaseAlongsideHolds(f.project.id, person);
+  const job2 = await f.service.prepareExport(f.project.id, f.actor, { expectedHeadVersion: f.head().headVersion, key: 'director-export-4' }, { directorRequestId: director.requestId });
+  const late = f.engine.setHold(f.project.id, { scopeId: f.project.id, ownerId: 'late-request' });
+  await assert.rejects(f.service.run(f.project.id, f.actor, job2.id), code('MEDIA_HELD'));
+  f.engine.releaseHold(f.project.id, late.id, 'late-request');
+  assert.equal(f.provider.acceptedCount(), 0);
 });

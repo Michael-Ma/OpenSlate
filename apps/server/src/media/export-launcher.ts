@@ -44,10 +44,13 @@ export class ExportLauncher {
     this.tasks.set(job.id, { abort, promise });
   }
 
-  /** The person's Export: prepare under a new app request and run the renderer when the job is ready. */
-  async start(projectId: string, input: StartExportInput, key: string) {
+  /**
+   * The person's Export: prepare under a new app request and run the renderer when the job is ready. The Director's
+   * start_export passes its own conversation as `directorRequestId`, so that conversation's edit holds do not block it.
+   */
+  async start(projectId: string, input: StartExportInput, key: string, options: { directorRequestId?: string } = {}) {
     const actor = this.commandActor(projectId, "Export the storyboard film", `export:${key}`, input);
-    const job = await this.media.prepareExport(projectId, actor, { ...input, key });
+    const job = await this.media.prepareExport(projectId, actor, { ...input, key }, options.directorRequestId ? { directorRequestId: options.directorRequestId } : {});
     if (job.state === "prepared" && !job.errorCode && !job.cancelRequested) this.launch(job, actor, "run");
     return this.media.exportRecord(projectId, job.id);
   }

@@ -92,7 +92,8 @@ export async function startExport(service: ProductionService, exports: ExportLau
   const { request, project } = assertDirectorEditAuthority(service, projectId, actor);
   wholeFilm(project, request, 'Export');
   invariant(exports, 'TOOL_CAPABILITY_UNAVAILABLE', 'Local export is not configured on this server');
-  const record = await exports.start(projectId, { expectedHeadVersion: project.headVersion }, key(invocationId));
+  // This conversation holds the timeline for editing while it runs; only its own holds are waived (MEDIA_HELD otherwise).
+  const record = await exports.start(projectId, { expectedHeadVersion: project.headVersion }, key(invocationId), { directorRequestId: request.id });
   return { export: record, next: 'Report the export state as returned. The finished file appears in Film; earlier exports stay listed.' };
 }
 
