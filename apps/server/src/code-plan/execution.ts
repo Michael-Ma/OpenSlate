@@ -11,7 +11,8 @@ import { ExecutionIngestionRouter } from "../execution/ingestion-router.js";
 import type { ExecutionOutputStore } from "../execution/output-store.js";
 import type { Store } from "../persistence/store.js";
 
-export type CodePlanMediaKind = "image" | "video" | "render";
+import type { CodePlanMediaKind } from "./identity.js";
+export type { CodePlanMediaKind } from "./identity.js";
 export type CodePlanLiability = "reserved" | "charged" | "released";
 export interface CodePlanExecutionRecord {
   id: string; projectId: string; requestDigest: string; liability: CodePlanLiability;
@@ -58,7 +59,7 @@ export class CodePlanExecution {
   prepare(projectId: string, key: string, kind: CodePlanMediaKind, normalizedInput: JsonObject): Attempt {
     invariant(!this.stopping, "CODE_PLAN_CLOSED", "Code-plan execution is stopping");
     invariant(this.store.getProject(projectId).planMode === "code", "CODE_PLAN_MODE_INVALID", "Code execution requires a code-mode project");
-    invariant(/^[a-f0-9]{64}$/.test(key) && ["image", "video", "render"].includes(kind), "CODE_PLAN_INPUT_INVALID", "Use a content-addressed media step");
+    invariant(/^[a-f0-9]{64}$/.test(key) && ["image", "video", "speech", "render"].includes(kind), "CODE_PLAN_INPUT_INVALID", "Use a content-addressed media step");
     const input = structuredClone(normalizedInput);
     const prepared = this.store.transaction(() => {
       const workKey = `code-plan:${key}`, specDigest = digest({ kind, input });
