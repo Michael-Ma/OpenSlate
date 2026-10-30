@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 /** Immutable code-mode instructions; independent of shipped graph releases. */
 export const CODE_PLAN_V1_GUIDANCE_DIGEST = "d3811c72395713445f2167bb281273de28b058098189f9d8bec441d7b3d0052e";
-export const CODE_PLAN_GUIDANCE_DIGEST = "4e0a9ba54a8d9fb2996d06c19581d76734939381b74d2a792785ce8349399db6";
+export const CODE_PLAN_GUIDANCE_DIGEST = "6e7e40742d3a22074117614e981b34e8ba85fd63ddd335534f12c790aff6bb16";
 
 export interface DirectorSkillConfiguration { repositoryRoot: string; snapshotRoot: string; runtimeId?: string }
 

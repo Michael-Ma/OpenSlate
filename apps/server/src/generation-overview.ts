@@ -181,7 +181,7 @@ export class GenerationOverviewReader {
             remakeClip = { available: false, code: error.code };
           }
           overview.shots[shot.id] = { shotId: shot.id, sceneId: scene.id, label: `${index + 1}.${shotIndex + 1}`, framing: shot.framing, purpose: shot.purpose,
-            imagePrompt: shot.imagePrompt, motion: shot.motion, durationFrames: shot.desiredFrames, keyframe: { ...image, opened }, video, narration: audio, quotes: { regenerateKeyframe: quote(captured.lock, [row], "regenerateKeyframe"), remakeClip: quote(captured.lock, [row], "remakeClip") }, remakeClip,
+            imagePrompt: shot.imagePrompt, motion: shot.motion, durationFrames: shot.desiredFrames, keyframe: { ...image, opened }, video, narration: audio, quotes: { regenerateKeyframe: quote(captured.lock, [row], "regenerateKeyframe"), ...(quote(captured.lock, [row], "remakeClip") ? { remakeClip: quote(captured.lock, [row], "remakeClip")! } : {}) }, remakeClip,
             ...("lipSync" in row && row.lipSync ? { lipSync: row.lipSync } : {}) };
           if (image.state === "direction_required") blockers.push({ code: "direction_required", shotId: shot.id });
           else if (image.state !== "ready") blockers.push({ code: "keyframe_missing", shotId: shot.id });
@@ -214,7 +214,7 @@ export class GenerationOverviewReader {
             kind: attempt.kind, phase: attempt.phase, action: attempt.resolution.action })) ?? [],
           blockedByTotal: jobs?.total ?? 0, blockedByTruncated: jobs?.truncated ?? false,
           videoTargets: generationTargets(rows, "video").map(r => r.shotId), keyframeTargets: generationTargets(rows, "image").map(r => r.shotId),
-          quotes: { makeKeyframes: quote(captured.lock, rows, "makeKeyframes"), ...(commonRegenerationQuote ? { regenerateKeyframe: commonRegenerationQuote } : {}), confirmVideo: quote(captured.lock, rows, "confirmVideo"), voice: quote(captured.lock, rows, "voice"), ...(oneClip ? { oneClip } : {}), ...(oneVoice ? { oneVoice } : {}) },
+          quotes: { makeKeyframes: quote(captured.lock, rows, "makeKeyframes"), ...(commonRegenerationQuote ? { regenerateKeyframe: commonRegenerationQuote } : {}), ...(quote(captured.lock, rows, "confirmVideo") ? {confirmVideo: quote(captured.lock, rows, "confirmVideo")!} : {}), voice: quote(captured.lock, rows, "voice"), ...(oneClip ? { oneClip } : {}), ...(oneVoice ? { oneVoice } : {}) },
           ...(confirmation ? { confirmation: confirmationView(confirmation) } : {}),
           ...(keyframesRun ? { keyframesRun: confirmationView(keyframesRun) } : {}),
           blockers, confirmationDigest: shots.some(s => [s.keyframe.state, s.video.state].includes("choose_take")) ? null : view.confirmationDigest });

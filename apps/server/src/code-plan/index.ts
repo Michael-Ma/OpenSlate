@@ -1,4 +1,5 @@
-import { modelPrice, modelDescriptions } from "./models.js";
+import { videoI2vFailure } from "../execution/video-i2v-execution.js";
+import { modelPrice, modelDescriptions, codePlanPriceFrame } from "./models.js";
 import { createHash, randomInt } from "node:crypto";
 import { canonical, digest, DomainError, invariant, moneyMicros } from "@openslate/core";
 import type { JsonObject, JsonValue } from "@openslate/core";
@@ -273,8 +274,8 @@ export class CodePlanRuntime implements CodePlanPort {
       const artifacts = Object.values(attempt.outputs);
       invariant(state !== "succeeded" || artifacts.length > 0, "CODE_PLAN_JOURNAL", "A successful step requires ingested output");
       const failure = this.options.execution.failure(attempt.id), retry = failure.retry;
-      const result: CodePlanStep["result"] = state === "succeeded" ? { ok: true, artifact: artifacts[0]!, artifacts }
-        : state === "failed" ? { ok: false, error: { ...failure, message: "Provider execution failed" } } : null;
+      const result: CodePlanStep["result"] = state === "succeeded" ? { ok: true, artifact: (step.kind === "video" || step.kind === "render" ? attempt.outputs.video : step.kind === "image" ? attempt.outputs.image : attempt.outputs.audio) ?? artifacts[0]!, artifacts }
+        : state === "failed" ? { ok: false, error: { ...failure, message: videoI2vFailure(this.store, attempt)?.message ?? "Provider execution failed" } } : null;
       const automaticRetries = step.automaticRetries ?? 0;
       this.store.put("code_plan_step", step.id, projectId, { ...step, state, result, updatedAt: stamp(),
         ...(state === "failed" && retry === "safe" && automaticRetries < 2
@@ -342,7 +343,7 @@ export class CodePlanRuntime implements CodePlanPort {
         reused.add(key);
         return step.result ?? SANDBOX_PENDING;
       }
-      const priceMicros = modelPrice(models[String(input.model)]!);
+      const priceMicros = modelPrice(models[String(input.model)]!, input, codePlanPriceFrame(this.store, projectId, input));
       step = { ...(step ?? { id, projectId, key, kind, input, attemptId: null, result: null, createdAt: stamp() }),
         state: "absent", priceMicros,
         updatedAt: step?.state === "absent" && step.priceMicros === priceMicros ? step.updatedAt : stamp() };

@@ -93,7 +93,7 @@ export async function realCodeFixture(t, changes = {}) {
   f.tick = async () => { f.due(); await f.plans.tick(); };
   f.finish = async () => { for (let count=0;count<16;count++) { await f.tick(); const run=f.plans.getRun(f.project.id);
     if (run?.state === 'error') assert.fail(JSON.stringify(run.error));
-    if (run?.state === 'done') return run; }
+    if (run?.state === 'done' || run?.state === 'done_with_failures') return run; }
     assert.fail(JSON.stringify(f.plans.getRun(f.project.id))); };
   f.noGraph = () => { for (const kind of ['node_binding','candidate','grant','reservation','approval','review_snapshot'])
     assert.equal(f.store.list(kind,f.project.id).length,0,`Unexpected graph ${kind}`); };

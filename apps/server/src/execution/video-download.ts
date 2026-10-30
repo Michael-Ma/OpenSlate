@@ -72,18 +72,27 @@ export class ProtectedVideoDownloader {
     invariant(saved.kind === "video" && saved.port === "video" && saved.mimeType === "video/mp4"
       && saved.source.kind === "protected_locator" && typeof saved.vendorTaskId === "string" && saved.vendorTaskId.length > 0,
     "OUTPUT_DOWNLOAD_RECEIPT", "A known video task and protected locator receipt are required");
-    let url: URL;
-    try { url = new URL(saved.source.locator); } catch { throw new DomainError("OUTPUT_DOWNLOAD_LOCATOR", "Output locator is invalid"); }
-    invariant(saved.source.locator.length <= 8192 && !/[\u0000-\u0020\u007f]/.test(saved.source.locator)
-      && url.protocol === "https:" && url.port === "" && url.username === "" && url.password === "" && url.hash === ""
-      && hostName(url.hostname) && this.hosts.has(url.hostname), "OUTPUT_DOWNLOAD_LOCATOR", "Output locator is outside the configured HTTPS hosts");
-    const locator = url.href, expiresAt = saved.source.expiresAt;
-    invariant(expiresAt === null || (typeof expiresAt === "string" && Number.isFinite(Date.parse(expiresAt))),
-      "OUTPUT_DOWNLOAD_RECEIPT", "Output locator expiry is invalid");
-    return signal => this.download(locator, expiresAt, signal);
+    return this.locatorSource(saved.source.locator, saved.source.expiresAt, false);
   }
 
-  private async *download(locator: string, expiresAt: string | null, originalSignal: AbortSignal): AsyncGenerator<Uint8Array> {
+  /** Seedance returns a JPEG last frame; normalize it through LocalImageStore before publication. */
+  imageSource(input: { locator: string; expiresAt: string | null }): OutputByteSource {
+    return this.locatorSource(input.locator, input.expiresAt, true);
+  }
+  private locatorSource(locatorInput: string, expiry: string | null, image: boolean): OutputByteSource {
+    let url: URL;
+    try { url = new URL(locatorInput); } catch { throw new DomainError("OUTPUT_DOWNLOAD_LOCATOR", "Output locator is invalid"); }
+    invariant(locatorInput.length <= 8192 && !/[\u0000-\u0020\u007f]/.test(locatorInput)
+      && url.protocol === "https:" && url.port === "" && url.username === "" && url.password === "" && url.hash === ""
+      && hostName(url.hostname) && this.hosts.has(url.hostname), "OUTPUT_DOWNLOAD_LOCATOR", "Output locator is outside the configured HTTPS hosts");
+    const locator = url.href, expiresAt = expiry;
+    invariant(expiresAt === null || (typeof expiresAt === "string" && Number.isFinite(Date.parse(expiresAt))),
+      "OUTPUT_DOWNLOAD_RECEIPT", "Output locator expiry is invalid");
+    return signal => this.download(locator, expiresAt, signal, image);
+  }
+
+  private async *download(locator: string, expiresAt: string | null, originalSignal: AbortSignal, image = false): AsyncGenerator<Uint8Array> {
+    const maximum = image ? Math.min(this.maximum, 32 * 1024 * 1024) : this.maximum;
     interrupted(originalSignal);
     invariant(expiresAt === null || Date.parse(expiresAt) > Date.now(), "OUTPUT_DOWNLOAD_EXPIRED", "The saved output locator has expired");
     const abort = new AbortController(); let timedOut = false;
@@ -109,7 +118,7 @@ export class ProtectedVideoDownloader {
         client = this.request({ protocol: "https:", hostname: url.hostname, port: 443, servername: url.hostname,
           path: url.pathname + url.search, method: "GET", agent, lookup: pinnedLookup, family: 4, rejectUnauthorized: true,
           maxHeaderSize: VIDEO_DOWNLOAD_LIMITS.headerBytes, signal: abort.signal,
-          headers: { accept: "video/mp4,application/octet-stream", "accept-encoding": "identity" } }, resolve);
+          headers: { accept: image ? "image/jpeg,image/png,image/webp,application/octet-stream" : "video/mp4,application/octet-stream", "accept-encoding": "identity" } }, resolve);
         closed = new Promise<void>(done => client!.once("close", done));
         client.once("error", reject); client.end();
       });
@@ -117,17 +126,17 @@ export class ProtectedVideoDownloader {
       invariant(response.statusCode === 200, "OUTPUT_DOWNLOAD_HTTP_STATUS", "Output server did not return a complete file");
       const encoding = response.headers["content-encoding"], type = response.headers["content-type"];
       invariant((encoding === undefined || encoding === "identity") && (type === undefined
-        || (typeof type === "string" && ["video/mp4", "application/octet-stream"].includes(type.split(";")[0]!.trim().toLowerCase()))),
+        || (typeof type === "string" && (image ? ["image/jpeg", "image/png", "image/webp", "application/octet-stream"] : ["video/mp4", "application/octet-stream"]).includes(type.split(";")[0]!.trim().toLowerCase()))),
       "OUTPUT_DOWNLOAD_FORMAT", "Output server returned an unsupported content format");
       const length = response.headers["content-length"];
       invariant(length === undefined || (typeof length === "string" && /^\d+$/.test(length) && Number.isSafeInteger(Number(length))
-        && Number(length) > 0 && Number(length) <= this.maximum), "OUTPUT_DOWNLOAD_SIZE", "Output file exceeds the download size limit");
+        && Number(length) > 0 && Number(length) <= maximum), "OUTPUT_DOWNLOAD_SIZE", "Output file exceeds the download size limit");
       let received = 0;
       for await (const part of response) {
         interrupted(abort.signal);
         invariant(Buffer.isBuffer(part), "OUTPUT_DOWNLOAD_FORMAT", "Output body must contain raw bytes");
         received += part.length;
-        invariant(received <= this.maximum && (length === undefined || received <= Number(length)), "OUTPUT_DOWNLOAD_SIZE", "Output body exceeds its declared or configured size");
+        invariant(received <= maximum && (length === undefined || received <= Number(length)), "OUTPUT_DOWNLOAD_SIZE", "Output body exceeds its declared or configured size");
         for (let offset = 0; offset < part.length; offset += VIDEO_DOWNLOAD_LIMITS.chunkBytes) {
           interrupted(abort.signal); yield part.subarray(offset, offset + VIDEO_DOWNLOAD_LIMITS.chunkBytes);
         }

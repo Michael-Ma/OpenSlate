@@ -15,6 +15,8 @@ export function connectFailureCode(error: unknown): string | undefined {
   const cause = (error as { cause?: unknown }).cause;
   if (!cause || typeof cause !== "object") return;
   const connectCodes = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "UND_ERR_CONNECT_TIMEOUT"]);
+  // These can also surface on a live socket, so they count only from the connect() call itself.
+  const routeCodes = new Set(["ENETUNREACH", "EHOSTUNREACH", "ETIMEDOUT"]);
   const tlsCodes = new Set([
     "CERT_HAS_EXPIRED", "CERT_NOT_YET_VALID", "DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN",
     "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "ERR_TLS_CERT_ALTNAME_INVALID",
@@ -27,7 +29,8 @@ export function connectFailureCode(error: unknown): string | undefined {
       return children.length > 0 && children.every(child => child && typeof child === "object" && classify(child, connecting || connectingErrors.has(child)))
         ? classify(children[0] as object, connecting || connectingErrors.has(children[0] as object)) : undefined;
     }
-    return typeof row.code === "string" && (connectCodes.has(row.code) || connecting && tlsCodes.has(row.code)) ? row.code : undefined;
+    const refused = typeof row.code === "string" && routeCodes.has(row.code) && (value as { syscall?: unknown }).syscall === "connect";
+    return typeof row.code === "string" && (connectCodes.has(row.code) || refused || connecting && tlsCodes.has(row.code)) ? row.code : undefined;
   };
   return classify(cause);
 }
