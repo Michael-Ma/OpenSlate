@@ -381,13 +381,15 @@ export interface CreateBody {
   profileIds?: string[];
   /** Sent only for a code plan, so a storyboard film's request is exactly what it was before (card P3a item 2). */
   planMode?: "code";
+  /** A code film's starting spend limit, when this browser has one other than the standard $1 (Settings). */
+  ceilingMicros?: string;
 }
 
-export function createBody(name: string, plan: Pick<ModelPlan, "selection"> | null, untitled: string, planning: Planning = "graph"): CreateBody {
+export function createBody(name: string, plan: Pick<ModelPlan, "selection"> | null, untitled: string, planning: Planning = "graph", ceilingMicros: string | null = null): CreateBody {
   const trimmed = name.trim().slice(0, 160) || untitled;
   const selection = plan?.selection;
   const body: CreateBody = selection ? { name: trimmed, expectedCatalogDigest: selection.expectedCatalogDigest, profileIds: [...selection.profileIds] } : { name: trimmed };
-  return planning === "code" ? { ...body, planMode: "code" } : body;
+  return planning === "code" ? { ...body, planMode: "code", ...(ceilingMicros ? { ceilingMicros } : {}) } : body;
 }
 
 /** A written plan is read into a storyboard (POST /plan-imports); a code-plan film starts from the Director or empty. */

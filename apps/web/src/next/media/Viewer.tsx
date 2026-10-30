@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { Picture } from "../keyframes/parts.tsx";
 import { Modal } from "../views/plan/Modal.tsx";
+import { useMode } from "../store/react.tsx";
 import { useArtifactUrl } from "./useArtifactUrl.ts";
 import "./viewer.css";
 
@@ -76,7 +77,10 @@ export function MediaViewer({ items, start, onClose }: { items: ViewerItem[]; st
 
 function ViewerClip({ artifact, title }: { artifact: StudioArtifactRef; title: string }) {
   const { t } = useI18n();
-  const source = useArtifactUrl(artifact);
+  // The sample studio has no video files: the clip's first frame stands in, as in Film's player.
+  const live = useMode() === "live";
+  const source = useArtifactUrl(live ? artifact : null);
+  if (!live) return <Picture artifact={{ ...artifact, kind: "image" }} alt={title} />;
   if (source.status === "failed") return <div className="pic-note" role="status">{t("preview.clip.failed")}</div>;
   if (source.status !== "ready") return <div className="pic-note pic-loading" role="status">{t("preview.clip.loading")}</div>;
   return <video className="mv-video" src={source.url} controls autoPlay playsInline aria-label={title} />;
