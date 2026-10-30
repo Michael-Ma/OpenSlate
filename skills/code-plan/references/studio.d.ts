@@ -8,7 +8,7 @@ interface Studio {
   shot<T extends { [key: string]: Json }>(declaration: T): Promise<T>;
   image(input: MediaInput & { prompt: string }): Promise<MediaResult>;
   video(input: MediaInput & { firstFrame: Artifact; prompt: string; durationSeconds?: number }): Promise<MediaResult>;
-  /** Currently returns {ok:false,error:{code:"NOT_IMPLEMENTED",message:string}}. */
+  /** A spoken line; default model fake-speech with voice "fixture". */
   speech(input: MediaInput & { text: string; voice?: string }): Promise<MediaResult>;
   /** Current local renderer is a fixture. Timeline rows are JSON, typically artifact refs. */
   render(timeline: Json[] | (MediaInput & { timeline: Json[] })): Promise<MediaResult>;

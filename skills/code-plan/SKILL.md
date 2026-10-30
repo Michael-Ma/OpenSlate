@@ -15,12 +15,12 @@ If no edit is needed, reply without submitting. The turn's terminal state releas
 All effects go through ctx. Await every ctx call, including declarations and logging; await Promise.all when running media concurrently.
 `scene(declaration)` and `shot(declaration)` accept bounded JSON objects, return those objects, and declare storyboard rows for this pass.
 `image({model?, prompt, variant?, ...parameters})` returns a media result. `video({model?, firstFrame, prompt, durationSeconds?, variant?, ...parameters})` does the same for clips.
-`speech({model?, text, voice?, variant?, ...parameters})` returns a media result; this experimental runtime currently returns NOT_IMPLEMENTED.
+`speech({model?, text, voice?, variant?, ...parameters})` returns a media result for a spoken line (default model fake-speech, voice "fixture").
 `render(timeline)` or `render({model?: "local-render", timeline, ...parameters})` returns a media result for local assembly. The current renderer is a labeled fixture.
 A media result is `{ok:true, artifact, artifacts}` or `{ok:false, error:{code,message}}`. Branch on ok before using an artifact. Provider failure is data; programming errors throw.
 `choose(id, {question, options})` accepts a nonempty array of JSON options and returns the chosen option exactly; execution waits until answered.
 `log(text)` returns null and records a bounded run-log line.
-The available initial models are fake-image, fake-video (default durationSeconds 6), and local-render. Never invent model availability or real-provider success.
+The available initial models are fake-image, fake-video (default durationSeconds 6), fake-speech (priced) and local-render. Never invent model availability or real-provider success.
 
 Replay starts at the top and reuses media by normalized input content, independent of code location.
 Use variant for deliberate duplicates of one prompt; otherwise identical inputs reuse the same step.
