@@ -119,7 +119,7 @@ Researched October 30, 2026; official docs and pricing pages; no account was use
 
 - Seedance through BytePlus ModelArk, official.
 - No cap on limit changes made in chat.
-- Music: compare Stable Audio with the alternatives before choosing (Wave B).
+- Music: **Lyria 3.5 through the Gemini API**, using the same key variable as song analysis (`OPENSLATE_GEMINI_API_KEY`). It is paid tier only: the key's Google project needs billing. On October 30 that variable was not set on this machine, so the owner adds it. Card N3.
 - Start Wave A.
 
 ## Phases and owners
