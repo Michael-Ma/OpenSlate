@@ -52,8 +52,12 @@ import { EnvironmentMediaCredentials } from "./application/provider-credentials.
 import { GeminiMusicListener } from "./media/music-enrichment.js";
 import { registerMusicEnrichmentRoutes } from "./media/music-enrichment-routes.js";
 import { LocalMusicAnalyzer } from "./media/music-analyzer.js";
+import { registerCodePlanRoutes } from "./code-plan/routes.js";
+import type { CodePlanPort } from "./code-plan/port.js";
+import { holdCodePlanRequest, wireCodePlans } from "./code-plan/director.js";
 
 interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: ProductionService; localToken?: string;
+  codePlans?: CodePlanPort;
   /** true logs to stdout; a stream receives the same JSON lines (tests). */
   logger?: boolean | { stream: { write(line: string): void } };
   /** Log every request and response (off by default: the studio's own refreshes would flood the log). Warnings and errors are always logged. */
@@ -78,6 +82,7 @@ const string = { type: "string", minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[]) => ({ type: "object", additionalProperties: false, properties, required });
 
 export function createApp(options: AppOptions = {}) {
+  if (options.service && options.codePlans) wireCodePlans(options.service, options.codePlans);
   const app = Fastify({ logger: options.logger ?? false, logController: new LogController({ disableRequestLogging: !options.logRequests }), bodyLimit: 3 * 1024 * 1024,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
   const allowedOrigins = options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS;
@@ -106,7 +111,7 @@ export function createApp(options: AppOptions = {}) {
       const nativeDiagnostic = error.code === "DIRECTOR_SETUP_REQUIRED"
         ? safeNativeDiagnostic((error.details as { nativeDiagnostic?: unknown } | undefined)?.nativeDiagnostic) : undefined;
       void reply.status(status).send({ error: { code: error.code, message: error.message,
-        ...(error instanceof GenerationAttemptBlockedError ? { details: error.recovery } : nativeDiagnostic ? { details: { nativeDiagnostic } } : ["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH", "PROPOSAL_PENDING", "GUIDANCE_READ_LIMIT"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
+        ...(error instanceof GenerationAttemptBlockedError ? { details: error.recovery } : nativeDiagnostic ? { details: { nativeDiagnostic } } : ["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH", "PROPOSAL_PENDING", "GUIDANCE_READ_LIMIT", "CODE_PLAN_REJECTED"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
     } else if ((error as { validation?: unknown }).validation) void reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: "Request does not match its schema" } });
     else { app.log.error(error); void reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "The operation could not be completed" } }); }
   });
@@ -115,7 +120,8 @@ export function createApp(options: AppOptions = {}) {
     invariant(host === "127.0.0.1" || host === "localhost", "ORIGIN_DENIED", "Use a loopback address");
     const origin = request.headers.origin;
     invariant(!origin || allowedOrigins.includes(origin), "ORIGIN_DENIED", "Origin is not permitted");
-    const requiresCommandKey = request.method === "POST" && ["/api/projects/:projectId/controls", "/api/projects/:projectId/scenes/:sceneId/generate", "/api/projects/:projectId/scenes/:sceneId/confirm", "/api/projects/:projectId/shots/:shotId/narration-fit"].includes(request.routeOptions.url ?? "");
+    const requiresCommandKey = request.method === "POST" && ["/api/projects/:projectId/controls", "/api/projects/:projectId/scenes/:sceneId/generate", "/api/projects/:projectId/scenes/:sceneId/confirm", "/api/projects/:projectId/shots/:shotId/narration-fit",
+      "/api/projects/:projectId/code-plan/choices", "/api/projects/:projectId/code-plan/ceiling", "/api/projects/:projectId/code-plan/source"].includes(request.routeOptions.url ?? "");
     const commandKey = request.headers["idempotency-key"];
     invariant(requiresCommandKey || commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
     if (request.routeOptions.url === "/api/health" || isPublicWebRequest(request)) return;
@@ -145,6 +151,7 @@ export function createApp(options: AppOptions = {}) {
     "INSTALLATION_QUARANTINED", "Review this restored installation before making changes");
   });
   registerPlanImports(app, service, options.director);
+  if (options.codePlans) registerCodePlanRoutes(app, service, options.codePlans);
   registerStoryboard(app, service);
   registerCharacters(app, service);
   registerShotTakes(app, service);
@@ -202,14 +209,14 @@ export function createApp(options: AppOptions = {}) {
     try { return await modelSettings().apply(request.params.projectId, { ...request.body, key: request.headers["idempotency-key"] as string | undefined ?? newId() }, { signal: abort.signal }); }
     finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
   });
-  app.post<{ Body: { name: string; expectedCatalogDigest?: string; profileIds?: string[] } }>("/api/projects", {
+  app.post<{ Body: { name: string; planMode?: "graph" | "code"; expectedCatalogDigest?: string; profileIds?: string[] } }>("/api/projects", {
     schema: { body: { ...object({ name: string, expectedCatalogDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
-      profileIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: string } }, ["name"]),
+      profileIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: string }, planMode: { enum: ["graph", "code"] } }, ["name"]),
       dependencies: { expectedCatalogDigest: ["profileIds"], profileIds: ["expectedCatalogDigest"] } } },
   }, async request => service().store.command("local-user:create-project", request.headers["idempotency-key"] as string | undefined ?? newId(), digest(request.body), () => {
     // Resolve only for a new command: a replay must not adopt or reject a later installation catalog.
     const selection = request.body.profileIds ? providerCatalog().select(request.body.expectedCatalogDigest!, request.body.profileIds) : undefined;
-    return service().createProject(request.body.name, selection);
+    return service().createProject(request.body.name, selection, request.body.planMode);
   }));
   registerAssetLibrary(app, service);
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async request => service().snapshot(request.params.projectId));
@@ -264,7 +271,10 @@ export function createApp(options: AppOptions = {}) {
         { ...request.body, contextDigest: attachmentMessageContext(images, attachments, request.body.replyToReviewId), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
       if (attachments) options.runtimeSettings!.recordAttachments(request.params.projectId, actor, attachments, images);
       else if (images) options.runtimeSettings!.recordImages(request.params.projectId, actor, images);
-      if (!request.body.replyToReviewId) options.director?.enqueue(request.params.projectId, actor);
+      if (!request.body.replyToReviewId && options.director) {
+        holdCodePlanRequest(service(), request.params.projectId, actor.requestId);
+        options.director.enqueue(request.params.projectId, actor);
+      }
       return actor;
     });
     if (request.body.replyToReviewId) return service().replyToReview(request.params.projectId, actor, request.body.replyToReviewId, text);
@@ -396,6 +406,7 @@ export function createApp(options: AppOptions = {}) {
     request.raw.on("aborted", disconnected); reply.raw.on("close", disconnected);
     const ports = options.narrationRoutes;
     try { return await new ToolInvocationService(service(), {
+      ...(options.codePlans ? { codePlans: options.codePlans } : {}),
       ...(sceneCommands ? { enqueueVoice: sceneCommands.enqueueKeyframes } : {}),
       ...(ports?.ownedTranscription ? { ownedTranscription: ports.ownedTranscription } : {}),
       ...(ports?.narrationSpeech ? { narrationSpeech: ports.narrationSpeech } : {}),
@@ -403,6 +414,11 @@ export function createApp(options: AppOptions = {}) {
       ...(exportLauncher ? { exports: exportLauncher } : {}),
       ...(musicListener ? { musicAnalyzers: { local: new LocalMusicAnalyzer(service(), ports?.narration), enrichment: musicListener } } : {}),
     }).invoke(projectId, actor, callId, tool, request.body, { signal: abort.signal }); }
+    catch (error) {
+      if (tool === "submit_plan" && error instanceof DomainError && error.code === "CODE_PLAN_REJECTED")
+        return reply.code(400).send({ error: { code: error.code, message: error.message, details: error.details } });
+      throw error;
+    }
     finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
   });
   return app;

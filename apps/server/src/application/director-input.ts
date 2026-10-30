@@ -22,11 +22,13 @@ import { createDirectorSkillLock, directorSkillEnvironment } from "./director-ca
 import { createCurrentShippedDirectorSkillLock } from "./director-shipped-guidance.js";
 import type { DirectorToolSettings } from "./director-tools-upgrade.js";
 import type { ShippedReleaseGuidance } from "./director-shipped-guidance.js";
+import { codeDirectorInput } from "../code-plan/director.js";
 
 /** Load/version once, activate against fresh canonical state on every request. */
 export function createDirectorInput(service: ProductionService, options: { repositoryRoot: string; snapshotRoot: string; endpoint: string; runtimeId?: string; defaultToolContract?: ToolContractVersion; freshTurnGuidance?: DirectorToolSettings; /** Shipped release rows; tests of earlier eras pass []. */ releases?: readonly ShippedReleaseGuidance[] }): NonNullable<SupervisorOptions["prepareInput"]> {
   const defaultVersion = toolCatalog(options.defaultToolContract ?? "6.0.0").version;
   return (turn, human, bridge): DirectorRunInput => {
+    if (service.store.getProject(turn.projectId).planMode === "code") return codeDirectorInput(service, options, turn, bridge);
     if (bridge.actor.kind !== "director") throw new Error("Director actor required");
     const epochLock = service.store.get<{ projectId: string; requestId: string; lockId: string }>("director_epoch_lock", bridge.actor.epochId);
     invariant(!epochLock || (epochLock.projectId === turn.projectId && epochLock.requestId === turn.requestId), "CAPABILITY_MISMATCH", "Director epoch lock belongs to different work");

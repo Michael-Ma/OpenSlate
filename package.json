@@ -19,6 +19,7 @@
     "check": "node scripts/test-toolchain.mjs && pnpm test && pnpm -r typecheck",
     "test": "pnpm build && node scripts/run-tests.mjs",
     "demo:headless": "pnpm build && node apps/server/dist/demo.js",
+    "demo:code": "pnpm build && node scripts/demo-code.mjs",
     "probe:runtime": "pnpm build:packages && node packages/director/dist/probe/cli.js",
     "probe:launcher": "pnpm build && node apps/server/test/launcher-smoke.mjs",
     "probe:workflow": "pnpm build && node apps/server/test/six-minute-workflow-smoke.mjs",

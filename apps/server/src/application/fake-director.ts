@@ -8,6 +8,7 @@ import { derivedShotPrompts } from "./shot-prompts.js";
 import { GenerationOverviewReader } from "../generation-overview.js";
 import { isKeyframeReview } from "./keyframe-review.js";
 import { directorProposals } from "./director-proposals.js";
+import { CODE_PLAN_TOOL_CONTRACT } from "@openslate/core";
 
 export interface DemoCommand { action: "create" | "close_up" | "wide" | "review"; shotId?: string; sceneId?: string }
 
@@ -44,6 +45,17 @@ export class FakeWorkflowDirector implements DirectorRuntime {
       options.signal?.throwIfAborted();
       return calls.invoke(input.projectId, actor, `demo-${++ordinal}`, tool, args);
     };
+    if (input.bridge.toolContractVersion === CODE_PLAN_TOOL_CONTRACT) {
+      const film = await invoke("read_film", {}) as { planVersion: number | null };
+      const references = JSON.parse(input.context).references as { skillId: string; path: string; content: string }[];
+      const example = references.find(row => row.skillId === "code-plan" && row.path === "references/example-plan.ts");
+      invariant(example, "CAPABILITY_MISMATCH", "Code-plan example is missing from the pinned instructions");
+      const receipt = await invoke("submit_plan", { source: example.content, basedOnVersion: film.planVersion,
+        summary: "Scripted two-shot example with frame choices, fallback clips and a render." }) as { version: number; diff: unknown };
+      const text = `Scripted code-plan version ${receipt.version} saved. Dry-run diff: ${JSON.stringify(receipt.diff)}`;
+      await options.onEvent?.({ ...identity, kind: "assistant_message", text, phase: "final" });
+      return { ...identity, status: "completed", text, dispatched: true };
+    }
     await invoke("read_context", {});
     const command = this.service.store.get<DemoCommand>("demo_command", input.requestId);
     let text = "Your message is saved. Use Create a 2-shot demo to explore this scripted demonstration, then review its frames or try a scoped close-up/wide edit. Connect the Codex runtime for creative conversation.";

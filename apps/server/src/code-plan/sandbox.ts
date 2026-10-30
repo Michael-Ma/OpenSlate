@@ -2,8 +2,8 @@ import { stripTypeScriptTypes } from "node:module";
 import * as process from "node:process";
 import { performance } from "node:perf_hooks";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
-import { getQuickJS } from "@tootallnate/quickjs-emscripten";
-import type { QuickJSContext, QuickJSDeferredPromise, QuickJSHandle } from "@tootallnate/quickjs-emscripten";
+import { getQuickJS } from "quickjs-emscripten";
+import type { QuickJSContext, QuickJSDeferredPromise, QuickJSHandle } from "quickjs-emscripten";
 
 /** A durable effect is still pending. It must be looked up again on the next pass. */
 export const SANDBOX_PENDING = Symbol("code-plan-pending");
@@ -19,6 +19,8 @@ export interface SandboxOptions {
 export interface SandboxResult {
   state: "done" | "waiting" | "error";
   error?: { message: string; stack: string };
+  errorCode?: "SOURCE_SYNTAX";
+  unawaitedCalls?: string[];
 }
 
 // These are bridge bounds, independent of the journal's stricter media-step limit.
@@ -136,7 +138,7 @@ async function runSandboxLocal(options: SandboxOptions): Promise<SandboxResult> 
   if (invalid) return errorResult(invalid);
   let source: string;
   try { source = stripTypeScriptTypes(options.source, { mode: "strip" }); }
-  catch (error) { return errorResult(error); }
+  catch (error) { return { ...errorResult(error), errorCode: "SOURCE_SYNTAX" }; }
 
   const quickJS = await getQuickJS();
   const runtime = quickJS.newRuntime();
@@ -232,6 +234,22 @@ async function runSandboxLocal(options: SandboxOptions): Promise<SandboxResult> 
       const parse = JSON.parse, stringify = JSON.stringify;
       const PromiseClass = Promise, resolve = Promise.resolve.bind(Promise);
       const then = Function.prototype.call.bind(Promise.prototype.then);
+      const calls = [], observations = new WeakMap();
+      const getObservation = Function.prototype.call.bind(WeakMap.prototype.get);
+      const setObservation = Function.prototype.call.bind(WeakMap.prototype.set);
+      const push = Function.prototype.call.bind(Array.prototype.push);
+      const filter = Function.prototype.call.bind(Array.prototype.filter);
+      const map = Function.prototype.call.bind(Array.prototype.map);
+      // Await bypasses .then on native promises. A Promise subclass forces
+      // thenable assimilation for await as well as Promise.all/then/catch.
+      class ObservedCall extends PromiseClass {
+        static get [Symbol.species]() { return PromiseClass; }
+        then(onValue, onError) {
+          const observation = getObservation(observations, this);
+          if (observation) observation.observed = true;
+          return then(this, onValue, onError);
+        }
+      }
       const NativeDate = Date;
       function FrozenDate(...args) {
         return new.target ? Reflect.construct(NativeDate, args.length ? args : [${JSON.stringify(options.now)}], new.target) : new NativeDate(${JSON.stringify(options.now)}).toString();
@@ -260,26 +278,34 @@ async function runSandboxLocal(options: SandboxOptions): Promise<SandboxResult> 
             if (typeof result !== "string") throw new Error("Declaration and log calls must resolve synchronously");
             return parse(result).value;
           }
-          if (result === undefined) return new PromiseClass(() => {});
-          return typeof result === "string" ? resolve(parse(result).value) : then(result, json => parse(json).value);
+          const promise = new ObservedCall((settle, reject) => {
+            if (result === undefined) return;
+            if (typeof result === "string") settle(parse(result).value);
+            else then(result, json => settle(parse(json).value), reject);
+          });
+          const observation = { method, observed: false };
+          setObservation(observations, promise, observation);
+          push(calls, observation);
+          return promise;
         };
       }
       Object.freeze(ctx);
-      return film => {
+      return { inspect: () => stringify(map(filter(calls, call => !call.observed), call => call.method)), run: film => {
         let result;
         try { result = film(ctx); }
         catch (error) { finish("error", error); return; }
         return then(resolve(result), () => finish("done", ""), error => finish("error", error));
-      };
+      } };
     })()`, "code-plan-bootstrap.js"));
     if (setup.error) {
       try { return failure(setup.error); } finally { setup.error.dispose(); }
     }
-    const runner = setup.value;
-    handles.push(runner);
+    const bootstrap = setup.value;
+    const runner = vm.getProp(bootstrap, "run"), inspect = vm.getProp(bootstrap, "inspect");
+    handles.push(bootstrap, runner, inspect);
     const loaded = execute(() => vm.evalCode(source, "plan.ts", { type: "module" }));
     if (loaded.error) {
-      try { return failure(loaded.error); } finally { loaded.error.dispose(); }
+      try { return { ...failure(loaded.error), errorCode: "SOURCE_SYNTAX" }; } finally { loaded.error.dispose(); }
     }
     loaded.value.dispose();
     let film: QuickJSHandle | undefined;
@@ -288,13 +314,13 @@ async function runSandboxLocal(options: SandboxOptions): Promise<SandboxResult> 
     vm.defineProp(vm.global, "__codePlanCapture", { value: capture, configurable: true });
     const entry = execute(() => vm.evalCode('import film from "plan.ts"; globalThis.__codePlanCapture(film); delete globalThis.__codePlanCapture;', "code-plan-entry.js", { type: "module" }));
     if (entry.error) {
-      try { return failure(entry.error); } finally { entry.error.dispose(); }
+      try { return { ...failure(entry.error), errorCode: "SOURCE_SYNTAX" }; } finally { entry.error.dispose(); }
     }
     entry.value.dispose();
-    if (!film) return errorResult("The plan must export a default function");
+    if (!film) return { ...errorResult("The plan must export a default function"), errorCode: "SOURCE_SYNTAX" };
     const plan = film;
     handles.push(plan);
-    if (vm.typeof(plan) !== "function") return errorResult("The plan must export a default function");
+    if (vm.typeof(plan) !== "function") return { ...errorResult("The plan must export a default function"), errorCode: "SOURCE_SYNTAX" };
     const started = execute(() => vm.callFunction(runner, vm.undefined, plan));
     if (started.error) {
       try { return failure(started.error); } finally { started.error.dispose(); }
@@ -318,21 +344,33 @@ async function runSandboxLocal(options: SandboxOptions): Promise<SandboxResult> 
         await new Promise<void>((resolve) => setImmediate(resolve));
         continue;
       }
-      return completion ?? { state: "waiting" };
+      const observed = execute(() => vm.callFunction(inspect, vm.undefined));
+      if (observed.error) {
+        try { return failure(observed.error); } finally { observed.error.dispose(); }
+      }
+      const unawaitedCalls = JSON.parse(vm.getString(observed.value)) as string[];
+      observed.value.dispose();
+      return { ...(completion ?? { state: "waiting" }), ...(unawaitedCalls.length ? { unawaitedCalls } : {}) };
     }
     return fatal;
   } catch (error) {
     return interrupted ? errorResult(`Sandbox CPU limit exceeded (${cpuMs} ms)`) : errorResult(error);
   } finally {
     active = false;
-    // The worker is terminated after its result. The cached QuickJS 0.23.0
-    // allocator can assert while freeing async functions after an OOM; never
-    // reuse that module or let allocator teardown override the recorded result.
-    // Worker termination releases the complete WASM memory and all host handles.
+    // Discard the entire interpreter, including after OOM/interruption. Worker
+    // termination releases the WASM memory and all host handles without
+    // depending on successful teardown of a damaged guest allocator.
   }
 }
 
 if (!isMainThread && workerData?.kind === WORKER_KIND && parentPort) {
+  // Every pass is a fresh worker, so Node would repeat the stripTypeScriptTypes ExperimentalWarning on each one.
+  const host = globalThis.process, emitWarning = host.emitWarning.bind(host) as (...args: unknown[]) => void;
+  host.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
+    const type = typeof rest[0] === "string" ? rest[0] : (rest[0] as { type?: string } | undefined)?.type;
+    if (type === "ExperimentalWarning" && String(warning).includes("stripTypeScriptTypes")) return;
+    emitWarning(warning, ...rest);
+  }) as typeof host.emitWarning;
   const port = parentPort;
   const shared = workerData.shared as SharedArrayBuffer;
   const control = new Int32Array(shared, 0, 1);

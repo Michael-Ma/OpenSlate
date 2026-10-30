@@ -14,10 +14,10 @@
     "@openslate/core": "workspace:*",
     "@openslate/director": "workspace:*",
     "@openslate/providers": "workspace:*",
-    "@tootallnate/quickjs-emscripten": "0.23.0",
     "better-sqlite3": "13.0.3",
     "fastify": "5.12.3",
-    "pdfjs-dist": "5.4.296"
+    "pdfjs-dist": "5.4.296",
+    "quickjs-emscripten": "0.32.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",

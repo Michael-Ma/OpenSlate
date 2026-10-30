@@ -1,4 +1,4 @@
-import { RELEASED_TOOL_CONTRACTS, toolContractAtLeast } from "@openslate/core";
+import { CODE_PLAN_TOOL_CONTRACT, RELEASED_TOOL_CONTRACTS, toolContractAtLeast } from "@openslate/core";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import type { ActorContext, ToolContractVersion } from "@openslate/core";
 import type { SkillCapabilityLock } from "@openslate/director";
@@ -45,6 +45,9 @@ export class DirectorToolSettings {
   }
   status(projectId: string) {
     const saved = this.latest(projectId);
+    if (this.service.store.getProject(projectId).planMode === "code") return {
+      currentVersion: CODE_PLAN_TOOL_CONTRACT, lockId: saved?.id ?? null, lockDigest: saved?.lock.lockDigest ?? null,
+      availableVersion: CODE_PLAN_TOOL_CONTRACT, upgradeAvailable: false, busy: this.busy(projectId) };
     return { currentVersion: saved?.lock.compatibility.toolContract ?? currentShippedToolContract(this.releases), lockId: saved?.id ?? null,
       lockDigest: saved?.lock.lockDigest ?? null, availableVersion: currentShippedToolContract(this.releases),
       upgradeAvailable: !!saved && !isCurrentShippedDirectorGuidance(saved.lock, this.releases), busy: this.busy(projectId) };
@@ -56,6 +59,7 @@ export class DirectorToolSettings {
     invariant(actor.kind === "director", "ACTOR_DENIED", "Director guidance requires an application-owned epoch");
     this.service.recovery.assertWritable(projectId, actor.requestId);
     this.service.assertActor(projectId, actor);
+    if (store.getProject(projectId).planMode === "code") return this.latest(projectId)?.lock;
     const binding = store.get<{ projectId: string; requestId: string; lockId: string }>("director_epoch_lock", actor.epochId);
     if (binding) {
       invariant(binding.projectId === projectId && binding.requestId === actor.requestId, "CAPABILITY_MISMATCH", "Director epoch belongs to different work");
@@ -113,6 +117,7 @@ export class DirectorToolSettings {
 
   upgrade(projectId: string, input: DirectorToolsUpgrade, key: string) {
     this.service.recovery.assertWritable(projectId);
+    invariant(this.service.store.getProject(projectId).planMode !== "code", "CODE_PLAN_MODE", "Graph tool upgrades do not apply to code films");
     invariant(input && Object.keys(input).every(field => ["expectedLockId", "expectedLockDigest", "targetVersion"].includes(field))
       && typeof input.expectedLockId === "string" && input.expectedLockId.length > 0 && input.expectedLockId.length <= 160
       && typeof input.expectedLockDigest === "string" && /^[a-f0-9]{64}$/.test(input.expectedLockDigest)

@@ -6,6 +6,8 @@ import type { StudioStore } from "./store.ts";
 interface StudioContextValue {
   store: StudioStore;
   media: MediaSource;
+  /** Where a code-plan step's media is read (api/code-plan.ts); absent: the same source as every other picture. */
+  codePlanMedia?: MediaSource;
   /** "live" talks to the studio server; "fixture" is the Last Ferry sample film with simulated actions. */
   mode: "live" | "fixture";
   /** Shared per-film drafts this window already handed to the next session through Disconnect. */
@@ -25,7 +27,23 @@ function useStudioContext(): StudioContextValue {
 }
 
 export const useStore = (): StudioStore => useStudioContext().store;
-export const useMedia = (): MediaSource => useStudioContext().media;
+
+const MediaScope = createContext<MediaSource | null>(null);
+
+/**
+ * Inside a code-plan screen, pictures and clips are a code-plan step's media and come from its own route: every
+ * Picture, thumbnail and player below reads through the session's codePlanMedia, with the same verification and cache.
+ */
+export function CodePlanMedia({ children }: { children: ReactNode }) {
+  const { codePlanMedia, media } = useStudioContext();
+  return <MediaScope.Provider value={codePlanMedia ?? media}>{children}</MediaScope.Provider>;
+}
+
+export const useMedia = (): MediaSource => {
+  const scoped = useContext(MediaScope);
+  const { media } = useStudioContext();
+  return scoped ?? media;
+};
 export const useMode = (): "live" | "fixture" => useStudioContext().mode;
 const NO_RELINQUISHED_DRAFTS = new Set<string>();
 export const useRelinquishedDrafts = (): Set<string> => useStudioContext().relinquishedDrafts ?? NO_RELINQUISHED_DRAFTS;

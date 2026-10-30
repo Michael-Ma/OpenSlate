@@ -1,9 +1,13 @@
 import type { ArtifactRef, JsonObject, JsonValue } from "@openslate/core";
 import type { CodePlanMediaKind } from "./identity.js";
+import type { CodePlanDiff } from "@openslate/core/public";
 
 export interface CodePlanVersion {
   id: string; projectId: string; version: number; source: string; sha256: string; author: "director" | "user"; createdAt: string;
+  diff?: CodePlanDiff;
 }
+export interface CodePlanHold { id: string; projectId: string; holdId: string; released: boolean }
+export interface CodePlanInvocation { id: string; projectId: string; invocationId: string; version: number; diff: CodePlanDiff }
 export type CodePlanResult = { ok: true; artifact: ArtifactRef; artifacts: ArtifactRef[] }
   | { ok: false; error: { code: string; message: string } };
 export interface CodePlanStep {

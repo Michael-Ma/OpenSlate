@@ -1,5 +1,6 @@
 import { EventStreamParser, type StreamEvent } from "../../shared/event-stream.ts";
 import type { StudioArtifactRef } from "@openslate/core/public";
+import { artifactContentPath, codePlanArtifactContentPath } from "./code-plan.ts";
 
 /** A refused or failed request. The web shows `code` through a message id, never a server sentence. */
 export class ApiError extends Error {
@@ -170,15 +171,23 @@ export class StudioClient {
     }
   }
 
-  /** Download an artifact, verify its SHA-256 and return an object URL. The caller revokes it. */
-  async artifactUrl(projectId: string, artifact: Pick<StudioArtifactRef, "artifactId" | "sha256" | "kind">, signal?: AbortSignal): Promise<string> {
+  /**
+   * Download an artifact, verify its SHA-256 and return an object URL. The caller revokes it. `contentPath` is the
+   * route that serves it: the artifact route by default, the code-plan route for a code-plan step's media.
+   */
+  async artifactUrl(projectId: string, artifact: Pick<StudioArtifactRef, "artifactId" | "sha256" | "kind">, signal?: AbortSignal, contentPath = artifactContentPath(projectId, artifact.artifactId)): Promise<string> {
     const limit = artifact.kind === "image" ? 32 * 1024 * 1024 : 256 * 1024 * 1024;
-    const response = await this.#send(`/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifact.artifactId)}/content`, { ...(signal ? { signal } : {}), timeoutMs: 90000 });
+    const response = await this.#send(contentPath, { ...(signal ? { signal } : {}), timeoutMs: 90000 });
     if (Number(response.headers.get("content-length") ?? 0) > limit) throw new ApiError("ARTIFACT_TOO_LARGE");
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > limit) throw new ApiError("ARTIFACT_TOO_LARGE");
     if (hex(await crypto.subtle.digest("SHA-256", bytes)) !== artifact.sha256) throw new ApiError("ARTIFACT_CHANGED");
     const mime = response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream";
     return URL.createObjectURL(new Blob([bytes], { type: mime }));
+  }
+
+  /** A code-plan step's media (code-plan.ts says which route serves it), verified the same way. */
+  codePlanArtifactUrl(projectId: string, artifact: Pick<StudioArtifactRef, "artifactId" | "sha256" | "kind">, signal?: AbortSignal): Promise<string> {
+    return this.artifactUrl(projectId, artifact, signal, codePlanArtifactContentPath(projectId, artifact.artifactId));
   }
 }

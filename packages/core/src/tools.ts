@@ -12,18 +12,21 @@ export const V6_TOOL_NAMES = Object.freeze([...V5_TOOL_NAMES, "make_keyframes", 
 export const V7_TOOL_NAMES = Object.freeze([...V6_TOOL_NAMES, "set_soundtrack", "move_shot", "move_scene", "start_export", "undo_edit",
   "delete_shots", "delete_scene", "use_take", "analyze_music", "make_character_sheets", "read_guidance", "propose_visual_style"] as const);
 /** Every tool name any catalog has advertised. */
-export const ALL_TOOL_NAMES = V7_TOOL_NAMES;
+export const CODE_PLAN_TOOL_CONTRACT = "0.1.0";
+export const CODE_PLAN_TOOL_NAMES = Object.freeze(["read_film", "submit_plan"] as const);
+export const ALL_TOOL_NAMES = Object.freeze([...V7_TOOL_NAMES, ...CODE_PLAN_TOOL_NAMES] as const);
 export type ToolName = typeof ALL_TOOL_NAMES[number];
 export const TOOL_CONTRACT_VERSION = "1.0.0";
 export const SUPPORTED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0", "7.0.0", "7.1.0"] as const);
-export type ToolContractVersion = typeof SUPPORTED_TOOL_CONTRACTS[number];
+export type ToolContractVersion = typeof SUPPORTED_TOOL_CONTRACTS[number] | typeof CODE_PLAN_TOOL_CONTRACT;
 /** Contracts that shipped two-package guidance locks. 7.0.0 ships as guidance release v8 (SHIPPED_DIRECTOR_RELEASES in the server). */
 export const RELEASED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"] as const);
 export const CURRENT_TOOL_CONTRACT: ToolContractVersion = "7.1.0";
 /** Ordered contract comparison; later contracts keep every earlier behaviour unless they say otherwise. */
 export function toolContractAtLeast(version: string | undefined, minimum: ToolContractVersion): boolean {
   const index = (SUPPORTED_TOOL_CONTRACTS as readonly string[]).indexOf(version ?? "1.0.0");
-  return index >= 0 && index >= SUPPORTED_TOOL_CONTRACTS.indexOf(minimum);
+  const minimumIndex = (SUPPORTED_TOOL_CONTRACTS as readonly string[]).indexOf(minimum);
+  return index >= 0 && minimumIndex >= 0 && index >= minimumIndex;
 }
 export interface ParsedToolCall { name: ToolName; arguments: JsonObject }
 export interface ToolDescriptor {
@@ -232,7 +235,16 @@ const v71Descriptors = freeze(v7Descriptors.map(tool => tool.name === "record_no
     description: "Start only keyframes and needed voice lines requested in the person's fresh editing conversation. Pass exactly one of sceneIds or shotIds within its scope. regenerate: true requires explicit shotIds and a request for new frames; for unclear or Director-proposed new frames offer regenerate_keyframe. Preserve existing takes in history. Reports started work, quotes and per-scene refusals. Review, read-only and automatic turns cannot start work. confirm_video is for clips still to make. For a named remake of saved clips that keeps the keyframe, offer remake_clip {shotIds} for 1 to 4 shots in one scene; never call make_keyframes for that request. Only a human press starts video or a clip remake. Reconcile unknown outcomes before retrying." }
   : tool));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
+const codePlanDescriptors = freeze([
+  descriptor("read_film", "Read this code film's current run, journal, choices, version history and current source. Free and read-only.", object({}), true),
+  descriptor("submit_plan", "Submit the whole TypeScript film program against the current version (null before the first plan). Read the returned diff before replying. Reuse unchanged prompt bytes; preserve choice IDs. Refused programs return CODE_PLAN_REJECTED with their diff.", object({
+    source: { type: "string", maxLength: 256 * 1024 },
+    basedOnVersion: { type: ["integer", "null"], minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+    summary: { type: "string", maxLength: 500 },
+  }, ["source", "basedOnVersion", "summary"]), false),
+]);
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
+  [CODE_PLAN_TOOL_CONTRACT]: { version: CODE_PLAN_TOOL_CONTRACT, names: CODE_PLAN_TOOL_NAMES, descriptors: codePlanDescriptors, digest: digest({ version: CODE_PLAN_TOOL_CONTRACT, tools: codePlanDescriptors }) },
   "1.0.0": { version: "1.0.0", names: TOOL_NAMES, descriptors: TOOL_DESCRIPTORS, digest: TOOL_CATALOG_DIGEST },
   "2.0.0": { version: "2.0.0", names: V2_TOOL_NAMES, descriptors: v2Descriptors, digest: digest({ version: "2.0.0", tools: v2Descriptors }) },
   "3.0.0": { version: "3.0.0", names: V3_TOOL_NAMES, descriptors: v3Descriptors, digest: digest({ version: "3.0.0", tools: v3Descriptors }) },
@@ -248,7 +260,9 @@ export function toolCatalog(version: string = TOOL_CONTRACT_VERSION): ToolCatalo
 }
 /** Exact implementation identity for each immutable catalog. */
 export function toolHandlerId(version: ToolContractVersion): string {
-  return ({ "1.0.0": "five-tools@1", "2.0.0": "director-tools@2", "3.0.0": "director-tools@3", "4.0.0": "director-tools@4", "5.0.0": "director-tools@5", "6.0.0": "director-tools@6", "7.0.0": "director-tools@7", "7.1.0": "director-tools@7.1" } as const)[toolCatalog(version).version];
+  toolCatalog(version);
+  if (version === CODE_PLAN_TOOL_CONTRACT) return "code-plan-tools@1";
+  return ({ "1.0.0": "five-tools@1", "2.0.0": "director-tools@2", "3.0.0": "director-tools@3", "4.0.0": "director-tools@4", "5.0.0": "director-tools@5", "6.0.0": "director-tools@6", "7.0.0": "director-tools@7", "7.1.0": "director-tools@7.1" } as const)[version];
 }
 const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false });
 const validators = new Map(Object.values(TOOL_CATALOGS).map(catalog => [catalog.version,
@@ -359,6 +373,8 @@ export function parseToolArguments(toolName: string, input: unknown, version: To
     throw new DomainError("VALIDATION_ERROR", toolValidationMessage(name, input, schema, validate.errors), name === 'record_notes' ? { reason } : undefined);
   }
   invariant(valid, "VALIDATION_ERROR", "Tool arguments do not match the registered schema");
+  if (name === "submit_plan") invariant(new TextEncoder().encode((input as { source: string }).source).byteLength <= 256 * 1024,
+    "VALIDATION_ERROR", "Plan source exceeds 256 KiB");
   // In-process callers must obey the same JSON data boundary as HTTP/MCP callers.
   canonical(input);
   const parsed = name === "prepare_change" ? parseChangeProposal(input) : structuredClone(input);

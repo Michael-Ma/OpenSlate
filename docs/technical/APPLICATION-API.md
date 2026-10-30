@@ -14,7 +14,7 @@ Below, `P` means `/api/projects/:projectId`. All listed reads require the applic
 
 | Route | Use and boundary |
 |---|---|
-| `GET /api/projects`, `POST /api/projects` | Film list/create; saved models are validated against the installed catalog |
+| `GET /api/projects`, `POST /api/projects` | Film list/create; optional `planMode: "graph" \| "code"` selects the experimental code path; omitted/graph leaves the legacy record unchanged. Saved models are validated against the installed catalog |
 | `GET P`, `POST P/storyboard` | Snapshot and revision-checked brief/story/scene/shot, music and Undo commands |
 | `POST P/rename`, `POST P/archive`, `POST P/unarchive` | Keyed film management without detaching owned media; archive refuses running/unknown attempts |
 | `GET P/plan-imports`, `POST P/plan-imports`, `POST P/plan-imports/:requestId/confirm` or `/discard` | Text/Markdown proposal review and canonical publication |
@@ -41,8 +41,21 @@ Below, `P` means `/api/projects/:projectId`. All listed reads require the applic
 | `GET /api/installation/recovery`, `POST /api/installation/recovery/release` | Restore-quarantine inspection and exact reviewed release; projects remain stopped |
 | `GET P/artifacts/:artifactId/content` | Owned artifact bytes, including completed export downloads |
 | `GET P/events` | Authenticated bounded cursor replay/invalidation; SSE grants no authority |
+| `GET P/code-plan` | Experimental `CodePlanView`: current run, steps, choices, versions and accounting |
+| `GET P/code-plan/versions/:version` | Stored `CodePlanSourceView` for a positive integer version |
+| `POST P/code-plan/choices` | Keyed `{choiceId, optionsDigest, answer}`; exact JSON option identity is checked by the runtime; returns `CodePlanReceipt` |
+| `POST P/code-plan/ceiling` | Keyed `{ceilingMicros}` raises the current integer-micro ceiling; returns `CodePlanReceipt` |
+| `POST P/code-plan/source` | Keyed `{source, basedOnVersion}` with a positive version or `null` before the first plan; submits with author `user`, returning `CodePlanReceipt` with the dry-run diff |
 
 Asset import/media processing routes remain in [media/routes.ts](../../apps/server/src/media/routes.ts) and [media/image-routes.ts](../../apps/server/src/media/image-routes.ts). Narration reads, owned transcription and voice routes remain in [narration/routes.ts](../../apps/server/src/narration/routes.ts). Their presence does not authorize a live experiment.
+
+## Experimental code-plan boundary
+
+The five code-plan routes register only when the host supplies `AppOptions.codePlans`, the lead-owned `CodePlanPort`. They use the ordinary studio session/CSRF and quarantine checks. Every code-plan POST requires one nonblank `Idempotency-Key` of at most 160 characters. Its completed receipt is saved, so replay returns that receipt even if the run has advanced; changed input under the same route/project/key is refused. Source submission binds its body durably before awaiting the port, shares simultaneous identical calls and uses the key as `invocationId` so interrupted submissions recover through the runtime's idempotent submit. Source is limited to 256 KiB of UTF-8; versions must be positive safe integers. The HTTP layer does not run or compile source.
+
+The port reports graph projects as `409 CODE_PLAN_MODE`, missing projects/versions as `404 NOT_FOUND`, stale bases as `409 REVISION_CONFLICT`, and rejected source as `409 CODE_PLAN_REJECTED` with `error.details.diff`. There is no additional generation approval in these HTTP adapters. Actual version publication, choice validation, increasing-ceiling enforcement and dispatch belong to the runtime. The startup cast is temporary until P2b's port implementation is merged; HTTP verification uses a fake port and does not establish integrated P2 runtime readiness. During installation quarantine, the three POSTs and their replays are blocked; the existing inspection allowlist also blocks the two new code-plan reads.
+
+For a `CodePlanStepView.artifact` (or an artifact inside a choice), the web should use **`GET P/artifacts/:artifactId/content`** with the usual session cookie. This existing route looks up the owned `ArtifactRecord` directly; no graph binding, selected shot or `project.artifacts` entry is required. It checks project ownership, resolved media-root containment, non-symlink file opening, size and SHA-256 before returning the recorded supported content type with private/no-store and nosniff headers. It serves image, MP4 video and supported audio bytes. This preview route returns a full `200` response, including when a Range header is supplied; it does not implement partial content. No additional code-plan artifact route is needed.
 
 ## Scene confirmation and compatibility
 

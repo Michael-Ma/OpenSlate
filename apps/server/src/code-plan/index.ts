@@ -1,13 +1,17 @@
 import { createHash, randomInt } from "node:crypto";
-import { canonical, digest, invariant, moneyMicros } from "@openslate/core";
+import { canonical, digest, DomainError, invariant, moneyMicros } from "@openslate/core";
 import type { JsonObject, JsonValue } from "@openslate/core";
+import type { CodePlanDiff, CodePlanSourceView, CodePlanView } from "@openslate/core/public";
 import type { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { CodePlanExecution } from "./execution.js";
 import { CODE_PLAN_MODELS, normalizeStepInput, stepKey } from "./identity.js";
 import type { CodePlanMediaKind, CodePlanModel } from "./identity.js";
-import type { CodePlanChoice, CodePlanRun, CodePlanStep, CodePlanVersion } from "./records.js";
+import type { CodePlanChoice, CodePlanHold, CodePlanInvocation, CodePlanRun, CodePlanStep, CodePlanVersion } from "./records.js";
 import { runSandbox, SANDBOX_PENDING } from "./sandbox.js";
+import type { SandboxResult } from "./sandbox.js";
+import type { CodePlanPort } from "./port.js";
+import { codePlanView, emptyDiff, stepLabel } from "./view.js";
 export { normalizeStepInput, stepKey } from "./identity.js";
 export type * from "./records.js";
 
@@ -18,7 +22,7 @@ const errorView = (error: unknown) => ({ message: String(error instanceof Error 
 const flights = new WeakMap<Store, Map<string, Promise<CodePlanRun>>>();
 
 /** Experimental, host-owned replay coordinator. It never admits graph candidates or grants. */
-export class CodePlanRuntime {
+export class CodePlanRuntime implements CodePlanPort {
   private readonly models: Readonly<Record<string, CodePlanModel>>;
   private readonly maxSteps: number;
   private readonly queued = new Set<string>();
@@ -34,7 +38,7 @@ export class CodePlanRuntime {
     this.recovery = new InstallationRecoveryGuard(store);
     this.models = structuredClone(options.models ?? CODE_PLAN_MODELS);
     for (const model of Object.values(this.models)) {
-      invariant(["image", "video", "render"].includes(model.kind), "CODE_PLAN_MODEL", "Invalid model operation");
+      invariant(["image", "video", "speech", "render"].includes(model.kind), "CODE_PLAN_MODEL", "Invalid model operation");
       moneyMicros(model.priceMicros ?? "0");
       invariant(model.kind !== "render" || moneyMicros(model.priceMicros ?? "0") === 0n, "CODE_PLAN_MODEL", "Local renders are free");
     }
@@ -50,13 +54,90 @@ export class CodePlanRuntime {
   getRun(projectId: string): CodePlanRun | undefined { return this.store.get("code_plan_run", projectId); }
   steps(projectId: string): CodePlanStep[] { return this.store.list("code_plan_step", projectId); }
   choices(projectId: string): CodePlanChoice[] { return this.store.list("code_plan_choice", projectId); }
+  view(projectId: string): CodePlanView {
+    this.assertProject(projectId);
+    return codePlanView(this.store, this.options.execution, projectId);
+  }
+  source(projectId: string, version: number): CodePlanSourceView {
+    this.assertProject(projectId);
+    const row = this.store.get<CodePlanVersion>("code_plan_version", entityId(projectId, `version:${version}`));
+    invariant(row, "NOT_FOUND", "Code plan version not found");
+    return { version: row.version, author: row.author, sha256: row.sha256, source: row.source, createdAt: row.createdAt };
+  }
+  async dryRun(projectId: string, source: string): Promise<CodePlanDiff> {
+    this.assertProject(projectId);
+    return (await this.evaluate(projectId, source, true)).diff;
+  }
+  async submit(projectId: string, input: {
+    source: string; author: "director" | "user"; basedOnVersion: number | null; invocationId: string;
+  }): Promise<{ version: number; diff: CodePlanDiff }> {
+    this.assertCode(projectId);
+    invariant(typeof input.invocationId === "string" && input.invocationId.length > 0 && input.invocationId.length <= 200,
+      "CODE_PLAN_INVOCATION", "Use a bounded invocation id");
+    invariant(input.basedOnVersion === null || Number.isSafeInteger(input.basedOnVersion) && input.basedOnVersion > 0,
+      "REVISION_CONFLICT", "Use the current code plan version");
+    const id = entityId(projectId, `invocation:${input.invocationId}`);
+    const previous = this.store.get<CodePlanInvocation>("code_plan_invocation", id);
+    if (previous) return { version: previous.version, diff: previous.diff };
+    const expected = input.basedOnVersion ?? 0;
+    invariant((this.getRun(projectId)?.planVersion ?? 0) === expected, "REVISION_CONFLICT", "Code plan changed; reload before editing");
+    const clock = this.getRun(projectId) ?? { now: Date.now(), seed: randomInt(1, 0x7fffffff) };
+    const diff = (await this.evaluate(projectId, input.source, true, clock)).diff;
+    // The sandbox yields: recheck both idempotency and the version in one transaction.
+    return this.store.transaction(() => {
+      this.assertCode(projectId);
+      const replay = this.store.get<CodePlanInvocation>("code_plan_invocation", id);
+      if (replay) return { version: replay.version, diff: replay.diff };
+      invariant((this.getRun(projectId)?.planVersion ?? 0) === expected, "REVISION_CONFLICT", "Code plan changed; reload before editing");
+      if (diff.findings.some(finding => finding.code === "SOURCE_SYNTAX" || finding.code === "RUNTIME_ERROR"))
+        throw new DomainError("CODE_PLAN_REJECTED", "Code plan failed its dry run", { diff });
+      const record = this.submitPlan(projectId, input.source, input.author, expected, diff, clock);
+      this.store.insert("code_plan_invocation", id, projectId, { id, projectId, invocationId: input.invocationId, version: record.version, diff });
+      return { version: record.version, diff };
+    });
+  }
+  answer(projectId: string, input: { choiceId: string; optionsDigest: string; answer: unknown }): CodePlanView {
+    this.answerChoice(projectId, input.choiceId, input.optionsDigest, input.answer as JsonValue);
+    return this.view(projectId);
+  }
+  hold(projectId: string, holdId: string): void { this.setHold(projectId, holdId, false); }
+  release(projectId: string, holdId: string): void { this.setHold(projectId, holdId, true); }
+  failure(projectId: string): { version: number; message: string; stack: string } | null {
+    this.assertProject(projectId);
+    const run = this.getRun(projectId);
+    return run?.error ? { version: run.planVersion, ...run.error } : null;
+  }
+  private setHold(projectId: string, holdId: string, released: boolean): void {
+    this.assertCode(projectId);
+    invariant(typeof holdId === "string" && holdId.length > 0 && holdId.length <= 200, "CODE_PLAN_HOLD", "Use a bounded hold id");
+    const id = entityId(projectId, `hold:${holdId}`);
+    this.store.transaction(() => {
+      const previous = this.store.get<CodePlanHold>("code_plan_hold", id);
+      // A late retry of hold must never reopen its already released identity.
+      if (previous && (previous.released || !released)) return;
+      this.store.put("code_plan_hold", id, projectId, { id, projectId, holdId, released });
+      if (released) this.queued.add(projectId);
+      if (previous || !released) this.changed(projectId);
+    });
+  }
+  private changed(projectId: string): void {
+    // A replay timestamp is diagnostic, not a reason for another browser refetch.
+    const { lastPassAt: _lastPassAt, ...view } = this.view(projectId);
+    const value = digest(view), previous = this.store.get<{ digest: string }>("code_plan_view_digest", projectId);
+    if (previous?.digest === value) return;
+    this.store.transaction(() => {
+      this.store.put("code_plan_view_digest", projectId, projectId, { digest: value });
+      this.store.appendEvent(projectId, "code_plan.changed", { planVersion: view.planVersion, state: view.state });
+    });
+  }
   stop(): void { this.stopping = true; }
   async close(): Promise<void> {
     this.stop(); await this.options.execution.close();
     await Promise.allSettled([...this.passes.values(), ...(this.ticking ? [this.ticking] : [])]);
   }
 
-  submitPlan(projectId: string, source: string, author: "director" | "user" = "user", expectedVersion?: number): CodePlanVersion {
+  submitPlan(projectId: string, source: string, author: "director" | "user" = "user", expectedVersion?: number,
+    diff?: CodePlanDiff, clock?: { now: number; seed: number }): CodePlanVersion {
     this.assertCode(projectId);
     invariant(typeof source === "string" && Buffer.byteLength(source) > 0 && Buffer.byteLength(source) <= 256 * 1024,
       "CODE_PLAN_SOURCE", "Use a plan source of at most 256 KiB");
@@ -66,12 +147,13 @@ export class CodePlanRuntime {
       invariant(expectedVersion === undefined || (current?.planVersion ?? 0) === expectedVersion, "REVISION_CONFLICT", "Code plan changed; reload before editing");
       const next = (current?.planVersion ?? 0) + 1;
       const record: CodePlanVersion = { id: entityId(projectId, `version:${next}`), projectId, version: next, source,
-        sha256: createHash("sha256").update(source).digest("hex"), author, createdAt: stamp() };
+        sha256: createHash("sha256").update(source).digest("hex"), author, createdAt: stamp(), ...(diff ? { diff } : {}) };
       this.store.put("code_plan_version", record.id, projectId, record);
       const run: CodePlanRun = current ? { ...current, planVersion: next, state: "running", error: null }
-        : { id: projectId, projectId, planVersion: next, state: "running", now: Date.now(), seed: randomInt(1, 0x7fffffff),
+        : { id: projectId, projectId, planVersion: next, state: "running", now: clock?.now ?? Date.now(), seed: clock?.seed ?? randomInt(1, 0x7fffffff),
           ceilingMicros: "1000000", lastPassAt: null, error: null, reachedStepKeys: [], declarations: { scenes: [], shots: [] }, logs: [] };
       this.store.put("code_plan_run", projectId, projectId, run);
+      this.changed(projectId);
       return record;
     });
     this.queued.add(projectId); return version;
@@ -86,15 +168,18 @@ export class CodePlanRuntime {
     invariant(choice && choice.options.some(option => canonical(option) === canonical(answer)), "CODE_PLAN_CHOICE", "Answer must be one of this choice's exact options");
     invariant(choice.answer === undefined || canonical(choice.answer) === canonical(answer), "CODE_PLAN_CHOICE_ANSWERED", "This choice already has another answer");
     this.store.put("code_plan_choice", id, projectId, { ...choice, answer, answeredAt: choice.answeredAt ?? stamp() });
+    this.changed(projectId);
     this.queued.add(projectId);
   }
 
-  raiseCeiling(projectId: string, micros: string): void {
+  raiseCeiling(projectId: string, micros: string): CodePlanView {
     this.assertCode(projectId);
     const run = this.getRun(projectId); invariant(run, "CODE_PLAN_MISSING", "No code plan is saved");
     invariant(moneyMicros(micros) > moneyMicros(run.ceilingMicros), "CODE_PLAN_CEILING", "The new ceiling must be higher");
     this.store.put("code_plan_run", projectId, projectId, { ...run, ceilingMicros: micros });
     this.queued.add(projectId);
+    this.changed(projectId);
+    return this.view(projectId);
   }
 
   tick(): Promise<void> {
@@ -119,6 +204,7 @@ export class CodePlanRuntime {
           const run = this.getRun(project.id)!;
           this.store.put("code_plan_run", project.id, project.id, { ...run, state: "error", error: errorView(error) });
         }
+        this.changed(project.id);
       }
     };
     this.ticking = work().finally(() => { this.ticking = undefined; }); return this.ticking;
@@ -132,8 +218,11 @@ export class CodePlanRuntime {
   }
 
   private assertCode(projectId: string): void {
+    this.assertProject(projectId);
     invariant(!this.stopping, "CODE_PLAN_STOPPED", "Code-plan execution is stopping");
     this.recovery.assertWritable();
+  }
+  private assertProject(projectId: string): void {
     invariant(this.store.getProject(projectId).planMode === "code", "CODE_PLAN_MODE", "This project uses graph planning");
   }
 
@@ -160,12 +249,31 @@ export class CodePlanRuntime {
     const run = this.getRun(projectId); invariant(run, "CODE_PLAN_MISSING", "No code plan is saved");
     const version = this.store.get<CodePlanVersion>("code_plan_version", entityId(projectId, `version:${run.planVersion}`));
     invariant(version && version.sha256 === createHash("sha256").update(version.source).digest("hex"), "CODE_PLAN_JOURNAL", "Plan source identity differs");
+    const { outcome, reached, declarations, logs, budget } = await this.evaluate(projectId, version.source, false);
+    // Leave outcomes from an obsolete pass in history; never overwrite the newer plan's run state.
+    const current = this.getRun(projectId)!;
+    if (current.planVersion !== run.planVersion) { this.queued.add(projectId); return current; }
+    for (const step of this.steps(projectId)) if (!reached.has(step.key) && !step.attemptId && step.state !== "cancelled")
+      this.store.put("code_plan_step", step.id, projectId, { ...step, state: "cancelled", updatedAt: stamp() });
+    const result: CodePlanRun = { ...current, state: outcome.state === "error" ? "error" : budget ? "paused_budget" : outcome.state,
+      lastPassAt: stamp(), error: outcome.error ?? null, reachedStepKeys: [...reached], declarations, logs };
+    this.store.put("code_plan_run", projectId, projectId, result); this.changed(projectId); return result;
+  }
+
+  /** One call path for preview and execution. Preview keeps all new state in memory. */
+  private async evaluate(projectId: string, source: string, dry: boolean, clock?: { now: number; seed: number }) {
+    const run = this.getRun(projectId);
     const reached = new Set<string>(), declarations: CodePlanRun["declarations"] = { scenes: [], shots: [] }, logs: string[] = [];
-    const submissions: Promise<void>[] = [];
-    let budget = false;
+    const journal = this.steps(projectId), virtual = new Map(journal.map(step => [step.key, step]));
+    const diff = emptyDiff(), submissions: Promise<void>[] = [];
+    let budget = false, limited = false;
+    const reused = new Set<string>(), fresh = new Set<string>();
     const call = (method: string, args: unknown[]): unknown => {
-      this.assertCode(projectId);
-      invariant(this.getRun(projectId)?.planVersion === run.planVersion, "REVISION_CONFLICT", "A newer plan replaced this pass");
+      if (dry) this.assertProject(projectId);
+      else {
+        this.assertCode(projectId);
+        invariant(this.getRun(projectId)?.planVersion === run?.planVersion, "REVISION_CONFLICT", "A newer plan replaced this pass");
+      }
       if (method === "shot" || method === "scene") {
         const value = args[0];
         invariant(value && typeof value === "object" && !Array.isArray(value) && Buffer.byteLength(canonical(value)) <= 64 * 1024,
@@ -175,57 +283,72 @@ export class CodePlanRuntime {
       }
       if (method === "log") { invariant(typeof args[0] === "string" && args[0].length <= 4096 && logs.length < 200,
         "CODE_PLAN_LOG", "Use at most 200 bounded log lines"); logs.push(args[0]); return null; }
-      if (method === "choose") return this.choose(projectId, args);
-      if (method === "speech") return { ok: false, error: { code: "NOT_IMPLEMENTED", message: "Code-plan speech is not implemented in P1" } };
-      invariant(method === "image" || method === "video" || method === "render", "CODE_PLAN_METHOD", "Unknown Studio operation");
+      if (method === "choose") return this.choose(projectId, args, dry);
+      invariant(method === "image" || method === "video" || method === "speech" || method === "render", "CODE_PLAN_METHOD", "Unknown Studio operation");
       const kind: CodePlanMediaKind = method;
       const input = normalizeStepInput(kind, args[0], this.models), key = stepKey(kind, input), id = entityId(projectId, key);
       reached.add(key);
-      let step = this.store.get<CodePlanStep>("code_plan_step", id);
-      if (step?.result) return step.result;
-      if (step?.attemptId) return SANDBOX_PENDING;
-      if (!step) {
-        invariant(this.steps(projectId).length < this.maxSteps, "CODE_PLAN_STEP_LIMIT", `Code plans allow at most ${this.maxSteps} media steps per run`);
-        step = { id, projectId, key, kind, input, state: "absent", attemptId: null, result: null,
-          priceMicros: this.models[String(input.model)]?.priceMicros ?? "0", createdAt: stamp(), updatedAt: stamp() };
+      let step = dry ? virtual.get(key) : this.store.get<CodePlanStep>("code_plan_step", id);
+      if (step?.result || step?.attemptId) {
+        reused.add(key);
+        return step.result ?? SANDBOX_PENDING;
       }
-      // Unsent work takes today's trusted price; dispatched work keeps its original reservation forever.
-      step = { ...step, priceMicros: this.models[String(input.model)]?.priceMicros ?? "0" };
-      const current = this.getRun(projectId)!;
+      const priceMicros = this.models[String(input.model)]?.priceMicros ?? "0";
+      step = { ...(step ?? { id, projectId, key, kind, input, attemptId: null, result: null, createdAt: stamp() }),
+        state: "absent", priceMicros,
+        updatedAt: step?.state === "absent" && step.priceMicros === priceMicros ? step.updatedAt : stamp() };
+      virtual.set(key, step);
+      if (!fresh.has(key)) {
+        fresh.add(key);
+        diff.newSteps.push({ kind, model: String(input.model), label: stepLabel(input), priceMicros: step.priceMicros });
+      }
+      if (dry) {
+        limited ||= journal.filter(item => item.attemptId).length + fresh.size > this.maxSteps;
+        return SANDBOX_PENDING;
+      }
+      // These predicates run immediately before intent admission, even for a pass
+      // that started before the Director opened a hold or raised the ceiling.
+      if (moneyMicros(step.priceMicros) > 0n && this.store.list<CodePlanHold>("code_plan_hold", projectId).some(hold => !hold.released)) {
+        this.store.put("code_plan_step", id, projectId, step); return SANDBOX_PENDING;
+      }
       const liability = this.steps(projectId).reduce((total, previous) => total + (previous.attemptId
         && this.options.execution.liability(previous.attemptId) !== "released" ? moneyMicros(previous.priceMicros) : 0n), 0n);
-      if (liability + moneyMicros(step.priceMicros) > moneyMicros(current.ceilingMicros)) {
-        budget = true; this.store.put("code_plan_step", id, projectId, { ...step, state: "absent" }); return SANDBOX_PENDING;
+      if (liability + moneyMicros(step.priceMicros) > moneyMicros(this.getRun(projectId)!.ceilingMicros)) {
+        budget = true; this.store.put("code_plan_step", id, projectId, step); return SANDBOX_PENDING;
       }
-      // Reserve against the durable step before the provider sees the intent. Both records commit together.
+      invariant(this.steps(projectId).filter(item => item.attemptId).length < this.maxSteps,
+        "CODE_PLAN_STEP_LIMIT", `Code plans allow at most ${this.maxSteps} dispatched media steps per project`);
       const admitted = this.store.transaction(() => {
         const attempt = this.options.execution.prepare(projectId, key, kind, input);
-        this.store.put("code_plan_step", id, projectId, { ...step, state: "in_flight", attemptId: attempt.id, updatedAt: stamp() });
+        this.store.put("code_plan_step", id, projectId, { ...step, state: "in_flight", attemptId: attempt.id });
         return attempt;
       });
       const submission = this.options.execution.submit(admitted.id).finally(() => { this.queued.add(projectId); });
-      // Retain the rejection for this pass while avoiding an unhandled rejection before the sandbox returns.
       void submission.catch(() => {}); submissions.push(submission);
       return SANDBOX_PENDING;
     };
-    let outcome: { state: "done" | "waiting" | "error"; error?: { message: string; stack: string } };
+    let outcome: SandboxResult;
     try {
-      outcome = await runSandbox({ source: version.source, now: run.now, seed: run.seed, limits: this.limits, call });
+      outcome = await runSandbox({ source, now: clock?.now ?? run?.now ?? Date.now(), seed: clock?.seed ?? run?.seed ?? 1, limits: this.limits, call });
       const settled = await Promise.allSettled(submissions);
       const rejected = settled.find(result => result.status === "rejected");
       if (rejected?.status === "rejected") outcome = { state: "error", error: errorView(rejected.reason) };
     } catch (error) { outcome = { state: "error", error: errorView(error) }; }
-    // Leave outcomes from an obsolete pass in history; never overwrite the newer plan's run state.
-    const current = this.getRun(projectId)!;
-    if (current.planVersion !== run.planVersion) { this.queued.add(projectId); return current; }
-    for (const step of this.steps(projectId)) if (!reached.has(step.key) && !step.attemptId && step.state !== "cancelled")
-      this.store.put("code_plan_step", step.id, projectId, { ...step, state: "cancelled", updatedAt: stamp() });
-    const result: CodePlanRun = { ...current, state: outcome.state === "error" ? "error" : budget ? "paused_budget" : outcome.state,
-      lastPassAt: stamp(), error: outcome.error ?? null, reachedStepKeys: [...reached], declarations, logs };
-    this.store.put("code_plan_run", projectId, projectId, result); return result;
+    diff.reusedSteps = reused.size;
+    diff.cancelledSteps = journal.filter(step => !step.attemptId && step.state !== "cancelled" && !reached.has(step.key)).length;
+    diff.certainMicros = diff.newSteps.reduce((sum, step) => sum + moneyMicros(step.priceMicros), 0n).toString();
+    diff.dependsOnPending = outcome.state === "waiting";
+    if (outcome.errorCode === "SOURCE_SYNTAX") diff.findings.push({ code: "SOURCE_SYNTAX", detail: outcome.error?.message ?? "Source evaluation failed" });
+    else if (outcome.state === "error") diff.findings.push({ code: "RUNTIME_ERROR", detail: outcome.error?.message ?? "Pass failed" });
+    if (outcome.unawaitedCalls?.length) diff.findings.push({ code: "UNAWAITED_CALL", detail: [...new Set(outcome.unawaitedCalls)].join(", ") });
+    if (limited) diff.findings.push({ code: "STEP_LIMIT" });
+    const liability = journal.reduce((sum, step) => sum + (step.attemptId && this.options.execution.liability(step.attemptId) !== "released"
+      ? moneyMicros(step.priceMicros) : 0n), 0n);
+    if (moneyMicros(diff.certainMicros) > moneyMicros(run?.ceilingMicros ?? "1000000") - liability) diff.findings.push({ code: "CEILING" });
+    return { outcome, reached, declarations, logs, budget, diff };
   }
 
-  private choose(projectId: string, args: unknown[]): unknown {
+  private choose(projectId: string, args: unknown[], dry = false): unknown {
     const [choiceId, raw] = args;
     invariant(typeof choiceId === "string" && choiceId.length > 0 && choiceId.length <= 200 && raw && typeof raw === "object",
       "CODE_PLAN_CHOICE", "Use a bounded choice id and question/options");
@@ -235,7 +358,7 @@ export class CodePlanRuntime {
     const optionsDigest = digest(options), id = entityId(projectId, digest({ choiceId, optionsDigest }));
     const previous = this.store.get<CodePlanChoice>("code_plan_choice", id);
     const choice: CodePlanChoice = { ...previous, id, projectId, choiceId, question, options: options as JsonValue[], optionsDigest };
-    this.store.put("code_plan_choice", id, projectId, choice);
+    if (!dry) this.store.put("code_plan_choice", id, projectId, choice);
     return Object.hasOwn(choice, "answer") ? choice.answer : SANDBOX_PENDING;
   }
 }

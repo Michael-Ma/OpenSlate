@@ -18,6 +18,7 @@ FFmpeg/ffprobe enable media import/export. Native director/image setup requires 
 | `pnpm studio:fixture` | Disposable fake First Light studio on port 3101; add `--film last-ferry` for the three-scene/eight-shot server seed |
 | `pnpm check:browser` | Build and rendered next-UI scenarios in system Chrome against disposable state; card sandboxes reserve launching for the lead |
 | `pnpm demo:headless` | Fake two-shot edit/restart and uncertain-submission proof |
+| `pnpm demo:code` | Real code-plan HTTP/runtime/fake-Director flow: frame choices, one-motion edit, lost-reply lookup and restart |
 | `pnpm probe:workflow` | Fake sixty-shot/six-minute workflow and scoped recovery |
 | `pnpm probe:toolchain` | SQLite/schema and optional FFmpeg H.264/AAC support |
 | `pnpm probe:runtime --codex /absolute/path/to/codex` | Installed compatibility with zero model turns |
@@ -26,6 +27,10 @@ FFmpeg/ffprobe enable media import/export. Native director/image setup requires 
 The browser-only `?fixture=last-ferry` sample uses its own simulated transport; it is distinct from the fake-provider server seed. Neither is real-provider evidence. The only UI is `apps/web/src/next`.
 
 Tests bind loopback and use temporary databases/media. Optional native probes are separate from paid model turns. Real media experiments must identify their explicitly authorized scope and exact job/attempt outcomes; unknown dispatch is reconciled before any retry. The studio has no separate usage-allowance or API-key approval step.
+
+`demo:code` always creates and removes its own temporary directory. It uses Fastify HTTP injection with real session pairing, CSRF and command keys; it opens no listener, reads no private configuration and does not use `.openslate/` or port 3001. It advances the normal Director/engine/code-plan tick functions directly, with no scheduler sleeps. Its separate durable fake-vendor database provides a test-only lookup oracle for an accepted job whose POST reply was lost. Repeated unknown lookups never authorize another submit. The reported $0.36 / $1.00 uses explicit fixture prices, and the final MP4 is labeled placeholder media from the fixture renderer; this does not prove FFmpeg assembly or real-provider output quality.
+
+The motion edit eventually reuses seven steps and adds one video plus one render. Its stored dry-run receipt reports only the reached prefix (three reused steps and one new video, `dependsOnPending: true`): the render cannot be reached until the new clip result exists. The demo prints both observations. The card's request for a complete two-step forecast in that immediate receipt remains a lead-owned preview-contract decision; see the [P2c report](../ai/code-plan/reports/P2c-report.md).
 
 ## Recovery and evidence
 

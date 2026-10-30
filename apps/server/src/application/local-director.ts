@@ -1,4 +1,4 @@
-import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
+import { CODE_PLAN_TOOL_CONTRACT, SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -27,6 +27,8 @@ import { readCodexStartupTimeout, readDirectorRunTimeout } from "./director-run-
 import { logNativeDiagnostic, safeNativeDiagnostic } from "./native-diagnostics.js";
 import { findLocalCodexBinary, supportedCodexInstall } from "./codex-binary.js";
 import type { LocalMediaService } from "../media/local-media.js";
+import type { CodePlanPort } from "../code-plan/port.js";
+import { triggerCodePlanRepairs, wireCodePlans } from "../code-plan/director.js";
 
 export interface LocalDirectorSelection { mode: "fake" | "native"; binaryPath?: string; model?: string; codexHome?: string }
 interface SavedSelection { id: string; projectId: string; selection: LocalDirectorSelection; digest: string }
@@ -58,6 +60,7 @@ export interface LocalDirectorOptions {
   /** Trusted local executable for selected-reference thumbnails. No browser path input. */
   ffmpegPath?: string;
   media?: LocalMediaService;
+  codePlans?: CodePlanPort;
 }
 
 /** One computer, persistent project choices, separate fake/native queues. */
@@ -79,6 +82,7 @@ export class LocalDirectorController {
   private readonly imageProjector: DirectorImageProjector | null;
   private readonly attachmentProjector: DirectorImageProjector;
   constructor(readonly service: ProductionService, readonly config: LocalDirectorOptions) {
+    if (config.codePlans) wireCodePlans(service, config.codePlans);
     if (config.runTimeoutMs !== undefined) readDirectorRunTimeout({ OPENSLATE_DIRECTOR_RUN_TIMEOUT_MS: String(config.runTimeoutMs) });
     if (config.startupTimeoutMs !== undefined) readCodexStartupTimeout({ OPENSLATE_CODEX_STARTUP_TIMEOUT_MS: String(config.startupTimeoutMs) });
     this.setup = config.setup ?? setupLocalCodex;
@@ -93,6 +97,7 @@ export class LocalDirectorController {
     const fakeInput = createDirectorInput(service, { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), endpoint: config.endpoint, ...(config.releases ? { releases: config.releases } : {}) });
     this.fake = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake", projectFilter: id => this.mode(id) === "fake", prepareInput: async (turn, human, bridge, preparation) => {
       let input = await fakeInput(turn, human, bridge);
+      if (service.store.getProject(turn.projectId).planMode === "code") return input;
       if (service.store.get("request_attachment_selection", turn.requestId)) {
         const projection = join(config.dataDirectory, "native", turn.projectId, "workspace");
         mkdirSync(projection, { recursive: true, mode: 0o700 });
@@ -105,6 +110,7 @@ export class LocalDirectorController {
       prepareRuntime: input => this.prepareNativeStart(input),
       prepareInput: async (turn, human, bridge, preparation) => {
         const input = await (await this.ready(turn.projectId)).input(turn, human, bridge);
+        if (service.store.getProject(turn.projectId).planMode === "code") return input;
         if (!this.imageProjector && !service.store.get("request_image_selection", turn.requestId)) {
           const projection = join(config.dataDirectory, "native", turn.projectId, "workspace");
           mkdirSync(projection, { recursive: true, mode: 0o700 });
@@ -170,7 +176,10 @@ export class LocalDirectorController {
   }
   enqueue(...args: Parameters<DirectorSupervisor["enqueue"]>) { return this.controller(args[0]).enqueue(...args); }
   answerQuestion(...args: Parameters<DirectorSupervisor["answerQuestion"]>) { return this.controller(args[0]).answerQuestion(...args); }
-  tick(): void { triggerKeyframeReviews(this.service, (id, actor) => this.enqueue(id, actor)); this.fake.tick(); this.native.tick(); }
+  tick(): void {
+    triggerCodePlanRepairs(this.service, (id, actor) => this.enqueue(id, actor));
+    triggerKeyframeReviews(this.service, (id, actor) => this.enqueue(id, actor)); this.fake.tick(); this.native.tick();
+  }
   async settle(): Promise<void> { await Promise.all([this.fake.settle(), this.native.settle()]); }
   async close(): Promise<void> {
     this.shutdown.abort();
@@ -271,11 +280,14 @@ export class LocalDirectorController {
     try {
       const prepared = selection.mode === "native" ? await this.prepare(projectId, selection) : null;
       const changedMode = before.selection.mode !== selection.mode;
-      invariant(!oldLock || (SUPPORTED_TOOL_CONTRACTS as readonly string[]).includes(oldLock.lock.compatibility.toolContract), "CAPABILITY_MISMATCH", "Saved director guidance version is unsupported");
+      const code = store.getProject(projectId).planMode === "code";
+      invariant(!oldLock || (code ? oldLock.lock.compatibility.toolContract === CODE_PLAN_TOOL_CONTRACT
+        : (SUPPORTED_TOOL_CONTRACTS as readonly string[]).includes(oldLock.lock.compatibility.toolContract)), "CAPABILITY_MISMATCH", "Saved director guidance version is unsupported");
       const replacementConfiguration = { repositoryRoot: this.config.repositoryRoot,
         snapshotRoot: selection.mode === "native" ? join(this.config.dataDirectory, "native", projectId, "workspace", ".agents", "skills") : join(this.config.dataDirectory, "skill-snapshots"),
         runtimeId: selection.mode === "native" ? "codex-app-server" : "fake-workflow-v1" };
-      const replacement = changedMode && oldLock ? (oldLock.lock.compatibility.toolContract === "6.0.0"
+      const replacement = changedMode && oldLock ? (code ? createDirectorSkillLock(replacementConfiguration, CODE_PLAN_TOOL_CONTRACT)
+        : oldLock.lock.compatibility.toolContract === "6.0.0"
         ? createCurrentShippedDirectorSkillLock(replacementConfiguration, []) : oldLock.lock.compatibility.toolContract === currentShippedToolContract(this.config.releases)
           ? createCurrentShippedDirectorSkillLock(replacementConfiguration, this.config.releases) : createDirectorSkillLock(replacementConfiguration, oldLock.lock.compatibility.toolContract as ToolContractVersion)).lock : null;
       store.transaction(() => {

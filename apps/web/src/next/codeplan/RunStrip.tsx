@@ -1,0 +1,76 @@
+import { useI18n } from "../i18n/I18n.tsx";
+import { numberLocale } from "../i18n/translate.ts";
+import { CEILING_PRESS, runStrip } from "../model/code-plan.ts";
+import { useGuarded } from "../app/useWriteGuard.ts";
+import { useStore, useStudio } from "../store/react.tsx";
+import { useCodePlan } from "./CodePlanContext.tsx";
+import "./codeplan.css";
+
+/**
+ * Under the Director's header in a code-plan film: the run's state as a chip, the version it runs, and what it has
+ * spent of its ceiling (with what is sent and not yet known). While a Director turn holds new paid work it says so.
+ * At the ceiling it offers one more dollar; an error is said plainly, in the pass's own words. App facts: neutral.
+ */
+export function CodePlanRunStrip() {
+  const { t, tm, locale } = useI18n();
+  const store = useStore();
+  const { view, error, loading, reload } = useCodePlan();
+  const guard = useGuarded("run");
+  const raising = useStudio((s) => !!s.pending[CEILING_PRESS]);
+  if (!view) {
+    if (!error && !loading) return null;
+    return (
+      <section className="cp-run" aria-label={t("codeplan.run.label")} data-state={error ? "unread" : "loading"}>
+        <p className="cp-run-note" role="status">{error ? t("codeplan.run.unread", { code: error }) : t("codeplan.run.loading")}</p>
+        {error ? <button type="button" className="pill sm" data-act="code-plan-reload" onClick={reload}>{t("codeplan.run.retry")}</button> : null}
+      </section>
+    );
+  }
+  const strip = runStrip(view, numberLocale(locale));
+  const tone = strip.tone === "busy" ? "status busy" : strip.tone === "attention" ? "status attn" : "status";
+  return (
+    <section className="cp-run" aria-label={t("codeplan.run.label")} data-state={view.state} data-held={strip.held ? "true" : undefined}>
+      <div className="cp-run-top">
+        <span className={tone} data-act="code-plan-state" data-run={view.state}>
+          {strip.tone === "busy" ? <i className="cp-spin" aria-hidden="true" /> : null}
+          {tm(strip.status)}
+        </span>
+        {view.planVersion !== null ? <span className="cp-run-ver">{t("codeplan.run.version", { version: view.planVersion })}</span> : null}
+        <span className="cp-run-spend" data-act="code-plan-spend">{tm(strip.spend)}</span>
+      </div>
+      <div className="cp-meter" aria-hidden="true">
+        <i className="spent" style={{ width: `${strip.meter.spent * 100}%` }} />
+        <i className="reserved" style={{ width: `${strip.meter.reserved * 100}%` }} />
+      </div>
+      {strip.held ? <p className="cp-run-note" role="status" data-act="code-plan-held">{t("codeplan.run.held")}</p> : null}
+      {strip.error !== null || view.state === "error" ? (
+        <div className="cp-run-error" role="alert">
+          <span className="mark" aria-hidden="true">!</span>
+          <div>
+            <b>{t("codeplan.run.error_title")}</b>
+            {strip.error ? <pre className="cp-error-text">{strip.error}</pre> : null}
+            <span>{t("codeplan.run.error_next")}</span>
+          </div>
+        </div>
+      ) : null}
+      {strip.raise ? (
+        <div className="cp-run-raise">
+          <p>{t("codeplan.run.raise_why", { ceiling: strip.raise.ceiling })}</p>
+          <button
+            type="button"
+            className="pill sm primary"
+            data-act="code-plan-raise"
+            {...guard}
+            disabled={guard.disabled || raising}
+            aria-busy={raising || undefined}
+            onClick={() => { if (strip.raise) void store.raiseCodePlanCeiling(view, strip.raise.body); }}
+          >
+            {tm(strip.raise.label)}
+          </button>
+          <span className="cp-hint">{t("codeplan.run.raise_hint")}</span>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+

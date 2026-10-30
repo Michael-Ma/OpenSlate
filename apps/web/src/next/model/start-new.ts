@@ -369,17 +369,32 @@ export function creationSteps(step: FirstStep, codex: Codex, planText: string): 
  */
 export const directorAfterOpen = (step: FirstStep, codex: Codex): boolean => !stepNeedsCodex(step) && codex.state !== "not_found";
 
+/**
+ * How a new film is planned: the storyboard (graph, every film so far) or a code plan (experiment). Mirrors
+ * PlanMode in studio-api.ts; POST /api/projects has no browser input type there, so the body is typed here.
+ */
+export type Planning = "graph" | "code";
+
 export interface CreateBody {
   name: string;
   expectedCatalogDigest?: string;
   profileIds?: string[];
+  /** Sent only for a code plan, so a storyboard film's request is exactly what it was before (card P3a item 2). */
+  planMode?: "code";
 }
 
-export function createBody(name: string, plan: Pick<ModelPlan, "selection"> | null, untitled: string): CreateBody {
+export function createBody(name: string, plan: Pick<ModelPlan, "selection"> | null, untitled: string, planning: Planning = "graph"): CreateBody {
   const trimmed = name.trim().slice(0, 160) || untitled;
   const selection = plan?.selection;
-  return selection ? { name: trimmed, expectedCatalogDigest: selection.expectedCatalogDigest, profileIds: [...selection.profileIds] } : { name: trimmed };
+  const body: CreateBody = selection ? { name: trimmed, expectedCatalogDigest: selection.expectedCatalogDigest, profileIds: [...selection.profileIds] } : { name: trimmed };
+  return planning === "code" ? { ...body, planMode: "code" } : body;
 }
+
+/** A written plan is read into a storyboard (POST /plan-imports); a code-plan film starts from the Director or empty. */
+export const stepFits = (step: FirstStep, planning: Planning): boolean => planning === "graph" || step !== "plan";
+
+/** The step the sheet shows for this way of planning: a written plan falls back to the computer's default. */
+export const planningStep = (step: FirstStep, planning: Planning, codex: Codex): FirstStep => (stepFits(step, planning) ? step : defaultStep(codex));
 
 export type PlanTextProblem = "too_long" | "not_text" | null;
 

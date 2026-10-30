@@ -96,9 +96,10 @@ export class ProductionService {
     migrateLegacyRequestSources(this.store);
   }
 
-  createProject(name: string, selection?: InstalledProviderSelection): ProjectRecord {
+  createProject(name: string, selection?: InstalledProviderSelection, planMode?: "graph" | "code"): ProjectRecord {
     this.recovery.assertWritable();
     invariant(typeof name === "string" && name.trim().length > 0 && name.length <= 160, "VALIDATION_ERROR", "Provide a short project name");
+    invariant(planMode === undefined || planMode === "graph" || planMode === "code", "VALIDATION_ERROR", "Use graph or code plan mode");
     const selected = selection === undefined ? undefined : selectedProviderProfiles(selection);
     const chosen = selected?.profiles ?? this.profiles;
     const pinLocalExecution = this.newProjectLocalExecution && (this.newProjectLocalExecutionFor === "all"
@@ -111,6 +112,7 @@ export class ProductionService {
         id: newId(), revisionId: newId(), headVersion: 0, name, brief: "", story: "", scenes: [],
         narration: { script: "", source: "undecided" }, maxFrames: 10800, capabilityLockId: newId(),
         shots: [], cues: [], artifacts: [], activePlanId: null,
+        ...(planMode === "code" ? { planMode } : {}),
       };
       this.store.createProject(project);
       this.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles,
@@ -119,6 +121,7 @@ export class ProductionService {
         ...(pinLocalExecution ? { localExecution: this.newProjectLocalExecution } : {}) });
       this.store.insert("project_revision", project.revisionId, project.id, { project });
       this.store.appendEvent(project.id, "project.created", { revisionId: project.revisionId });
+      if (planMode === "code") this.store.appendEvent(project.id, "code_plan.changed", { planVersion: null, state: "empty" });
       return project;
     });
   }
