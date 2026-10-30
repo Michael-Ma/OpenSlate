@@ -176,7 +176,7 @@ export function CodePlanFilmView() {
 
 function filmRows(view: CodePlanView, locale: string) {
   const renders = stepRows(view, ["render"], locale);
-  const clips = stepRows(view, ["video", "speech"], locale);
+  const clips = stepRows(view, ["video", "speech", "music"], locale);
   const latest = latestRender(view);
   return {
     renders, clips,

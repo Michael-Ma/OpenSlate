@@ -293,7 +293,7 @@ export interface CodePlanAttentionItem { key: string; view: "keyframes" | "film"
 
 export function codePlanAttentionItems(view: CodePlanView | null, locale: string): CodePlanAttentionItem[] {
   return (view?.steps ?? []).filter(needsAttention).map((step) => {
-    const kind = step.kind === "image" ? "image" : step.kind === "render" ? "render" : "clip";
+    const kind = step.kind === "image" ? "image" : step.kind === "render" ? "render" : step.kind === "music" ? "music" : "clip";
     const label = text(step.label, 60);
     const problem = stepProblem(step, locale);
     return {
@@ -510,7 +510,7 @@ export interface VersionRow {
 
 const FINDINGS = new Set(["SOURCE_SYNTAX", "RUNTIME_ERROR", "UNAWAITED_CALL", "STEP_LIMIT", "CEILING"]);
 const KIND_LABEL: Record<CodePlanStepKind, Msg> = {
-  image: msg("codeplan.kind.image"), video: msg("codeplan.kind.video"), speech: msg("codeplan.kind.speech"), render: msg("codeplan.kind.render"),
+  image: msg("codeplan.kind.image"), video: msg("codeplan.kind.video"), speech: msg("codeplan.kind.speech"), music: msg("codeplan.kind.music"), render: msg("codeplan.kind.render"),
 };
 
 export function findingMsg(code: string): Msg {

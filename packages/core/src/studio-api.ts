@@ -753,7 +753,7 @@ export interface InstallationStatus {
 export type PlanMode = "graph" | "code";
 /** `done_with_failures`: the program returned, but at least one step it reached failed or stayed unknown. */
 export type CodePlanRunState = "empty" | "running" | "waiting" | "error" | "paused_budget" | "done" | "done_with_failures";
-export type CodePlanStepKind = "image" | "video" | "speech" | "render";
+export type CodePlanStepKind = "image" | "video" | "speech" | "music" | "render";
 export type CodePlanStepState = "absent" | "in_flight" | "unknown" | "succeeded" | "failed" | "cancelled";
 
 /** One content-addressed effect the plan has reached at least once. */
