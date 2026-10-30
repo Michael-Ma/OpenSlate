@@ -9,11 +9,12 @@ import { InstallationRecoveryGuard } from "../application/installation-recovery.
 import { CodePlanExecution } from "./execution.js";
 import { CODE_PLAN_MODELS, normalizeStepInput, stepKey } from "./identity.js";
 import type { CodePlanMediaKind, CodePlanModel } from "./identity.js";
-import type { CodePlanChoice, CodePlanHold, CodePlanInvocation, CodePlanRun, CodePlanStep, CodePlanVersion } from "./records.js";
+import type { CodePlanChoice, CodePlanHold, CodePlanInvocation, CodePlanRun, CodePlanSettings, CodePlanStep, CodePlanVersion } from "./records.js";
 import { runSandbox, SANDBOX_PENDING } from "./sandbox.js";
 import type { SandboxResult } from "./sandbox.js";
 import type { CodePlanPort } from "./port.js";
 import { codePlanView, emptyDiff, stepLabel } from "./view.js";
+import { codePlanCeiling } from "./settings.js";
 export { normalizeStepInput, stepKey } from "./identity.js";
 export type * from "./records.js";
 
@@ -158,7 +159,7 @@ export class CodePlanRuntime implements CodePlanPort {
       this.store.put("code_plan_version", record.id, projectId, record);
       const run: CodePlanRun = current ? { ...current, planVersion: next, state: "running", error: null, reachedStepKeys: [] }
         : { id: projectId, projectId, planVersion: next, state: "running", now: clock?.now ?? Date.now(), seed: clock?.seed ?? randomInt(1, 0x7fffffff),
-          ceilingMicros: "1000000", lastPassAt: null, error: null, reachedStepKeys: [], declarations: { scenes: [], shots: [] }, logs: [] };
+          ceilingMicros: codePlanCeiling(this.store, projectId), lastPassAt: null, error: null, reachedStepKeys: [], declarations: { scenes: [], shots: [] }, logs: [] };
       this.store.put("code_plan_run", projectId, projectId, run);
       this.changed(projectId);
       return record;
@@ -181,8 +182,7 @@ export class CodePlanRuntime implements CodePlanPort {
 
   raiseCeiling(projectId: string, micros: string): CodePlanView {
     this.assertCode(projectId);
-    const run = this.getRun(projectId); invariant(run, "CODE_PLAN_MISSING", "No code plan is saved");
-    invariant(moneyMicros(micros) > moneyMicros(run.ceilingMicros), "CODE_PLAN_CEILING", "The new ceiling must be higher");
+    invariant(moneyMicros(micros) > moneyMicros(codePlanCeiling(this.store, projectId)), "CODE_PLAN_CEILING", "The new ceiling must be higher");
     return this.setCeiling(projectId, { ceilingMicros: micros, by: "person" });
   }
 
@@ -190,15 +190,18 @@ export class CodePlanRuntime implements CodePlanPort {
     this.assertCode(projectId);
     if (input.by === "director") return this.store.command(`code-plan:${projectId}:ceiling`, input.invocationId, digest(input),
       () => this.setCeiling(projectId, { ceilingMicros: input.ceilingMicros, by: "person" }));
-    const run = this.getRun(projectId); invariant(run, "CODE_PLAN_MISSING", "No code plan is saved");
+    const run = this.getRun(projectId);
     const amount = moneyMicros(input.ceilingMicros), accounting = this.options.execution.accounting(projectId);
     if (amount < accounting.total) throw new DomainError("CODE_PLAN_CEILING", "The limit cannot be below charged, unknown and in-flight work", {
       ceilingMicros: input.ceilingMicros, chargedMicros: accounting.charged.toString(), unknownMicros: accounting.unknown.toString(),
       inFlightMicros: accounting.inFlight.toString(), liabilityMicros: accounting.total.toString(),
     });
-    this.store.put("code_plan_run", projectId, projectId, { ...run, ceilingMicros: input.ceilingMicros });
-    this.queued.add(projectId);
-    this.changed(projectId);
+    this.store.transaction(() => {
+      this.store.put<CodePlanSettings>("code_plan_settings", projectId, projectId, { ceilingMicros: input.ceilingMicros });
+      if (run) this.store.put("code_plan_run", projectId, projectId, { ...run, ceilingMicros: input.ceilingMicros });
+      this.changed(projectId);
+    });
+    if (run) this.queued.add(projectId);
     return this.view(projectId);
   }
 
@@ -220,6 +223,7 @@ export class CodePlanRuntime implements CodePlanPort {
     if (this.ticking) return this.ticking;
     const work = async () => {
       if (this.stopping || this.recovery.isQuarantined()) return;
+      let backfilled = false;
       for (const project of this.store.listProjects()) {
         if (project.planMode !== "code" || !this.getRun(project.id)) continue;
         try {
@@ -240,6 +244,8 @@ export class CodePlanRuntime implements CodePlanPort {
           const run = this.getRun(project.id)!;
           this.store.put("code_plan_run", project.id, project.id, { ...run, state: "error", error: errorView(error) });
         }
+        // Historical thumbnails are local maintenance, bounded across the entire tick.
+        if (!backfilled) backfilled = await this.options.execution.backfillPoster(project.id);
         this.changed(project.id);
       }
     };
@@ -338,6 +344,13 @@ export class CodePlanRuntime implements CodePlanPort {
       const key = stepKey(kind, input), id = entityId(projectId, key);
       reached.add(key);
       let step = dry ? virtual.get(key) : this.store.get<CodePlanStep>("code_plan_step", id);
+      const shotId = kind !== "render" ? (args[0] as { shot?: string }).shot : undefined;
+      if (step && step.shotId !== shotId) {
+        const { shotId: _previous, ...previous } = step;
+        step = { ...previous, ...(shotId === undefined ? {} : { shotId }), updatedAt: stamp() };
+        virtual.set(key, step);
+        if (!dry) this.store.put("code_plan_step", id, projectId, step);
+      }
       if (step?.retryAt !== undefined && step.retryAt > Date.now()) return SANDBOX_PENDING;
       if (step?.retryAt === undefined && (step?.result || step?.attemptId)) {
         reused.add(key);
@@ -345,6 +358,7 @@ export class CodePlanRuntime implements CodePlanPort {
       }
       const priceMicros = modelPrice(models[String(input.model)]!, input, codePlanPriceFrame(this.store, projectId, input));
       step = { ...(step ?? { id, projectId, key, kind, input, attemptId: null, result: null, createdAt: stamp() }),
+        ...(shotId === undefined ? {} : { shotId }),
         state: "absent", priceMicros,
         updatedAt: step?.state === "absent" && step.priceMicros === priceMicros ? step.updatedAt : stamp() };
       virtual.set(key, step);
@@ -400,7 +414,7 @@ export class CodePlanRuntime implements CodePlanPort {
     if (outcome.unawaitedCalls?.length) diff.findings.push({ code: "UNAWAITED_CALL", detail: [...new Set(outcome.unawaitedCalls)].join(", ") });
     if (limited) diff.findings.push({ code: "STEP_LIMIT" });
     const liability = this.options.execution.accounting(projectId).total;
-    if (moneyMicros(diff.certainMicros) > moneyMicros(run?.ceilingMicros ?? "1000000") - liability) diff.findings.push({ code: "CEILING" });
+    if (moneyMicros(diff.certainMicros) > moneyMicros(codePlanCeiling(this.store, projectId)) - liability) diff.findings.push({ code: "CEILING" });
     return { outcome, reached, declarations, logs, budget, diff };
   }
 

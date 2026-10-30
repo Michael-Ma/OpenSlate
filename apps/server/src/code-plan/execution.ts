@@ -20,6 +20,8 @@ import type { CodePlanModel } from "./identity.js";
 import { VIDEO_DERIVATION_LIMITS, assertNormalizedVideoIngestion, type NormalizedVideoIngestion, type VideoDerivationIntent } from "../execution/video-derivation.js";
 import { AUDIO_DERIVATION_LIMITS, assertNormalizedAudioIngestion, type NormalizedAudioIngestion, type AudioDerivationIntent } from "../execution/audio-derivation.js";
 import { assertCodePlanFirstDispatch } from "./provider-authority.js";
+import { makeCodePlanPoster } from "./posters.js";
+import type { CodePlanStep } from "./records.js";
 import type { CodePlanMediaKind } from "./identity.js";
 export type { CodePlanMediaKind } from "./identity.js";
 export type CodePlanLiability = "reserved" | "charged" | "released";
@@ -211,6 +213,22 @@ export class CodePlanExecution {
     return before !== canonical(this.attempts(projectId));
   }
 
+  /** At most one historical clip per tick, including history from older plan versions. */
+  async backfillPoster(projectId: string): Promise<boolean> {
+    if (this.stopping || !this.localExecutor) return false;
+    const step = this.store.list<CodePlanStep>("code_plan_step", projectId).find(step => step.state === "succeeded"
+      && step.result?.ok && step.result.artifact.kind === "video" && !this.store.get("code_plan_poster", step.result.artifact.artifactId));
+    if (!step?.result?.ok) return false;
+    await this.poster(projectId, step.result.artifact); return true;
+  }
+
+  private async poster(projectId: string, ref: ArtifactRef): Promise<void> {
+    if (this.stopping || !this.localExecutor || ref.kind !== "video") return;
+    const controller = new AbortController(); this.controllers.add(controller);
+    try { await makeCodePlanPoster(this.store, this.localExecutor.media, this.artifactDir, projectId, ref, controller.signal); }
+    finally { this.controllers.delete(controller); }
+  }
+
   /** Await already-started work before a replay or before closing the shared store. */
   async awaitIdle(): Promise<void> {
     const results = await Promise.allSettled([...this.operations.values()]);
@@ -324,6 +342,7 @@ export class CodePlanExecution {
         this.store.put("code_plan_execution", attempt.id, attempt.projectId, { ...record, liability: "charged", updatedAt: new Date().toISOString() });
         this.store.put("attempt", attempt.id, attempt.projectId, { ...current, phase: "succeeded", outputs: { video: artifact.artifact } });
       });
+      await this.poster(attempt.projectId, artifact.artifact);
     } finally { this.controllers.delete(controller); }
   }
 
@@ -378,6 +397,7 @@ export class CodePlanExecution {
       }
       this.store.put("attempt", id, attempt.projectId, { ...current, phase: "succeeded", outputs });
     });
+    for (const ref of Object.values(outputs)) if (ref.kind === "video") await this.poster(attempt.projectId, ref);
   }
 
   private async validateArtifact(attempt: Attempt, output: IngestibleExecutionOutput, artifact: ArtifactRecord, derived = false): Promise<void> {

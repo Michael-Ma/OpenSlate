@@ -209,14 +209,15 @@ export function createApp(options: AppOptions = {}) {
     try { return await modelSettings().apply(request.params.projectId, { ...request.body, key: request.headers["idempotency-key"] as string | undefined ?? newId() }, { signal: abort.signal }); }
     finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
   });
-  app.post<{ Body: { name: string; planMode?: "graph" | "code"; expectedCatalogDigest?: string; profileIds?: string[] } }>("/api/projects", {
+  app.post<{ Body: { name: string; planMode?: "graph" | "code"; ceilingMicros?: string; expectedCatalogDigest?: string; profileIds?: string[] } }>("/api/projects", {
     schema: { body: { ...object({ name: string, expectedCatalogDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
-      profileIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: string }, planMode: { enum: ["graph", "code"] } }, ["name"]),
+      profileIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: string }, planMode: { enum: ["graph", "code"] },
+      ceilingMicros: { type: "string", pattern: "^(0|[1-9][0-9]*)$", maxLength: 19 } }, ["name"]),
       dependencies: { expectedCatalogDigest: ["profileIds"], profileIds: ["expectedCatalogDigest"] } } },
   }, async request => service().store.command("local-user:create-project", request.headers["idempotency-key"] as string | undefined ?? newId(), digest(request.body), () => {
     // Resolve only for a new command: a replay must not adopt or reject a later installation catalog.
     const selection = request.body.profileIds ? providerCatalog().select(request.body.expectedCatalogDigest!, request.body.profileIds) : undefined;
-    return service().createProject(request.body.name, selection, request.body.planMode);
+    return service().createProject(request.body.name, selection, request.body.planMode, request.body.ceilingMicros);
   }));
   registerAssetLibrary(app, service);
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async request => service().snapshot(request.params.projectId));
