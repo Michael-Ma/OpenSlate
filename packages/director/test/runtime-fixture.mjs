@@ -24,7 +24,8 @@ for (let i = 2; i < process.argv.length; i++) {
 const credential = config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_CREDENTIAL;
 log({ kind: "launch", pid: process.pid, parentSecretAbsent: !process.env.OPENSLATE_PARENT_SECRET,
   credentialDigest: createHash("sha256").update(credential).digest("hex"),
-  endpoint: config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_ENDPOINT });
+  endpoint: config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_ENDPOINT,
+  codeProfile: { effort: config.model_reasoning_effort, tools: Object.keys(config.mcp_servers.openslate.tools ?? {}), shell: config.features?.shell_tool } });
 const send = value => process.stdout.write(JSON.stringify(value) + "\n");
 const respond = (id, result) => send({ id, result });
 const notify = (method, params) => send({ method, params });
@@ -91,7 +92,9 @@ lines.on("line", line => {
         : mode === "instructions-extra" ? [{ path: "/fake/AGENTS.md" }] : [] });
   }
   if (method === "mcpServerStatus/list") {
-    const tools = Object.fromEntries(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"].map(name => [name, { name }]));
+    const names = config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT === "0.1.0" && mode !== "catalog-legacy"
+      ? ["read_film", "submit_plan"] : ["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"];
+    const tools = Object.fromEntries(names.map(name => [name, { name }]));
     if (["2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") tools.revise_narration_draft = { name: "revise_narration_draft" };
     if (["3.0.0", "4.0.0", "5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") { tools.prepare_recording_transcription = { name: "prepare_recording_transcription" }; tools.prepare_narration_speech = { name: "prepare_narration_speech" }; }
     if (["5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") { tools.record_notes = { name: "record_notes" }; tools.propose_change = { name: "propose_change" }; }
