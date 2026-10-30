@@ -24,6 +24,16 @@ Registered execution identities bind requests to the compiled-in adapter. Creden
 
 Runtime configuration explicitly supplies every route switch and download-host array, with `false` switches and empty arrays when no routes or hosts are configured. Only optional Codex binary/home paths may be omitted. Viggle preparation and backup validation reproduce the current centre-crop recipe; crop metadata is absent only for inputs that already need no crop.
 
+## Experimental code-plan use
+
+Code projects expose the installed image/video/speech profiles in their saved lock by profile id through `read_film.models`. Exact definitions, registered adapters, explicit host enablement, required media tools and credentials are checked before admission. Codex image authentication remains the existing native ChatGPT prepare check. A missing or changed installation definition never selects a demo or alternate route. The same server composition supplies registry, credential resolver, protected download allowlists, output store and ingesters to both execution modes.
+
+The code-plan journal substitutes its own immutable attempt/request/version/price reservation for graph candidate/grant/node admission; graph authority remains unchanged. Codex and speech retain their full original profile/receipt lineage. Viggle's first-frame receipt has an alternate code-plan intent pin, keeping exact artifact identity and the shared F1 centre crop without inventing a human review. Unknown outcomes use only retained tasks/receipts and lookup; no failed or unknown code step automatically resubmits. In particular, the existing Viggle/MiniMax policy can close an unresolvable lost POST as `SUBMISSION_RESPONSE_LOST`, retaining charge liability and refusing retries; it cannot discover a job from the application's attempt id.
+
+P4a code-plan prices use `unitCostMicros` per call for images, speech and clips alike (the graph quote's basis). Codex subscription images count $0; other zero estimates remain unknown. This explicit card rule differs from this checkout's flat Viggle/MiniMax graph quote; it changes no graph pricing. These host estimates bound known liability under the film's $1 circuit breaker, not actual vendor charges or unpriced usage.
+
+Real local rendering reuses measured `media_source` descriptors, timeline documents, frozen manifests, FFmpeg, probing and managed installation. Artifact publication follows retained completion evidence; spooled raw bytes and normalized media retain distinct hashes. Demo projects keep fixture media and fixture renders. Offline adapter fixtures and synthetic MP4/WAV checks establish plumbing and recovery, not live account access or subjective output quality. See the [P4a report](../ai/code-plan/reports/P4a-report.md).
+
 ## Output boundary
 
 1. Retain a provider effect/receipt and exact task identity where available.
