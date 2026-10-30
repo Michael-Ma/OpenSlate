@@ -8,10 +8,12 @@ interface Studio {
   shot<T extends { [key: string]: Json }>(declaration: T): Promise<T>;
   image(input: MediaInput & { prompt: string }): Promise<MediaResult>;
   video(input: MediaInput & { firstFrame: Artifact; prompt: string; durationSeconds?: number }): Promise<MediaResult>;
-  /** A spoken line; default model fake-speech with voice "fixture". */
-  speech(input: MediaInput & { text: string; voice?: string }): Promise<MediaResult>;
-  /** Current local renderer is a fixture. Timeline rows are JSON, typically artifact refs. */
-  render(timeline: Json[] | (MediaInput & { timeline: Json[] })): Promise<MediaResult>;
+  /** Use an installed read_film.models id. Real speech defaults to stock voice coral. */
+  speech(input: MediaInput & { text: string; voice?: string; instructions?: string }): Promise<MediaResult>;
+  /** Real projects: owned video refs or {artifact,startFrame?,durationFrames?,fit?};
+   * optional audio placements use artifact,startSample,durationSamples,atSample,gainMilliDb.
+   * Cut-only, 30 fps, 48 kHz; at most 64 clips/65 audio placements/8 lanes/360 s. Demo output is a fixture. */
+  render(timeline: Json[] | (MediaInput & { timeline: Json[]; audio?: Json[]; width?: number; height?: number })): Promise<MediaResult>;
   choose<T extends Json>(id: string, input: { question: string; options: T[] }): Promise<T>;
   log(text: string): Promise<null>;
 }

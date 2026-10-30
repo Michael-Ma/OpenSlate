@@ -76,9 +76,11 @@ const ffmpegPath = findMediaTool("ffmpeg", process.env.OPENSLATE_FFMPEG), ffprob
 const runtime = createMediaExecutionRuntime({ store, fakeProvider: provider, dataDirectory: directory, configuration: executionConfiguration,
   ffmpegPath, ffprobePath, startupTimeoutMs, ...(providerConfiguration === undefined ? {} : { providerConfiguration }) });
 const { engine, localMedia, imageStore, providerCatalog, uploadDirectory } = runtime;
-// Experimental code mode is deliberately pinned to fixture execution in P1.
+// Code mode shares the installed adapters and owned media pipeline, with its own admission journal.
 const codePlans = new CodePlanRuntime(store, { execution: new CodePlanExecution(store, {
-  provider, artifactDir: join(directory, "artifacts"),
+  provider, registry: runtime.registry, catalog: providerCatalog, outputStore: runtime.outputStore,
+  outputIngestor: runtime.outputIngestor, ...(runtime.localExecutor ? { localExecutor: runtime.localExecutor } : {}),
+  providerTimeoutMs: 600000, artifactDir: join(directory, "artifacts"),
 }) });
 const service = new ProductionService(store, engine, undefined, runtime.productionOptions);
 const narration = new NarrationService(service, localMedia ?? undefined);
@@ -116,7 +118,7 @@ const close = createServerShutdown(app, {
   cleanup: [
     { name: "Director turns", close: () => director.close() },
     { name: "native media workers", close: () => runtime.close() },
-    { name: "code-plan fixture workers", close: () => codePlans.close() },
+    { name: "code-plan workers", close: () => codePlans.close() },
     { name: "media reconciliation", close: () => activeWork },
   ],
   resources: [

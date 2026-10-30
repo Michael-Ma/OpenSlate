@@ -2,6 +2,12 @@
 
 Reconciled October 16, 2026 (feature branch after the B18 merge, including B1–B18). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
+## October 29 P4a — code-plan installed providers and local rendering
+
+Code-mode media now uses the exact installed profiles in the project's capability lock and the existing Codex image, OpenAI Images, Viggle H3, MiniMax H3 and OpenAI speech adapters. `read_film` exposes their model ids, defaults, known/unknown prices and unit basis. Saved step intent, original plan version, one-use submit permits, current profile/readiness, priced holds, Stop, the ceiling and concurrency constrain new dispatch; recovery retains existing tasks/receipts without resubmission. Shared spool/ingestion/normalization and Viggle's current first-frame crop remain authoritative, with no graph candidate/grant/review admission.
+
+Real code-plan rendering captures owned measured clips/audio and reuses local timelines, frozen manifests, FFmpeg, probing and managed MP4 installation. Durable completions survive lost publication. Demo-only projects retain fake models/rendering. This is an offline implementation: real account access, provider output quality and actual charges await the lead's P4b run. Code mode follows P4a's per-second video unit-cost rule; this checkout's flat Viggle/MiniMax graph quote is unchanged. Pinned setup/preflight, all five builds, **429/429 focused tests**, **4,755 passed / zero failed / one optional skip (4,756 total)**, all **five** workspace typechecks and the fake `pnpm demo:code` passed. **28 tests added**, none rewritten/deleted/disabled. Self-review corrected authority/receipt recovery, local error visibility and raw-versus-normalized audio limits. No browser, live provider call, external network, protected-state read, port-3001 listener or commit occurred. The [P4a report](../ai/code-plan/reports/P4a-report.md) records the complete scope, narrow shared changes and pricing decision for lead review.
+
 ## October 29 L1–L4 — legacy compatibility removal (persistence, execution, narration)
 
 L1 replaces the migration chain with one current schema (v4); data directories from earlier prototype builds need a new `OPENSLATE_DATA_DIR`.

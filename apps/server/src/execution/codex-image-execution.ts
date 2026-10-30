@@ -22,7 +22,7 @@ export interface CodexImageExecutionUnresolved {id:string;projectId:string;versi
 const unknown=():ExecutionOutcome=>({type:'unknown',diagnostic:'Codex image outcome is unresolved; no automatic turn restart'});
 const stopped=(signal?:AbortSignal):void=>invariant(!signal?.aborted,'CODEX_IMAGE_CANCELLED','Codex image work was cancelled');
 const identity=(attempt:Attempt)=>({id:attempt.id,projectId:attempt.projectId,version:1 as const,attemptId:attempt.id,requestDigest:digest(attempt.request)});
-const selectionChanged=(error:unknown):boolean=>error instanceof DomainError&&['CODEX_IMAGE_SELECTION_CHANGED','EXECUTION_PAUSED','EXECUTION_HELD'].includes(error.code);
+const selectionChanged=(error:unknown):boolean=>error instanceof DomainError&&['CODE_PLAN_SELECTION_CHANGED','CODEX_IMAGE_SELECTION_CHANGED','EXECUTION_PAUSED','EXECUTION_HELD'].includes(error.code);
 
 /** Separate ChatGPT-usage adapter. One irreversible turn/start marker, never an Images API fallback. */
 export class CodexImageExecution implements ExecutionProvider {

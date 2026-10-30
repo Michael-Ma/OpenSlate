@@ -1,3 +1,5 @@
+import { assertCodePlanProviderAdmission, resolveCodePlanProviderAdmission, assertCodePlanFirstDispatch, assertCodePlanProviderLease } from "../code-plan/provider-authority.js";
+import type { CodePlanProviderAdmission } from "../code-plan/provider-authority.js";
 import { configuredProfileMatches, providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, effectiveNodeDigest, invariant, shotIntentDigest } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
@@ -11,10 +13,11 @@ import type { CodexImageExecutionMapping } from "./codex-image-receipts.js";
 
 export interface CodexImageCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; [key: string]: unknown }
 export interface CodexImageReservation { id: string; projectId: string; attemptId: string; micros: string; state: string }
-export interface CodexImageAdmission {
+interface GraphCodexImageAdmission {
   attempt: Attempt; candidate: Candidate; grant: Grant; reservation: CodexImageReservation;
   profile: ProviderProfile; capabilityLock: CodexImageCapabilityLock; references?: ArtifactRecord[];
 }
+export type CodexImageAdmission = GraphCodexImageAdmission | (CodePlanProviderAdmission & { references?: ArtifactRecord[] });
 export type CodexImageProfilePin = Pick<CodexImageExecutionMapping, "capabilityLockId" | "capabilityLockDigest" | "profileDefinition">;
 export type CodexImageAuthorityStore = Pick<Store, "get" | "getProject" | "db">;
 export const CODEX_IMAGE_PROFILE_LOOKUP_LIMITS = Object.freeze({ lockBytes: 65536, profiles: 64 });
@@ -22,6 +25,7 @@ const fail = (condition: unknown, message: string): void => invariant(condition,
 
 /** Retained admission proof; current selection is checked separately before first submit. */
 export function assertCodexImageAdmission(value: CodexImageAdmission): void {
+  if ("codePlan" in value) { assertCodePlanProviderAdmission(value); assertCodexImageExecutionProfile(value.profile, value.attempt); return; }
   const { attempt, candidate, grant, reservation, profile, capabilityLock } = value;
   fail(attempt && attempt.id === attempt.request.attemptId && attempt.nodeId === attempt.request.nodeId && attempt.fingerprint === attempt.request.fingerprint
     && attempt.request.kind === "image" && attempt.request.execution?.adapter === "codex-image" && attempt.request.execution.version === "1"
@@ -48,6 +52,12 @@ export function assertCodexImageMappingAdmission(admission: CodexImageAdmission,
 
 /** Resolve the exact original lock and full profile definition recorded at admission. */
 export function resolveCodexImageAdmission(store: CodexImageAuthorityStore, input: Readonly<ExecutionRequest>, pinned?: CodexImageProfilePin & Partial<Pick<CodexImageExecutionMapping, "references">>): CodexImageAdmission {
+  const code = resolveCodePlanProviderAdmission(store, input, pinned);
+  if (code) {
+    const result: CodexImageAdmission = code;
+    if (pinned?.references) result.references = resolveCodexImageReferences(store, result.attempt);
+    assertCodexImageAdmission(result); return result;
+  }
   const request = structuredClone(input), attempt = store.get<Attempt>("attempt", request.attemptId);
   fail(attempt && canonical(attempt.request) === canonical(request) && attempt.candidateId && attempt.reservationId,
     "CodexImage requires an unchanged stored admission");
@@ -82,6 +92,7 @@ export function resolveCodexImageAdmission(store: CodexImageAuthorityStore, inpu
 
 /** Lease authority is independent of current selection, pause and holds. */
 export function assertCodexImageLease(store: Store, original: CodexImageAdmission, expectedLease: ExecutionCallOptions["expectedLease"], reconciling = false): CodexImageAdmission {
+  if ("codePlan" in original) { assertCodePlanProviderLease(store, original.attempt, expectedLease, reconciling); return resolveCodexImageAdmission(store, original.attempt.request); }
   const current = resolveCodexImageAdmission(store, original.attempt.request, { capabilityLockId: original.capabilityLock.id,
     capabilityLockDigest: digest(original.capabilityLock), profileDefinition: original.profile });
   invariant(expectedLease && Object.keys(expectedLease).length === 2 && expectedLease.owner === original.attempt.leaseOwner
@@ -93,6 +104,7 @@ export function assertCodexImageLease(store: Store, original: CodexImageAdmissio
 }
 /** Use inside the short pre-marker transaction; late provider observations use no first-submit check. */
 export function assertCodexImageFirstDispatch(store: Store, original: CodexImageAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): void {
+  if ("codePlan" in original) { assertCodePlanFirstDispatch(store, original.attempt, expectedLease); return; }
   new InstallationRecoveryGuard(store).assertFirstSubmit(original.attempt.projectId, original.attempt.id);
   const current = assertCodexImageLease(store, original, expectedLease);
   const lock = store.get<CodexImageCapabilityLock>("capability_lock", store.getProject(current.attempt.projectId).capabilityLockId);

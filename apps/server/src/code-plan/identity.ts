@@ -1,8 +1,8 @@
 import { canonical, digest, invariant } from "@openslate/core";
-import type { JsonObject, JsonValue } from "@openslate/core";
+import type { JsonObject, JsonValue, ProviderProfile } from "@openslate/core";
 
 export type CodePlanMediaKind = "image" | "video" | "speech" | "render";
-export interface CodePlanModel { kind: CodePlanMediaKind; defaults?: JsonObject; priceMicros?: string }
+export interface CodePlanModel { kind: CodePlanMediaKind; defaults?: JsonObject; priceMicros?: string; priceUnit?: "call"; profile?: ProviderProfile; profileDefinitionDigest?: string }
 export const CODE_PLAN_MODELS: Readonly<Record<string, CodePlanModel>> = Object.freeze({
   "fake-image": { kind: "image" },
   "fake-video": { kind: "video", defaults: { durationSeconds: 6 } },
@@ -17,7 +17,7 @@ export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
   const input = kind === "render" && Array.isArray(value) ? { timeline: value } : value;
   invariant(input && typeof input === "object" && !Array.isArray(input), "CODE_PLAN_INPUT", "Media input must be an object");
   const source = input as Record<string, unknown>;
-  const model = source.model ?? defaultModel[kind];
+  const model = source.model ?? (models[defaultModel[kind]] ? defaultModel[kind] : Object.keys(models).find(id => models[id]?.kind === kind));
   invariant(typeof model === "string" && Object.hasOwn(models, model) && models[model]?.kind === kind,
     "CODE_PLAN_MODEL", "Use a configured model for this operation");
   const normalize = (item: unknown, depth: number): JsonValue => {
@@ -34,7 +34,7 @@ export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
     }
     return Object.fromEntries(Object.keys(object).sort().map(key => [key, normalize(object[key], depth + 1)]));
   };
-  const result = normalize({ ...models[model]?.defaults, ...source, model }, 0) as JsonObject;
+  const result = normalize({ ...models[model]?.defaults, ...source, model, ...(models[model]?.profileDefinitionDigest ? { profileDefinitionDigest: models[model]!.profileDefinitionDigest! } : {}) }, 0) as JsonObject;
   invariant(Buffer.byteLength(canonical(result)) <= 256 * 1024, "CODE_PLAN_INPUT", "Media input exceeds its byte limit");
   return result;
 }

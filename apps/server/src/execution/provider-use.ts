@@ -1,3 +1,4 @@
+import { codePlanAdmissionFromAttempt, isCodePlanAttempt } from "../code-plan/provider-authority.js";
 import { canonical, digest, invariant, providerProfileArguments } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import type { ExecutionRequest } from "@openslate/providers";
@@ -25,6 +26,7 @@ export function configuredProfileMatches(request: ExecutionRequest, profile: Pro
 /** Historical identity check also usable before the reservation is inserted in the admission transaction. */
 export function assertConfiguredProviderPin(store: Pick<Store, "get">, attempt: Attempt): ProviderProfile | null {
   if (!attempt.request) return null;
+  if (isCodePlanAttempt(attempt) && Object.hasOwn(attempt.request, "providerUse")) return codePlanAdmissionFromAttempt(store, attempt).profile;
   if (!Object.hasOwn(attempt.request, "providerUse")) {
     if (attempt.request.execution?.version === "1" && externalV1.has(attempt.request.execution.adapter))
       invariant(false, "CONFIGURED_PROVIDER_ADMISSION_CONFLICT", "External work requires its recorded provider-use proof");
@@ -54,6 +56,7 @@ export function assertConfiguredProviderPin(store: Pick<Store, "get">, attempt: 
 /** Retained proof; current selection and Stop are checked separately before first submit. */
 export function assertConfiguredProviderAdmission(store: Pick<Store, "get">, attempt: Attempt): void {
   const profile = assertConfiguredProviderPin(store, attempt); if (!profile) return;
+  if (isCodePlanAttempt(attempt)) { codePlanAdmissionFromAttempt(store, attempt); return; }
   const reservation = store.get<{ id: string; projectId: string; attemptId: string; micros: string; state: string }>("reservation", attempt.reservationId!);
   invariant(reservation?.id === attempt.reservationId && reservation.projectId === attempt.projectId && reservation.attemptId === attempt.id
     && reservation.micros === profile.unitCostMicros && ["reserved", "charged", "released"].includes(reservation.state),

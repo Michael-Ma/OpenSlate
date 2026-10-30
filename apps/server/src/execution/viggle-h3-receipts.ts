@@ -13,7 +13,8 @@ export interface ViggleH3ExecutionMapping extends Identity {
   /** Exact original admission lock and full profile definition. */
   capabilityLockId: string; capabilityLockDigest: string;
   estimatedMicros: string;
-  firstFrame: { artifactId: string; artifactDigest: string; approvalId: string; approvalDigest: string; snapshotId: string; snapshotDigest: string };
+  firstFrame: { artifactId: string; artifactDigest: string; approvalId: string; approvalDigest: string; snapshotId: string; snapshotDigest: string }
+    | { artifactId: string; artifactDigest: string; codePlanAttemptId: string; codePlanRequestDigest: string };
   firstFrameCrop?: PngCenterCrop;
   transport: ViggleH3Description;
 }
@@ -112,7 +113,9 @@ export function assertViggleH3ExecutionMapping(attempt: Attempt, mapping: Viggle
   viggleH3Fields(request.args, [...VIGGLE_ARGUMENT_FIELDS, ...(Object.hasOwn(request.args, "aspect") ? ["aspect"] : [])]);
   viggleH3Fields(request.args.settings, []);
   viggleH3Fields(description, ["adapterVersion", "model", "mode", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "firstFrame", "requestDigest", "bodySha256", "bodyByteLength"]);
-  viggleH3Fields(mapping.firstFrame, ["artifactId", "artifactDigest", "approvalId", "approvalDigest", "snapshotId", "snapshotDigest"]);
+  const codeFrame = "codePlanAttemptId" in mapping.firstFrame;
+  viggleH3Fields(mapping.firstFrame, codeFrame ? ["artifactId", "artifactDigest", "codePlanAttemptId", "codePlanRequestDigest"]
+    : ["artifactId", "artifactDigest", "approvalId", "approvalDigest", "snapshotId", "snapshotDigest"]);
   invariant(config.model === "MiniMax-H3" && description.mode === "first_frame" && description.watermark === false
     && description.model === config.model && description.adapterVersion === VIGGLE_H3_ADAPTER_VERSION
     && description.resolution === config.settings.resolution && description.quality === config.settings.quality && description.aspectRatio === viggleH3RequestAspect(request.args, request.profile!)
@@ -124,7 +127,9 @@ export function assertViggleH3ExecutionMapping(attempt: Attempt, mapping: Viggle
     && mapping.profileDigest === request.profile!.digest && mapping.profileDefinitionDigest === digest(mapping.profileDefinition)
     && id(mapping.capabilityLockId) && viggleH3Hash(mapping.capabilityLockDigest) && mapping.estimatedMicros === mapping.profileDefinition.unitCostMicros
     && request.inputs.length === 1 && request.inputs[0]!.kind === "image" && mapping.firstFrame.artifactId === request.inputs[0]!.artifactId
-    && id(mapping.firstFrame.approvalId) && id(mapping.firstFrame.snapshotId) && [mapping.firstFrame.artifactDigest, mapping.firstFrame.approvalDigest, mapping.firstFrame.snapshotDigest].every(viggleH3Hash),
+    && viggleH3Hash(mapping.firstFrame.artifactDigest) && ("codePlanAttemptId" in mapping.firstFrame
+      ? attempt.workKey?.startsWith("code-plan:") && attempt.candidateId === null && mapping.firstFrame.codePlanAttemptId === attempt.id && mapping.firstFrame.codePlanRequestDigest === digest(request)
+      : id(mapping.firstFrame.approvalId) && id(mapping.firstFrame.snapshotId) && [mapping.firstFrame.approvalDigest, mapping.firstFrame.snapshotDigest].every(viggleH3Hash)),
   "VIGGLE_H3_EXECUTION_CONFLICT", "H3 mapping must preserve the pinned model, exact duration and reviewed first frame");
   const image = description.firstFrame!; viggleH3Fields(image, ["sha256", "width", "height", "byteLength", "mediaType"]);
   const crop = mapping.firstFrameCrop;

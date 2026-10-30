@@ -1,3 +1,4 @@
+import { resolveCodePlanProviderAdmission, isCodePlanAttempt } from "../code-plan/provider-authority.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open, realpath } from "node:fs/promises";
@@ -258,7 +259,8 @@ export class ViggleH3Execution implements ExecutionProvider {
       // Reconciliation owns a new epoch, so every old first-POST writer is fenced before this receipt is sealed.
       if (options.signal?.aborted || this.started(current.id) || current.taskId || !expected || current.phase !== "submission_unknown"
         || current.leaseOwner !== expected.owner || current.leaseEpoch !== expected.epoch || current.leaseExpiresAt <= Date.now()
-        || this.#store.get<{ state: string }>("reservation", current.reservationId!)?.state !== "reserved") return;
+        || (isCodePlanAttempt(current) ? resolveCodePlanProviderAdmission(this.#store, current.request)?.codePlan.liability
+          : this.#store.get<{ state: string }>("reservation", current.reservationId!)?.state) !== "reserved") return;
       this.saveSubmit(current, { kind: "not_dispatched", code: "LOCAL_CANCELLED" });
     });
   }

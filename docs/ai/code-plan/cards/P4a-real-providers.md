@@ -16,7 +16,7 @@ P4 needs one real two-shot film: Codex image keyframes and Viggle H3 clips, unde
 
 1. **Models from the installed catalog.**
    - A code project's available models are the installed provider profiles of the project's capability lock (image, video, speech), named by profile id. The fake models stay when the installation has no real profiles.
-   - Each model's price comes from the profile's `unitCostMicros`, scaled the same way the graph quote does (per image, or per second of video).
+   - Each model's price comes from the profile's `unitCostMicros`, priced the same way the graph quote does: one `unitCostMicros` per call, clips included. (Corrected after review; it first said per second of video.)
    - An unpriced profile stays unpriced. Codex image uses the ChatGPT plan and counts as $0, capped by the step limit.
    - `read_film` and the code-plan guidance tell the Director which models exist and what they cost. If you change `skills/code-plan/`, update `CODE_PLAN_GUIDANCE_DIGEST`.
 2. **Real dispatch through the existing provider adapters.**

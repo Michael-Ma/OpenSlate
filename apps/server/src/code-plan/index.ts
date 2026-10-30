@@ -1,3 +1,4 @@
+import { modelPrice, modelDescriptions } from "./models.js";
 import { createHash, randomInt } from "node:crypto";
 import { canonical, digest, DomainError, invariant, moneyMicros } from "@openslate/core";
 import type { JsonObject, JsonValue } from "@openslate/core";
@@ -23,7 +24,8 @@ const flights = new WeakMap<Store, Map<string, Promise<CodePlanRun>>>();
 
 /** Experimental, host-owned replay coordinator. It never admits graph candidates or grants. */
 export class CodePlanRuntime implements CodePlanPort {
-  private readonly models: Readonly<Record<string, CodePlanModel>>;
+  private readonly capacityWaiting = new Set<string>();
+  private readonly models: Readonly<Record<string, CodePlanModel>> | undefined;
   private readonly maxSteps: number;
   private readonly queued = new Set<string>();
   private readonly passes: Map<string, Promise<CodePlanRun>>;
@@ -36,8 +38,8 @@ export class CodePlanRuntime implements CodePlanPort {
     limits?: { cpuMs?: number; memoryMb?: number; maxSteps?: number };
   }) {
     this.recovery = new InstallationRecoveryGuard(store);
-    this.models = structuredClone(options.models ?? CODE_PLAN_MODELS);
-    for (const model of Object.values(this.models)) {
+    this.models = options.models ? structuredClone(options.models) : undefined;
+    for (const model of Object.values(this.models ?? CODE_PLAN_MODELS)) {
       invariant(["image", "video", "speech", "render"].includes(model.kind), "CODE_PLAN_MODEL", "Invalid model operation");
       moneyMicros(model.priceMicros ?? "0");
       invariant(model.kind !== "render" || moneyMicros(model.priceMicros ?? "0") === 0n, "CODE_PLAN_MODEL", "Local renders are free");
@@ -54,6 +56,10 @@ export class CodePlanRuntime implements CodePlanPort {
   getRun(projectId: string): CodePlanRun | undefined { return this.store.get("code_plan_run", projectId); }
   steps(projectId: string): CodePlanStep[] { return this.store.list("code_plan_step", projectId); }
   choices(projectId: string): CodePlanChoice[] { return this.store.list("code_plan_choice", projectId); }
+  availableModels(projectId: string): ReturnType<typeof modelDescriptions> {
+    this.assertProject(projectId);
+    return modelDescriptions(this.models ?? this.options.execution.models(projectId));
+  }
   view(projectId: string): CodePlanView {
     this.assertProject(projectId);
     return codePlanView(this.store, this.options.execution, projectId);
@@ -189,6 +195,7 @@ export class CodePlanRuntime implements CodePlanPort {
       for (const project of this.store.listProjects()) {
         if (project.planMode !== "code" || !this.getRun(project.id)) continue;
         try {
+          if (this.capacityWaiting.delete(project.id)) this.queued.add(project.id);
           let ingestionError: unknown;
           try { if (await this.options.execution.advance(project.id)) this.queued.add(project.id); }
           catch (error) { ingestionError = error; }
@@ -262,7 +269,7 @@ export class CodePlanRuntime implements CodePlanPort {
 
   /** One call path for preview and execution. Preview keeps all new state in memory. */
   private async evaluate(projectId: string, source: string, dry: boolean, clock?: { now: number; seed: number }) {
-    const run = this.getRun(projectId);
+    const run = this.getRun(projectId), models = this.models ?? this.options.execution.models(projectId);
     const reached = new Set<string>(), declarations: CodePlanRun["declarations"] = { scenes: [], shots: [] }, logs: string[] = [];
     const journal = this.steps(projectId), virtual = new Map(journal.map(step => [step.key, step]));
     const diff = emptyDiff(), submissions: Promise<void>[] = [];
@@ -286,14 +293,14 @@ export class CodePlanRuntime implements CodePlanPort {
       if (method === "choose") return this.choose(projectId, args, dry);
       invariant(method === "image" || method === "video" || method === "speech" || method === "render", "CODE_PLAN_METHOD", "Unknown Studio operation");
       const kind: CodePlanMediaKind = method;
-      const input = normalizeStepInput(kind, args[0], this.models), key = stepKey(kind, input), id = entityId(projectId, key);
+      const input = normalizeStepInput(kind, args[0], models), key = stepKey(kind, input), id = entityId(projectId, key);
       reached.add(key);
       let step = dry ? virtual.get(key) : this.store.get<CodePlanStep>("code_plan_step", id);
       if (step?.result || step?.attemptId) {
         reused.add(key);
         return step.result ?? SANDBOX_PENDING;
       }
-      const priceMicros = this.models[String(input.model)]?.priceMicros ?? "0";
+      const priceMicros = modelPrice(models[String(input.model)]!);
       step = { ...(step ?? { id, projectId, key, kind, input, attemptId: null, result: null, createdAt: stamp() }),
         state: "absent", priceMicros,
         updatedAt: step?.state === "absent" && step.priceMicros === priceMicros ? step.updatedAt : stamp() };
@@ -318,6 +325,9 @@ export class CodePlanRuntime implements CodePlanPort {
       }
       invariant(this.steps(projectId).filter(item => item.attemptId).length < this.maxSteps,
         "CODE_PLAN_STEP_LIMIT", `Code plans allow at most ${this.maxSteps} dispatched media steps per project`);
+      if (!this.options.execution.hasCapacity(projectId, input)) {
+        this.capacityWaiting.add(projectId); this.store.put("code_plan_step", id, projectId, step); return SANDBOX_PENDING;
+      }
       const admitted = this.store.transaction(() => {
         const attempt = this.options.execution.prepare(projectId, key, kind, input);
         this.store.put("code_plan_step", id, projectId, { ...step, state: "in_flight", attemptId: attempt.id });

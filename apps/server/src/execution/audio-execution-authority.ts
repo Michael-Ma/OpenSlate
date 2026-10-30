@@ -1,3 +1,5 @@
+import { assertCodePlanProviderAdmission, resolveCodePlanProviderAdmission, assertCodePlanFirstDispatch } from "../code-plan/provider-authority.js";
+import type { CodePlanProviderAdmission } from "../code-plan/provider-authority.js";
 import { configuredProfileMatches, providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, invariant } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
@@ -12,10 +14,11 @@ import { assertNarrationSpeechAttemptCurrent } from "./narration-speech-executio
 
 export interface SpeechCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; [key: string]: unknown }
 export interface SpeechReservation { id: string; projectId: string; attemptId: string; micros: string; state: string }
-export interface SpeechAdmission {
+interface GraphSpeechAdmission {
   attempt: Attempt; candidate: Candidate; grant: Grant; reservation: SpeechReservation;
   profile: ProviderProfile; capabilityLock: SpeechCapabilityLock;
 }
+export type SpeechAdmission = GraphSpeechAdmission | (CodePlanProviderAdmission);
 export type SpeechProfilePin = Pick<SpeechExecutionMapping, "capabilityLockId" | "capabilityLockDigest" | "profileDefinition">;
 export type SpeechAuthorityStore = Pick<Store, "get" | "getProject" | "db">;
 export const SPEECH_PROFILE_LOOKUP_LIMITS = Object.freeze({ lockBytes: 65536, profiles: 64 });
@@ -23,6 +26,7 @@ const fail = (condition: unknown, message: string): void => invariant(condition,
 
 /** Retained admission proof; current selection is checked separately before first submit. */
 export function assertSpeechAdmission(value: SpeechAdmission): void {
+  if ("codePlan" in value) { assertCodePlanProviderAdmission(value); assertSpeechExecutionProfile(value.profile, value.attempt); return; }
   const { attempt, candidate, grant, reservation, profile, capabilityLock } = value;
   fail(attempt && attempt.id === attempt.request.attemptId && attempt.nodeId === attempt.request.nodeId && attempt.fingerprint === attempt.request.fingerprint
     && attempt.request.kind === "speech" && attempt.request.execution?.adapter === "openai-speech" && attempt.request.execution.version === "1"
@@ -47,6 +51,11 @@ export function assertSpeechMappingAdmission(admission: SpeechAdmission, mapping
 
 /** Resolve the exact original lock and full profile definition recorded at admission. */
 export function resolveSpeechAdmission(store: SpeechAuthorityStore, input: Readonly<ExecutionRequest>, pinned?: SpeechProfilePin): SpeechAdmission {
+  const code = resolveCodePlanProviderAdmission(store, input, pinned);
+  if (code) {
+    const result: SpeechAdmission = code;
+    assertSpeechAdmission(result); return result;
+  }
   const request = structuredClone(input), attempt = store.get<Attempt>("attempt", request.attemptId);
   fail(attempt && canonical(attempt.request) === canonical(request) && attempt.candidateId && attempt.reservationId,
     "Speech requires an unchanged stored admission");
@@ -80,6 +89,7 @@ export function resolveSpeechAdmission(store: SpeechAuthorityStore, input: Reado
 
 /** Use inside the short pre-marker/local-failure transaction; late provider observations use no first-submit check. */
 export function assertSpeechFirstDispatch(store: Store, original: SpeechAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): void {
+  if ("codePlan" in original) { assertCodePlanFirstDispatch(store, original.attempt, expectedLease); return; }
   new InstallationRecoveryGuard(store).assertFirstSubmit(original.attempt.projectId, original.attempt.id);
   const current = resolveSpeechAdmission(store, original.attempt.request, { capabilityLockId: original.capabilityLock.id,
     capabilityLockDigest: digest(original.capabilityLock), profileDefinition: original.profile });
