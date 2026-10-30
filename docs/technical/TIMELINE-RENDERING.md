@@ -8,7 +8,7 @@ Picture uses integer frames at 30/1 fps. Audio uses integer samples at 48,000 Hz
 
 The current local document supports up to **360 seconds, 64 cuts, 65 audio placements and 65 distinct audio sources**, with **eight simultaneous mixing lanes**. The transition is a cut. Inputs are normalized silent H.264 video and measured 48 kHz stereo PCM audio. Source ranges must actually exist in their owned media.
 
-Accepted compact voiceover uses its exact range within the planned shot. Short audio ends while picture continues; it is never padded to imply accepted coverage. Compact placement follows current shot order. Legacy absolute audio keeps its saved coordinates. Optional owned background music supplies one chosen range/gain; looping, fades, ducking and limiting are not implemented.
+Accepted compact voiceover uses its exact range within the planned shot. Short audio ends while picture continues; it is never padded to imply accepted coverage. Canonical placement follows current shot order. The separate plan-DSL asset timeline still accepts explicit absolute audio coordinates and exact-length timing pending its planning-layer removal. Optional owned background music supplies one chosen range/gain; looping, fades, ducking and limiting are not implemented.
 
 ## Storyboard exports
 

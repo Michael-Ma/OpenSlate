@@ -16,6 +16,8 @@ import { InstalledProviderCatalog } from "../dist/application/provider-catalog.j
 import { assertViggleH3OperationOptions } from "../dist/execution/viggle-h3-receipts.js";
 import { ImageApplicationService } from "../dist/media/image-application.js";
 import { NarrationService, NarrationCanonicalService } from "../dist/narration/index.js";
+import { createShotNarrationSession } from "../dist/narration/narration-scope.js";
+import { createShotAudioWorkspace } from "../dist/narration/shot-audio-routes.js";
 import { projectFixture } from "./execution-fixture.mjs";
 
 const ffmpegPath = process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync("/opt/homebrew/bin/ffmpeg") ? "/opt/homebrew/bin/ffmpeg" : "/usr/bin/ffmpeg");
@@ -73,7 +75,7 @@ function fixture(t, options = {}) {
     const runtime = f.runtime, production = legacy ? new ProductionService(store, runtime.engine) : f.production, profile = kind === "image" ? imageProfile : options.videoProfile ?? videoProfile;
     const selection = runtime.providerCatalog.select(runtime.providerCatalog.digest, [profile.id]);
     const created = production.createProject("Offline runtime composition", selection), seed = projectFixture(created.id, 1);
-    if (kind === "video") seed.shots[0].narration = { mode: "uploaded", text: "Built to last.", voice: "stock" };
+    if (kind === "video") seed.shots[0].desiredFrames = videoSeconds * 30;
     let project = store.saveProject({ ...seed, capabilityLockId: created.capabilityLockId }, created.headVersion);
     const human = production.beginRequest(project.id, "offline-human", "Plan one exact media operation");
     let reference;
@@ -82,21 +84,25 @@ function fixture(t, options = {}) {
         { bytes: png, sha256: hash(png), expectedHeadVersion: project.headVersion, key: newId() });
       reference = imported.artifact; project = store.getProject(project.id);
       const narration = new NarrationService(production, runtime.localMedia), canonical = new NarrationCanonicalService(narration);
-      const view = () => narration.snapshot(project.id, human), key = () => newId();
-      narration.reviseSegments(project.id, human, view().state.version, key(), { add: [
-        { text: "Built to last.", meaning: "Built to last.", textKind: "draft", language: "en", source: { kind: "uploaded" } },
-      ] });
+      const shotId = project.shots[0].id, key = () => newId();
+      const session = createShotNarrationSession(production, project.id, shotId, key(), undefined, { holdScopeIds: [] });
+      const narrationHuman = { kind: "human", principalId: session.principalId, requestId: session.requestId };
+      const workspace = createShotAudioWorkspace({ production, narration, canonical, actorFor: (projectId, sessionId) => {
+        const saved = store.get("narration_session", sessionId); assert.equal(saved?.projectId, projectId);
+        return { kind: "human", principalId: saved.principalId, requestId: saved.requestId };
+      } });
+      const view = () => narration.workspaceSnapshot(project.id);
+      workspace.saveWriting(project.id, shotId, { sessionId: session.id, expectedHeadVersion: project.headVersion,
+        expectedVersion: view().state.version, text: "Built to last.", language: "en", mode: "uploaded", voice: null, profileRevisionId: null }, key());
       const path = join(runtime.uploadDirectory, "narration.wav"); copyFileSync(voice, path);
-      const audio = await narration.importAudio(project.id, human, { path, declaredOrigin: "uploaded", key: key() });
-      const segmentId = view().segments[0].entry.segmentId;
-      narration.bindAudio(project.id, human, view().state.version, key(), segmentId, audio.id);
-      narration.recordHumanCue(project.id, human, view().state.version, key(), { segmentId, startSample: 0, endSample: videoSeconds * 48000 });
-      let segment = view().segments[0]; narration.accept(project.id, human, view().state.version, key(), "script", [segment.script.id]);
-      narration.acceptAudio(project.id, human, view().state.version, key(), [{ segmentRevisionId: segment.script.id, audioId: audio.id }]);
-      segment = view().segments[0]; narration.accept(project.id, human, view().state.version, key(), "timing", [segment.cue.id]);
-      const canonicalPlan = canonical.prepare(project.id, human, { expectedHeadVersion: project.headVersion,
-        expectedNarrationVersion: view().state.version, shotMappings: [{ shotId: project.shots[0].id, segmentId }], key: key() });
-      await canonical.apply(project.id, human, canonicalPlan.id); project = store.getProject(project.id);
+      const audio = await narration.importAudio(project.id, narrationHuman, { path, declaredOrigin: "uploaded", key: key() });
+      const segmentId = workspace.detail(project.id, shotId).segment.entry.segmentId;
+      narration.bindAudio(project.id, narrationHuman, view().state.version, key(), segmentId, audio.id);
+      const segment = workspace.detail(project.id, shotId).segment;
+      await workspace.accept(project.id, shotId, { sessionId: session.id, expectedHeadVersion: store.getProject(project.id).headVersion,
+        expectedVersion: view().state.version, segmentId, segmentRevisionId: segment.script.id, audioId: audio.id,
+        sha256: audio.media.sha256, startSample: 0, endSample: videoSeconds * 48000 }, key());
+      project = store.getProject(project.id);
     }
     const shot = project.shots[0], q = JSON.stringify, settingsSource = options.videoSettings === undefined ? "" : `,settings:${q(options.videoSettings)}`;
     production.authorize(project.id, human, [{ scopeId: shot.id, kind }], newId(), "initial_slot");

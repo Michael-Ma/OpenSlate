@@ -80,12 +80,11 @@ export function bindNarrationScopeTarget(store: Store, scope: NarrationShotScope
 }
 function ownedSegment(reader: Reader, projectId: string, shotId: string): string | null {
   const draft = record<{ projectId: string; shotId: string; segmentId: string }>(reader, 'narration_shot_draft', shotDraftId(projectId, shotId), projectId);
-  const head = reader.get<{ canonicalId: string }>('narration_canonical_head', projectId), saved = head ? reader.get<{ projectId: string; shotMappings: { shotId: string; segmentId: string | null }[] }>('narration_canonical', head.canonicalId) : undefined;
   fail(!draft || draft.projectId === projectId && draft.shotId === shotId && typeof draft.segmentId === 'string', 'The saved shot narration mapping is invalid');
-  const segmentId = draft?.segmentId ?? saved?.shotMappings.find(mapping => mapping.shotId === shotId)?.segmentId ?? null;
+  const segmentId = draft?.segmentId ?? null;
   if (!segmentId) return null;
   const others = reader.db.prepare("SELECT 1 FROM entities WHERE kind='narration_shot_draft' AND project_id=? AND json_extract(body,'$.segmentId')=? AND json_extract(body,'$.shotId')<>? LIMIT 1").get(projectId, segmentId, shotId);
-  fail(!others && !saved?.shotMappings.some(mapping => mapping.segmentId === segmentId && mapping.shotId !== shotId), 'A narration section shared by several shots requires the full narration workspace');
+  fail(!others, 'A narration section cannot be shared by several shot drafts');
   fail(reader.get<NarrationState>('narration_state', projectId)?.entries.some(entry => entry.segmentId === segmentId), 'The mapped shot narration section was removed');
   return segmentId;
 }

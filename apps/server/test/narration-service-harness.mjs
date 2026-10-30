@@ -1,12 +1,11 @@
+import { audioRequestActor } from '../dist/narration/audio-request-session.js';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { digest, invariant, DomainError } from '@openslate/core';
 import { ManagedUploadStore } from '../dist/narration/managed-upload.js';
 import { assertNarrationAuthority, createShotNarrationSession, shotSessionHeadId } from '../dist/narration/narration-scope.js';
 import { createShotAudioWorkspace } from '../dist/narration/shot-audio-routes.js';
-import { projectGeneratedRecordings } from '../dist/narration/generated-recording-projection.js';
 import { isVerifiedGeneratedNarrationAudio, summarizeGeneratedNarrationAudio } from '../dist/narration/generated-audio.js';
-import { projectTranscriptCandidates, projectTranscriptSelection, projectTranscriptWords } from '../dist/narration/transcript-projection.js';
 import { projectNarrationSpeechOptions, projectNarrationSpeechProposals, projectNarrationSpeechProposal, summarizeNarrationSpeechProposal } from '../dist/narration/narration-speech-projection.js';
 import { projectOwnedTranscriptionOptions, projectOwnedTranscriptionProposals, projectOwnedTranscriptionProposal, summarizeOwnedTranscriptionProposal } from '../dist/narration/owned-transcription-projection.js';
 
@@ -35,17 +34,6 @@ export function narrationServiceHarness(f, { uploadDirectory = f.uploadDirectory
     const continuationRequest = session?.state === 'active' ? null : store.db.prepare(`SELECT id, substr(json_extract(body,'$.text'),1,240) text FROM entities WHERE kind='message' AND project_id=? AND json_extract(body,'$.principalId')='local-user' AND json_extract(body,'$.editing')=1 AND json_extract(body,'$.state')='active' AND EXISTS (SELECT 1 FROM json_each(body,'$.scopeIds') WHERE value=?) ORDER BY rowid DESC LIMIT 1`).get(pid, pid) ?? null;
     return { headVersion: project.headVersion, revisionId: project.revisionId, snapshot: { ...snapshot, segments: snapshot.segments.map(row => row.audio && isVerifiedGeneratedNarrationAudio(row.audio) ? { ...row, audio: summarizeGeneratedNarrationAudio(row.audio) } : row) }, canonical: canonical.workspaceCurrent(pid), session, continuationRequest };
   };
-  const open = (pid, body, commandKey) => store.command(`local-user:${pid}:fixture-narration-session`, commandKey, digest(body), () => {
-    const old = selected(pid); invariant(!old || body.continuationSessionId === old.id, 'NARRATION_SESSION_EXISTS', 'Continue the fixture session explicitly');
-    const previous = body.continuationSessionId && store.get('narration_session', body.continuationSessionId);
-    invariant(!body.continuationSessionId || previous?.projectId === pid && previous.principalId === 'local-user', 'NARRATION_SESSION_STALE', 'Previous fixture session changed');
-    const explicit = body.continuationRequestId && store.get('message', body.continuationRequestId);
-    invariant(!body.continuationRequestId || explicit?.projectId === pid && explicit.principalId === 'local-user' && explicit.editing && explicit.state === 'active' && explicit.scopeIds.includes(pid), 'NARRATION_SESSION_STALE', 'Explicit fixture request changed');
-    const continuationRequestId = body.continuationRequestId ?? previous?.requestId;
-    const actor = production.beginRequest(pid, 'local-user', body.text ?? 'Set up narration service fixture', { source: 'app', concurrency: 'alongside', scopeIds: [pid], editing: true, key: digest({ commandKey }), ...(continuationRequestId ? { continuationRequestId } : {}) });
-    const session = { id: randomUUID(), projectId: pid, requestId: actor.requestId, principalId: 'local-user' };
-    store.insert('narration_session', session.id, pid, session); store.put('narration_session_head', pid, pid, { sessionId: session.id }); return session;
-  });
   const response = (data, statusCode = 200) => { const body = JSON.stringify(data); return { statusCode, body, rawPayload: Buffer.from(body), json: () => JSON.parse(body) }; };
   return async (suffix = '', body, extras = {}) => {
     const url = new URL(extras.url ?? `/api/projects/${projectId}/narration${suffix}`, 'http://fixture.invalid');
@@ -55,26 +43,15 @@ export function narrationServiceHarness(f, { uploadDirectory = f.uploadDirectory
     try {
       let result;
       if (path === '' && body === undefined) result = view(pid);
-      else if (path === '/sessions') { const session = open(pid, body, commandKey); result = { ...view(pid), session: { ...session, state: (() => { try { actorFor(pid, session.id); return 'active'; } catch { return 'stale'; } })() } }; }
       else if (path === '/segments') result = narration.reviseSegments(pid, actorFor(pid, body.sessionId), body.expectedVersion, commandKey, body.patch);
       else if (path === '/bindings') result = narration.bindAudio(pid, actorFor(pid, body.sessionId), body.expectedVersion, commandKey, body.segmentId, body.audioId);
       else if (path === '/generated-audio-bindings') result = await narration.attachGeneratedAudio(pid, actorFor(pid, body.sessionId), { ...input, key: commandKey });
-      else if (path === '/transcript-words' || path === '/transcript-timing') result = await narration[path === '/transcript-words' ? 'useTranscriptWords' : 'useTranscriptTiming'](pid, actorFor(pid, body.sessionId), { ...input, key: commandKey });
-      else if (path === '/cues') result = narration.recordHumanCue(pid, actorFor(pid, body.sessionId), body.expectedVersion, commandKey, { segmentId: body.segmentId, startSample: body.startSample, endSample: body.endSample });
-      else if (path === '/placements') result = narration.placeSegments(pid, actorFor(pid, body.sessionId), body.expectedVersion, commandKey, body.placements);
-      else if (path === '/acceptances') result = narration.accept(pid, actorFor(pid, body.sessionId), body.expectedVersion, commandKey, body.kind, body.targets);
-      else if (path === '/audio-acceptances') result = narration.acceptAudio(pid, actorFor(pid, body.sessionId), body.expectedVersion, commandKey, body.targets);
-      else if (path === '/prepare') result = canonical.prepare(pid, actorFor(pid, body.sessionId), { ...input, key: commandKey });
-      else if (path === '/apply') result = canonical.apply(pid, actorFor(pid, body.sessionId), body.preparedId);
       else if (path === '/audio') {
         invariant(narration.mediaAvailable, 'NARRATION_MEDIA_UNAVAILABLE', 'Fixture import needs media');
         const actor = actorFor(pid, query.sessionId), uploads = new ManagedUploadStore({ rootDir: uploadDirectory });
         const upload = await uploads.receive(Readable.from([body]), digest({ pid, sessionId: query.sessionId, commandKey }), () => actorFor(pid, query.sessionId));
         try { result = await narration.importAudio(pid, actor, { path: upload.path, declaredOrigin: query.declaredOrigin, key: `fixture:${commandKey}` }); } finally { await upload.release(); }
-      } else if (path === '/generated-recordings') result = projectGeneratedRecordings(store, pid, Number(query.offset ?? 0), query.expectedDigest);
-      else if (/^\/audio\/[^/]+\/transcripts$/.test(path)) result = projectTranscriptCandidates(store, pid, path.split('/')[2], Number(query.offset ?? 0), query.expectedDigest);
-      else if (/^\/transcripts\/[^/]+\/words$/.test(path)) result = projectTranscriptWords(store, pid, { ...query, candidateId: path.split('/')[2], offset: Number(query.offset ?? 0) });
-      else if (/^\/transcripts\/[^/]+\/selection$/.test(path)) result = projectTranscriptSelection(store, pid, { ...query, candidateId: path.split('/')[2], startWordIndex: Number(query.startWordIndex), endWordIndex: Number(query.endWordIndex) });
+      }
       else if (path === '/speech-options') result = projectNarrationSpeechOptions(production, pid);
       else if (path === '/speech-proposals' && body === undefined) result = projectNarrationSpeechProposals(store, pid, Number(query.offset ?? 0), query.expectedDigest);
       else if (path.startsWith('/speech-proposals/') && body === undefined) result = projectNarrationSpeechProposal(store, pid, path.split('/')[2]);
@@ -103,4 +80,14 @@ export function narrationServiceHarness(f, { uploadDirectory = f.uploadDirectory
       return response({ error: { code: error.code ?? 'INTERNAL_ERROR', message: error.message } }, status);
     }
   };
+}
+
+/** Opens the actual application session used by the retained speech/transcription request routes. */
+export function fixtureAudioRequestSession(f, commandKey = randomUUID()) {
+  audioRequestActor(f.production, f.project.id, commandKey, undefined, (projectId, sessionId) => {
+    const session = f.store.get('narration_session', sessionId);
+    invariant(session?.projectId === projectId, 'NARRATION_SESSION_STALE', 'Saved audio session changed');
+    return { kind: 'human', principalId: session.principalId, requestId: session.requestId };
+  }, 'Request saved fixture audio');
+  return f.store.get('narration_session', f.store.get('narration_session_head', f.project.id).sessionId);
 }

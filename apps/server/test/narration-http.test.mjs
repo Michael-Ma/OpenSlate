@@ -1,7 +1,7 @@
-import { narrationServiceHarness } from './narration-service-harness.mjs';
+import { narrationServiceHarness, fixtureAudioRequestSession } from './narration-service-harness.mjs';
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, mkdir, readdir, readFile, rm } from 'node:fs/promises';
@@ -25,18 +25,7 @@ let inputDir, wave;
 before(async () => { inputDir = await mkdtemp(join(tmpdir(), 'openslate-narration-http-input-')); const path = join(inputDir, 'wave.wav'); await promisify(execFile)(ffmpeg, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=530:sample_rate=44100:duration=1', '-c:a', 'pcm_s16le', path], { timeout: 15000 }); wave = await readFile(path); });
 after(async () => rm(inputDir, { recursive: true, force: true }));
 const draft = { text: 'Built with care', textKind: 'draft', language: 'en', meaning: 'Handmade construction', source: { kind: 'uploaded' } };
-test('narration writing and human script acceptance work with no configured media service', async t => {
-  const f = await fixture(t, { withMedia: false });
-  assert.equal(f.narration.mediaAvailable, false);
-  await f.start();
-  const added = await f.edit('/segments', { patch: { add: [draft] } }); assert.equal(added.statusCode, 200, added.body);
-  const segment = f.view().segments[0];
-  const accepted = await f.edit('/acceptances', { kind: 'script', targets: [segment.script.id] }); assert.equal(accepted.statusCode, 200, accepted.body);
-  assert.equal(f.view().segments[0].accepted.script, true); assert.equal(f.view().segments[0].accepted.audio, false);
-  const uploaded = await f.upload(); assert.equal(uploaded.json().error.code, 'NARRATION_MEDIA_UNAVAILABLE');
-  assert.equal(f.store.list('narration_audio', f.project.id).length, 0); assert.deepEqual(await readdir(f.uploadDirectory), []);
-  assert.equal(f.store.getProject(f.project.id).headVersion, 0); assert.equal(f.provider.acceptedCount(), 0);
-});
+
 async function fixture(t, { withMedia = true } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'openslate-narration-http-')), uploadDirectory = join(dir, 'uploads'); await mkdir(uploadDirectory);
   const store = new Store(join(dir, 'db.sqlite')), provider = new FakeProvider(join(dir, 'fake.sqlite')), engine = new Engine(store, provider, { artifactDir: join(dir, 'artifacts') });
@@ -49,7 +38,7 @@ async function fixture(t, { withMedia = true } = {}) {
     headers: { host: '127.0.0.1', authorization: `Bearer ${token}`, 'idempotency-key': randomUUID(), ...extras.headers } });
   f.testToken = token;
   f.request = narrationServiceHarness(f, { uploadDirectory });
-  f.start = async (body = {}, commandKey = randomUUID()) => { const response = await f.request('/sessions', body, { headers: { 'idempotency-key': commandKey } }); assert.equal(response.statusCode, 200, response.body); f.session = response.json().session; return response.json(); };
+  f.start = async (_body = {}, commandKey = randomUUID()) => { f.session = fixtureAudioRequestSession(f, commandKey); return f.session; };
   f.view = () => narration.workspaceSnapshot(project.id);
   f.edit = (suffix, fields, extras = {}) => f.request(suffix, { sessionId: f.session.id, expectedVersion: f.view().state.version, ...fields }, extras);
   f.upload = (bytes = wave, commandKey = 'wave-once', extra = '') => f.request(`/audio?sessionId=${f.session.id}&declaredOrigin=uploaded${extra}`, bytes, { headers: { 'content-type': 'application/octet-stream', 'idempotency-key': commandKey } });
@@ -66,27 +55,6 @@ test('retained narration playback requires local authentication and reads create
   assert.equal(f.store.list('hold', f.project.id).length, 0);
 });
 
-test('uploaded audio can be heard before acceptance; exact human decisions commit and release their own alongside hold without generation', async t => {
-  const f = await fixture(t); await f.start();
-  assert.equal((await f.edit('/segments', { patch: { add: [draft] } })).statusCode, 200);
-  const upload = await f.upload(); assert.equal(upload.statusCode, 200, upload.body); const audio = upload.json();
-  const preview = await f.request(`/audio/${audio.id}/content`); assert.equal(preview.statusCode, 200); assert.match(preview.headers['content-type'], /audio\/wav/);
-  assert.equal(createHash('sha256').update(preview.rawPayload).digest('hex'), audio.media.sha256); assert.equal(preview.headers['x-content-sha256'], audio.media.sha256);
-  assert.equal(f.store.list('narration_acceptance', f.project.id).length, 0);
-  const segment = f.view().segments[0];
-  assert.equal((await f.edit('/bindings', { segmentId: segment.entry.segmentId, audioId: audio.id })).statusCode, 200);
-  assert.equal((await f.edit('/cues', { segmentId: segment.entry.segmentId, startSample: 0, endSample: 48000 })).statusCode, 200);
-  assert.equal((await f.edit('/acceptances', { kind: 'script', targets: [segment.script.id] })).statusCode, 200);
-  assert.equal((await f.edit('/audio-acceptances', { targets: [{ segmentRevisionId: segment.script.id, audioId: audio.id }] })).statusCode, 200);
-  assert.equal((await f.edit('/acceptances', { kind: 'timing', targets: [f.view().segments[0].cue.id] })).statusCode, 200);
-  const prepared = await f.request('/prepare', { sessionId: f.session.id, expectedHeadVersion: 0, expectedNarrationVersion: f.view().state.version, shotMappings: [] }); assert.equal(prepared.statusCode, 200, prepared.body);
-  const applied = await f.request('/apply', { sessionId: f.session.id, preparedId: prepared.json().id }, { headers: { 'idempotency-key': 'apply-once' } }); assert.equal(applied.statusCode, 200, applied.body);
-  assert.deepEqual((await f.request('/apply', { sessionId: f.session.id, preparedId: prepared.json().id })).json(), applied.json());
-  const current = (await f.request()).json(); assert.equal(current.canonical.id, applied.json().canonicalId); assert.equal(current.headVersion, 1);
-  assert.equal(current.canonical.source, 'uploaded'); assert.ok(!f.store.list('hold', f.project.id).some(hold => hold.active && hold.ownerId === f.session.requestId));
-  assert.equal(f.store.list('grant', f.project.id).length, 0); assert.equal(f.store.list('attempt', f.project.id).length, 0); assert.equal(f.provider.acceptedCount(), 0);
-  assert.deepEqual(await readdir(f.uploadDirectory), []);
-});
 
 test('service upload replay preserves identity and rejects different bytes or origin under the same key', async t => {
   const f = await fixture(t); await f.start(); const first = await f.upload(); assert.equal(first.statusCode, 200, first.body);
@@ -96,10 +64,9 @@ test('service upload replay preserves identity and rejects different bytes or or
   assert.equal(f.store.list('narration_audio', f.project.id).length, 1); assert.deepEqual(await readdir(f.uploadDirectory), []);
 });
 
-test('narration services reject stale revisions, unknown acceptance targets and cross-project authority', async t => {
+test('narration services reject stale revisions and cross-project authority', async t => {
   const f = await fixture(t); await f.start(); await f.edit('/segments', { patch: { add: [draft] } });
   assert.equal((await f.edit('/segments', { expectedVersion: 0, patch: { add: [draft] } })).json().error.code, 'REVISION_CONFLICT');
-  assert.equal((await f.edit('/acceptances', { kind: 'script', targets: [randomUUID()] })).json().error.code, 'NARRATION_STALE_ACCEPTANCE');
   const foreign = f.production.createProject('Other');
   const response = await f.request('/segments', { sessionId: f.session.id, expectedVersion: 0, patch: { add: [draft] } }, { url: `/api/projects/${foreign.id}/narration/segments`, headers: { 'idempotency-key': 'foreign' } });
   assert.equal(response.json().error.code, 'NARRATION_SESSION_STALE');

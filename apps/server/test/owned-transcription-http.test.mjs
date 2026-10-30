@@ -1,4 +1,4 @@
-import { narrationServiceHarness } from './narration-service-harness.mjs';
+import { narrationServiceHarness, fixtureAudioRequestSession } from './narration-service-harness.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
@@ -32,8 +32,7 @@ async function setup(t, options = {}) {
     uploadDirectory: join(f.root, 'uploads'), ...(options.available === false ? {} : { ownedTranscription: f.service }) });
   await f.app.ready(); t.after(() => f.app.close()); f.base = `/api/projects/${f.project.id}/narration`;
   f.testToken = token; f.request = narrationServiceHarness(f, { uploadDirectory: f.uploadDirectory ?? join(f.root ?? f.dir, 'uploads'), speech: f.speechService ?? (f.profile?.kind === 'speech' ? f.service : undefined), transcription: f.service });
-  f.session = async (body = {}, commandKey = key()) => { const response = await f.request('/sessions', body, { headers: { 'idempotency-key': commandKey } });
-    assert.equal(response.statusCode, 200, response.body); return response.json().session; };
+  f.session = async (_body = {}, commandKey = key()) => fixtureAudioRequestSession(f, commandKey);
   f.prepareBody = (session, patch = {}) => { const { key: _key, ...input } = f.input(); return { ...input, sessionId: session.id, ...patch }; };
   f.propose = async (session, patch = {}, commandKey = key()) => {
     const input = f.prepareBody(session, patch), response = await f.request(PROPOSALS, input, { headers: { 'idempotency-key': commandKey } });

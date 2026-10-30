@@ -15,7 +15,7 @@ async function voiceFixture(t, options = {}) {
   const saved = f.store.saveProject(project, project.headVersion);
   f.store.insert('project_revision', saved.revisionId, project.id, { project: saved });
   f.store.put('narration_shot_draft', digest({ projectId: project.id, shotId: 'shot-0' }), project.id,
-    { shotId: 'shot-0', segmentId: segment.entry.segmentId });
+    { shotId: 'shot-0', segmentId: segment.entry.segmentId, intentDigest: digest(saved.shots[0].narration ?? null) });
   const proposal = await f.prepare(), application = await f.review(proposal);
   f.attempt = f.admit(application);
   f.reader = new GenerationOverviewReader(f.production, f.narration);

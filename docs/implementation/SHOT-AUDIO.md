@@ -1,6 +1,6 @@
 # Shot audio and Timeline
 
-Compact shot audio accepts a script first or an owned recording first. Listening needs no fabricated transcript. Acceptance requires saved words or a truthful description, exact recording binding and reviewed source range. Advanced section/transcript tools remain available.
+Compact shot audio accepts a script first or an owned recording first. Listening needs no fabricated transcript. Acceptance requires saved words or a truthful description, exact recording binding and reviewed source range. Transcript recognition remains evidence for Director attachments; human transcript adoption has been removed.
 
 ## Exact scope and acceptance
 
@@ -12,7 +12,7 @@ Within-shot voiceover fits inside a planned 3–15 second shot. A shorter nonemp
 
 ## Canonical placement and reuse
 
-Accepted compact audio follows its shot after reorder/earlier-duration edits. Browser/export share saved source/range/placement. Writing-only within-shot changes preserve footage, while stale generated speech is rejected at review/admission/dispatch. Successive accepted narration updates rebase only allowed audio/assembly state, retaining picture specs, reviews, attempts and grants. Legacy cue-driven absolute timing keeps its original semantics.
+Accepted compact audio follows its shot after reorder/earlier-duration edits. Browser/export share saved source/range/placement. Writing-only within-shot changes preserve footage, while stale generated speech is rejected at review/admission/dispatch. Successive accepted narration updates rebase only allowed audio/assembly state, retaining picture specs, reviews, attempts and grants. Canonical narration requires one pinned shot and a saved shot draft with an intent digest; it neither adopts canonical mappings as missing drafts nor accepts project-wide or absolute placements. Plan-DSL asset timelines retain their separate absolute/exact-length path until the planning layer is removed.
 
 The owned audio library imports/listens/selects soundtrack without changing narration, holding creative work or fencing the director. Optional music is a measured owned source. Existing eligible [personal voice IDs](PERSONAL-VOICE.md) require current consent; a personal request cannot fall back to stock speech.
 

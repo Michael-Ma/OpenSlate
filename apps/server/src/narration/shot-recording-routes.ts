@@ -75,7 +75,7 @@ export function registerShotRecordingRoutes(app: FastifyInstance, options: ShotA
           undo.bindings = store.list<NodeBinding>("node_binding", projectId).filter(binding => binding.state === "active" && binding.planId === current.activePlanId &&
             (binding.node.shotId === shotId || ["timeline", "render"].includes(binding.node.kind)));
           undo.narrationWorkspace = { shotId, state: narration.workspaceSnapshot(projectId).state,
-            draft: store.get<{ segmentId: string; intentDigest?: string }>("narration_shot_draft", shotDraftId(projectId, shotId)) ?? null, expectedVersion: -1 };
+            draft: store.get<{ segmentId: string; intentDigest: string }>("narration_shot_draft", shotDraftId(projectId, shotId)) ?? null, expectedVersion: -1 };
           const saved = workspace.saveWriting(projectId, shotId, { sessionId: intent.sessionId, expectedHeadVersion,
             expectedVersion: narration.workspaceSnapshot(projectId).state.version, text: shot.narration?.text.trim() || "Uploaded narration recording",
             language: workspace.detail(projectId, shotId).segment?.script.language ?? "en", mode: "uploaded", voice: null, profileRevisionId: null,

@@ -33,7 +33,7 @@ before(async () => {
 });
 after(async () => { await rm(inputs, { recursive: true, force: true }); });
 
-async function fixture(t, { demo = false, narration = true, mixed = false, short = false, absoluteNarration = false, absoluteSharedCue = false, mixedVoice = false, mixedMusic = false, soundtrack = true } = {}) {
+async function fixture(t, { demo = false, narration = true, mixed = false, short = false, mixedVoice = false, mixedMusic = false, soundtrack = true } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'openslate-export-')), store = new Store(join(dir, 'db.sqlite'));
   const provider = new FakeProvider(join(dir, 'fake.sqlite')), engine = new Engine(store, provider, { artifactDir: join(dir, 'artifacts') });
   const production = new ProductionService(store, engine), project = production.createProject('Storyboard film');
@@ -63,16 +63,16 @@ async function fixture(t, { demo = false, narration = true, mixed = false, short
   const cue = { id: newId(), meaning: 'Voice', durationFrames: 15, placementFrames: 30, audio: audioRef, accepted: true, measured: true };
   const shots = refs.map((_, index) => {
     const shot = { id: newId(), revisionId: newId(), sceneId: scene.id, purpose: `Shot ${index}`, action: 'Stand', framing: 'Wide', motion: 'Push', desiredFrames: demo ? 90 : 30,
-      imagePrompt: 'Boot', videoPrompt: 'Push', referenceArtifactIds: [], cueId: narration && (index === 1 || absoluteSharedCue && index === 2) ? cue.id : null,
-      narration: { mode: narration && (index === 1 || absoluteSharedCue && index === 2) ? 'uploaded' : 'none', text: narration && (index === 1 || absoluteSharedCue && index === 2) ? 'Voice' : '', voice: 'stock' },
-      ...(narration && (index === 1 || absoluteSharedCue && index === 2) ? { narrationTimingMode: 'within_shot' } : {}), promptIntent: {} };
+      imagePrompt: 'Boot', videoPrompt: 'Push', referenceArtifactIds: [], cueId: narration && index === 1 ? cue.id : null,
+      narration: { mode: narration && index === 1 ? 'uploaded' : 'none', text: narration && index === 1 ? 'Voice' : '', voice: 'stock' },
+      ...(narration && index === 1 ? { narrationTimingMode: 'within_shot' } : {}), promptIntent: {} };
     shot.promptIntent = { image: shotIntentDigest(shot, 'image', shot.cueId ? cue : undefined), video: shotIntentDigest(shot, 'video', shot.cueId ? cue : undefined) }; return shot;
   });
   const frame = { artifactId: newId(), sha256: 'a'.repeat(64), kind: 'image' };
   const saved = store.saveProject({ ...project, revisionId: newId(), scenes: [scene], shots, cues: narration ? [cue] : [], artifacts: [...refs, audioRef, frame],
     narration: { script: narration ? 'Voice' : '', source: narration ? 'uploaded' : 'undecided' }, ...(soundtrack ? { soundtrack: { audioId: music.artifactId, gainMilliDb: -18000, startFrame: 0, muted: false } } : {}) }, project.headVersion);
   if (narration) {
-    const id = newId(); store.insert('narration_canonical', id, project.id, { id, script: 'Voice', segments: [{ cue, ...(absoluteSharedCue || absoluteNarration ? {} : { placementMode: 'shot', timingMode: 'within_shot' }), audioPlacement: { source: audio, startSample: 0, durationSamples: 24000, atSample: 48000, gainMilliDb: 0 } }] });
+    const id = newId(); store.insert('narration_canonical', id, project.id, { id, script: 'Voice', segments: [{ cue, placementMode: 'shot', timingMode: 'within_shot', audioPlacement: { source: audio, startSample: 0, durationSamples: 24000, atSample: 48000, gainMilliDb: 0 } }] });
     store.put('narration_canonical_head', project.id, project.id, { canonicalId: id });
   }
   const declarations = shots.map((shot, i) => `const s${i}=p.shot(${JSON.stringify(shot.id)});const r${i}=p.humanReview("r${i}",{shots:[{intent:s${i},keyframe:p.asset(${JSON.stringify(frame.artifactId)}),videoProfile:"fake-video-v1",motionPrompt:"Push",seconds:6}]});const v${i}=p.video("v${i}",{intent:s${i},profile:"fake-video-v1",firstFrame:p.approvedImage(p.asset(${JSON.stringify(frame.artifactId)}),r${i}),prompt:"Push",seconds:6});`).join('');
@@ -282,31 +282,7 @@ test('changed-since fingerprints distinguish shot media, narration and order wit
 });
 
 
-test('legacy absolute narration is current only on the shared cue cut at its accepted sample', async t => {
-  const f = await fixture(t, { absoluteSharedCue: true }), capture = captureStoryboard(f.store, f.project.id);
-  assert.deepEqual(capture.readiness.blockers, [{ code: 'voice_unsettled', shotId: f.shots[2].id }]);
-  assert.equal(capture.input.audio.length, 2, 'only the aligned narration placement and soundtrack are projected');
-  assert.deepEqual(capture.input.audio.map(a => a.atSample), [48000, 0]);
-  await assert.rejects(f.prepare(), code('EXPORT_BLOCKED'));
-});
 
-test('legacy absolute narration becomes unsettled after reorder and after an earlier shot is lengthened', async t => {
-  const f = await fixture(t, { absoluteNarration: true });
-  const canonicalId = f.store.get('narration_canonical_head', f.project.id).canonicalId, accepted = f.store.get('narration_canonical', canonicalId);
-  assert.equal(captureStoryboard(f.store, f.project.id).readiness.ready, true);
-  editStoryboard(f.production, f.project.id, { kind: 'moveShot', id: f.shots[1].id, beforeId: f.shots[0].id, sceneId: f.shots[0].sceneId, expectedHeadVersion: f.head().headVersion }, 'move-legacy-voice');
-  let capture = captureStoryboard(f.store, f.project.id);
-  assert.deepEqual(capture.readiness.blockers, [{ code: 'voice_unsettled', shotId: f.shots[1].id }]);
-  assert.equal(capture.input.audio.some(a => a.gainMilliDb === 0), false);
-  await assert.rejects(f.prepare(), code('EXPORT_BLOCKED'));
-  editStoryboard(f.production, f.project.id, { kind: 'moveShot', id: f.shots[0].id, beforeId: f.shots[1].id, sceneId: f.shots[0].sceneId, expectedHeadVersion: f.head().headVersion }, 'restore-legacy-cut');
-  assert.equal(captureStoryboard(f.store, f.project.id).readiness.ready, true);
-  f.mutate(p => { p.shots.find(shot => shot.id === f.shots[0].id).desiredFrames = 45; });
-  capture = captureStoryboard(f.store, f.project.id);
-  assert.deepEqual(capture.readiness.blockers.filter(b => b.code === 'voice_unsettled'), [{ code: 'voice_unsettled', shotId: f.shots[1].id }]);
-  assert.equal(capture.input.audio.some(a => a.gainMilliDb === 0), false);
-  assert.deepEqual(f.store.get('narration_canonical', canonicalId), accepted, 'readiness never moves the accepted absolute source history');
-});
 
 test('demo preparation waits for a busy fixture worker and concurrent same-key requests share one export', async t => {
   const f = await fixture(t, { demo: true, narration: false }), original = f.media.importFixture.bind(f.media);

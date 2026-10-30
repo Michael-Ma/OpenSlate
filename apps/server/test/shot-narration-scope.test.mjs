@@ -27,9 +27,9 @@ test('dedicated shot session pins exactly one section; cross-section writes, sec
   ()=>f.narration.reviseSegments(f.project.id,f.scoped,view().state.version,key(),{order:view().segments.map(s=>s.entry.segmentId)}),
   ()=>f.narration.accept(f.project.id,f.scoped,view().state.version,key(),'script',[f.other.script.id]),
   ()=>f.narration.placeSegments(f.project.id,f.scoped,view().state.version,key(),[{segmentId:f.other.entry.segmentId,atSample:0}]),
-  ()=>f.canonical.prepare(f.project.id,f.scoped,{expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedNarrationVersion:view().state.version,segmentIds:[f.segment.entry.segmentId],shotMappings:[{shotId:f.project.shots[1].id,segmentId:f.segment.entry.segmentId}],key:key()}),
+  ()=>f.canonical.prepare(f.project.id,f.scoped,{expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedNarrationVersion:view().state.version,segmentIds:[f.segment.entry.segmentId],shotRelativeSegmentIds:[f.segment.entry.segmentId],shotDurationMode:'preserve',shotMappings:[{shotId:f.project.shots[1].id,segmentId:f.segment.entry.segmentId}],key:key()}),
  ];
- for(const action of actions){const before=f.before();assert.throws(action);assert.equal(f.before(),before);}
+ for(const action of actions){const before=f.before();assert.throws(action,{code:'SCOPE_DENIED'});assert.equal(f.before(),before);}
  const loose=f.production.beginRequest(f.project.id,'local-user','An ordinary scoped conversation',{scopeIds:[f.project.shots[0].id]});
  assert.throws(()=>f.narration.reviseSegments(f.project.id,loose,view().state.version,key(),{update:[{segmentId:f.segment.entry.segmentId,draft}]}),{code:'SCOPE_DENIED'});
  assert.deepEqual(f.store.get('narration_shot_scope',scope.id),scope);assert.equal(narrationScopeTarget(f.store,scope).segmentId,f.segment.entry.segmentId);

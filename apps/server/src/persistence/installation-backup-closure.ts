@@ -42,7 +42,6 @@ import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt } from "../execution/engine.js";
 import type { BackupFile } from "./installation-backup.js";
 import { assertGeneratedCanonicalNarrationSegment, assertGeneratedNarrationAudio, resolveGeneratedNarrationAudio } from "../narration/generated-audio.js";
-import { assertTranscriptCanonicalSegment, assertTranscriptSelection, assertTranscriptSelectionOutput, transcriptCanonicalProvenance } from "../narration/transcript-selection.js";
 
 type RecordValue = Record<string, any>;
 const object = (value: unknown): value is RecordValue => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -446,7 +445,6 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         else await source(value.media);
       } else if (row.kind === "narration_prepared") {
         for (const view of value.snapshot?.segments ?? []) {
-          transcriptCanonicalProvenance(speechReader, value.projectId, view.script, view.cue);
           const saved = view.audio ? speechReader.get<RecordValue>("narration_audio", view.audio.id) : undefined;
           if (!view.audio || !(Object.hasOwn(view.audio, "originEvidence") || Object.hasOwn(view.audio, "generation") || saved && Object.hasOwn(saved, "generation"))) continue;
           fail(canonical(get("narration_audio", view.audio.id)) === canonical(view.audio), "Prepared generated narration differs from its saved recording");
@@ -454,8 +452,6 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         }
       } else if (row.kind === "narration_canonical") {
         for (const segment of value.segments ?? []) {
-          assertTranscriptCanonicalSegment(speechReader, value.projectId, segment,
-            { narrationRevisionId: value.narrationRevisionId, narrationVersion: value.narrationVersion });
           const provenance = segment.provenance;
           const saved = provenance ? speechReader.get<RecordValue>("narration_audio", provenance.audioId) : undefined;
           if (!provenance || provenance.originEvidence === "human_declared_supplied_recording" && !Object.hasOwn(provenance, "generation") && !(saved && Object.hasOwn(saved, "generation"))) continue;
@@ -463,14 +459,6 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
             { narrationRevisionId: value.narrationRevisionId, narrationVersion: value.narrationVersion });
           const audio = get("narration_audio", provenance.audioId); await generatedNarration(audio);
         }
-      } else if (row.kind === "narration_segment" || row.kind === "narration_cue") {
-        assertTranscriptSelectionOutput(speechReader, value.projectId, row.kind, value);
-      } else if (row.kind === "narration_transcript_selection") {
-        assertTranscriptSelection(speechReader, value.projectId, value);
-        const output = get(value.output.kind, value.output.id);
-        assertTranscriptSelectionOutput(speechReader, value.projectId, value.output.kind, output);
-        fail(output.id === value.id && digest(output) === value.output.digest, "Transcript selection lost its reciprocal output");
-        await transcriptCandidate(get("transcript_candidate", value.candidateId) as TranscriptCandidate);
       }
       else if (row.kind === "media_render") { await renderManifest(value.manifest); if (value.artifact) {
         const saved = get("artifact", value.artifact.artifactId); fail(canonical(saved.artifact) === canonical(value.artifact), "Render artifact identity differs"); }

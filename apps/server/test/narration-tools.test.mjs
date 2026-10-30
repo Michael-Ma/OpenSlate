@@ -1,4 +1,9 @@
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
+import { projectFixture } from './execution-fixture.mjs';
+import { NarrationCanonicalService } from '../dist/narration/canonical.js';
+import { createShotNarrationSession } from '../dist/narration/narration-scope.js';
+import { createShotAudioWorkspace } from '../dist/narration/shot-audio-routes.js';
 import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,18 +48,22 @@ function fixture(t, version = '2.0.0') {
   return { root, config, project, provider, store, service, tools, input, lock: configured.lock, activate, reopen, ...first };
 }
 
-test('v2 saves narration drafts without media tools and preserves exact unrelated acceptance and canonical state', async t => {
-  const f = fixture(t), before = f.store.getProject(f.project.id), holds = f.store.list('hold', f.project.id);
-  const first = await f.tools.invoke(f.project.id, f.bridge.actor, 'add', 'revise_narration_draft', { expectedVersion: 0, patch: { add: [draft('Handmade leather'), draft('Built to last')] } });
-  assert.equal(first.version, 1); assert.equal(first.canonicalApplied, false); assert.equal(first.segments.length, 2);
-  const accepted = f.tools.narration.accept(f.project.id, f.human, 1, 'accept-script', 'script', first.segments.map(row => row.segmentRevisionId));
-  const next = await f.tools.invoke(f.project.id, f.bridge.actor, 'edit', 'revise_narration_draft', { expectedVersion: 2, patch: { update: [{ segmentId: first.segments[0].segmentId, draft: draft('Crafted leather boots') }] } });
-  const saved = f.tools.narration.snapshot(f.project.id, f.bridge.actor);
-  assert.equal(next.version, 3); assert.equal(saved.segments[0].accepted.script, false); assert.equal(saved.segments[1].accepted.script, true);
-  assert.deepEqual(saved.segments[1].entry, accepted.segments[1].entry);
-  assert.deepEqual(f.store.getProject(f.project.id), before); assert.deepEqual(f.store.list('hold', f.project.id), holds);
-  assert.equal(f.store.list('attempt', f.project.id).length, 0); assert.equal(f.provider.acceptedCount(), 0);
-  assert.throws(() => f.tools.narration.accept(f.project.id, f.bridge.actor, 3, 'forged', 'script', [next.segments[0].segmentRevisionId]), { code: 'ACTOR_DENIED' });
+test('v2 saves narration drafts without media tools and preserves exact unrelated shot acceptance and canonical state', async t => {
+  const f=fixture(t),current=f.store.getProject(f.project.id),shape=projectFixture(f.project.id,2);
+  f.store.saveProject({...current,revisionId:shape.revisionId,scenes:shape.scenes,shots:shape.shots},current.headVersion);
+  const session=createShotNarrationSession(f.service,f.project.id,shape.shots[1].id,randomUUID()),human={kind:'human',principalId:session.principalId,requestId:session.requestId};
+  const workspace=createShotAudioWorkspace({production:f.service,narration:f.tools.narration,canonical:new NarrationCanonicalService(f.tools.narration),actorFor:()=>human});
+  const writing=workspace.saveWriting(f.project.id,shape.shots[1].id,{sessionId:session.id,expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedVersion:0,text:'Built to last',language:'en',mode:'generated',voice:'coral',profileRevisionId:'fixture-profile'},randomUUID());
+  const accepted=f.tools.narration.accept(f.project.id,human,writing.narrationVersion,randomUUID(),'script',[writing.segment.script.id]),unrelated=accepted.segments[0];
+  const before=f.store.getProject(f.project.id),holds=f.store.list('hold',f.project.id);
+  const first=await f.tools.invoke(f.project.id,f.bridge.actor,'add','revise_narration_draft',{expectedVersion:accepted.state.version,patch:{add:[draft('Handmade leather')]}});
+  assert.equal(first.canonicalApplied,false);assert.equal(first.segments.length,2);
+  const added=first.segments.find(row=>row.segmentId!==unrelated.entry.segmentId),next=await f.tools.invoke(f.project.id,f.bridge.actor,'edit','revise_narration_draft',{expectedVersion:first.version,patch:{update:[{segmentId:added.segmentId,draft:draft('Crafted leather boots')}]}});
+  const saved=f.tools.narration.snapshot(f.project.id,f.bridge.actor),changed=saved.segments.find(row=>row.entry.segmentId===added.segmentId),preserved=saved.segments.find(row=>row.entry.segmentId===unrelated.entry.segmentId);
+  assert.equal(next.version,first.version+1);assert.equal(changed.accepted.script,false);assert.equal(preserved.accepted.script,true);assert.deepEqual(preserved.entry,unrelated.entry);
+  assert.deepEqual(f.store.getProject(f.project.id),before);assert.deepEqual(f.store.list('hold',f.project.id),holds);
+  assert.equal(f.store.list('attempt',f.project.id).length,0);assert.equal(f.provider.acceptedCount(),0);
+  assert.throws(()=>f.tools.narration.accept(f.project.id,f.bridge.actor,next.version,'forged','script',[changed.script.id]),{code:'ACTOR_DENIED'});
 });
 
 test('schema forbids human decisions, media/timing fields, and canonical narration through v2 prepare', async t => {

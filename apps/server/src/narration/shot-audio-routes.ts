@@ -54,7 +54,7 @@ interface ShotDraft {
   segmentId: string;
   projectId: string;
   shotId: string;
-  intentDigest?: string;
+  intentDigest: string;
 }
 interface PreparedAcceptance {
   preparedId: string;
@@ -152,10 +152,7 @@ export function createShotAudioWorkspace(options: ShotAudioOptions) {
           "narration_shot_draft",
           draftId(projectId, shotId),
         );
-      const mapped = frozen?.shotMappings.find(
-        (mapping) => mapping.shotId === shotId,
-      )?.segmentId;
-      const segmentId = saved?.segmentId ?? mapped ?? null;
+      const segmentId = saved?.segmentId ?? null;
       const workspace = narration.workspaceSnapshot(projectId);
       const row = workspace.segments.find((row) => row.entry.segmentId === segmentId) ?? null;
       const segment =
@@ -635,12 +632,9 @@ export function registerShotAudioRoutes(
               ),
           )
           .flatMap((segment) =>
-            projectAudioPlacements(segment, cuts, { requireAbsoluteCutStart: true }).map(
+            projectAudioPlacements(segment, cuts).map(
               (placement) => ({
-                id:
-                  segment.placementMode === "shot"
-                    ? `${segment.cue.id}@${placement.atSample}`
-                    : segment.cue.id,
+                id: `${segment.cue.id}@${placement.atSample}`,
                 audioId: segment.cue.audio.artifactId,
                 sha256: segment.cue.audio.sha256,
                 startSample: placement.startSample,
@@ -649,8 +643,7 @@ export function registerShotAudioRoutes(
                 gainMilliDb: placement.gainMilliDb,
                 ...(placement.fadeOutSamples ? { fadeOutSamples: placement.fadeOutSamples } : {}),
                 shotIds: project.shots
-                  .filter((shot) => shot.cueId === segment.cue.id &&
-                    (segment.placementMode === "shot" || cuts.some(cut => cut.shotId === shot.id && cut.startFrame * 1600 === placement.atSample)))
+                  .filter((shot) => shot.cueId === segment.cue.id)
                   .map((shot) => shot.id),
               }),
             ),

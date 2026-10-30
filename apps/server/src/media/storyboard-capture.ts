@@ -47,7 +47,7 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
     const dependencyNodeIds = new Set<string>(), fixtureClips: FixtureClip[] = [], fixtureAudio: FixtureAudio[] = [];
     const clips: RenderManifestInput["clips"] = [], audio: NonNullable<RenderManifestInput["audio"]> = [];
     const selected: { shotId: string; fixture: boolean }[] = [];
-    const placedAbsoluteCues = new Set<string>(), voices: { shotId: string; fixture: boolean }[] = [];
+    const voices: { shotId: string; fixture: boolean }[] = [];
     let musicFixture: boolean | undefined;
     const shotFingerprints: unknown[] = [], voiceFingerprints: unknown[] = [];
     const clipsByShot = new Map<string, { artifact: ArtifactRef; fixture: boolean; source: SuppliedMedia | null }>();
@@ -97,12 +97,9 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
         if (record) voices.push({ shotId: shot.id, fixture: record.fixture });
         if (accepted && record && accepted.audioPlacement.source.kind === "audio" && accepted.audioPlacement.source.artifactId === cue.audio.artifactId && accepted.audioPlacement.source.sha256 === cue.audio.sha256) {
           try {
-            const placements = projectAudioPlacements(accepted, [cuts[index]!], { requireAbsoluteCutStart: true });
+            const placements = projectAudioPlacements(accepted, [cuts[index]!]);
             if (!placements.length) settled = false;
-            else if (accepted.placementMode === "shot" || !placedAbsoluteCues.has(cue.id)) {
-              audio.push(...placements);
-              placedAbsoluteCues.add(cue.id);
-            }
+            else audio.push(...placements);
           }
           catch { settled = false; }
           inputs.push({ nodeId: null, port: "audio", artifact: cue.audio });
