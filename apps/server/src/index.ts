@@ -83,7 +83,7 @@ const codePlans = new CodePlanRuntime(store, { execution: new CodePlanExecution(
 const service = new ProductionService(store, engine, undefined, runtime.productionOptions);
 const narration = new NarrationService(service, localMedia ?? undefined);
 // Each project starts in demo mode until its user chooses and checks local Codex.
-const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", runTimeoutMs: directorRunTimeoutMs, startupTimeoutMs, ...(ffmpegPath ? { ffmpegPath } : {}), ...(localMedia ? { media: localMedia } : {}) });
+const director = new LocalDirectorController(service, { codePlans, repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", runTimeoutMs: directorRunTimeoutMs, startupTimeoutMs, ...(ffmpegPath ? { ffmpegPath } : {}), ...(localMedia ? { media: localMedia } : {}) });
 const studioSessions = new StudioSessions();
 const narrationSpeech = new NarrationSpeechService(narration), canonical = new NarrationCanonicalService(narration);
 const sceneCommands = new SceneConfirmationRunner(service, { narration, narrationSpeech, canonical });

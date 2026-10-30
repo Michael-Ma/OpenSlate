@@ -126,6 +126,22 @@ test("v2 native launch discovers six locked tools and rejects an advertised lega
   assert.equal((await legacy.records()).some(row => row.method === "turn/start"), false);
 });
 
+test("code native launch discovers only its two tools and refuses the graph catalog before dispatch", async t => {
+  const f = await fixture(t);
+  f.input.bridge.toolContractVersion = "0.1.0";
+  assert.equal((await deadline(f.runtime.start(f.input))).status, "completed");
+  const records = await f.records();
+  const profile = records.find(row => row.kind === "launch").codeProfile;
+  assert.equal(profile.effort, "low");
+  assert.deepEqual(profile.tools.sort(), ["read_film", "submit_plan"]);
+  assert.equal(profile.shell, false);
+  const legacy = await fixture(t, "catalog-legacy");
+  legacy.input.bridge.toolContractVersion = "0.1.0";
+  const result = await deadline(legacy.runtime.start(legacy.input));
+  assert.equal(result.dispatched, false); assert.equal(result.error.code, "RUNTIME_CATALOG_UNEXPECTED");
+  assert.equal((await legacy.records()).some(row => row.method === "turn/start"), false);
+});
+
 for (const scenario of ["version-wrong", "missing-result", "skill-extra", "skills-error", "catalog-extra", "instructions-extra", "bundled-skills-wrong", "bridge-wrong", "permissions-wrong", "permissions-expanded", "permissions-defaults-expanded", "permissions-defaults-unknown"]) {
   test(`fail closed before dispatch: ${scenario}`, async t => {
     const f = await fixture(t, scenario);

@@ -179,6 +179,21 @@ test("references must exist, stay within the package, and be explicitly declared
   writeFileSync(join(f.source, "undeclared.md"), "extra"); assert.throws(f.load, /missing or undeclared/);
 });
 
+test("TypeScript references are inert bounded instruction text and remain inside references", t => {
+  const f = fixture(t);
+  const source = 'throw new Error("Instruction text must never execute");\n';
+  writeFileSync(join(f.source, "references/example.ts"), source);
+  writeFileSync(join(f.source, "references/studio.d.ts"), 'interface Studio { log(text: string): Promise<null> }\n');
+  const files = [...f.manifest.files, "references/example.ts", "references/studio.d.ts"];
+  f.setManifest({ files });
+  const lock = lockFor(f), activation = activateSkills(lock, { ...f.environment, requestId: "typescript-reference",
+    contextDigest: checksum("code context"), selectedSkillIds: ["production"] });
+  assert.equal(readActivatedSkillFile(lock, activation, f.environment, { skillId: "production", path: "references/example.ts" }).content, source);
+  writeFileSync(join(f.source, "outside.ts"), source);
+  f.setManifest({ files: [...files, "outside.ts"] });
+  assert.throws(f.load, /TypeScript reference/);
+});
+
 for (const kind of ["file", "directory", "package-root"]) test(`symlink ${kind} cannot enter a trusted instruction snapshot`, t => {
   const f = fixture(t); const outside = join(f.root, "outside"); mkdirSync(outside);
   if (kind === "file") { rmSync(join(f.source, "references/guide.md")); writeFileSync(join(outside, "guide.md"), "external"); symlinkSync(join(outside, "guide.md"), join(f.source, "references/guide.md")); }

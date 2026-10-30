@@ -31,6 +31,11 @@ import { moveScene, moveShot, requestDeleteScene, requestDeleteShots, requestRes
 import { applyCharacterChange, makeCharacterSheets, readCharacters, type CharacterChangeInput } from './character-tools.js';
 import { analyzeMusic, LocalMusicAnalyzer, type MusicAnalyzers } from '../media/music-analyzer.js';
 import type { ExportLauncher } from '../media/export-launcher.js';
+import type { CodePlanPort } from '../code-plan/port.js';
+import { codePlanPort, readCodeFilm, wireCodePlans } from '../code-plan/director.js';
+import { CODE_PLAN_TOOL_CONTRACT } from '@openslate/core';
+
+const codeReconciliations = new WeakMap<ProductionService, Map<string, Promise<void>>>();
 
 export const TOOL_RESULT_MAX_BYTES = 1024 * 1024;
 export interface ToolInvocation {
@@ -48,9 +53,9 @@ export interface ToolInvocation {
   state: "started" | "succeeded" | "failed" | "unresolved";
   result: JsonValue | null;
   resultDigest: string | null;
-  error: { code: string; message: string; reason?: ReviewNotesFailure['reason'] } | null;
+  error: { code: string; message: string; reason?: ReviewNotesFailure['reason']; details?: JsonValue } | null;
   /** Minimal domain correlation; credentials and full context never belong here. */
-  recovery?: { preparedId?: string; proposalDigest?: string; narrationCommand?: { key: string; digest: string };
+  recovery?: { codePlan?: { source: string; basedOnVersion: number | null; summary: string }; preparedId?: string; proposalDigest?: string; narrationCommand?: { key: string; digest: string };
     audioProposalCommand?: { kind: "recording_transcription" | "narration_speech"; key: string; digest: string; requested?: boolean; suggested?: boolean } };
 }
 
@@ -131,7 +136,8 @@ export class ToolInvocationService {
   readonly #music: MusicAnalyzers;
   constructor(readonly service: ProductionService, options: { ownedTranscription?: OwnedTranscriptionService; narrationSpeech?: NarrationSpeechService; enqueueVoice?: EnqueueSceneVoice;
     /** Media-capable narration for local song analysis. */ mediaNarration?: NarrationService; exports?: ExportLauncher;
-    /** Override the analyzer slots; the default is the local timing analyzer with no enrichment. */ musicAnalyzers?: MusicAnalyzers } = {}) {
+    /** Override the analyzer slots; the default is the local timing analyzer with no enrichment. */ musicAnalyzers?: MusicAnalyzers; codePlans?: CodePlanPort } = {}) {
+    if (options.codePlans) wireCodePlans(service, options.codePlans);
     this.narration = new NarrationService(service);
     this.#exports = options.exports;
     this.#music = options.musicAnalyzers ?? { local: new LocalMusicAnalyzer(service, options.mediaNarration) };
@@ -247,7 +253,7 @@ export class ToolInvocationService {
       const record: ToolInvocation = { id, projectId, requestId: actor.requestId, epochId: actor.epochId, callId,
         tool: parsed.name, toolContractVersion: selected.catalog.version, catalogDigest: selected.catalog.digest, skillLockId: selected.lockId,
         argumentsDigest: argumentHash, state: "started", result: null, resultDigest: null, error: null,
-        recovery: audioTool(parsed.name) ? { audioProposalCommand: { kind: audioKind(parsed.name), key: commandKey, digest: digest(proposalInput), suggested: true } }
+        recovery: parsed.name === "submit_plan" ? { codePlan: parsed.arguments as unknown as { source: string; basedOnVersion: number | null; summary: string } } : audioTool(parsed.name) ? { audioProposalCommand: { kind: audioKind(parsed.name), key: commandKey, digest: digest(proposalInput), suggested: true } }
           : parsed.name === "apply_change" ? { preparedId: parsed.arguments.preparedId as string }
           : parsed.name === "prepare_change" ? { proposalDigest: digest(parsed.arguments) }
           : parsed.name === "revise_narration_draft" ? { narrationCommand: { key: `director-tool:${id}`,
@@ -258,7 +264,7 @@ export class ToolInvocationService {
     });
     if (existing) {
       if (existing.state === "succeeded") return existing.result;
-      if (existing.state === "failed" && existing.error) throw new DomainError(existing.error.code, existing.error.message);
+      if (existing.state === "failed" && existing.error) throw new DomainError(existing.error.code, existing.error.message, existing.error.details);
       throw new DomainError("TOOL_CALL_UNRESOLVED", "Earlier tool work may have taken effect; reconcile application receipts before continuing");
     }
 
@@ -268,6 +274,13 @@ export class ToolInvocationService {
       if (store.get("plan_import", actor.requestId)) invariant(["read_context", "prepare_change", "inspect_artifact", "control_execution", "read_guidance"].includes(parsed.name),
         "IMPORT_REVIEW_REQUIRED", "Interpret supplied material with prepare_change, then wait for human confirmation in Film plan. Other mutations and generation proposals are unavailable for this request.");
       switch (parsed.name) {
+        case "read_film": value = readCodeFilm(this.service, projectId); break;
+        case "submit_plan": {
+          invariant(this.service.store.getProject(projectId).planMode === "code", "CODE_PLAN_MODE", "Code-plan tools require a code project");
+          const args = parsed.arguments as unknown as { source: string; basedOnVersion: number | null };
+          value = await codePlanPort(this.service).submit(projectId, { source: args.source, basedOnVersion: args.basedOnVersion, author: "director", invocationId: id });
+          break;
+        }
         case "make_keyframes": value = await makeDirectorKeyframes(this.service, projectId, actor, id, parsed.arguments,
           this.narration, this.#enqueueVoice, signal); break;
         case 'accept_proposal': case 'reject_proposal': value = decideProposal(this.service, projectId, actor, id,
@@ -372,9 +385,10 @@ export class ToolInvocationService {
       // not proof that the application had no effects. Unexpected failures stay unresolved.
       // A late cancellation can follow a committed domain command. Keep new
       // proposal calls reconcilable instead of inferring that no effect occurred.
-      const known = error instanceof DomainError && !((audioTool(parsed.name) || parsed.name === "make_keyframes") && (error.code.endsWith("CANCELLED") || error.code === "TOOL_CALL_UNRESOLVED"));
+      const known = error instanceof DomainError && !((audioTool(parsed.name) || parsed.name === "make_keyframes" || parsed.name === "submit_plan") && (error.code.endsWith("CANCELLED") || error.code === "TOOL_CALL_UNRESOLVED"));
       this.finish(id, projectId, known ? "failed" : "unresolved", null,
-        known ? { code: error.code, message: error.message.slice(0, 2000), ...(parsed.name === 'record_notes' ? {
+        known ? { code: error.code, message: error.message.slice(0, 2000),
+          ...(parsed.name === "submit_plan" && error.details !== undefined ? { details: JSON.parse(canonical(error.details)) as JsonValue } : {}), ...(parsed.name === 'record_notes' ? {
           reason: (error.details as { reason?: ReviewNotesFailure['reason'] } | undefined)?.reason ?? (error.code === 'SCOPE_DENIED' ? 'outside_scope' : error.code === 'VALIDATION_ERROR' ? 'invalid_arguments' : 'unavailable'),
         } : {}) } : { code: "TOOL_CALL_UNRESOLVED", message: "Tool outcome needs application reconciliation" });
       if (known) throw error;
@@ -393,7 +407,7 @@ export class ToolInvocationService {
     }
   }
 
-  /** Recover only from authoritative application receipts. This never calls a tool again. */
+  /** Recover authoritative effects; code submissions use the port's exact-identity replay contract. */
   reconcileEpoch(projectId: string, epochId: string): void {
     const store = this.service.store;
     store.transaction(() => {
@@ -401,6 +415,9 @@ export class ToolInvocationService {
       invariant(epoch?.projectId === projectId && epoch.state === "revoked", "ACTOR_DENIED", "Reconciliation requires a fenced epoch");
       for (const call of store.list<ToolInvocation>("tool_invocation", projectId).filter(call => call.epochId === epochId && ["started", "unresolved"].includes(call.state))) {
         if (store.get("tool_reconciliation", call.id)) continue;
+        if (call.tool === "submit_plan" && call.toolContractVersion === CODE_PLAN_TOOL_CONTRACT) {
+          this.reconcileCodePlan(projectId, call, epoch); continue;
+        }
         let receipt: unknown = null;
         const catalogMatches = this.reconciliationCatalogMatches(projectId, call, epoch);
         if (call.tool === 'make_keyframes' && toolContractAtLeast(call.toolContractVersion, '6.0.0') && catalogMatches) {
@@ -501,6 +518,57 @@ export class ToolInvocationService {
         store.appendEvent(projectId, "tool.reconciled", { invocationId: call.id, requestId: call.requestId, effectConfirmed: !!receipt });
       }
     });
+  }
+
+  /** CodePlanPort explicitly guarantees durable replay with the original invocation identity. */
+  private reconcileCodePlan(projectId: string, call: ToolInvocation, epoch: { principalId: string; requestId: string }): void {
+    let pending = codeReconciliations.get(this.service);
+    if (!pending) { pending = new Map(); codeReconciliations.set(this.service, pending); }
+    if (pending.has(call.id)) return;
+    const store = this.service.store;
+    const task = Promise.resolve().then(async () => {
+      this.service.recovery.assertWritable(projectId);
+      const binding = store.get<{ projectId: string; requestId: string; lockId: string }>("director_epoch_lock", call.epochId);
+      const row = binding ? store.get<{ projectId: string; lock: SkillCapabilityLock }>("director_skill_lock", binding.lockId) : undefined;
+      invariant(binding?.projectId === projectId && binding.requestId === epoch.requestId && call.requestId === epoch.requestId
+        && binding.lockId === call.skillLockId && row?.projectId === projectId, "CAPABILITY_MISMATCH", "Code recovery lock belongs to different work");
+      const { lockDigest, ...body } = row.lock;
+      const catalog = toolCatalog(CODE_PLAN_TOOL_CONTRACT);
+      invariant(digest(body) === lockDigest && row.lock.compatibility.toolContract === CODE_PLAN_TOOL_CONTRACT
+        && row.lock.bindings.some(binding => binding.kind === "handler" && binding.id === toolHandlerId(CODE_PLAN_TOOL_CONTRACT) && binding.digest === catalog.digest)
+        && call.catalogDigest === catalog.digest && call.recovery?.codePlan && digest(call.recovery.codePlan) === call.argumentsDigest,
+        "CAPABILITY_MISMATCH", "Code recovery input differs from its original invocation");
+      const args = parseToolArguments("submit_plan", call.recovery.codePlan, CODE_PLAN_TOOL_CONTRACT).arguments;
+      let result: JsonValue | null = null, error: ToolInvocation["error"] = null;
+      try {
+        result = JSON.parse(canonical(await codePlanPort(this.service).submit(projectId, { source: args.source as string,
+          basedOnVersion: args.basedOnVersion as number | null, author: "director", invocationId: call.id }))) as JsonValue;
+      } catch (cause) {
+        if (!(cause instanceof DomainError) || !["CODE_PLAN_REJECTED", "REVISION_CONFLICT", "VALIDATION_ERROR"].includes(cause.code)) throw cause;
+        error = { code: cause.code, message: cause.message,
+          ...(cause.details === undefined ? {} : { details: JSON.parse(canonical(cause.details)) as JsonValue }) };
+      }
+      store.transaction(() => {
+        this.service.recovery.assertWritable(projectId);
+        const current = store.get<ToolInvocation>("tool_invocation", call.id)!;
+        if (!["started", "unresolved"].includes(current.state) || store.get("tool_reconciliation", call.id)) return;
+        // An unresolved transport receipt is immutable. Its separate reconciliation
+        // records the authoritative result without rewriting the original history.
+        if (current.state === "started") store.put("tool_invocation", call.id, projectId, { ...current, state: error ? "failed" : "succeeded", result,
+          resultDigest: error ? null : digest(result), error });
+        store.insert("tool_reconciliation", call.id, projectId, { id: call.id, requestId: call.requestId, epochId: call.epochId,
+          state: "effect_confirmed", receipt: result ?? { error }, receiptDigest: digest(result ?? { error }) });
+        store.appendEvent(projectId, "tool.reconciled", { invocationId: call.id, requestId: call.requestId, effectConfirmed: true });
+      });
+    }).catch(() => {
+      // Retain an unresolved call for the next bounded reconciliation attempt.
+      // No new identity or native/model submission is created.
+    }).finally(() => pending!.delete(call.id));
+    pending.set(call.id, task);
+  }
+
+  async settleReconciliation(): Promise<void> {
+    await Promise.all([...(codeReconciliations.get(this.service)?.values() ?? [])]);
   }
 
   private finish(id: string, projectId: string, state: ToolInvocation["state"], result: JsonValue | null, error: ToolInvocation["error"]): void {

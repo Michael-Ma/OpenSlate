@@ -182,7 +182,8 @@ function path(value: unknown): string {
   const result = text(value, "package path", SKILL_LIMITS.pathBytes);
   check(!isAbsolute(result) && !result.includes("\\") && !result.includes(":") && result.split("/").length <= SKILL_LIMITS.pathDepth, "Invalid package path");
   check(result.split("/").every(part => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part) && part !== "." && part !== ".."), "Unsafe package path");
-  check(result.endsWith(".md") || result.endsWith(".json"), "Only Markdown and JSON instruction files are supported");
+  check(result.endsWith(".md") || result.endsWith(".json") || /^references\/[A-Za-z0-9._/-]+\.ts$/.test(result),
+    "Only Markdown, JSON and TypeScript reference instruction files are supported");
   return result;
 }
 const KIND = /^[a-z][a-z0-9_]*$/;

@@ -34,6 +34,32 @@ Release 8.1.0 was generated with `pnpm skills:draft`, edits in `skills/next`, th
 
 Parallel authors each work in their own worktree on `skills/next`. Whoever merges second drafts from the merged latest row, reapplies edits and re-runs `skills:release`, producing a fresh successor instead of colliding with the first release. See [the authoring workflow](../../skills/README.md#author-and-release-guidance) for command details and recovery after an interrupted command.
 
+## Experimental code mode
+
+`skills/code-plan` is a separate schema 1 instruction package, version `1.0.0`, outside the `skills/v<N>...` release automation.
+Its content digest is pinned as `CODE_PLAN_GUIDANCE_DIGEST`. Its environment binds only the selected runtime and independent
+`code-plan-tools@1` catalog handler; graph recipes, stages, routed releases and graph upgrade targets are not part of this lock.
+The loader accepts bounded non-executable `.ts` references under `references/`, including `studio.d.ts` and `example-plan.ts`.
+They are verified and injected as text, never evaluated by the instruction loader.
+
+Code contract `0.1.0` is deliberately absent from `SUPPORTED_TOOL_CONTRACTS` and `RELEASED_TOOL_CONTRACTS`; graph-version
+comparisons return false for code mode. Existing graph descriptor bytes and digests remain unchanged.
+
+| Code-only tool | Responsibility |
+|---|---|
+| `read_film {}` | Return `CodePlanView` plus `source: string \| null` for its current version |
+| `submit_plan {source, basedOnVersion, summary}` | Submit the complete program as author `director`, using the durable invocation ID; return `{version, diff}` |
+
+Source is limited to 256 KiB of UTF-8 and summary to 500 characters. `basedOnVersion` is the current integer version, or null
+before the first plan. `CODE_PLAN_REJECTED` retains `details.diff` through transport/refusal replay; stale versions return
+`REVISION_CONFLICT`. Submission recovery uses the port's same-ID replay guarantee. The host-scoped port registration also
+serves fake Director and supervisor tool services constructed without options.
+
+The package documents every `ctx` call, replay by media input identity, deliberate duplicate `variant`s, stable choice IDs,
+unchanged prompt bytes, awaited effects, failure-result branches, and the absence of secrets, paths and external capabilities.
+It describes the current fake models, unimplemented speech and fixture renderer honestly. See the
+[code-plan design](../ai/code-plan/DESIGN.md) and [Director runtime](DIRECTOR-RUNTIME.md#experimental-code-plan-director).
+
 ## Model-facing tools
 
 | Tool | Responsibility |

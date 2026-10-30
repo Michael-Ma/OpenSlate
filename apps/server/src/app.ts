@@ -54,8 +54,10 @@ import { registerMusicEnrichmentRoutes } from "./media/music-enrichment-routes.j
 import { LocalMusicAnalyzer } from "./media/music-analyzer.js";
 import { registerCodePlanRoutes } from "./code-plan/routes.js";
 import type { CodePlanPort } from "./code-plan/port.js";
+import { holdCodePlanRequest, wireCodePlans } from "./code-plan/director.js";
 
 interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: ProductionService; localToken?: string;
+  codePlans?: CodePlanPort;
   /** true logs to stdout; a stream receives the same JSON lines (tests). */
   logger?: boolean | { stream: { write(line: string): void } };
   /** Log every request and response (off by default: the studio's own refreshes would flood the log). Warnings and errors are always logged. */
@@ -65,7 +67,6 @@ interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: Produc
   /** Browser origins allowed to call the API. Defaults to the dev server and the installed studio. */
   allowedOrigins?: readonly string[];
   studioSessions?: StudioSessions;
-  codePlans?: CodePlanPort;
   providerCatalog?: InstalledProviderCatalog;
   webAssets?: WebAssets;
   director?: Pick<DirectorSupervisor, "status" | "enqueue" | "answerQuestion" | "tick">;
@@ -81,6 +82,7 @@ const string = { type: "string", minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[]) => ({ type: "object", additionalProperties: false, properties, required });
 
 export function createApp(options: AppOptions = {}) {
+  if (options.service && options.codePlans) wireCodePlans(options.service, options.codePlans);
   const app = Fastify({ logger: options.logger ?? false, logController: new LogController({ disableRequestLogging: !options.logRequests }), bodyLimit: 3 * 1024 * 1024,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
   const allowedOrigins = options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS;
@@ -269,7 +271,10 @@ export function createApp(options: AppOptions = {}) {
         { ...request.body, contextDigest: attachmentMessageContext(images, attachments, request.body.replyToReviewId), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
       if (attachments) options.runtimeSettings!.recordAttachments(request.params.projectId, actor, attachments, images);
       else if (images) options.runtimeSettings!.recordImages(request.params.projectId, actor, images);
-      if (!request.body.replyToReviewId) options.director?.enqueue(request.params.projectId, actor);
+      if (!request.body.replyToReviewId && options.director) {
+        holdCodePlanRequest(service(), request.params.projectId, actor.requestId);
+        options.director.enqueue(request.params.projectId, actor);
+      }
       return actor;
     });
     if (request.body.replyToReviewId) return service().replyToReview(request.params.projectId, actor, request.body.replyToReviewId, text);
@@ -401,6 +406,7 @@ export function createApp(options: AppOptions = {}) {
     request.raw.on("aborted", disconnected); reply.raw.on("close", disconnected);
     const ports = options.narrationRoutes;
     try { return await new ToolInvocationService(service(), {
+      ...(options.codePlans ? { codePlans: options.codePlans } : {}),
       ...(sceneCommands ? { enqueueVoice: sceneCommands.enqueueKeyframes } : {}),
       ...(ports?.ownedTranscription ? { ownedTranscription: ports.ownedTranscription } : {}),
       ...(ports?.narrationSpeech ? { narrationSpeech: ports.narrationSpeech } : {}),
@@ -408,6 +414,11 @@ export function createApp(options: AppOptions = {}) {
       ...(exportLauncher ? { exports: exportLauncher } : {}),
       ...(musicListener ? { musicAnalyzers: { local: new LocalMusicAnalyzer(service(), ports?.narration), enrichment: musicListener } } : {}),
     }).invoke(projectId, actor, callId, tool, request.body, { signal: abort.signal }); }
+    catch (error) {
+      if (tool === "submit_plan" && error instanceof DomainError && error.code === "CODE_PLAN_REJECTED")
+        return reply.code(400).send({ error: { code: error.code, message: error.message, details: error.details } });
+      throw error;
+    }
     finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
   });
   return app;
