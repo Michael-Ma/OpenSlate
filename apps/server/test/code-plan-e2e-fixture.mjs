@@ -173,9 +173,10 @@ export async function runCodePlanOfflineFlow(f) {
   const editInput = { source: editedSource, basedOnVersion: 1 };
   const receipt = await f.ok("POST", `${base}/source`, editInput, "motion-edit");
   assert.equal(receipt.view.planVersion, 2);
-  // The existing port reports only the reached prefix: the new clip's result blocks the render.
+  // Shots run as concurrent pipelines, so the preview reaches the unchanged shot's frames, choice and clip; only the
+  // render still waits for the new clip's result.
   assert.deepEqual(receipt.diff.newSteps.map(step => step.kind), ["video"]);
-  assert.equal(receipt.diff.reusedSteps, 3); assert.equal(receipt.diff.dependsOnPending, true);
+  assert.equal(receipt.diff.reusedSteps, 7); assert.equal(receipt.diff.dependsOnPending, true);
   eventCount = f.changed(id, eventCount, "edited source");
   assert.deepEqual(await f.ok("POST", `${base}/source`, editInput, "motion-edit"), receipt);
 
