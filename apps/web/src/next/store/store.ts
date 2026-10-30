@@ -1,6 +1,8 @@
-import type { AcceptProposalInput, NarrationFitInput, NarrationFitReceipt, ControlInput, ControlReceipt, DirectorProposal, FrameViewInput, GenerationOverview, ProposalList, ProposalReceipt, ReleaseAttemptInput, ResolveNoteInput, DiscardAttemptInput, RetryLocalAttemptInput } from "@openslate/core/public";
+import type { AcceptProposalInput, NarrationFitInput, NarrationFitReceipt, CodePlanCeilingInput, CodePlanChoiceView, CodePlanReceipt, CodePlanSourceInput, CodePlanSourceView, CodePlanView, ControlInput, ControlReceipt, DirectorProposal, FrameViewInput, GenerationOverview, ProposalList, ProposalReceipt, ReleaseAttemptInput, ResolveNoteInput, DiscardAttemptInput, RetryLocalAttemptInput } from "@openslate/core/public";
 import { ProjectSubscription } from "../../shared/project-subscription.ts";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
+import { CODE_PLAN_CEILING_PATH, CODE_PLAN_CHOICES_PATH, CODE_PLAN_PATH, CODE_PLAN_SOURCE_PATH, codePlanVersionPath } from "../api/code-plan.ts";
+import { answerPress, ceilingPress, isCodeProject, sourcePress } from "../model/code-plan.ts";
 import { errorMsg } from "../i18n/translate.ts";
 import type { RoleFilter } from "../model/assets.ts";
 import { CommandRefused, confirmBody, keyframesBody, remakeClipsBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
@@ -545,6 +547,52 @@ export class StudioStore {
     const receipt = await this.#press<ProposalReceipt>(`proposal:undo:${proposalId}`, { proposalId }, async () => ({ path: path(this.#state.projectId!, `/director/proposals/${encodeURIComponent(proposalId)}/undo`), body: {} }));
     if (receipt) this.dispatch({ type: "toast", message: receipt.leftAlone?.length ? msg("note.proposal.left_alone", { count: receipt.leftAlone.length }) : msg("note.proposal.undone"), tone: "info" });
     return receipt;
+  }
+
+  // ---- code-plan films (experiment; api/code-plan.ts). A graph film never reaches these routes. ----
+
+  /** The open film's id when it is a code-plan film (its snapshot says so), else null. */
+  #codePlanFilm(): string | null {
+    const { projectId, snapshot } = this.#state;
+    return isCodeProject(snapshot, projectId) ? projectId : null;
+  }
+
+  /** GET /code-plan. Refused without a request for a graph film. */
+  readCodePlan(signal?: AbortSignal): Promise<CodePlanView> {
+    const projectId = this.#codePlanFilm();
+    if (!projectId) return Promise.reject(new ApiError("CODE_PLAN_MODE", 409));
+    return this.#deps.client.request<CodePlanView>(path(projectId, CODE_PLAN_PATH), signal ? { signal } : {});
+  }
+
+  /** GET /code-plan/versions/:version: one stored version's program. */
+  readCodePlanSource(version: number, signal?: AbortSignal): Promise<CodePlanSourceView> {
+    const projectId = this.#codePlanFilm();
+    if (!projectId || !Number.isSafeInteger(version) || version < 1) return Promise.reject(new ApiError(projectId ? "VALIDATION_ERROR" : "CODE_PLAN_MODE", projectId ? 400 : 409));
+    return this.#deps.client.request<CodePlanSourceView>(path(projectId, codePlanVersionPath(version)), signal ? { signal } : {});
+  }
+
+  /** Answer a choice the plan asked with one of its options, exactly as the plan passed it. */
+  answerCodePlanChoice(choice: Pick<CodePlanChoiceView, "choiceId" | "optionsDigest">, answer: unknown): Promise<CodePlanReceipt | undefined> {
+    const projectId = this.#codePlanFilm();
+    if (!projectId) return Promise.resolve(undefined);
+    const press = answerPress(choice, answer);
+    return this.#press<CodePlanReceipt>(press.pressId, press.logical, async () => ({ path: path(projectId, CODE_PLAN_CHOICES_PATH), body: press.body }));
+  }
+
+  /** Raise the spend ceiling (it must be higher than `view`'s); paid work paused at the ceiling goes on. */
+  raiseCodePlanCeiling(view: Pick<CodePlanView, "ceilingMicros">, body: CodePlanCeilingInput): Promise<CodePlanReceipt | undefined> {
+    const projectId = this.#codePlanFilm();
+    if (!projectId) return Promise.resolve(undefined);
+    const press = ceilingPress(view, body);
+    return this.#press<CodePlanReceipt>(press.pressId, press.logical, async () => ({ path: path(projectId, CODE_PLAN_CEILING_PATH), body: press.body }));
+  }
+
+  /** A person submits a program directly; the receipt carries the dry run's diff (CODE_PLAN_REJECTED carries it too). */
+  submitCodePlanSource(input: CodePlanSourceInput): Promise<CodePlanReceipt | undefined> {
+    const projectId = this.#codePlanFilm();
+    if (!projectId) return Promise.resolve(undefined);
+    const press = sourcePress(input);
+    return this.#press<CodePlanReceipt>(press.pressId, press.logical, async () => ({ path: path(projectId, CODE_PLAN_SOURCE_PATH), body: press.body }));
   }
 
   // ---- generic primitives for views (phase P5): views define their commands in their own model files ----

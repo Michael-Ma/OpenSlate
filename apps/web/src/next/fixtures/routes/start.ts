@@ -5,6 +5,7 @@ import { FIXTURE_REPLY_MS } from "../fixture-director.ts";
 import type { FixtureWorld } from "../fixture-port.ts";
 import { FPS, lastFerryOverview, lastFerrySnapshot, PROJECT_ID, sceneId } from "../last-ferry.ts";
 import { catalogDigest, changeCatalogOnce, CODEX_DEFAULTS, computer, startPreset } from "./computer.ts";
+import { addCodeFilm, CODE_FILM_ID, CODE_FILM_NAME, codeFilmData, codeFilmReply, codePlanPreset, holdCodeFilm, isCodeFilm } from "./code-plan.ts";
 import type { FixtureRoute } from "./types.ts";
 
 /**
@@ -26,6 +27,8 @@ import type { FixtureRoute } from "./types.ts";
  * running, so archiving it is refused (ATTEMPTS_RUNNING).
  * `?start=slow-models` answers GET /api/providers after a moment, so the sheet's Create waits for it.
  * `?start=no-stand-in` is a studio without the stand-in Director: filling the demo is refused (ACTOR_DENIED).
+ * `?codeplan=` adds Harbour lights, a code-plan film, and opens it first (code-plan.ts). A film created with
+ * `planMode: "code"` is a code-plan film too.
  */
 
 interface Film {
@@ -134,6 +137,8 @@ function initial(world: FixtureWorld): StartWorld {
     { id: "lighthouse-test", name: "Lighthouse test", archived: true, updatedAt: daysAgo(now, 13, 16, 30), director: "fake", planImport: null,
       data: draftFilm("lighthouse-test", "Lighthouse test", "Beam", [{ framing: "Wide", prompt: "A lighthouse beam sweeping over a calm sea.", motion: "Static", seconds: 5 }]) },
   ];
+  const code = codePlanPreset();
+  if (code) others.unshift({ id: CODE_FILM_ID, name: CODE_FILM_NAME, archived: false, updatedAt: daysAgo(now, 0, 10, 41), director: "fake", data: codeFilmData(CODE_FILM_ID, CODE_FILM_NAME, code), planImport: null });
   if (start === "refusals") {
     const bus = others.find((item) => item.id === "night-bus")!.data!;
     const [first] = Object.keys(bus.overview.shots);
@@ -177,6 +182,18 @@ function listItem(world: FixtureWorld, item: Film): ProjectListItem {
     videosReady: shots.filter((shot) => shot.video.state === "ready").length,
     updatedAt: item.updatedAt,
   };
+}
+
+/**
+ * A code-plan film's run changed (code-plan.ts): its cursor moves, so the studio reads its views again, the way a
+ * code_plan.changed event moves a server film's cursor. A world update or a press's refresh tells the page.
+ */
+export function bumpFilmCursor(world: FixtureWorld, id: string): void {
+  const item = state(world).films.find((candidate) => candidate.id === id);
+  if (!item?.data) return;
+  const cursor = item.data.snapshot.cursor + 1;
+  item.updatedAt = new Date().toISOString();
+  item.data = { snapshot: { ...item.data.snapshot, cursor }, overview: { ...item.data.overview, cursor } };
 }
 
 /** Change a simulated film: a new head version and cursor, like a server command. */
@@ -232,7 +249,9 @@ export const startRoutes: FixtureRoute[] = [
     match: /^\/api\/projects$/,
     handle(world) {
       const ferry = film(world, PROJECT_ID);
-      return { projects: ferry.archived ? [] : [{ id: ferry.id, name: world.snapshot.project.name }] };
+      // `?codeplan=`: the code-plan film comes first, so the studio opens it.
+      const code = codePlanPreset() ? state(world).films.find((item) => item.id === CODE_FILM_ID && !item.archived) : undefined;
+      return { projects: [...(code ? [{ id: code.id, name: code.name }] : []), ...(ferry.archived ? [] : [{ id: ferry.id, name: world.snapshot.project.name }])] };
     },
   },
   {
@@ -255,8 +274,11 @@ export const startRoutes: FixtureRoute[] = [
         changeCatalogOnce(world);
         if (input.expectedCatalogDigest !== catalogDigest(world)) throw new ApiError("PROVIDER_CATALOG_CHANGED", 409);
       }
+      if (input.planMode !== undefined && input.planMode !== "graph" && input.planMode !== "code") throw new ApiError("VALIDATION_ERROR", 400);
       const id = `film-${start.next++}`;
-      const data = emptyFilm(id, name);
+      // A code plan is stored only when asked for; a storyboard film's record is what it always was.
+      const data = input.planMode === "code" ? codeFilmData(id, name, "empty") : emptyFilm(id, name);
+      if (input.planMode === "code") addCodeFilm(world, id);
       start.films.push({ id, name, archived: false, updatedAt: new Date().toISOString(), director: "fake", data, planImport: null });
       start.busyOnce?.add(id);
       start.setupRequiredOnce?.add(id);
@@ -345,8 +367,12 @@ export const startRoutes: FixtureRoute[] = [
         snapshot: { ...data.snapshot, conversation: [...(data.snapshot.conversation ?? []), entry] },
         overview: { ...data.overview, director: { state: "working", scopeIds: [], requestId } },
       }));
+      // A code-plan film's Director holds new paid work while it reads the message, then may write a new version.
+      const code = isCodeFilm(world, item.id);
+      if (code) holdCodeFilm(world, item.id);
       world.later(FIXTURE_REPLY_MS, () => {
-        const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: "Noted. I would draft scenes and shots from that and show them in the Plan before anything is made.", requestId, at: new Date().toISOString(), runtime: "scripted" };
+        const text = code ? codeFilmReply(world, item.id) : "Noted. I would draft scenes and shots from that and show them in the Plan before anything is made.";
+        const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text, requestId, at: new Date().toISOString(), runtime: "scripted" };
         change(world, item, (data) => ({
           snapshot: { ...data.snapshot, conversation: [...(data.snapshot.conversation ?? []), reply] },
           overview: { ...data.overview, director: { state: "idle", scopeIds: [] } },

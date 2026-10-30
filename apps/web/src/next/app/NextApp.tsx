@@ -22,6 +22,9 @@ import { FilmView } from "../views/film/FilmView.tsx";
 import { PlanView } from "../views/plan/PlanView.tsx";
 import { SettingsView } from "../views/settings/SettingsView.tsx";
 import { StartView } from "../views/start/StartView.tsx";
+import { CodePlanProvider, codePlanOpen } from "../codeplan/CodePlanContext.tsx";
+import { CodePlanFilmView, CodePlanKeyframesView, CodePlanPlanView } from "../codeplan/CodePlanViews.tsx";
+import { CodePlanCodeView } from "../codeplan/CodeView.tsx";
 import "./shell.css";
 
 /**
@@ -79,6 +82,7 @@ export function NextApp({ onReconnect, onDisconnected, carried = null, onCarried
   const view = useStudio(shownView);
   const directorOpen = useStudio((s) => s.directorOpen);
   const overview = useStudio((s) => s.overview);
+  const codePlan = useStudio(codePlanOpen);
   const narrow = useNarrow();
   const drawer = narrow && directorOpen;
   const { offline, check } = useOffline(store, connection === "reconnecting");
@@ -218,8 +222,13 @@ export function NextApp({ onReconnect, onDisconnected, carried = null, onCarried
 
   if (screen) return <Connect state={screen} onRetry={() => void onReconnect()} />;
 
+  // A code-plan film shows its run in Plan, Keyframes and Film, and its program in Code; every other view is shared.
   const workspace = showReview ? <RecoveryReview onPutAway={lookAround} />
-    : view === "keyframes" ? <KeyframesView />
+    : codePlan && view === "plan" ? <CodePlanPlanView />
+    : codePlan && view === "keyframes" ? <CodePlanKeyframesView />
+    : codePlan && view === "film" ? <CodePlanFilmView />
+    : codePlan && view === "code" ? <CodePlanCodeView />
+    : view === "keyframes" || view === "code" ? <KeyframesView />
     : view === "plan" ? <PlanView />
     : view === "film" ? <FilmView />
     : view === "assets" ? <AssetsView />
@@ -227,7 +236,8 @@ export function NextApp({ onReconnect, onDisconnected, carried = null, onCarried
     : <StartView />;
   return (
     <WriteGuardContext.Provider value={guard}>
-      <div className={`app${directorOpen ? " dir-open" : ""}`} data-ui="next" data-view={view} data-recovery={showReview ? recoveryMode : undefined}>
+      <CodePlanProvider>
+      <div className={`app${directorOpen ? " dir-open" : ""}`} data-ui="next" data-view={view} data-plan-mode={codePlan ? "code" : undefined} data-recovery={showReview ? recoveryMode : undefined}>
         <TopBar inert={drawer} expired={expired} offline={offline} onNavigate={putAway} {...(onDisconnected ? { onDisconnected } : {})} />
         <DirectorColumn />
         {/* display: contents, so the strip and the view are the grid's second column. */}
@@ -239,6 +249,7 @@ export function NextApp({ onReconnect, onDisconnected, carried = null, onCarried
         </div>
         {drawer && <div className="scrim" aria-hidden="true" onClick={() => store.setDirectorOpen(false)} />}
       </div>
+      </CodePlanProvider>
       <Toast />
       {expired && <ExpiredDialog onRetry={reconnect} />}
     </WriteGuardContext.Provider>

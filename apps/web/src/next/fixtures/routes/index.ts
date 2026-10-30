@@ -3,6 +3,7 @@ import { directorRoutes } from "../fixture-director.ts";
 import { assetsRoutes } from "./assets.ts";
 import { castRoutes } from "./cast.ts";
 import { cardRoutes } from "./cards.ts";
+import { codePlanRoutes } from "./code-plan.ts";
 import { computerRoutes } from "./computer.ts";
 import { filmRoutes } from "./film.ts";
 import { narrationRoutes } from "./narration.ts";
@@ -22,7 +23,7 @@ import { DECLINE, type Decline, type FixtureRoute } from "./types.ts";
  * (start.ts), GET /audio-library (film.ts; Assets' audio imports join it). Plan declines the shot's narration voice for
  * narration.ts, which also owns a shot's recording and the Undo of both.
  */
-export const extraRoutes: FixtureRoute[] = [...cardRoutes, ...planRoutes, ...narrationRoutes, ...filmRoutes, ...assetsRoutes, ...settingsRoutes, ...startRoutes, ...computerRoutes, ...directorRoutes, ...castRoutes];
+export const extraRoutes: FixtureRoute[] = [...cardRoutes, ...planRoutes, ...narrationRoutes, ...filmRoutes, ...assetsRoutes, ...settingsRoutes, ...startRoutes, ...computerRoutes, ...directorRoutes, ...castRoutes, ...codePlanRoutes];
 
 /**
  * The answer of the first route for this request that does not decline, or DECLINE when none answers (the caller

@@ -1,0 +1,136 @@
+import type { Entry } from "./entry.ts";
+
+/**
+ * Code-plan films (experiment, docs/ai/code-plan/DESIGN.md): the run strip and choice cards in the Director column,
+ * and the Plan, Keyframes, Film and Code views projected from the plan's run. "Code plan" is 代码计划 throughout.
+ */
+export const codePlanMessages = {
+  // ---- the top bar ----
+  "codeplan.meta": { en: "Code plan · experimental", zh: "代码计划 · 实验性" },
+
+  // ---- run states ----
+  "codeplan.state.empty": { en: "No plan yet", zh: "还没有计划" },
+  "codeplan.state.running": { en: "Running", zh: "运行中" },
+  "codeplan.state.waiting": { en: "Waiting for results", zh: "等待结果" },
+  "codeplan.state.waiting_choice": { en: "Waiting for your choice", zh: "等你选择" },
+  "codeplan.state.error": { en: "Stopped by an error", zh: "因错误停止" },
+  "codeplan.state.paused_budget": { en: "Paused at the spend limit", zh: "已到花费上限，暂停" },
+  "codeplan.state.done": { en: "Done", zh: "已完成" },
+  "codeplan.state.unknown": { en: "State {state}", zh: "状态 {state}" },
+
+  // ---- the run strip ----
+  "codeplan.run.label": { en: "Plan run", zh: "计划运行" },
+  "codeplan.run.version": { en: "Version {version}", zh: "第 {version} 版" },
+  "codeplan.run.spend": { en: "Spent {spent} of {ceiling}", zh: "已花费 {spent}，上限 {ceiling}" },
+  "codeplan.run.spend_pending": { en: "Spent {spent} (+{reserved} pending) of {ceiling}", zh: "已花费 {spent}（另有 {reserved} 待定），上限 {ceiling}" },
+  "codeplan.run.held": { en: "The Director is updating the plan. New paid work waits; work already sent goes on.", zh: "导演正在更新计划。新的付费任务先等待，已发出的任务继续进行。" },
+  "codeplan.run.error_title": { en: "The plan stopped with an error", zh: "计划因错误停止" },
+  "codeplan.run.error_next": { en: "Nothing more is sent until the plan changes. Tell the Director in the chat to fix it.", zh: "计划修改前不会再发出任务。可以在对话里让导演修复。" },
+  "codeplan.run.raise_why": { en: "The next paid step would go past the {ceiling} limit, so new paid work is paused. Work already sent goes on.", zh: "下一个付费步骤会超过 {ceiling} 的上限，所以新的付费任务已暂停。已发出的任务继续进行。" },
+  "codeplan.run.raise": { en: "Raise the limit to {ceiling}", zh: "把上限提高到 {ceiling}" },
+  "codeplan.run.raise_hint": { en: "Raising the limit spends nothing by itself.", zh: "提高上限本身不花钱。" },
+  "codeplan.run.unread": { en: "The plan’s run could not be read ({code}).", zh: "无法读取计划的运行情况（{code}）。" },
+  "codeplan.run.loading": { en: "Reading the plan…", zh: "正在读取计划…" },
+  "codeplan.run.retry": { en: "Read again", zh: "重新读取" },
+
+  // ---- choice cards ----
+  "codeplan.choice.group": { en: "Choices from the plan", zh: "计划里的选择" },
+  "codeplan.choice.eyebrow": { en: "The plan asks", zh: "计划请你选择" },
+  "codeplan.choice.eyebrow_done": { en: "You chose", zh: "你已选择" },
+  "codeplan.choice.option": { en: "Option {n}", zh: "选项 {n}" },
+  "codeplan.choice.chosen": { en: "Chosen", zh: "已选" },
+  "codeplan.choice.choose": { en: "Choose {option}", zh: "选择{option}" },
+  "codeplan.choice.chosen_label": { en: "{option}, chosen", zh: "{option}，已选" },
+  "codeplan.choice.sending": { en: "Sending your choice…", zh: "正在发送你的选择…" },
+  "codeplan.choice.unconfirmed": { en: "Not confirmed. Press the same option again to check; it is never sent twice.", zh: "未确认。再按同一个选项即可核实，不会重复发送。" },
+  "codeplan.choice.cost": { en: "Choosing lets the plan go on; what it makes next is priced in Code.", zh: "选择后计划会继续；接下来要生成的内容和价格见“代码”。" },
+
+  // ---- steps ----
+  "codeplan.step.absent": { en: "Not sent yet", zh: "还未发出" },
+  "codeplan.step.in_flight": { en: "Making…", zh: "生成中…" },
+  "codeplan.step.unknown": { en: "No answer yet", zh: "还没有回应" },
+  "codeplan.step.succeeded": { en: "Made", zh: "已生成" },
+  "codeplan.step.failed": { en: "Failed", zh: "失败" },
+  "codeplan.step.cancelled": { en: "Not sent: no longer in the plan", zh: "未发出：已不在计划中" },
+  "codeplan.step.budget": { en: "Waiting for a higher limit", zh: "等待提高上限" },
+  "codeplan.step.price": { en: "about {price}", zh: "约 {price}" },
+  "codeplan.step.chosen": { en: "Chosen", zh: "已选" },
+  "codeplan.step.alt": { en: "Image step: {label}", zh: "图片步骤：{label}" },
+  "codeplan.step.no_label": { en: "No prompt", zh: "没有提示词" },
+  "codeplan.step.failed_code": { en: "Failed ({code})", zh: "失败（{code}）" },
+  "codeplan.steps.current": { en: "In the current plan", zh: "当前计划中" },
+  "codeplan.steps.history": { en: "Earlier steps", zh: "之前的步骤" },
+  "codeplan.steps.history_hint": { en: "The current plan no longer reaches these. They are kept, and a plan that asks for the same input again reuses them for free.", zh: "当前计划已不再用到这些步骤。它们会保留，计划再次用相同输入时可免费复用。" },
+
+  "codeplan.kind.image": { en: "Image", zh: "图片" },
+  "codeplan.kind.video": { en: "Clip", zh: "视频" },
+  "codeplan.kind.speech": { en: "Voice", zh: "配音" },
+  "codeplan.kind.render": { en: "Render", zh: "渲染" },
+  "codeplan.kind.other": { en: "Step", zh: "步骤" },
+
+  // ---- Plan ----
+  "codeplan.plan.note": { en: "The Director writes this plan as code. Ask in the chat to change it; Code shows the program.", zh: "这份计划由导演用代码写成。要修改请在对话里说；“代码”里可以看到程序。" },
+  "codeplan.plan.line": { en: "{scenes, plural, one {# scene} other {# scenes}} · {shots, plural, one {# shot} other {# shots}} · version {version}", zh: "{scenes} 场 · {shots} 个镜头 · 第 {version} 版" },
+  "codeplan.plan.empty_title": { en: "No plan yet", zh: "还没有计划" },
+  "codeplan.plan.empty_body": { en: "Tell the Director what the film is about. It writes the plan as a program, and its scenes and shots appear here.", zh: "告诉导演这部影片讲什么。导演会把计划写成程序，场次和镜头会显示在这里。" },
+  "codeplan.plan.no_rows": { en: "This version declares no scenes or shots.", zh: "这一版没有声明场次或镜头。" },
+  "codeplan.plan.loose": { en: "Shots without a scene", zh: "未归入场次的镜头" },
+  "codeplan.plan.scene": { en: "Scene {n}", zh: "第 {n} 场" },
+  "codeplan.plan.seconds": { en: "{seconds} s", zh: "{seconds} 秒" },
+  "codeplan.plan.no_keyframe": { en: "No keyframe yet", zh: "还没有关键帧" },
+  "codeplan.plan.motion": { en: "Motion: {motion}", zh: "运动：{motion}" },
+
+  // ---- Keyframes ----
+  "codeplan.keyframes.line": { en: "{count, plural, one {# image step} other {# image steps}} · {made} made", zh: "{count} 个图片步骤 · 已生成 {made} 个" },
+  "codeplan.keyframes.empty": { en: "No image steps yet. The plan’s images appear here once it runs.", zh: "还没有图片步骤。计划运行后，它生成的图片会显示在这里。" },
+
+  // ---- Film ----
+  "codeplan.film.line": { en: "{clips, plural, one {# clip step} other {# clip steps}} · {renders, plural, one {# render} other {# renders}}", zh: "{clips} 个视频步骤 · {renders} 次渲染" },
+  "codeplan.film.none_title": { en: "No film yet", zh: "还没有成片" },
+  "codeplan.film.none_body": { en: "The film appears here once the plan’s render step has finished.", zh: "计划的渲染步骤完成后，成片会显示在这里。" },
+  "codeplan.film.player": { en: "The latest render of the film", zh: "最新渲染的成片" },
+  "codeplan.film.sample": { en: "The sample studio has no video files: the render’s first frame stands in.", zh: "示例工作室没有视频文件，用渲染的第一帧代替。" },
+  "codeplan.film.renders": { en: "Renders", zh: "渲染" },
+  "codeplan.film.clips": { en: "Clips", zh: "视频" },
+  "codeplan.film.no_clips": { en: "No clip steps yet.", zh: "还没有视频步骤。" },
+
+  // ---- Code ----
+  "codeplan.code.title": { en: "Code", zh: "代码" },
+  "codeplan.code.line": { en: "Version {version} by {author} · {time}", zh: "第 {version} 版 · {author} · {time}" },
+  "codeplan.code.read_only": { en: "Read only. Ask the Director in the chat to change the program.", zh: "只读。要修改程序请在对话里告诉导演。" },
+  "codeplan.code.empty": { en: "No program yet. The Director writes one when you tell it about the film.", zh: "还没有程序。你告诉导演影片内容后，导演会写一份。" },
+  "codeplan.code.versions": { en: "Versions", zh: "版本" },
+  "codeplan.code.version": { en: "Version {version}", zh: "第 {version} 版" },
+  "codeplan.code.in_use": { en: "In use", zh: "使用中" },
+  "codeplan.code.show": { en: "Show", zh: "显示" },
+  "codeplan.code.changes": { en: "Changes", zh: "改动" },
+  "codeplan.code.program": { en: "Whole program", zh: "完整程序" },
+  "codeplan.code.first": { en: "The first version: there is nothing earlier to compare with.", zh: "这是第一版，没有更早的版本可比较。" },
+  "codeplan.code.against": { en: "Against version {version}: +{added} −{removed} lines", zh: "与第 {version} 版相比：+{added} −{removed} 行" },
+  "codeplan.code.same": { en: "Same program as version {version}.", zh: "与第 {version} 版的程序相同。" },
+  "codeplan.code.unchanged": { en: "{count, plural, one {# unchanged line} other {# unchanged lines}}", zh: "{count} 行未改动" },
+  "codeplan.code.loading": { en: "Reading version {version}…", zh: "正在读取第 {version} 版…" },
+  "codeplan.code.failed": { en: "Version {version} could not be read ({code}).", zh: "无法读取第 {version} 版（{code}）。" },
+  "codeplan.code.source": { en: "Program of version {version}", zh: "第 {version} 版的程序" },
+  "codeplan.code.added": { en: "added", zh: "新增" },
+  "codeplan.code.removed": { en: "removed", zh: "删除" },
+  "codeplan.code.new_steps": { en: "New steps", zh: "新步骤" },
+
+  "codeplan.author.director": { en: "the Director", zh: "导演" },
+  "codeplan.author.user": { en: "you", zh: "你" },
+
+  // ---- a version's dry run ----
+  "codeplan.diff.reused": { en: "{count, plural, =0 {No steps reused} one {# step reused} other {# steps reused}}", zh: "{count, plural, =0 {没有复用步骤} other {复用 # 个步骤}}" },
+  "codeplan.diff.new": { en: "{count, plural, one {# new step} other {# new steps}} · {price}", zh: "{count} 个新步骤 · {price}" },
+  "codeplan.diff.cancelled": { en: "{count, plural, one {# unsent step cancelled} other {# unsent steps cancelled}}", zh: "取消 {count} 个未发出的步骤" },
+  "codeplan.diff.certain": { en: "Certain cost {price}", zh: "确定花费 {price}" },
+  "codeplan.diff.certain_more": { en: "Certain cost {price}; more depends on your choices and results", zh: "确定花费 {price}；之后的花费取决于你的选择和结果" },
+  "codeplan.diff.findings": { en: "Findings", zh: "检查结果" },
+
+  "codeplan.finding.SOURCE_SYNTAX": { en: "The program does not parse", zh: "程序无法解析" },
+  "codeplan.finding.RUNTIME_ERROR": { en: "The program throws an error", zh: "程序运行出错" },
+  "codeplan.finding.UNAWAITED_CALL": { en: "A studio call is not awaited", zh: "有工作室调用没有 await" },
+  "codeplan.finding.STEP_LIMIT": { en: "Too many media steps", zh: "媒体步骤太多" },
+  "codeplan.finding.CEILING": { en: "It would pass the spend limit", zh: "会超过花费上限" },
+  "codeplan.finding.unknown": { en: "Finding {code}", zh: "检查结果 {code}" },
+} satisfies Record<string, Entry>;

@@ -6,7 +6,8 @@ import { FILM_NAME_MAX } from "../../model/start.ts";
 import { runCreation, setUpDirector, type CreationResult, type Film } from "../../model/start-commands.ts";
 import {
   afterFailure, createBody, createdOutcome, creationSteps, directorAfterOpen, effectiveStep, failedMsg, failureNeedsReason, sheetFootMsg, isPlanFileName, madePlan, modelPlan, modelsNote, modelSummaryText,
-  nameRuns, planFileName, planTextProblem, retryMsg, sheetTitleMsg, stepAvailable, JOB_LABEL, PLAN_TEXT_MAX, type Codex, type CreatedOutcome, type CreationStep, type FirstStep, type ProviderCatalog,
+  nameRuns, planFileName, planningStep, planTextProblem, retryMsg, sheetTitleMsg, stepAvailable, stepFits, JOB_LABEL, PLAN_TEXT_MAX, type Codex, type CreatedOutcome, type CreationStep, type FirstStep,
+  type Planning, type ProviderCatalog,
 } from "../../model/start-new.ts";
 import type { Msg } from "../../model/types.ts";
 import { useStore } from "../../store/react.tsx";
@@ -18,6 +19,18 @@ const STEP_TEXT: Record<FirstStep, { title: MessageId; body: MessageId }> = {
   director: { title: "start.step.director.title", body: "start.step.director.body" },
   plan: { title: "start.step.plan.title", body: "start.step.plan.body" },
   empty: { title: "start.step.empty.title", body: "start.step.empty.body" },
+};
+/** A code-plan film has no outline to write by hand: its steps say what they do there. */
+const CODE_STEP_TEXT: Record<FirstStep, { title: MessageId; body: MessageId }> = {
+  ...STEP_TEXT,
+  director: { title: "start.step.director.title", body: "start.step.director.code_body" },
+  empty: { title: "start.step.empty.code_title", body: "start.step.empty.code_body" },
+};
+/** Storyboard stays the default; the code plan is the experiment (docs/ai/code-plan/DESIGN.md, CP-4). */
+const PLANNINGS: readonly Planning[] = ["graph", "code"];
+const PLANNING_TEXT: Record<Planning, { title: MessageId; body: MessageId }> = {
+  graph: { title: "start.planning.graph.title", body: "start.planning.graph.body" },
+  code: { title: "start.planning.code.title", body: "start.planning.code.body" },
 };
 const PROGRESS: Record<CreationStep, MessageId> = { create: "start.new.step.create", director: "start.new.step.director", import: "start.new.step.import" };
 
@@ -56,6 +69,8 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   const titleId = useId();
   const formId = useId();
   const stepLabel = useId();
+  const planningLabel = useId();
+  const planningHint = useId();
   const modelsId = useId();
   const planId = useId();
   const planHint = useId();
@@ -68,6 +83,8 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
 
   const [name, setName] = useState("");
   const [chosen, setChosen] = useState<FirstStep | null>(initialStep);
+  const [planning, setPlanning] = useState<Planning>("graph");
+  const planningRefs = useRef<Partial<Record<Planning, HTMLButtonElement | null>>>({});
   const [planText, setPlanText] = useState("");
   const [planFile, setPlanFile] = useState<string | null>(null);
   const [fileProblem, setFileProblem] = useState<MessageId | null>(null);
@@ -82,7 +99,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   // Create waits for this computer's models, so the film never gets the stand-ins only because the list was still being read.
   const modelsLoading = providers === null && !failed;
   // A run keeps the step it started with; otherwise the step follows the person's choice and what Codex allows.
-  const step = phase.kind === "idle" ? effectiveStep(chosen, codex) : phase.first;
+  const step = phase.kind === "idle" ? planningStep(effectiveStep(chosen, codex), planning, codex) : phase.first;
   const problem = step === "plan" ? planTextProblem(planText) : null;
   const untitled = t("start.new.untitled");
   const fmt = (n: number) => new Intl.NumberFormat(numberLocale(locale)).format(n);
@@ -111,7 +128,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
     const first = step;
     const filmName = failed?.film.name ?? (name.trim() || untitled);
     const input = {
-      body: createBody(name, plan, untitled),
+      body: createBody(name, plan, untitled, planning),
       steps: creationSteps(first, codex, planText),
       plan: first === "plan" && planText.trim() ? { fileName: planFileName(filmName, planFile), text: planText } : null,
       codex,
@@ -124,7 +141,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   };
 
   const chooseStep = (next: FirstStep) => {
-    if (!stepAvailable(next, codex) || failed || running) return;
+    if (!stepAvailable(next, codex) || !stepFits(next, planning) || failed || running) return;
     setChosen(next);
     setRefusal(null);
   };
@@ -133,11 +150,26 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
     const dir = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
     if (!dir) return;
     event.preventDefault();
-    const usable = STEPS.filter((s) => stepAvailable(s, codex));
+    const usable = STEPS.filter((s) => stepAvailable(s, codex) && stepFits(s, planning));
     const next = usable[(usable.indexOf(step) + dir + usable.length) % usable.length];
     if (!next) return;
     chooseStep(next);
     stepRefs.current[next]?.focus();
+  };
+
+  const choosePlanning = (next: Planning) => {
+    if (failed || running) return;
+    setPlanning(next);
+    setRefusal(null);
+  };
+
+  const onPlanningKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const dir = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
+    if (!dir) return;
+    event.preventDefault();
+    const next = PLANNINGS[(PLANNINGS.indexOf(planning) + dir + PLANNINGS.length) % PLANNINGS.length]!;
+    choosePlanning(next);
+    planningRefs.current[next]?.focus();
   };
 
   const onFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -190,10 +222,33 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
         </label>
 
         <div className="field">
+          <span className="label" id={planningLabel}>{t("start.new.planning")}</span>
+          <div className="choice" role="radiogroup" aria-labelledby={planningLabel} onKeyDown={onPlanningKey}>
+            {PLANNINGS.map((option) => (
+              <button
+                key={option}
+                ref={(element) => { planningRefs.current[option] = element; }}
+                type="button"
+                role="radio"
+                aria-checked={planning === option}
+                tabIndex={planning === option ? 0 : -1}
+                disabled={locked}
+                data-act="planning"
+                data-planning={option}
+                onClick={() => choosePlanning(option)}
+              >
+                <b>{t(PLANNING_TEXT[option].title)}</b>
+                <span>{t(PLANNING_TEXT[option].body)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="field">
           <span className="label" id={stepLabel}>{t("start.new.first_step")}</span>
           <div className="choice" role="radiogroup" aria-labelledby={stepLabel} onKeyDown={onStepKey}>
             {STEPS.map((option) => {
-              const off = !stepAvailable(option, codex);
+              const off = !stepAvailable(option, codex) || !stepFits(option, planning);
               return (
                 <button
                   key={option}
@@ -201,21 +256,22 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
                   type="button"
                   role="radio"
                   aria-checked={step === option}
-                  aria-describedby={off && codexHint ? stepHint : undefined}
+                  aria-describedby={off && !stepFits(option, planning) ? planningHint : off && codexHint ? stepHint : undefined}
                   tabIndex={step === option ? 0 : -1}
                   disabled={off || locked}
                   data-act="step"
                   data-step={option}
                   onClick={() => chooseStep(option)}
                 >
-                  <b>{t(STEP_TEXT[option].title)}</b>
-                  <span>{t(STEP_TEXT[option].body)}</span>
+                  <b>{t((planning === "code" ? CODE_STEP_TEXT : STEP_TEXT)[option].title)}</b>
+                  <span>{t((planning === "code" ? CODE_STEP_TEXT : STEP_TEXT)[option].body)}</span>
                 </button>
               );
             })}
           </div>
           {/* Once a step failed, the check has answered and the alert below says what it found. */}
           {codexHint && <span className="hint" id={stepHint} data-hint={codex.state === "unknown" ? "codex-unknown" : "no-codex"}>{codexHint}</span>}
+          {planning === "code" && <span className="hint" id={planningHint} data-hint="code-no-plan">{t("start.planning.code_no_plan")}</span>}
         </div>
 
         {step === "plan" && (
