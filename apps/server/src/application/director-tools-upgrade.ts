@@ -46,8 +46,8 @@ export class DirectorToolSettings {
   status(projectId: string) {
     const saved = this.latest(projectId);
     if (this.service.store.getProject(projectId).planMode === "code") return {
-      currentVersion: CODE_PLAN_TOOL_CONTRACT, lockId: saved?.id ?? null, lockDigest: saved?.lock.lockDigest ?? null,
-      availableVersion: CODE_PLAN_TOOL_CONTRACT, upgradeAvailable: false, busy: this.busy(projectId) };
+      currentVersion: saved?.lock.compatibility.toolContract ?? CODE_PLAN_TOOL_CONTRACT, lockId: saved?.id ?? null, lockDigest: saved?.lock.lockDigest ?? null,
+      availableVersion: saved?.lock.compatibility.toolContract ?? CODE_PLAN_TOOL_CONTRACT, upgradeAvailable: false, busy: this.busy(projectId) };
     return { currentVersion: saved?.lock.compatibility.toolContract ?? currentShippedToolContract(this.releases), lockId: saved?.id ?? null,
       lockDigest: saved?.lock.lockDigest ?? null, availableVersion: currentShippedToolContract(this.releases),
       upgradeAvailable: !!saved && !isCurrentShippedDirectorGuidance(saved.lock, this.releases), busy: this.busy(projectId) };

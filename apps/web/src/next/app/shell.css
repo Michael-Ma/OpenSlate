@@ -153,3 +153,6 @@ dialog.shell-dialog::backdrop{background:rgba(8,9,10,.62)}
   .attn-pop{left:0!important;right:0;bottom:0;top:auto!important;width:auto;max-width:none;border-radius:16px 16px 0 0;max-height:75vh}
 }
 .topbar .attn-pop .t,.topbar .attn-pop h3,.topbar .attn-pop .sub,.topbar .attn-pop .attn-foot{white-space:normal;overflow-wrap:anywhere}
+
+/* A red dot on a view tab whose film has a failed step there (code-plan films) */
+.topbar .tab .tab-dot{display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:var(--danger,#e5484d);vertical-align:middle;box-shadow:0 0 0 2px var(--bar)}

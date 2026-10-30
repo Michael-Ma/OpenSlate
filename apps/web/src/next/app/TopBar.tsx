@@ -9,8 +9,9 @@ import { StudioMenu } from "./StudioMenu.tsx";
 import { AttentionMenu } from "./AttentionMenu.tsx";
 import { useNarrow } from "./useNarrow.ts";
 import { useWriteGuard } from "./useWriteGuard.ts";
+import { useDeveloperMode } from "./useDeveloperMode.ts";
 import { useCodePlan } from "../codeplan/CodePlanContext.tsx";
-import { codePlanHeading } from "../model/code-plan.ts";
+import { attentionViews, codePlanHeading } from "../model/code-plan.ts";
 
 /** First control inside the Director drawer, so opening it puts the person where they will type. */
 function focusIntoDirector() {
@@ -62,11 +63,15 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
   const reachable = useWriteGuard().server;
   // A code-plan film says so under its title and counts what its plan declared; it has a Code tab too.
   const codePlan = useCodePlan();
+  // Code is a developer's tab (Settings › This computer › Developer mode).
+  const developer = useDeveloperMode();
   const heading = useMemo(() => (codePlan.enabled ? codePlanHeading(filmHeading(name, projects, projectId, null), codePlan.view) : filmHeading(name, projects, projectId, overview)),
     [codePlan.enabled, codePlan.view, name, projects, projectId, overview]);
   const mode = topBarMode(view, !!projectId);
   const pill = connectionPill(connection, offline);
-  const tabs = viewTabs(view, codePlan.enabled);
+  const tabs = viewTabs(view, codePlan.enabled && developer);
+  // A red dot on the tab that holds a failed step, so a failure is never hidden in a corner.
+  const dots = useMemo(() => attentionViews(codePlan.enabled ? codePlan.view : null), [codePlan.enabled, codePlan.view]);
   const stop = mode === "film" && showStop(overview, director, reachable, view);
   const [confirming, setConfirming] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -182,9 +187,11 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
               data-view={tab.view}
               aria-selected={tab.selected}
               tabIndex={tab.focusable ? 0 : -1}
+              aria-label={dots.has(tab.view as "keyframes" | "film") ? t("codeplan.tab.attention", { tab: t(tab.label) }) : undefined}
               onClick={() => go(tab.view)}
             >
               {t(tab.label)}
+              {dots.has(tab.view as "keyframes" | "film") ? <i className="tab-dot" aria-hidden="true" data-dot={tab.view} /> : null}
             </button>
           ))}
         </div>

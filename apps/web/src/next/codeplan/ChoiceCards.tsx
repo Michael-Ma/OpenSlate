@@ -4,6 +4,7 @@ import { Picture } from "../keyframes/parts.tsx";
 import { answerPress, threadChoices, type ChoiceCard, type ChoiceOption } from "../model/code-plan.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { Modal } from "../views/plan/Modal.tsx";
+import { useDeveloperMode } from "../app/useDeveloperMode.ts";
 import { CodePlanMedia, useStore, useStudio } from "../store/react.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
 import "./codeplan.css";
@@ -49,7 +50,10 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
   const unconfirmed = !card.answered && !sending && store.unconfirmed(pressId);
   const off = card.answered || sending || guard.disabled;
   const choose = (option: ChoiceOption) => { if (!off) void store.answerCodePlanChoice(card, option.value); };
-  const [comparing, setComparing] = useState(false);
+  // The option whose large view is open (media choices are chosen there, never by one press on a thumbnail).
+  const [comparing, setComparing] = useState<number | null>(null);
+  // Code is mentioned only to developers, who have the Code tab.
+  const developer = useDeveloperMode();
   return (
     <section
       className={`cp-choice${card.answered ? " done" : ""}`}
@@ -62,28 +66,24 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
       <div className={`cp-options${card.media ? " media" : ""}`}>
         {card.options.map((option) => {
           const name = optionName(option, t);
-          const label = option.chosen ? t("codeplan.choice.chosen_label", { option: name }) : card.answered ? name : t("codeplan.choice.choose", { option: name });
-          const common = {
-            type: "button" as const,
-            "data-act": "code-plan-choose",
-            "data-option": option.index,
-            "aria-pressed": option.chosen,
-            "aria-label": label,
-            disabled: off,
-            title: !card.answered && guard.disabled ? guard.title : undefined,
-            onClick: () => choose(option),
-          };
           if (option.artifact) {
+            // A press opens the options large, this one first; a paid clip never starts from a press on a thumbnail.
             return (
-              <button key={option.index} className={`cp-thumb${option.chosen ? " chosen" : ""}`} data-kind={option.artifact.kind} {...common}>
+              <button key={option.index} type="button" className={`cp-thumb${option.chosen ? " chosen" : ""}`} data-kind={option.artifact.kind}
+                data-act="code-plan-look" data-option={option.index} aria-pressed={option.chosen}
+                aria-label={t(card.answered ? "codeplan.choice.look_done" : "codeplan.choice.look", { option: name })} onClick={() => setComparing(option.index)}>
                 <span className="cp-thumb-pic"><Picture artifact={option.artifact} alt="" /></span>
                 <span className="cp-thumb-label">{name}</span>
                 {option.chosen ? <span className="cp-chosen-mark" aria-hidden="true">✓ {t("codeplan.choice.chosen")}</span> : null}
               </button>
             );
           }
+          // A text option is chosen by its press.
+          const label = option.chosen ? t("codeplan.choice.chosen_label", { option: name }) : card.answered ? name : t("codeplan.choice.choose", { option: name });
           return (
-            <button key={option.index} className={`pill sm cp-chip${option.chosen ? " chosen" : ""}`} {...common}>
+            <button key={option.index} type="button" className={`pill sm cp-chip${option.chosen ? " chosen" : ""}`} data-act="code-plan-choose"
+              data-option={option.index} aria-pressed={option.chosen} aria-label={label} disabled={off}
+              title={!card.answered && guard.disabled ? guard.title : undefined} onClick={() => choose(option)}>
               {option.chosen ? <span aria-hidden="true">✓</span> : null}
               {name}
             </button>
@@ -91,28 +91,28 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
         })}
       </div>
       {card.media ? (
-        <button type="button" className="pill sm cp-compare-open" data-act="code-plan-compare" onClick={() => setComparing(true)}>
+        <button type="button" className="pill sm cp-compare-open" data-act="code-plan-compare" onClick={() => setComparing(0)}>
           {t("codeplan.choice.compare")}
         </button>
       ) : null}
-      {comparing ? (
-        <ChoiceCompare card={card} off={off} offTitle={!card.answered && guard.disabled ? guard.title : undefined}
-          onChoose={(option) => { choose(option); setComparing(false); }} onClose={() => setComparing(false)} />
+      {comparing !== null ? (
+        <ChoiceCompare card={card} focus={comparing} off={off} offTitle={!card.answered && guard.disabled ? guard.title : undefined}
+          onChoose={(option) => { choose(option); setComparing(null); }} onClose={() => setComparing(null)} />
       ) : null}
       {sending ? <p className="cp-choice-note" role="status">{t("codeplan.choice.sending")}</p> : null}
       {unconfirmed ? <p className="cp-choice-note" role="status" data-act="code-plan-unconfirmed">{t("codeplan.choice.unconfirmed")}</p> : null}
-      {!card.answered && !sending && !unconfirmed ? <p className="cp-choice-note">{t("codeplan.choice.cost")}</p> : null}
+      {!card.answered && !sending && !unconfirmed ? <p className="cp-choice-note">{t(developer ? "codeplan.choice.cost" : "codeplan.choice.cost_plain")}</p> : null}
     </section>
   );
 }
 
 /**
- * The options of a media choice side by side at a size that can be judged, since the thumbnails in the thread are
- * too small to compare. Choosing here sends the same answer as the thumbnail and closes the dialog; an answered card
- * opens it read only, its pick marked.
+ * The options of a media choice side by side at a size that can be judged, the thumbnails in the thread being too
+ * small to compare: a media choice is made here. Focus starts on the pressed option's Choose; choosing sends the answer
+ * and closes the dialog. An answered card opens it read only, its pick marked.
  */
-function ChoiceCompare({ card, off, offTitle, onChoose, onClose }: {
-  card: ChoiceCard; off: boolean; offTitle: string | undefined; onChoose(option: ChoiceOption): void; onClose(): void;
+function ChoiceCompare({ card, focus, off, offTitle, onChoose, onClose }: {
+  card: ChoiceCard; focus: number; off: boolean; offTitle: string | undefined; onChoose(option: ChoiceOption): void; onClose(): void;
 }) {
   const { t } = useI18n();
   const titleId = `cp-compare-${card.choiceId}`;
@@ -133,7 +133,7 @@ function ChoiceCompare({ card, off, offTitle, onChoose, onClose }: {
                 {option.chosen ? <span className="cp-chosen-mark static">✓ {t("codeplan.choice.chosen")}</span>
                   : card.answered ? null : (
                     <button type="button" className="pill sm primary" data-act="code-plan-choose" data-option={option.index}
-                      data-autofocus={option.index === 0 ? true : undefined} disabled={off} title={offTitle} onClick={() => onChoose(option)}>
+                      data-autofocus={option.index === focus ? true : undefined} disabled={off} title={offTitle} onClick={() => onChoose(option)}>
                       {t("codeplan.choice.choose", { option: name })}
                     </button>
                   )}

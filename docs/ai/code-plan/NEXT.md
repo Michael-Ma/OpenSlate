@@ -63,7 +63,24 @@ Researched October 30, 2026; official docs and pricing pages; no account was use
 
 Not usable: Suno (no public API; invite-only partner program), Udio (closed platform), MusicGen (non-commercial weights), Lyria RealTime (WebSocket stream, no price), Mubert ($199/month for monetised use), Soundraw/Loudly/AIVA (sales-led or no API).
 
-**Recommendation:** Stable Audio 3.0 first. It matches the existing async adapter shape, hits the film's exact length, costs $0.08 whatever the length, and its terms give the user the output. It returns 44.1 kHz WAV, which the existing audio ingest resamples to 48 kHz. ElevenLabs is the better-sounding second, but its terms exclude film use on self-serve plans, so it should ship only with a visible licence note (or not until the owner decides). The existing fal credential (`fal-video`, used for lip sync) can later add ACE-Step or MiniMax Music cheaply.
+**Quality and control comparison** (owner asked for it, October 30).
+- *Source:* the Artificial Analysis instrumental leaderboard v1.1: blind pairwise votes, about 21k votes across 17 genres, not film-specific.
+- *Elo scale:* a 65-point gap means listeners prefer the higher model about 59% of the time. Suno v6 leads at 1148 but has no API.
+
+| Model | Instrumental Elo | Length | Controls for film | Watermark / terms |
+|---|---|---|---|---|
+| Mureka V9.5 | 1084 (3rd–6th) | not published | instrumental endpoint, extend, 5/12 stems | paid API includes commercial use (second-hand); training data undisclosed |
+| Lyria 3.5 | 1078 (3rd–6th) | only "influenced" (a 54 s ask ran 64 s) | BPM/key/sections in the prompt; no seed or editing | SynthID always on; preview |
+| **Stable Audio 3.0** | 1014 (7th–12th) | **exact** | seed, inpaint a range, audio-to-audio; strong on beds and ambient, weaker on long arcs | **user owns output, licensed data, no watermark** |
+| Eleven Music v2.5 | 1001 | exact, section plan | best control set (sections, stems, video-to-music) | **film excluded below Enterprise Music** |
+| MiniMax Music 3 | 1000 | maximum only | seed; lyrics-first | weights licence asks for attribution in commercial UIs |
+| ACE-Step 1.5 | not ranked (self-reported) | exact 10–600 s | BPM/key/time signature, repaint, stems | Apache-style model card; no indemnity |
+
+**Recommendation (pending the owner's choice):**
+- **Default: Stable Audio 3.0.** It is the only one with exact length, instrumental by design, seed and inpaint in the API, and the cleanest film terms (licensed data, user-owned output, no watermark, no film exclusion), at $0.08 per cue. The price is musicality: it sits mid-table, and about 59% of blind listeners prefer Lyria 3.5 or Mureka.
+- **Optional second: Lyria 3.5** as a "richer score" choice at the same $0.08. It needs trimming and a fade at the cut, since it cannot hit an exact length, and every file carries SynthID.
+- **ElevenLabs** stays out unless the owner gets Enterprise Music.
+- **Bake-off:** a blind test of 5 cues × 3 providers (about $1.50) would settle quality and clean endings. It needs the owner's approval.
 
 ## Video providers
 
@@ -102,7 +119,7 @@ Researched October 30, 2026; official docs and pricing pages; no account was use
 
 - Seedance through BytePlus ModelArk, official.
 - No cap on limit changes made in chat.
-- Music: compare Stable Audio with the alternatives before choosing (Wave B).
+- Music: **Lyria 3.5 through the Gemini API**, using the same key variable as song analysis (`OPENSLATE_GEMINI_API_KEY`). It is paid tier only: the key's Google project needs billing. The owner added the key on October 30, and one live call succeeded ($0.08, 19 s). It returned a 68 s MP3 for a 20 s ask, so plans always trim to the cut. Card N3.
 - Start Wave A.
 
 ## Phases and owners

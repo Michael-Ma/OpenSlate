@@ -213,6 +213,11 @@ export class InstalledProviderCatalog {
     return this.#definitions.filter(definition => definition.profile.adapter === "fal-h3-lipsync" && this.describe(definition.profile).readiness.realExecutionEnabled)
       .map(definition => structuredClone(definition.profile)).slice(0, 1);
   }
+  /** Every ready video model, pinned on new code films: their plans choose a model per shot. */
+  codeVideoProfiles(): ProviderProfile[] {
+    return this.#definitions.filter(definition => definition.profile.kind === "video" && definition.profile.adapter !== "fal-h3-lipsync"
+      && this.describe(definition.profile).readiness.realExecutionEnabled).map(definition => structuredClone(definition.profile));
+  }
   private describe(input: unknown, name?: string) {
     let valid = true, policy: ReturnType<typeof profilePolicy> | undefined;
     try { policy = profilePolicy(input as ProviderProfile); } catch { valid = false; }

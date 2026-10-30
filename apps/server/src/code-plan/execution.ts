@@ -15,7 +15,7 @@ import type { Store } from "../persistence/store.js";
 import type { InstalledProviderCatalog } from "../application/provider-catalog.js";
 import type { LocalMediaExecutor } from "../execution/local-media-executor.js";
 import { projectModels, modelPrice, codePlanPriceFrame, type CodePlanCapabilityLock } from "./models.js";
-import { codePlanProviderArgs } from "./provider-input.js";
+import { codePlanProviderArgs, videoAspect } from "./provider-input.js";
 import type { CodePlanModel } from "./identity.js";
 import { VIDEO_DERIVATION_LIMITS, assertNormalizedVideoIngestion, type NormalizedVideoIngestion, type VideoDerivationIntent } from "../execution/video-derivation.js";
 import { AUDIO_DERIVATION_LIMITS, assertNormalizedAudioIngestion, type NormalizedAudioIngestion, type AudioDerivationIntent } from "../execution/audio-derivation.js";
@@ -63,6 +63,15 @@ export class CodePlanExecution {
 
   models(projectId: string): Record<string, CodePlanModel> { return projectModels(this.store, projectId, this.catalog); }
 
+  normalizeVideoInput(projectId: string, input: JsonObject, model: CodePlanModel): JsonObject {
+    if (!model.profile) return input;
+    const ref = input.firstFrame;
+    const frame = ref && typeof ref === "object" && !Array.isArray(ref) && this.store.list<ArtifactRecord>("artifact", projectId)
+      .find(row => row.artifact.kind === "image" && row.artifact.sha256 === ref.sha256);
+    invariant(frame, "CODE_PLAN_ARTIFACT_INVALID", "Video requires an owned first frame");
+    return videoAspect(input, model.profile, frame);
+  }
+
   private ready(projectId: string, input: JsonObject, kind: CodePlanMediaKind): CodePlanModel {
     const model = this.models(projectId)[String(input.model)];
     const lock = this.store.get<CodePlanCapabilityLock>("capability_lock", this.store.getProject(projectId).capabilityLockId);
@@ -97,8 +106,30 @@ export class CodePlanExecution {
     return this.record(this.attempt(attemptId)).liability;
   }
 
+  failure(attemptId: string): { code: string; retry: "safe" | "consent" | "none"; mayHaveCharged: boolean } {
+    const attempt = this.attempt(attemptId), liability = this.record(attempt).liability;
+    return { code: attempt.failure?.id ?? "PROVIDER_FAILED",
+      retry: liability === "released" ? attempt.failure?.retryAllowed ? "safe" : "none" : "consent",
+      mayHaveCharged: liability !== "released" };
+  }
+
+  accounting(projectId: string): { charged: bigint; unknown: bigint; inFlight: bigint; total: bigint } {
+    let charged = 0n, unknown = 0n, inFlight = 0n;
+    for (const attempt of this.attempts(projectId)) {
+      const record = this.record(attempt);
+      const price = BigInt(record.priceMicros ?? this.store.list<import("./records.js").CodePlanStep>("code_plan_step", projectId)
+        .find(step => step.key === attempt.fingerprint)?.priceMicros ?? "0");
+      if (record.liability === "released") continue;
+      if (attempt.phase === "submission_unknown" || attempt.failure?.id === "SUBMISSION_RESPONSE_LOST") unknown += price;
+      else if (record.liability === "charged") charged += price;
+      else inFlight += price;
+    }
+    return { charged, unknown, inFlight, total: charged + unknown + inFlight };
+  }
+
   /** The complete immutable submission intent is durable before this method returns. */
-  prepare(projectId: string, key: string, kind: CodePlanMediaKind, normalizedInput: JsonObject): Attempt {
+  prepare(projectId: string, key: string, kind: CodePlanMediaKind, normalizedInput: JsonObject,
+    options: { previousAttemptId?: string; priceMicros?: string } = {}): Attempt {
     invariant(!this.stopping, "CODE_PLAN_CLOSED", "Code-plan execution is stopping");
     invariant(this.store.getProject(projectId).planMode === "code", "CODE_PLAN_MODE_INVALID", "Code execution requires a code-mode project");
     invariant(/^[a-f0-9]{64}$/.test(key) && ["image", "video", "speech", "render"].includes(kind), "CODE_PLAN_INPUT_INVALID", "Use a content-addressed media step");
@@ -109,14 +140,21 @@ export class CodePlanExecution {
     const realRender = kind === "render" && this.store.get<CodePlanCapabilityLock>("capability_lock", this.store.getProject(projectId).capabilityLockId)?.profiles.some(row => row.adapter !== "fake");
     invariant(!realRender || this.localExecutor, "CODE_PLAN_RENDER_UNAVAILABLE", "Real projects require the installed local media executor");
     const prepared = this.store.transaction(() => {
-      const workKey = `code-plan:${key}`, specDigest = digest({ kind, input });
-      const existing = this.attempts(projectId).find(attempt => attempt.workKey === workKey);
+      const specDigest = digest({ kind, input });
+      const history = this.attempts(projectId).filter(attempt => attempt.fingerprint === key).sort((a, b) => a.ordinal - b.ordinal);
+      const previous = options.previousAttemptId ? history.find(attempt => attempt.id === options.previousAttemptId) : undefined;
+      invariant(!options.previousAttemptId || previous && terminal(previous), "CODE_PLAN_RETRY", "Only terminal attempts may open another submission intent");
+      const ordinal = previous ? previous.ordinal + 1 : 1;
+      // The store's local-work index is globally unique. A step keeps its key,
+      // while each project/attempt needs a distinct immutable execution work key.
+      const workKey = `code-plan:${projectId}:${key}:${ordinal}`;
+      const existing = history.find(attempt => attempt.ordinal === ordinal);
       if (existing) {
         invariant(existing.specDigest === specDigest && existing.request.kind === kind, "CODE_PLAN_STEP_CONFLICT", "Step key already has different execution inputs");
         this.record(existing); return { attempt: existing, created: false };
       }
       const id = newId(), at = new Date().toISOString(), inputs = this.resolveInputs(projectId, input);
-      const attempt: Attempt = { id, projectId, nodeId: workKey, candidateId: null, ordinal: 1, specDigest,
+      const attempt: Attempt = { id, projectId, nodeId: workKey, candidateId: null, ordinal, specDigest,
         fingerprint: key, workKey, phase: "submitting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.providerTimeoutMs + 600000,
         taskId: null, reservationId: null, failure: null, outputs: {}, createdAt: at,
         request: { attemptId: id, nodeId: workKey, kind, fingerprint: key, args, inputs, execution: profile ? profileExecutionIdentity(profile) : realRender ? { adapter: "local-media", version: "1" } : { adapter: "fake", version: "1" },
@@ -124,8 +162,8 @@ export class CodePlanExecution {
             capabilityLockDigest: digest(lock), profileDefinitionDigest: digest(profile) } } : {}) } };
       this.store.insert("code_plan_execution", id, projectId, { requestDigest: digest(attempt.request), liability: "reserved",
         outcome: null, outcomeDigest: null, createdAt: at, updatedAt: at,
-        ...(profile || realRender ? { planVersion: this.store.get<{ planVersion: number }>("code_plan_run", projectId)!.planVersion,
-          normalizedInput: input, priceMicros: modelPrice(model, input, codePlanPriceFrame(this.store, projectId, input)) } : {}) });
+        ...(this.store.get<{ planVersion: number }>("code_plan_run", projectId) ? { planVersion: this.store.get<{ planVersion: number }>("code_plan_run", projectId)!.planVersion } : {}),
+        normalizedInput: input, priceMicros: options.priceMicros ?? modelPrice(model, input, codePlanPriceFrame(this.store, projectId, input)) });
       this.store.insert("attempt", id, projectId, attempt);
       return { attempt, created: true };
     });
@@ -258,10 +296,13 @@ export class CodePlanExecution {
         { attemptId: id, outcome, outcomeDigest: evidenceDigest, recordedAt: new Date().toISOString() });
       const phase = outcome.type === "completed" ? "ingesting" : outcome.type === "accepted" ? "remote_pending"
         : outcome.type === "unknown" ? "submission_unknown" : "failed";
+      const freeFailure = outcome.type === "failed" ? (() => { const row = videoI2vFailure(this.store, attempt); return row?.free ? row : null; })() : null;
       const failure = outcome.type === "failed" || outcome.type === "rejected" ? { id: outcome.failureId, technical: outcome.technical,
-        retryAllowed: false, source: `${attempt.request.execution.adapter}_provider` } : null;
+        // A free vendor failure (not a content refusal) cannot charge twice, so it may retry as safely as a rejection.
+        retryAllowed: outcome.type === "rejected" ? outcome.retryAllowed : !!freeFailure && !/FACE|MODERATION/.test(freeFailure.code),
+        source: `${attempt.request.execution.adapter}_provider` } : null;
       // Rejections and request-bound Seedance free-task failures positively release liability.
-      const liability: CodePlanLiability = outcome.type === "rejected" || outcome.type === "failed" && videoI2vFailure(this.store, attempt)?.free ? "released"
+      const liability: CodePlanLiability = outcome.type === "rejected" || freeFailure ? "released"
         : outcome.type === "completed" || outcome.type === "failed" ? "charged" : record.liability;
       this.store.put("code_plan_execution", id, attempt.projectId, { ...record, liability, outcome, outcomeDigest: digest(outcome), updatedAt: new Date().toISOString() });
       this.store.put("attempt", id, attempt.projectId, { ...attempt, phase, failure, taskId: executionTaskId(outcome) ?? attempt.taskId });

@@ -156,7 +156,7 @@ export class CodePlanRuntime implements CodePlanPort {
       const record: CodePlanVersion = { id: entityId(projectId, `version:${next}`), projectId, version: next, source,
         sha256: createHash("sha256").update(source).digest("hex"), author, createdAt: stamp(), ...(diff ? { diff } : {}) };
       this.store.put("code_plan_version", record.id, projectId, record);
-      const run: CodePlanRun = current ? { ...current, planVersion: next, state: "running", error: null }
+      const run: CodePlanRun = current ? { ...current, planVersion: next, state: "running", error: null, reachedStepKeys: [] }
         : { id: projectId, projectId, planVersion: next, state: "running", now: clock?.now ?? Date.now(), seed: clock?.seed ?? randomInt(1, 0x7fffffff),
           ceilingMicros: "1000000", lastPassAt: null, error: null, reachedStepKeys: [], declarations: { scenes: [], shots: [] }, logs: [] };
       this.store.put("code_plan_run", projectId, projectId, run);
@@ -183,9 +183,36 @@ export class CodePlanRuntime implements CodePlanPort {
     this.assertCode(projectId);
     const run = this.getRun(projectId); invariant(run, "CODE_PLAN_MISSING", "No code plan is saved");
     invariant(moneyMicros(micros) > moneyMicros(run.ceilingMicros), "CODE_PLAN_CEILING", "The new ceiling must be higher");
-    this.store.put("code_plan_run", projectId, projectId, { ...run, ceilingMicros: micros });
+    return this.setCeiling(projectId, { ceilingMicros: micros, by: "person" });
+  }
+
+  setCeiling(projectId: string, input: { ceilingMicros: string; by: "person" } | { ceilingMicros: string; by: "director"; quote: string; invocationId: string }): CodePlanView {
+    this.assertCode(projectId);
+    if (input.by === "director") return this.store.command(`code-plan:${projectId}:ceiling`, input.invocationId, digest(input),
+      () => this.setCeiling(projectId, { ceilingMicros: input.ceilingMicros, by: "person" }));
+    const run = this.getRun(projectId); invariant(run, "CODE_PLAN_MISSING", "No code plan is saved");
+    const amount = moneyMicros(input.ceilingMicros), accounting = this.options.execution.accounting(projectId);
+    if (amount < accounting.total) throw new DomainError("CODE_PLAN_CEILING", "The limit cannot be below charged, unknown and in-flight work", {
+      ceilingMicros: input.ceilingMicros, chargedMicros: accounting.charged.toString(), unknownMicros: accounting.unknown.toString(),
+      inFlightMicros: accounting.inFlight.toString(), liabilityMicros: accounting.total.toString(),
+    });
+    this.store.put("code_plan_run", projectId, projectId, { ...run, ceilingMicros: input.ceilingMicros });
     this.queued.add(projectId);
     this.changed(projectId);
+    return this.view(projectId);
+  }
+
+  retryStep(projectId: string, input: { stepKey: string; consent: { by: "person" } | { by: "director"; quote: string; invocationId: string } }): CodePlanView {
+    this.assertCode(projectId);
+    if (input.consent.by === "director") return this.store.command(`code-plan:${projectId}:retry`, input.consent.invocationId, digest(input),
+      () => this.retryStep(projectId, { stepKey: input.stepKey, consent: { by: "person" } }));
+    this.syncSteps(projectId);
+    const run = this.getRun(projectId), step = this.steps(projectId).find(step => step.key === input.stepKey);
+    invariant(run && run.reachedStepKeys.includes(input.stepKey) && step?.state === "failed" && step.result && !step.result.ok
+      && step.result.error.retry !== "none", "CODE_PLAN_RETRY", "Only a reached failed or terminal-unknown step that permits retry can be retried");
+    // Mark a new intent for the next replay. Stop, holds, ceiling and capacity still gate admission.
+    this.store.put("code_plan_step", step.id, projectId, { ...step, retryAt: Date.now(), updatedAt: stamp() });
+    this.queued.add(projectId); this.changed(projectId);
     return this.view(projectId);
   }
 
@@ -197,6 +224,7 @@ export class CodePlanRuntime implements CodePlanPort {
         if (project.planMode !== "code" || !this.getRun(project.id)) continue;
         try {
           if (this.capacityWaiting.delete(project.id)) this.queued.add(project.id);
+          if (this.steps(project.id).some(step => step.retryAt !== undefined && step.retryAt <= Date.now())) this.queued.add(project.id);
           let ingestionError: unknown;
           try { if (await this.options.execution.advance(project.id)) this.queued.add(project.id); }
           catch (error) { ingestionError = error; }
@@ -237,17 +265,21 @@ export class CodePlanRuntime implements CodePlanPort {
   private syncSteps(projectId: string): boolean {
     let changed = false;
     for (const step of this.steps(projectId)) {
-      if (!step.attemptId || step.result) continue;
+      if (!step.attemptId || step.result && (step.result.ok || step.result.error.retry !== undefined && step.result.error.mayHaveCharged !== undefined)) continue;
       const attempt = this.store.get<import("../execution/engine.js").Attempt>("attempt", step.attemptId);
       invariant(attempt?.projectId === projectId, "CODE_PLAN_JOURNAL", "Step lost its admitted attempt");
       const state = attempt.phase === "succeeded" ? "succeeded" : attempt.phase === "failed" ? "failed"
         : attempt.phase === "submission_unknown" ? "unknown" : "in_flight";
-      if (state === step.state) continue;
+      if (state === step.state && !step.result) continue;
       const artifacts = Object.values(attempt.outputs);
       invariant(state !== "succeeded" || artifacts.length > 0, "CODE_PLAN_JOURNAL", "A successful step requires ingested output");
+      const failure = this.options.execution.failure(attempt.id), retry = failure.retry;
       const result: CodePlanStep["result"] = state === "succeeded" ? { ok: true, artifact: (step.kind === "video" || step.kind === "render" ? attempt.outputs.video : step.kind === "image" ? attempt.outputs.image : attempt.outputs.audio) ?? artifacts[0]!, artifacts }
-        : state === "failed" ? { ok: false, error: { code: attempt.failure?.id ?? "PROVIDER_FAILED", message: videoI2vFailure(this.store, attempt)?.message ?? "Provider execution failed" } } : null;
-      this.store.put("code_plan_step", step.id, projectId, { ...step, state, result, updatedAt: stamp() }); changed = true;
+        : state === "failed" ? { ok: false, error: { ...failure, message: videoI2vFailure(this.store, attempt)?.message ?? "Provider execution failed" } } : null;
+      const automaticRetries = step.automaticRetries ?? 0;
+      this.store.put("code_plan_step", step.id, projectId, { ...step, state, result, updatedAt: stamp(),
+        ...(state === "failed" && retry === "safe" && automaticRetries < 2
+          ? { retryAt: Date.now() + 250 * 2 ** automaticRetries, automaticRetries: automaticRetries + 1 } : {}) }); changed = true;
     }
     return changed;
   }
@@ -263,7 +295,9 @@ export class CodePlanRuntime implements CodePlanPort {
     if (current.planVersion !== run.planVersion) { this.queued.add(projectId); return current; }
     for (const step of this.steps(projectId)) if (!reached.has(step.key) && !step.attemptId && step.state !== "cancelled")
       this.store.put("code_plan_step", step.id, projectId, { ...step, state: "cancelled", updatedAt: stamp() });
-    const result: CodePlanRun = { ...current, state: outcome.state === "error" ? "error" : budget ? "paused_budget" : outcome.state,
+    const failed = this.steps(projectId).some(step => reached.has(step.key) && step.state === "failed" && step.retryAt === undefined);
+    const result: CodePlanRun = { ...current, state: outcome.state === "error" ? "error" : budget ? "paused_budget"
+      : outcome.state === "done" && failed ? "done_with_failures" : outcome.state,
       lastPassAt: stamp(), error: outcome.error ?? null, reachedStepKeys: [...reached], declarations, logs };
     this.store.put("code_plan_run", projectId, projectId, result); this.changed(projectId); return result;
   }
@@ -294,10 +328,18 @@ export class CodePlanRuntime implements CodePlanPort {
       if (method === "choose") return this.choose(projectId, args, dry);
       invariant(method === "image" || method === "video" || method === "speech" || method === "render", "CODE_PLAN_METHOD", "Unknown Studio operation");
       const kind: CodePlanMediaKind = method;
-      const input = normalizeStepInput(kind, args[0], models), key = stepKey(kind, input), id = entityId(projectId, key);
+      const normalized = normalizeStepInput(kind, args[0], models);
+      // Previously journaled defaults are immutable: installing new aspect inference
+      // must not silently buy replacement clips for an unchanged saved program.
+      const journaledDefault = kind === "video" && normalized.aspectRatio === undefined
+        && virtual.has(stepKey(kind, normalized));
+      const input = kind === "video" && !journaledDefault
+        ? this.options.execution.normalizeVideoInput(projectId, normalized, models[String(normalized.model)]!) : normalized;
+      const key = stepKey(kind, input), id = entityId(projectId, key);
       reached.add(key);
       let step = dry ? virtual.get(key) : this.store.get<CodePlanStep>("code_plan_step", id);
-      if (step?.result || step?.attemptId) {
+      if (step?.retryAt !== undefined && step.retryAt > Date.now()) return SANDBOX_PENDING;
+      if (step?.retryAt === undefined && (step?.result || step?.attemptId)) {
         reused.add(key);
         return step.result ?? SANDBOX_PENDING;
       }
@@ -311,7 +353,7 @@ export class CodePlanRuntime implements CodePlanPort {
         diff.newSteps.push({ kind, model: String(input.model), label: stepLabel(input), priceMicros: step.priceMicros });
       }
       if (dry) {
-        limited ||= journal.filter(item => item.attemptId).length + fresh.size > this.maxSteps;
+        limited ||= this.options.execution.attempts(projectId).length + fresh.size > this.maxSteps;
         return SANDBOX_PENDING;
       }
       // These predicates run immediately before intent admission, even for a pass
@@ -319,19 +361,23 @@ export class CodePlanRuntime implements CodePlanPort {
       if (moneyMicros(step.priceMicros) > 0n && this.store.list<CodePlanHold>("code_plan_hold", projectId).some(hold => !hold.released)) {
         this.store.put("code_plan_step", id, projectId, step); return SANDBOX_PENDING;
       }
-      const liability = this.steps(projectId).reduce((total, previous) => total + (previous.attemptId
-        && this.options.execution.liability(previous.attemptId) !== "released" ? moneyMicros(previous.priceMicros) : 0n), 0n);
+      if (this.store.get<{ paused: boolean }>("execution_control", projectId)?.paused) {
+        this.store.put("code_plan_step", id, projectId, step); return SANDBOX_PENDING;
+      }
+      const liability = this.options.execution.accounting(projectId).total;
       if (liability + moneyMicros(step.priceMicros) > moneyMicros(this.getRun(projectId)!.ceilingMicros)) {
         budget = true; this.store.put("code_plan_step", id, projectId, step); return SANDBOX_PENDING;
       }
-      invariant(this.steps(projectId).filter(item => item.attemptId).length < this.maxSteps,
+      invariant(this.options.execution.attempts(projectId).length < this.maxSteps,
         "CODE_PLAN_STEP_LIMIT", `Code plans allow at most ${this.maxSteps} dispatched media steps per project`);
       if (!this.options.execution.hasCapacity(projectId, input)) {
         this.capacityWaiting.add(projectId); this.store.put("code_plan_step", id, projectId, step); return SANDBOX_PENDING;
       }
       const admitted = this.store.transaction(() => {
-        const attempt = this.options.execution.prepare(projectId, key, kind, input);
-        this.store.put("code_plan_step", id, projectId, { ...step, state: "in_flight", attemptId: attempt.id });
+        const attempt = this.options.execution.prepare(projectId, key, kind, input, {
+          ...(step.attemptId ? { previousAttemptId: step.attemptId } : {}), priceMicros: step.priceMicros });
+        const { retryAt: _retryAt, ...next } = step;
+        this.store.put("code_plan_step", id, projectId, { ...next, result: null, state: "in_flight", attemptId: attempt.id });
         return attempt;
       });
       const submission = this.options.execution.submit(admitted.id).finally(() => { this.queued.add(projectId); });
@@ -353,8 +399,7 @@ export class CodePlanRuntime implements CodePlanPort {
     else if (outcome.state === "error") diff.findings.push({ code: "RUNTIME_ERROR", detail: outcome.error?.message ?? "Pass failed" });
     if (outcome.unawaitedCalls?.length) diff.findings.push({ code: "UNAWAITED_CALL", detail: [...new Set(outcome.unawaitedCalls)].join(", ") });
     if (limited) diff.findings.push({ code: "STEP_LIMIT" });
-    const liability = journal.reduce((sum, step) => sum + (step.attemptId && this.options.execution.liability(step.attemptId) !== "released"
-      ? moneyMicros(step.priceMicros) : 0n), 0n);
+    const liability = this.options.execution.accounting(projectId).total;
     if (moneyMicros(diff.certainMicros) > moneyMicros(run?.ceilingMicros ?? "1000000") - liability) diff.findings.push({ code: "CEILING" });
     return { outcome, reached, declarations, logs, budget, diff };
   }

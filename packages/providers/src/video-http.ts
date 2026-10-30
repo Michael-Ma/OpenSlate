@@ -1,12 +1,7 @@
-/** Positive evidence that a connection was never established. Socket resets, timeouts after connect and aborts stay unknown. */
-export function isConnectPhaseFailure(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const value = error as { code?: unknown; syscall?: unknown; cause?: unknown; errors?: unknown };
-  if (["ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"].includes(String(value.code))) return true;
-  if (["ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ETIMEDOUT"].includes(String(value.code)) && value.syscall === "connect") return true;
-  if (Array.isArray(value.errors) && value.errors.length > 0) return value.errors.every(isConnectPhaseFailure);
-  return value.cause !== error && isConnectPhaseFailure(value.cause);
-}
+import { connectFailureCode } from "./connect-failure.js";
+
+/** The one rule for "never reached the vendor", shared with the Viggle and MiniMax adapters. */
+export const isConnectPhaseFailure = (error: unknown): boolean => connectFailureCode(error) !== undefined;
 export const videoObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 export function videoEnsure(value: unknown, code: string): asserts value { if (!value) throw new Error(code); }
 export interface VideoApiOptions { apiKey: string; fetch?: typeof globalThis.fetch; timeoutMs?: number }

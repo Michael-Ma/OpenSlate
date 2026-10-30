@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { attentionItems, filmAttentionItems, type AttentionGroup, type AttentionItem } from "../model/attention.ts";
+import { codePlanAttentionItems, type CodePlanAttentionItem } from "../model/code-plan.ts";
+import { useCodePlan } from "../codeplan/CodePlanContext.tsx";
 import { GiveUp } from "./GiveUp.tsx";
 import { NARROW_QUERY, noteOpenView, shownView } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
@@ -13,14 +15,17 @@ const GROUPS: AttentionGroup[] = ["waiting", "failed"];
  * shot. Under the pill on wide screens, a bottom sheet on narrow ones. Keys as in the studio menu.
  */
 export function AttentionMenu() {
-  const { t, tm } = useI18n();
+  const { t, tm, locale } = useI18n();
   const store = useStore();
+  // A code-plan film's failed steps: each opens the tab that shows it, scrolled to the step.
+  const codePlan = useCodePlan();
+  const steps = useMemo(() => codePlanAttentionItems(codePlan.enabled ? codePlan.view : null, locale), [codePlan.enabled, codePlan.view, locale]);
   const overview = useStudio((s) => s.overview);
   const items = useMemo(() => attentionItems(overview), [overview]);
   // Decision R4: film-wide local work that stopped after it started; Render again is acknowledged in place.
   const film = useMemo(() => filmAttentionItems(overview), [overview]);
   const pending = useStudio((s) => s.pending);
-  const count = items.length + film.length;
+  const count = items.length + film.length + steps.length;
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -64,6 +69,11 @@ export function AttentionMenu() {
     const view = shownView(store.getState());
     if (noteOpenView(view) !== view) store.setView(noteOpenView(view));
   };
+  const show = (item: CodePlanAttentionItem) => {
+    close(false);
+    store.setView(item.view);
+    requestAnimationFrame(() => document.querySelector(`[data-step="${CSS.escape(item.key)}"]`)?.scrollIntoView({ block: "center" }));
+  };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const buttons = [...(list.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -100,6 +110,18 @@ export function AttentionMenu() {
               </section>
             );
           })}
+          {steps.length ? (
+            <section aria-label={t("attention.group.failed")}>
+              <div className="attn-group">{t("attention.group.failed")}</div>
+              {steps.map((item) => (
+                <div key={item.key} className="attn-item" data-item={item.key} data-group="code-plan">
+                  <span className="badge">{tm(item.badge)}</span>
+                  <div className="t"><b>{tm(item.title)}</b>{tm(item.detail)}</div>
+                  <button type="button" className="pill sm" data-act="attention-show-step" data-step-key={item.key} onClick={() => show(item)}>{t("codeplan.attention.open")}</button>
+                </div>
+              ))}
+            </section>
+          ) : null}
           {film.length ? (
             <section aria-label={t("attention.group.film")}>
               <div className="attn-group">{t("attention.group.film")}</div>

@@ -6,9 +6,11 @@ import { StudioStore } from '../../src/next/store/store.ts';
 import { ApiError } from '../../src/next/api/client.ts';
 import { artifactContentPath, codePlanArtifactContentPath, codePlanVersionPath, CODE_PLAN_PATH } from '../../src/next/api/code-plan.ts';
 import {
-  answerPress, artifactRefOf, ceilingPress, changeBlocks, choiceCard, codePlanHeading, declaredPlan, diffCounts, diffSummary, findingMsg, isCodeProject,
-  latestRender, lineDiff, optionArtifact, optionLabel, placeByTime, previousVersion, runStrip, sourcePress, stepRows, threadChoices, versionRows,
+  answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
+  findingMsg, isCodeProject, latestRender, lineDiff, needsAttention, optionArtifact, optionLabel, placeByTime, previousVersion, problemCause, retryPress, runStrip,
+  sourcePress, stepProblem, stepRows, threadChoices, versionRows,
 } from '../../src/next/model/code-plan.ts';
+import { DEVELOPER_STORAGE_KEY, readDeveloperMode, setDeveloperMode } from '../../src/next/app/useDeveloperMode.ts';
 import { createBody, planningStep, stepFits } from '../../src/next/model/start-new.ts';
 import { runCreation } from '../../src/next/model/start-commands.ts';
 import { searchWithView, shownView, viewFromSearch, viewTabs } from '../../src/next/model/shell.ts';
@@ -454,4 +456,85 @@ test('Start makes a code-plan film with planMode "code"; the Director writes its
   // A storyboard film's create body is what it always was.
   await runCreation(store, { body: createBody('Plain', null, 'Untitled'), steps: ['create'], plan: null, codex: { state: 'unknown' } }, { onStep() {} });
   assert.deepEqual(client.sent.filter((request) => request.path === '/api/projects' && request.method === 'POST').at(-1).body, { name: 'Plain' });
+});
+
+test('a failed step is explained in plain words, with what a retry means; the runtime\'s own facts win', () => {
+  const lost = step('clip', 'video', 'failed', { priceMicros: '100000', error: { code: 'SUBMISSION_RESPONSE_LOST' } });
+  const problem = stepProblem(lost, 'en-US');
+  assert.equal(problem.cause, 'lost');
+  assert.equal(en(problem.what), 'The service did not answer when this was sent, so it is not known whether it started.');
+  assert.equal(en(problem.cost), 'It may already have cost $0.10.');
+  assert.deepEqual([problem.retry, problem.price], ['consent', '$0.10']);
+  assert.equal(en(problem.retryNote), 'A retry makes a new attempt and may charge again.');
+  // N1 says the request never left: safe, and nothing charged.
+  const safe = stepProblem({ ...lost, error: { code: 'VIGGLE_H3_CONNECT_REFUSED', mayHaveCharged: false, retry: 'safe' } }, 'en-US');
+  assert.deepEqual([safe.retry, safe.cost], ['safe', null]);
+  assert.equal(zh(safe.retryNote), '请求没有到达服务，重试不会重复收费。');
+  assert.equal(stepProblem(step('f', 'video', 'failed', { error: { code: 'SEEDANCE_MODERATION_REFUSED' } }), 'en-US').retry, 'none');
+  assert.equal(en(stepProblem(step('f', 'image', 'failed', { error: { code: 'WEIRD_THING' } }), 'en-US').what), 'The service reported a problem (WEIRD_THING).');
+  assert.deepEqual(['NO_KEY_CREDENTIAL', 'RATE_LIMITED', 'TIMED_OUT', 'MEDIA_VALIDATION_FAILED', 'CODE_PLAN_INPUT', 'CODE_PLAN_CEILING'].map((code) => problemCause(code, 'failed')),
+    ['key', 'busy', 'timeout', 'media', 'input', 'limit']);
+  assert.equal(stepProblem(step('ok', 'image', 'succeeded'), 'en-US'), null);
+  assert.equal(stepProblem(step('w', 'video', 'unknown'), 'en-US'), null, 'still waiting for an answer is not a failure');
+});
+
+test('failed steps put a red dot on their tab and list in Needs attention; unreached history does not', () => {
+  const plan = view({ steps: [
+    step('frame', 'image', 'failed', { error: { code: 'MODERATION' } }),
+    step('clip', 'video', 'unknown', { error: { code: 'SUBMISSION_RESPONSE_LOST' }, label: 'Push in on Tofu' }),
+    step('old', 'video', 'failed', { reached: false, error: { code: 'X' } }),
+    step('fine', 'image', 'succeeded'),
+  ] });
+  assert.deepEqual(plan.steps.map(needsAttention), [true, true, false, false]);
+  assert.deepEqual([...attentionViews(plan)].sort(), ['film', 'keyframes']);
+  assert.deepEqual([...attentionViews(view({ steps: [step('fine', 'image', 'succeeded')] }))], []);
+  const items = codePlanAttentionItems(plan, 'en-US');
+  assert.deepEqual(items.map((item) => [item.key, item.view, en(item.badge)]), [['frame', 'keyframes', 'Frame'], ['clip', 'film', 'Clip']]);
+  assert.equal(en(items[1].title), 'A clip failed: Push in on Tofu');
+  assert.match(en(items[1].detail), /did not answer/);
+});
+
+test('a retry press is keyed by the step and its attempt, so a later retry is a new request', () => {
+  assert.deepEqual(retryPress({ key: 'clip', attempts: 1 }), { pressId: 'codeplan:retry:clip', logical: { stepKey: 'clip', attempt: 1 } });
+  assert.notDeepEqual(retryPress({ key: 'clip', attempts: 2 }).logical, retryPress({ key: 'clip', attempts: 1 }).logical);
+  const row = stepRows(view({ steps: [step('clip', 'video', 'failed', { attempts: 2, error: { code: 'X' } })] }), ['video'], 'en-US').current[0];
+  assert.equal(row.attempts, 2);
+});
+
+test('developer mode is a browser preference, off unless saved as on; storage that throws reads as off', () => {
+  const saved = new Map();
+  const storage = { getItem: (k) => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v), removeItem: (k) => saved.delete(k) };
+  assert.equal(readDeveloperMode(storage), false);
+  assert.equal(setDeveloperMode(true, storage), true);
+  assert.equal(saved.get(DEVELOPER_STORAGE_KEY), 'on');
+  assert.equal(readDeveloperMode(storage), true);
+  setDeveloperMode(false, storage);
+  assert.equal(readDeveloperMode(storage), false);
+  assert.equal(readDeveloperMode({ getItem() { throw new Error('blocked'); } }), false);
+  assert.equal(setDeveloperMode(true, { setItem() { throw new Error('full'); }, removeItem() {} }), false);
+  setDeveloperMode(false, null);
+  // Without it a code film has no Code tab.
+  assert.deepEqual(viewTabs('plan', false).map((tab) => tab.view), ['plan', 'keyframes', 'assets', 'film']);
+  assert.deepEqual(viewTabs('plan', true).map((tab) => tab.view), ['plan', 'keyframes', 'assets', 'film', 'code']);
+});
+
+test('?codeplan=failed: a lost clip stops the run; Retry (with consent) makes it again and the film renders', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { store, client } = await studio(t, '?codeplan=failed');
+  const plan = await store.readCodePlan();
+  assert.equal(plan.state, 'done_with_failures');
+  assert.equal(en(runStrip(plan, 'en-US').status), 'Stopped: a step failed');
+  const row = stepRows(plan, ['video'], 'en-US').current.find((r) => r.key === 'clip-pier');
+  assert.deepEqual([row.state, row.problem.retry, row.attempts], ['failed', 'consent', 1]);
+  const receipt = await store.retryCodePlanStep(row);
+  const sent = client.sent.find((request) => request.path.endsWith('/code-plan/steps/clip-pier/retry'));
+  assert.ok(sent && sent.key, 'an idempotent POST');
+  assert.equal(receipt.view.state, 'running');
+  t.mock.timers.tick(CODE_STEP_MS);
+  t.mock.timers.tick(CODE_STEP_MS);
+  const done = await store.readCodePlan();
+  assert.equal(done.state, 'done');
+  assert.equal(done.steps.find((s) => s.key === 'clip-pier').attempts, 2);
+  // Nothing left to retry.
+  assert.equal(await store.retryCodePlanStep({ key: 'clip-pier', attempts: 2 }), undefined);
 });

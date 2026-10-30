@@ -1,8 +1,8 @@
 import type { AcceptProposalInput, NarrationFitInput, NarrationFitReceipt, CodePlanCeilingInput, CodePlanChoiceView, CodePlanReceipt, CodePlanSourceInput, CodePlanSourceView, CodePlanView, ControlInput, ControlReceipt, DirectorProposal, FrameViewInput, GenerationOverview, ProposalList, ProposalReceipt, ReleaseAttemptInput, ResolveNoteInput, DiscardAttemptInput, RetryLocalAttemptInput } from "@openslate/core/public";
 import { ProjectSubscription } from "../../shared/project-subscription.ts";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
-import { CODE_PLAN_CEILING_PATH, CODE_PLAN_CHOICES_PATH, CODE_PLAN_PATH, CODE_PLAN_SOURCE_PATH, codePlanVersionPath } from "../api/code-plan.ts";
-import { answerPress, ceilingPress, isCodeProject, sourcePress } from "../model/code-plan.ts";
+import { CODE_PLAN_CEILING_PATH, CODE_PLAN_CHOICES_PATH, CODE_PLAN_PATH, CODE_PLAN_SOURCE_PATH, codePlanStepRetryPath, codePlanVersionPath } from "../api/code-plan.ts";
+import { answerPress, ceilingPress, isCodeProject, retryPress, sourcePress, type StepRow } from "../model/code-plan.ts";
 import { errorMsg } from "../i18n/translate.ts";
 import type { RoleFilter } from "../model/assets.ts";
 import { CommandRefused, confirmBody, keyframesBody, remakeClipsBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
@@ -585,6 +585,14 @@ export class StudioStore {
     if (!projectId) return Promise.resolve(undefined);
     const press = ceilingPress(view, body);
     return this.#press<CodePlanReceipt>(press.pressId, press.logical, async () => ({ path: path(projectId, CODE_PLAN_CEILING_PATH), body: press.body }));
+  }
+
+  /** Retry a failed step with the person's consent; the step keeps its place, so the rest of the film is reused. */
+  retryCodePlanStep(step: Pick<StepRow, "key" | "attempts">): Promise<CodePlanReceipt | undefined> {
+    const projectId = this.#codePlanFilm();
+    if (!projectId) return Promise.resolve(undefined);
+    const press = retryPress(step);
+    return this.#press<CodePlanReceipt>(press.pressId, press.logical, async () => ({ path: path(projectId, codePlanStepRetryPath(step.key)), body: {} }));
   }
 
   /** A person submits a program directly; the receipt carries the dry run's diff (CODE_PLAN_REJECTED carries it too). */

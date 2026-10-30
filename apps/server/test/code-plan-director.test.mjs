@@ -82,7 +82,7 @@ function fixture(t, { mode = 'code' } = {}) {
 }
 
 test('code catalog is isolated from every graph comparison and enforces source bytes, version and summary', () => {
-  assert.deepEqual(toolCatalog(CODE_PLAN_TOOL_CONTRACT).names, ['read_film','submit_plan']);
+  assert.deepEqual(toolCatalog(CODE_PLAN_TOOL_CONTRACT).names, ['read_film','submit_plan','set_spend_limit','retry_step']);
   assert.ok(!SUPPORTED_TOOL_CONTRACTS.includes(CODE_PLAN_TOOL_CONTRACT));
   for (const version of SUPPORTED_TOOL_CONTRACTS) {
     assert.equal(toolContractAtLeast(CODE_PLAN_TOOL_CONTRACT, version), false);
@@ -250,15 +250,15 @@ test('pinned example executes every ctx call through JSON, stable choices, varia
   const result=await runSandbox({source:example,now:1,seed:1,call:(method,args)=>{
     calls.push({method,args});
     if(method==='scene'||method==='shot')return args[0];if(method==='log')return null;if(method==='choose')return args[1].options[0];
-    if(method==='video'&&!args[0].variant)return{ok:false,error:{code:'FAILED',message:'Fixture fallback'}};
+    if(method==='video'&&!args[0].variant)return{ok:false,error:{code:'FAILED',message:'Fixture fallback',retry:'consent',mayHaveCharged:true}};
     const item=artifact(method==='image'?'image':'video');return{ok:true,artifact:item,artifacts:[item]};
   }});
   assert.equal(result.state,'done',JSON.stringify(result));
   assert.equal(calls.filter(c=>c.method==='image').length,6);
-  assert.deepEqual(calls.filter(c=>c.method==='choose').map(c=>c.args[0]),['shot-1-keyframe','shot-2-keyframe']);
+  assert.deepEqual(calls.filter(c=>c.method==='choose').map(c=>c.args[0]),['shot-1-keyframe','shot-2-keyframe','shot-1-retry','shot-2-retry']);
   assert.equal(calls.filter(c=>c.method==='video').length,4);assert.equal(calls.filter(c=>c.method==='render').length,1);
   assert.deepEqual(calls.find(c=>c.method==='render').args[0].map(row=>row.motion),
-    ['Locked camera, subtle natural movement', 'Locked camera, subtle natural movement']);
+    ['Slow gentle push in', 'Locked camera, subtle steam']);
 });
 
 test('code project changes fake/native selection with code locks and never runs a graph release upgrade', async t => {
@@ -304,4 +304,83 @@ test('an unavailable code port fails before dispatch and has no graph fallback',
   const f=fixture(t), isolated=new ProductionService(f.store,new Engine(f.store,f.provider,{artifactDir:join(f.root,'isolated')}));
   const human=isolated.beginRequest(f.project.id,'local-user','Code'), bridge=isolated.openEpoch(f.project.id,human);
   assert.throws(()=>createDirectorInput(isolated,f.config)({id:newId(),projectId:f.project.id,requestId:human.requestId},human,bridge),{code:'TOOL_CAPABILITY_UNAVAILABLE'});
+});
+
+test('spend and retry tools require quoted human consent, persist thread receipts and reconcile lost replies without reapplying',async t=>{
+ const f=fixture(t),calls=new ToolInvocationService(f.service),key='a'.repeat(64);let limits=0,retries=0;
+ f.port.setCeiling=(projectId,input)=>{limits++;assert.equal(input.by,'director');assert.equal(input.quote,'set the limit to $300');return {...f.port.view(projectId),ceilingMicros:input.ceilingMicros};};
+ f.port.retryStep=(projectId,input)=>{retries++;assert.deepEqual(input.consent.by,'director');return {...f.port.view(projectId),steps:[{key,kind:'video',label:'tofu-05',state:'failed'}]};};
+ const a=f.turn('Please set the limit to $300\n and retry the tofu clip.');
+ f.store.insert('director_turn',a.turn.id,f.project.id,{...a.turn,epochId:a.bridge.actor.epochId,state:'running'});
+ const result=await calls.invoke(f.project.id,a.bridge.actor,'limit','set_spend_limit',{ceilingMicros:'300000000',quote:'set the limit to $300'});
+ assert.equal(result.view.ceilingMicros,'300000000');assert.match(result.receipt,/\$300.00/);assert.equal(limits,1,'no chat cap');
+ assert.deepEqual(await calls.invoke(f.project.id,a.bridge.actor,'limit','set_spend_limit',{ceilingMicros:'300000000',quote:'set the limit to $300'}),result);assert.equal(limits,1);
+ await assert.rejects(calls.invoke(f.project.id,a.bridge.actor,'wrong','retry_step',{stepKey:key,quote:'retry everything'}),{code:'CODE_PLAN_CONSENT_QUOTE'});
+ await assert.rejects(calls.invoke(f.project.id,a.bridge.actor,'empty','set_spend_limit',{ceilingMicros:'1',quote:'   '}),{code:'CODE_PLAN_CONSENT_QUOTE'});
+ const retry=await calls.invoke(f.project.id,a.bridge.actor,'retry','retry_step',{stepKey:key,quote:'and   retry the tofu clip.'});
+ assert.match(retry.receipt,/tofu-05/);assert.equal(retries,1);
+ assert.equal(f.store.list('code_plan_director_change',f.project.id).length,2);
+ assert.deepEqual(f.store.list('director_output',f.project.id).map(o=>o.text),[result.receipt,retry.receipt]);
+ // Model the crash window between the domain command and saving the tool result.
+ const pendingId=digest({projectId:f.project.id,epochId:a.bridge.actor.epochId,callId:'lost-limit'});
+ const originalFinish=calls.finish.bind(calls);let lose=true;
+ calls.finish=(...args)=>{if(args[0]===pendingId&&lose){lose=false;throw Error('lost completion');}return originalFinish(...args);};
+ await assert.rejects(calls.invoke(f.project.id,a.bridge.actor,'lost-limit','set_spend_limit',{ceilingMicros:'300000000',quote:'set the limit to $300'}),{code:'TOOL_CALL_UNRESOLVED'});
+ assert.equal(limits,2);
+ const epoch=f.store.get('epoch',a.bridge.actor.epochId);f.store.put('epoch',epoch.id,f.project.id,{...epoch,state:'revoked'});
+ calls.reconcileEpoch(f.project.id,epoch.id);await calls.settleReconciliation();
+ assert.equal(limits,2);assert.equal(f.store.get('tool_reconciliation',pendingId).state,'effect_confirmed');
+ // Application turns can repeat human words, but cannot borrow that authority.
+ const b=f.turn('set the limit to $300',{source:'app'});
+ await assert.rejects(calls.invoke(f.project.id,b.bridge.actor,'app-limit','set_spend_limit',{ceilingMicros:'300000000',quote:'set the limit to $300'}),{code:'CODE_PLAN_PERSON_CONSENT_REQUIRED'});
+ assert.equal(limits,2);
+});
+
+test('paid media failures queue exactly one Director notification per attempt, including retry meaning and price',async t=>{
+ const f=fixture(t),local=f.local();await f.port.submit(f.project.id,{source:example,basedOnVersion:null,author:'user',invocationId:'seed'});
+ const original=f.port.view.bind(f.port),step={key:'b'.repeat(64),kind:'video',model:'fake-video',state:'failed',label:'tofu-05',priceMicros:'100000',reached:true,updatedAt:'2026-10-30',attempts:1,error:{code:'SUBMISSION_RESPONSE_LOST',retry:'consent',mayHaveCharged:true}};
+ f.port.view=projectId=>({...original(projectId),steps:[step]});let turns=0;
+ local.fake.runtime.start=async input=>{turns++;const context=JSON.parse(input.context);assert.equal(context.mediaFailure.stepKey,step.key);assert.equal(context.mediaFailure.shotLabel,'tofu-05');assert.equal(context.mediaFailure.retry,'consent');assert.equal(context.mediaFailure.mayHaveCharged,true);assert.equal(context.mediaFailure.priceMicros,'100000');return completed(input);};
+ local.tick();local.tick();await local.settle();local.tick();await local.settle();assert.equal(turns,1);
+ assert.equal(f.store.list('code_plan_failure_request',f.project.id).length,1);
+ // The marker survives a new controller and changed plan version.
+ await local.close();const next=f.local();next.fake.runtime.start=local.fake.runtime.start;
+ next.tick();await next.settle();assert.equal(turns,1);
+ step.attempts=2;next.tick();await next.settle();next.tick();await next.settle();assert.equal(turns,2);
+ step.reached=false;step.attempts=3;next.tick();await next.settle();assert.equal(turns,2);
+});
+
+test('safe failures scheduled for automatic retry do not notify the Director early',async t=>{
+ const f=fixture(t),key='c'.repeat(64),original=f.port.view.bind(f.port),queue=[];
+ f.port.view=p=>({...original(p),steps:[{key,kind:'video',state:'failed',priceMicros:'100000',reached:true,attempts:1,label:'clip',error:{code:'CONNECT_ECONNREFUSED',retry:'safe',mayHaveCharged:false}}]});
+ const id=digest({projectId:f.project.id,key});f.store.put('code_plan_step',id,f.project.id,{id,key,projectId:f.project.id,retryAt:Date.now()+250});
+ triggerCodePlanRepairs(f.service,(...args)=>queue.push(args));assert.equal(queue.length,0);
+ const row=f.store.get('code_plan_step',id);delete row.retryAt;f.store.put('code_plan_step',id,f.project.id,row);
+ triggerCodePlanRepairs(f.service,(...args)=>queue.push(args));triggerCodePlanRepairs(f.service,(...args)=>queue.push(args));assert.equal(queue.length,1);
+});
+
+test('0.1.0 films retain the exact old catalog, guidance, submit recovery and runtime-selection pin',async t=>{
+ const {createDirectorSkillLock,CODE_PLAN_V1_GUIDANCE_DIGEST}=await import('../dist/application/director-capabilities.js');
+ const f=fixture(t),old=createDirectorSkillLock(f.config,'0.1.0').lock;
+ f.store.insert('director_skill_lock',old.id,f.project.id,{id:old.id,projectId:f.project.id,lock:old});
+ assert.deepEqual(toolCatalog('0.1.0').names,['read_film','submit_plan']);assert.equal(toolHandlerId('0.1.0'),'code-plan-tools@1');
+ assert.throws(()=>parseToolArguments('retry_step',{stepKey:'a'.repeat(64),quote:'yes'},'0.1.0'),{code:'NOT_FOUND'});
+ const {bridge,input}=f.turn('Keep my old film');assert.equal(input.bridge.toolContractVersion,'0.1.0');
+ const context=JSON.parse(input.context);assert.equal(context.references.find(r=>r.path==='references/example-plan.ts').content,readFileSync(join(repositoryRoot,'skills/code-plan-v1/references/example-plan.ts'),'utf8'));
+ assert.equal(old.skills[0].packageDigest,CODE_PLAN_V1_GUIDANCE_DIGEST);assert.equal(new DirectorToolSettings(f.service,()=>f.config).status(f.project.id).currentVersion,'0.1.0');
+ const calls=new ToolInvocationService(f.service);f.port.lose=true;
+ await assert.rejects(calls.invoke(f.project.id,bridge.actor,'old-submit','submit_plan',{source:example,basedOnVersion:null,summary:'old catalog still works'}),{code:'TOOL_CALL_UNRESOLVED'});
+ const epoch=f.store.get('epoch',bridge.actor.epochId);f.store.put('epoch',epoch.id,f.project.id,{...epoch,state:'revoked'});
+ calls.reconcileEpoch(f.project.id,epoch.id);await calls.settleReconciliation();assert.equal(f.port.view(f.project.id).versions.length,1);assert.equal(f.store.list('tool_reconciliation',f.project.id)[0].state,'effect_confirmed');
+});
+
+test('quoted consent cannot override a read-only or superseded Director epoch',async t=>{
+ const f=fixture(t),a=f.turn('Set the limit to $3 and retry the clip'),calls=new ToolInvocationService(f.service);
+ f.port.setCeiling=()=>assert.fail('read-only epoch changed limit');f.port.retryStep=()=>assert.fail('read-only epoch opened retry');
+ const epoch=f.store.get('epoch',a.bridge.actor.epochId);f.store.put('epoch',epoch.id,f.project.id,{...epoch,state:'read_only'});
+ await assert.rejects(calls.invoke(f.project.id,a.bridge.actor,'limit-read-only','set_spend_limit',{ceilingMicros:'3000000',quote:'Set the limit to $3'}),{code:'ACTOR_DENIED'});
+ await assert.rejects(calls.invoke(f.project.id,a.bridge.actor,'retry-read-only','retry_step',{stepKey:'a'.repeat(64),quote:'retry the clip'}),{code:'ACTOR_DENIED'});
+ f.service.beginRequest(f.project.id,'local-user','Use a different direction');
+ await assert.rejects(calls.invoke(f.project.id,a.bridge.actor,'stale','set_spend_limit',{ceilingMicros:'3000000',quote:'Set the limit to $3'}),{code:'EPOCH_REVOKED'});
+ assert.equal(f.store.list('code_plan_director_change',f.project.id).length,0);
 });

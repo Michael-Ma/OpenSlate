@@ -85,3 +85,10 @@ No commits created under the card's hard rule. Proposed lead-owned split:
 - **Merge note:** N1 owns broader retry/failure/ceiling work and merges first. Its existing per-call Viggle/MiniMax prices must remain unchanged while the new input-priced branches use the shared functions. The retry-none projection is retained execution evidence plus `retryAllowed: false`; no N1 browser failure contract is changed here.
 
 No commit, push, browser launch/check, port-3001 listener, protected `.env*`/secrets/`.openslate` read, real native/model/provider call or subagent was used. Only permitted public documentation GETs and loopback fake APIs accessed the network.
+
+## Lead review (merge with N1)
+
+- **Connect failures have one rule.** `isConnectPhaseFailure` now delegates to N1's `connectFailureCode`, which gained N2's `ENETUNREACH`/`EHOSTUNREACH`/`ETIMEDOUT` cases, counted only when the failing syscall is `connect`.
+- **Free failures can retry.** A Seedance task that fails for free and is not a content refusal now reports `retry: "safe"`, so it retries automatically up to twice. Otherwise it could never be retried. Face and moderation refusals stay `"none"`.
+- **Code films can use every ready video model.** New code films pin all ready video profiles beside the selected one, which stays first as the default, so the model guidance is real. Graph films still pin one. Films already created keep their saved lock.
+- **Audio from vendors is still dropped.** The shared normalization strips it, as the report says.

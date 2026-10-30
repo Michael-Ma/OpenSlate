@@ -42,7 +42,8 @@ export const errors = {
   // The runtime's refusals (apps/server/src/code-plan/index.ts answerChoice / raiseCeiling).
   "error.CODE_PLAN_CHOICE": { en: "This choice has changed. Look at the cards again.", zh: "这个选择已经变化，请再看一下卡片。" },
   "error.CODE_PLAN_CHOICE_ANSWERED": { en: "This choice already has another answer.", zh: "这个选择已经有了另一个答案。" },
-  "error.CODE_PLAN_CEILING": { en: "The new spending limit must be higher than the current one.", zh: "新的花费上限必须高于当前上限。" },
+  "error.CODE_PLAN_CEILING": { en: "That spending limit is below what this film has already spent or started.", zh: "这个花费上限低于影片已经花掉或已开始的金额。" },
+  "error.CODE_PLAN_RETRY": { en: "This step cannot be retried now; it may have finished or changed. The page has the latest state.", zh: "这个步骤现在不能重试，它可能已经完成或改变了。页面显示的是最新状态。" },
   "error.CODE_PLAN_MISSING": { en: "This film has no plan yet.", zh: "这部影片还没有计划。" },
   "error.CONFIRMATION_RUNNING": { en: "This scene's video is already being made.", zh: "这一场的视频已经在生成。" },
   "error.FRAME_NOT_OPENED": { en: "Open every frame before making video.", zh: "生成视频前请先查看每张画面。" },

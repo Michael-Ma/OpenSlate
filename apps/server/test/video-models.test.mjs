@@ -8,7 +8,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { digest } from '@openslate/core';
 import { seedancePriceMicros, falVideoPriceMicros } from '@openslate/providers';
-import { realCodeFixture } from './code-plan-providers-fixture.mjs';
+import { realCodeFixture, videoProfile, miniMaxProfile } from './code-plan-providers-fixture.mjs';
+import { projectModels } from '../dist/code-plan/models.js';
 import { codexImageProfile } from './codex-image-execution-fixture.mjs';
 import { pngBytes, tool } from './viggle-h3-execution-fixture.mjs';
 import { modelPrice, modelDescriptions, codePlanPriceFrame } from '../dist/code-plan/models.js';
@@ -43,9 +44,9 @@ async function fixture(t,{adapter='seedance',model=seedanceModel,mode='complete'
    res.end(JSON.stringify(adapter==='seedance'?{id:'task-seedance'}:{request_id:'task-fal001'}));return;
   }
   state.polls++;
-  if(adapter==='seedance') res.end(JSON.stringify({id:'task-seedance',status:state.mode==='moderation'?'failed':state.mode==='pending'?'running':'succeeded',
+  if(adapter==='seedance') res.end(JSON.stringify({id:'task-seedance',status:state.mode==='moderation'||state.mode==='transient'?'failed':state.mode==='pending'?'running':'succeeded',
    content:{video_url:'https://media.example.test/clip.mp4',...(state.lastFrame?{last_frame_url:'https://media.example.test/frame.jpg'}:{})},
-   usage:{completion_tokens:108000},error:{code:'InvalidParameter.RealPersonFace'}}));
+   usage:{completion_tokens:108000},error:{code:state.mode==='transient'?'InternalServiceError':'InvalidParameter.RealPersonFace'}}));
   else if(url.endsWith('/status'))res.end(JSON.stringify({request_id:'task-fal001',status:state.mode==='pending'?'IN_QUEUE':'COMPLETED',...(state.mode==='moderation'?{error:'blocked',error_type:'content_policy_violation'}:{})}));
   else res.end(JSON.stringify({video:{url:'https://media.example.test/clip.mp4'},duration:5}));
  });
@@ -185,4 +186,27 @@ test('graph projects can snapshot installed N2 profiles without quotes or provid
  const { GenerationOverviewReader }=await import('../dist/generation-overview.js');
  assert.equal(f.service.snapshot(project.id).project.planMode,undefined);assert.deepEqual(new GenerationOverviewReader(f.service).read(project.id).scenes,[]);
  const lock=f.store.get('capability_lock',project.capabilityLockId);assert.equal(unitQuote(lock,'video'),undefined);assert.equal(f.state.creates,0);
+});
+
+test('a free Seedance task failure that is not a content refusal retries safely, and only twice on its own',async t=>{
+ const f=await fixture(t,{mode:'transient'});await f.submit(f.source);
+ for(let i=0;i<40&&f.state.creates<3;i++){await f.tick();await new Promise(resolve=>setTimeout(resolve,50));}
+ await f.finish();
+ assert.equal(f.state.creates,3,'the first try and two automatic retries');
+ const step=f.plans.view(f.project.id).steps.find(row=>row.kind==='video');
+ assert.deepEqual([step.state,step.error.retry,step.error.mayHaveCharged],['failed','safe',false]);
+ assert.equal(f.plans.view(f.project.id).spentMicros,'0','free failures hold no liability');
+});
+
+test('a new code film can use every ready video model, the selected one first; a graph film keeps one',async t=>{
+ const f=await realCodeFixture(t,{profiles:[codexImageProfile,videoProfile,miniMaxProfile],selected:[codexImageProfile.id,videoProfile.id],
+  configuration:{h3:true,h3DownloadHosts:['media.example.test']}});
+ const lock=f.store.get('capability_lock',f.store.getProject(f.project.id).capabilityLockId);
+ assert.deepEqual(lock.profiles.filter(row=>row.kind==='video').map(row=>row.id),[videoProfile.id,miniMaxProfile.id]);
+ const models=projectModels(f.store,f.project.id,f.mediaRuntime.providerCatalog);
+ assert.ok(models[videoProfile.id]&&models[miniMaxProfile.id]);
+ const catalog=f.mediaRuntime.providerCatalog;
+ const graph=f.service.createProject('Graph keeps one',catalog.select(catalog.digest,[codexImageProfile.id,videoProfile.id]));
+ const graphLock=f.store.get('capability_lock',graph.capabilityLockId);
+ assert.deepEqual(graphLock.profiles.filter(row=>row.kind==='video').map(row=>row.id),[videoProfile.id]);
 });

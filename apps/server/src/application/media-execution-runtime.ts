@@ -240,9 +240,10 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
     ...(localExecutor ? { localExecution: localExecutor } : {}) });
   const providerCatalog = new InstalledProviderCatalog({ ...(options.providerConfiguration === undefined ? {} : { configuration: options.providerConfiguration }),
     registry, credentials, enabledExecutions, codexImageConfigured, mediaTools: { image: !!imageStore, video: !!localMedia, audio: !!localMedia } });
-  const lipSyncProfiles = providerCatalog.lipSyncProfiles();
+  const lipSyncProfiles = providerCatalog.lipSyncProfiles(), codeVideoProfiles = providerCatalog.codeVideoProfiles();
   const productionOptions: ProductionServiceOptions = configuration.h3 || configuration.viggleH3 || configuration.seedance || configuration.falVideo
     ? { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video",
-      ...(lipSyncProfiles.length ? { newProjectLipSyncProfiles: lipSyncProfiles } : {}) } : {};
+      ...(lipSyncProfiles.length ? { newProjectLipSyncProfiles: lipSyncProfiles } : {}),
+      ...(codeVideoProfiles.length ? { newCodeProjectVideoProfiles: codeVideoProfiles } : {}) } : {};
   return { close: () => closing ??= nativeWorker?.close() ?? Promise.resolve(), engine, registry, outputIngestor, localExecutor, localMedia, imageStore, outputStore, providerCatalog, uploadDirectory, productionOptions };
 }

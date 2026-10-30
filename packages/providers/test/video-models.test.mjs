@@ -71,8 +71,10 @@ test('both transports distinguish a lost create reply from connect refusal and n
  const refused = () => fetch(`http://127.0.0.1:${port}`);
  assert.equal((await new SeedanceProvider({apiKey:'fixture',fetch:refused}).submit('{}')).kind,'rejected');
  assert.equal((await new FalVideoProvider({apiKey:'fixture',fetch:refused,model:kling}).submit('{}',createHash('sha256').update('{}').digest('hex'))).kind,'rejected');
- assert.equal(isConnectPhaseFailure(Object.assign(new Error(),{code:'ECONNRESET',syscall:'read'})),false);
- assert.equal(isConnectPhaseFailure(Object.assign(new Error(),{code:'ETIMEDOUT',syscall:'connect'})),true);
+ const fetchFailed = cause => new TypeError('fetch failed',{cause});
+ assert.equal(isConnectPhaseFailure(fetchFailed(Object.assign(new Error(),{code:'ECONNRESET',syscall:'read'}))),false);
+ assert.equal(isConnectPhaseFailure(fetchFailed(Object.assign(new Error(),{code:'ETIMEDOUT',syscall:'connect'}))),true);
+ assert.equal(isConnectPhaseFailure(fetchFailed(Object.assign(new Error(),{code:'ETIMEDOUT',syscall:'read'}))),false,'a read timeout may follow a delivered request');
  assert.equal(isConnectPhaseFailure(Object.assign(new Error(),{code:'ETIMEDOUT',syscall:'read'})),false);
 });
 
