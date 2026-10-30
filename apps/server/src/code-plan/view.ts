@@ -1,5 +1,5 @@
 import type { CodePlanDiff, CodePlanView } from "@openslate/core/public";
-import { invariant, moneyMicros } from "@openslate/core";
+import { invariant } from "@openslate/core";
 import type { ArtifactRef } from "@openslate/core";
 import type { CodePlanExecution } from "./execution.js";
 import type { Store } from "../persistence/store.js";
@@ -17,24 +17,18 @@ const mediaArtifact = (artifact: ArtifactRef) => {
 export function codePlanView(store: Store, execution: CodePlanExecution, projectId: string): CodePlanView {
   const run = store.get<CodePlanRun>("code_plan_run", projectId);
   const steps = store.list<CodePlanStep>("code_plan_step", projectId);
-  let spent = 0n, reserved = 0n;
-  for (const step of steps) {
-    if (!step.attemptId) continue;
-    const liability = execution.liability(step.attemptId);
-    const price = moneyMicros(step.priceMicros);
-    const attempt = store.get<{ phase: string }>("attempt", step.attemptId);
-    if (liability === "charged" || liability === "reserved" && attempt?.phase === "submission_unknown") spent += price;
-    else if (liability === "reserved") reserved += price;
-  }
+  const accounting = execution.accounting(projectId), attempts = execution.attempts(projectId);
   return {
     projectId, planVersion: run?.planVersion ?? null, state: run?.state ?? "empty",
     ...(run?.error ? { error: { message: run.error.message } } : {}),
     held: store.list<CodePlanHold>("code_plan_hold", projectId).some(hold => !hold.released),
-    ceilingMicros: run?.ceilingMicros ?? "1000000", spentMicros: spent.toString(), reservedMicros: reserved.toString(),
+    ceilingMicros: run?.ceilingMicros ?? "1000000", spentMicros: (accounting.charged + accounting.unknown).toString(), reservedMicros: accounting.inFlight.toString(),
     declarations: run?.declarations ?? { scenes: [], shots: [] },
     steps: steps.map(step => ({ key: step.key, kind: step.kind, state: step.state, model: String(step.input.model),
       label: stepLabel(step.input), ...(step.result?.ok ? { artifact: mediaArtifact(step.result.artifact) } : {}),
-      ...(step.result && !step.result.ok ? { error: { code: step.result.error.code } } : {}),
+      ...(step.result && !step.result.ok ? { error: step.attemptId ? execution.failure(step.attemptId)
+        : { code: step.result.error.code, retry: "none" as const, mayHaveCharged: false } } : {}),
+      attempts: attempts.filter(attempt => attempt.fingerprint === step.key).length,
       priceMicros: step.priceMicros, reached: run?.reachedStepKeys.includes(step.key) ?? false, updatedAt: step.updatedAt })),
     choices: store.list<CodePlanChoice>("code_plan_choice", projectId)
       .sort((a, b) => Number(Object.hasOwn(a, "answer")) - Number(Object.hasOwn(b, "answer")))

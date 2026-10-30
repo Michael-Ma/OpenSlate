@@ -8,7 +8,7 @@ import { derivedShotPrompts } from "./shot-prompts.js";
 import { GenerationOverviewReader } from "../generation-overview.js";
 import { isKeyframeReview } from "./keyframe-review.js";
 import { directorProposals } from "./director-proposals.js";
-import { CODE_PLAN_TOOL_CONTRACT } from "@openslate/core";
+import { isCodePlanToolContract } from "@openslate/core";
 
 export interface DemoCommand { action: "create" | "close_up" | "wide" | "review"; shotId?: string; sceneId?: string }
 
@@ -45,7 +45,7 @@ export class FakeWorkflowDirector implements DirectorRuntime {
       options.signal?.throwIfAborted();
       return calls.invoke(input.projectId, actor, `demo-${++ordinal}`, tool, args);
     };
-    if (input.bridge.toolContractVersion === CODE_PLAN_TOOL_CONTRACT) {
+    if (isCodePlanToolContract(input.bridge.toolContractVersion)) {
       const film = await invoke("read_film", {}) as { planVersion: number | null };
       const references = JSON.parse(input.context).references as { skillId: string; path: string; content: string }[];
       const example = references.find(row => row.skillId === "code-plan" && row.path === "references/example-plan.ts");

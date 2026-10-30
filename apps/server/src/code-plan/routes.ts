@@ -42,7 +42,15 @@ export function registerCodePlanRoutes(app: FastifyInstance, getService: () => P
     const { projectId } = request.params, key = requiredCommandKey(request), service = writable(projectId);
     moneyMicros(request.body.ceilingMicros);
     return service.store.command<CodePlanReceipt>(`local-user:${projectId}:code-plan-ceiling`, key, digest(request.body),
-      () => ({ view: codePlans.raiseCeiling(projectId, request.body.ceilingMicros) }));
+      () => ({ view: codePlans.setCeiling(projectId, { ...request.body, by: "person" }) }));
+  });
+  app.post<{ Params: ProjectParams & { stepKey: string }; Body: Record<string, never> }>(`${base}/steps/:stepKey/retry`, {
+    schema: { params: object({ projectId: { type: "string", minLength: 1 }, stepKey: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["projectId", "stepKey"]),
+      body: object({}, []) },
+  }, async request => {
+    const { projectId, stepKey } = request.params, key = requiredCommandKey(request), service = writable(projectId);
+    return service.store.command<CodePlanReceipt>(`local-user:${projectId}:code-plan-retry`, key, digest({ stepKey }),
+      () => ({ view: codePlans.retryStep(projectId, { stepKey, consent: { by: "person" } }) }));
   });
   app.post<{ Params: ProjectParams; Body: CodePlanSourceInput }>(`${base}/source`, {
     schema: { body: object({ source: { type: "string", minLength: 1, maxLength: 256 * 1024 },

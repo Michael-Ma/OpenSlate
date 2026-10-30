@@ -1,0 +1,8 @@
+{
+  "id": "code-plan",
+  "version": "1.0.0",
+  "entry": "SKILL.md",
+  "files": ["SKILL.md", "references/studio.d.ts", "references/example-plan.ts"],
+  "compatibility": { "toolContract": "0.1.0", "planLanguage": "1.0.0", "workflowContract": "1.0.0" },
+  "requiredToolIds": ["read_film", "submit_plan"]
+}

@@ -1,3 +1,4 @@
+import { connectFailureCode } from "./connect-failure.js";
 import { createHash } from "node:crypto";
 import { setImmediate as yieldEventLoop } from "node:timers/promises";
 
@@ -178,7 +179,7 @@ function retryAfter(value: string | null): number | undefined {
   const ms = Number(value) * 1000; return Number.isFinite(ms) && ms >= 0 && ms <= 600000 ? Math.ceil(ms) : undefined;
 }
 type HttpResponse = { ok: true; body: Record<string, unknown>; receipt: ViggleH3Receipt; retryAfterMs?: number }
-  | { ok: false; error: ViggleH3Diagnostic; receipt: ViggleH3Receipt };
+  | { ok: false; error: ViggleH3Diagnostic; receipt: ViggleH3Receipt; notSubmitted?: boolean };
 /** Explicit single-call transport; only the host owns durable admission, polling schedules and recovery. */
 export class ViggleH3Provider {
   readonly id = "viggle-h3-v1";
@@ -205,7 +206,9 @@ export class ViggleH3Provider {
       error: { code: error instanceof ViggleH3ValidationError ? error.code : "VIGGLE_H3_REQUEST_INVALID",
         category: error instanceof ViggleH3ValidationError && error.code === "VIGGLE_H3_ABORTED_BEFORE_DISPATCH" ? "aborted" : "invalid_input" } }; }
     const response = await this.call("POST", "/v1/videos", context.signal, prepared);
-    if (!response.ok) return { kind: "unknown", error: response.error, receipt: response.receipt };
+    if (!response.ok) return response.notSubmitted
+      ? { kind: "rejected", certainty: "not_accepted", source: "local", error: response.error, receipt: response.receipt }
+      : { kind: "unknown", error: response.error, receipt: response.receipt };
     const data = response.body;
     if (response.receipt.httpStatus === 200 && this.safeTask(data.id) && data.status === "queued" && data.error == null
       && data.video_url == null && data.alpha_url == null && data.type !== "error" && !Object.hasOwn(data, "task"))
@@ -299,6 +302,8 @@ export class ViggleH3Provider {
       // Complete parsed evidence survives a later cleanup/abort race. Cancellation
       // cannot erase an observed provider job and justify another paid submission.
       if (observed) return observed;
+      const code = receipt.httpStatus === null && !controller.signal.aborted ? connectFailureCode(error) : undefined;
+      if (code) return { ok: false, notSubmitted: true, receipt: { ...receipt }, error: { code: `CONNECT_${code}`, category: "transport" } };
       return {ok:false,receipt:{...receipt},error:{code:error instanceof ViggleH3ValidationError ? error.code : "VIGGLE_H3_TRANSPORT_OR_RESPONSE_LOSS",
       category:controller.signal.aborted ? timedOut ? "transport" : "aborted" : "protocol"}};
     } finally {clearTimeout(timer);signal?.removeEventListener("abort",stop);controller.signal.removeEventListener("abort",reject);controller.abort();cancelBody?.();}

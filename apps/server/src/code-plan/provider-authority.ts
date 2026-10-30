@@ -29,7 +29,8 @@ export function assertCodePlanProviderAdmission(value: CodePlanProviderAdmission
     && record.id === attempt.id && record.projectId === attempt.projectId && record.requestDigest === digest(request)
     && Number.isSafeInteger(record.planVersion) && Number(record.planVersion) > 0 && record.normalizedInput && record.priceMicros !== undefined
     && attempt.fingerprint === digest({ kind: request.kind, input: record.normalizedInput }) && attempt.specDigest === attempt.fingerprint
-    && attempt.nodeId === attempt.workKey && attempt.workKey === `code-plan:${attempt.fingerprint}`
+    && attempt.nodeId === attempt.workKey && (attempt.workKey === `code-plan:${attempt.projectId}:${attempt.fingerprint}:${attempt.ordinal}`
+      || attempt.ordinal === 1 && attempt.workKey === `code-plan:${attempt.fingerprint}`)
     && supportedCodePlanAdapters.has(profile.adapter) && profile.kind === request.kind
     && request.execution.adapter === profile.adapter && request.execution.version === profile.executionVersion
     && lock.projectId === attempt.projectId && lock.profiles.length <= 64 && Buffer.byteLength(canonical(lock)) <= 65536

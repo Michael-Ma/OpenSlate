@@ -1,18 +1,19 @@
-import { CODE_PLAN_TOOL_CONTRACT, digest, FILM_KIND_KINDS, invariant, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, STAGES, toolCatalog, toolContractAtLeast, toolHandlerId } from "@openslate/core";
+import { isCodePlanToolContract, digest, FILM_KIND_KINDS, invariant, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, STAGES, toolCatalog, toolContractAtLeast, toolHandlerId } from "@openslate/core";
 import type { ToolContractVersion } from "@openslate/core";
 import { createSkillLock, createSkillReleaseLock, loadSkillCatalog, loadSkillRelease, skillReleaseDirectory, SKILL_RELEASE_MIN_MAJOR } from "@openslate/director";
 import type { SkillCapabilityLock, SkillEnvironment } from "@openslate/director";
 import { join } from "node:path";
 
 /** Immutable code-mode instructions; independent of shipped graph releases. */
-export const CODE_PLAN_GUIDANCE_DIGEST = "d3811c72395713445f2167bb281273de28b058098189f9d8bec441d7b3d0052e";
+export const CODE_PLAN_V1_GUIDANCE_DIGEST = "d3811c72395713445f2167bb281273de28b058098189f9d8bec441d7b3d0052e";
+export const CODE_PLAN_GUIDANCE_DIGEST = "4e0a9ba54a8d9fb2996d06c19581d76734939381b74d2a792785ce8349399db6";
 
 export interface DirectorSkillConfiguration { repositoryRoot: string; snapshotRoot: string; runtimeId?: string }
 
 /** Select a shipped implementation by exact lock version; never negotiate with model arguments. */
 export function directorSkillEnvironment(options: DirectorSkillConfiguration, version: ToolContractVersion): SkillEnvironment {
   const catalog = toolCatalog(version);
-  if (version === CODE_PLAN_TOOL_CONTRACT) return { snapshotRoot: options.snapshotRoot,
+  if (isCodePlanToolContract(version)) return { snapshotRoot: options.snapshotRoot,
     compatibility: { toolContract: version, planLanguage: "1.0.0", workflowContract: "1.0.0" }, availableToolIds: catalog.names,
     bindings: [{ kind: "runtime", id: options.runtimeId ?? "fake-workflow-v1", digest: digest({ runtimeId: options.runtimeId ?? "fake-workflow-v1", portVersion: 1 }) },
       { kind: "handler", id: toolHandlerId(version), digest: catalog.digest }] };
@@ -26,9 +27,9 @@ export function directorSkillEnvironment(options: DirectorSkillConfiguration, ve
 /** Trusted configuration helper. Creates/verifies snapshots but does not install or upgrade a project lock. */
 export function createDirectorSkillLock(options: DirectorSkillConfiguration, version: ToolContractVersion = "6.0.0", guidanceVersion = toolContractAtLeast(version, "7.1.0") ? "8.1.0" : version === "7.0.0" ? "8" : version === "6.0.0" ? "7" : version === "5.0.0" ? "6" : version === "4.0.0" ? "5" : version.split(".")[0], expectedPackageDigests?: Readonly<Record<string, string>>): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
   const environment = directorSkillEnvironment(options, version);
-  if (version === CODE_PLAN_TOOL_CONTRACT) {
-    const catalog = loadSkillCatalog({ ...environment, packageRoots: [join(options.repositoryRoot, "skills/code-plan")],
-      expectedPackageDigests: { "code-plan": CODE_PLAN_GUIDANCE_DIGEST } });
+  if (isCodePlanToolContract(version)) {
+    const catalog = loadSkillCatalog({ ...environment, packageRoots: [join(options.repositoryRoot, version === "0.1.0" ? "skills/code-plan-v1" : "skills/code-plan")],
+      expectedPackageDigests: { "code-plan": version === "0.1.0" ? CODE_PLAN_V1_GUIDANCE_DIGEST : CODE_PLAN_GUIDANCE_DIGEST } });
     return { environment, lock: createSkillLock(catalog, { selectedSkillIds: ["code-plan"], bindings: environment.bindings! }) };
   }
   if (Number((guidanceVersion ?? '').split('.')[0]) >= SKILL_RELEASE_MIN_MAJOR) return createDirectorReleaseLock(options, version, guidanceVersion!);

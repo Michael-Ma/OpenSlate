@@ -36,19 +36,27 @@ Parallel authors each work in their own worktree on `skills/next`. Whoever merge
 
 ## Experimental code mode
 
-`skills/code-plan` is a separate schema 1 instruction package, version `1.0.0`, outside the `skills/v<N>...` release automation.
+`skills/code-plan` is a separate schema 1 instruction package, version `2.0.0`, outside the `skills/v<N>...` release automation.
 Its content digest is pinned as `CODE_PLAN_GUIDANCE_DIGEST`. Its environment binds only the selected runtime and independent
-`code-plan-tools@1` catalog handler; graph recipes, stages, routed releases and graph upgrade targets are not part of this lock.
+`code-plan-tools@2` catalog handler; graph recipes, stages, routed releases and graph upgrade targets are not part of this lock.
 The loader accepts bounded non-executable `.ts` references under `references/`, including `studio.d.ts` and `example-plan.ts`.
 They are verified and injected as text, never evaluated by the instruction loader.
 
-Code contract `0.1.0` is deliberately absent from `SUPPORTED_TOOL_CONTRACTS` and `RELEASED_TOOL_CONTRACTS`; graph-version
+Code contracts `0.1.0` and `0.2.0` are deliberately absent from `SUPPORTED_TOOL_CONTRACTS` and `RELEASED_TOOL_CONTRACTS`; graph-version
 comparisons return false for code mode. Existing graph descriptor bytes and digests remain unchanged.
 
 | Code-only tool | Responsibility |
 |---|---|
 | `read_film {}` | Return `CodePlanView` plus `source: string \| null` for its current version |
 | `submit_plan {source, basedOnVersion, summary}` | Submit the complete program as author `director`, using the durable invocation ID; return `{version, diff}` |
+| `set_spend_limit {ceilingMicros, quote}` | 0.2.0: raise or lower this film's limit using quoted human consent; return view and receipt |
+| `retry_step {stepKey, quote}` | 0.2.0: schedule another attempt for a reached retryable failure, retaining earlier liability; return view and receipt |
+
+New code-film locks use `0.2.0`. Existing `0.1.0` locks retain the exact two-tool catalog, `code-plan-tools@1` handler and original package digest; `skills/code-plan-v1` archives the immutable package for runtime-selection changes or snapshot recreation. Code-film settings report the saved catalog instead of silently upgrading it. Graph descriptor bytes/digests are unchanged.
+
+The two new tools require an active editable epoch in a turn started by the person's own message. The nonempty quote must be a whitespace-normalized substring of that original message; automatic repair/failure turns and wrong quotes return CODE_PLAN_PERSON_CONSENT_REQUIRED or CODE_PLAN_CONSENT_QUOTE. There is no chat-specific spend cap; ordinary nonnegative SQLite integer money bounds still apply. A limit below existing liability is refused with the component numbers. Accepted changes persist a domain receipt and a Director thread message; lost tool replies reconcile the receipt without reapplying the mutation. A request-specific hold can defer actual retry dispatch until the turn ends. Programs only have ctx: they can ask a cost-bearing retry/skip choice, then repeat a media call with a stable variant, and cannot invoke retry_step.
+
+Guidance explains failures in plain words, possible spending and safe/consent/none retry meaning. It shows the in-program choice/variant pattern and vertical aspectRatio use. Automatic safe retries are bounded at two per step and survive restart. Unresolved submissions are never blindly retried.
 
 Source is limited to 256 KiB of UTF-8 and summary to 500 characters. `basedOnVersion` is the current integer version, or null
 before the first plan. `CODE_PLAN_REJECTED` retains `details.diff` through transport/refusal replay; stale versions return
@@ -57,7 +65,7 @@ serves fake Director and supervisor tool services constructed without options.
 
 The package documents every `ctx` call, replay by media input identity, deliberate duplicate `variant`s, stable choice IDs,
 unchanged prompt bytes, awaited effects, failure-result branches, and the absence of secrets, paths and external capabilities.
-It describes the current fake models, unimplemented speech and fixture renderer honestly. See the
+It describes installed real models and measured local rendering, with explicit fake models/rendering for demo projects. See the
 [code-plan design](../ai/code-plan/DESIGN.md) and [Director runtime](DIRECTOR-RUNTIME.md#experimental-code-plan-director).
 
 ## Model-facing tools
