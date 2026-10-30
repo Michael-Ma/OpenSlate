@@ -52,6 +52,8 @@ import { EnvironmentMediaCredentials } from "./application/provider-credentials.
 import { GeminiMusicListener } from "./media/music-enrichment.js";
 import { registerMusicEnrichmentRoutes } from "./media/music-enrichment-routes.js";
 import { LocalMusicAnalyzer } from "./media/music-analyzer.js";
+import { registerCodePlanRoutes } from "./code-plan/routes.js";
+import type { CodePlanPort } from "./code-plan/port.js";
 
 interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: ProductionService; localToken?: string;
   /** true logs to stdout; a stream receives the same JSON lines (tests). */
@@ -63,6 +65,7 @@ interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: Produc
   /** Browser origins allowed to call the API. Defaults to the dev server and the installed studio. */
   allowedOrigins?: readonly string[];
   studioSessions?: StudioSessions;
+  codePlans?: CodePlanPort;
   providerCatalog?: InstalledProviderCatalog;
   webAssets?: WebAssets;
   director?: Pick<DirectorSupervisor, "status" | "enqueue" | "answerQuestion" | "tick">;
@@ -106,7 +109,7 @@ export function createApp(options: AppOptions = {}) {
       const nativeDiagnostic = error.code === "DIRECTOR_SETUP_REQUIRED"
         ? safeNativeDiagnostic((error.details as { nativeDiagnostic?: unknown } | undefined)?.nativeDiagnostic) : undefined;
       void reply.status(status).send({ error: { code: error.code, message: error.message,
-        ...(error instanceof GenerationAttemptBlockedError ? { details: error.recovery } : nativeDiagnostic ? { details: { nativeDiagnostic } } : ["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH", "PROPOSAL_PENDING", "GUIDANCE_READ_LIMIT"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
+        ...(error instanceof GenerationAttemptBlockedError ? { details: error.recovery } : nativeDiagnostic ? { details: { nativeDiagnostic } } : ["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH", "PROPOSAL_PENDING", "GUIDANCE_READ_LIMIT", "CODE_PLAN_REJECTED"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
     } else if ((error as { validation?: unknown }).validation) void reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: "Request does not match its schema" } });
     else { app.log.error(error); void reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "The operation could not be completed" } }); }
   });
@@ -115,7 +118,8 @@ export function createApp(options: AppOptions = {}) {
     invariant(host === "127.0.0.1" || host === "localhost", "ORIGIN_DENIED", "Use a loopback address");
     const origin = request.headers.origin;
     invariant(!origin || allowedOrigins.includes(origin), "ORIGIN_DENIED", "Origin is not permitted");
-    const requiresCommandKey = request.method === "POST" && ["/api/projects/:projectId/controls", "/api/projects/:projectId/scenes/:sceneId/generate", "/api/projects/:projectId/scenes/:sceneId/confirm", "/api/projects/:projectId/shots/:shotId/narration-fit"].includes(request.routeOptions.url ?? "");
+    const requiresCommandKey = request.method === "POST" && ["/api/projects/:projectId/controls", "/api/projects/:projectId/scenes/:sceneId/generate", "/api/projects/:projectId/scenes/:sceneId/confirm", "/api/projects/:projectId/shots/:shotId/narration-fit",
+      "/api/projects/:projectId/code-plan/choices", "/api/projects/:projectId/code-plan/ceiling", "/api/projects/:projectId/code-plan/source"].includes(request.routeOptions.url ?? "");
     const commandKey = request.headers["idempotency-key"];
     invariant(requiresCommandKey || commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
     if (request.routeOptions.url === "/api/health" || isPublicWebRequest(request)) return;
@@ -145,6 +149,7 @@ export function createApp(options: AppOptions = {}) {
     "INSTALLATION_QUARANTINED", "Review this restored installation before making changes");
   });
   registerPlanImports(app, service, options.director);
+  if (options.codePlans) registerCodePlanRoutes(app, service, options.codePlans);
   registerStoryboard(app, service);
   registerCharacters(app, service);
   registerShotTakes(app, service);
@@ -202,14 +207,14 @@ export function createApp(options: AppOptions = {}) {
     try { return await modelSettings().apply(request.params.projectId, { ...request.body, key: request.headers["idempotency-key"] as string | undefined ?? newId() }, { signal: abort.signal }); }
     finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
   });
-  app.post<{ Body: { name: string; expectedCatalogDigest?: string; profileIds?: string[] } }>("/api/projects", {
+  app.post<{ Body: { name: string; planMode?: "graph" | "code"; expectedCatalogDigest?: string; profileIds?: string[] } }>("/api/projects", {
     schema: { body: { ...object({ name: string, expectedCatalogDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
-      profileIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: string } }, ["name"]),
+      profileIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: string }, planMode: { enum: ["graph", "code"] } }, ["name"]),
       dependencies: { expectedCatalogDigest: ["profileIds"], profileIds: ["expectedCatalogDigest"] } } },
   }, async request => service().store.command("local-user:create-project", request.headers["idempotency-key"] as string | undefined ?? newId(), digest(request.body), () => {
     // Resolve only for a new command: a replay must not adopt or reject a later installation catalog.
     const selection = request.body.profileIds ? providerCatalog().select(request.body.expectedCatalogDigest!, request.body.profileIds) : undefined;
-    return service().createProject(request.body.name, selection);
+    return service().createProject(request.body.name, selection, request.body.planMode);
   }));
   registerAssetLibrary(app, service);
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async request => service().snapshot(request.params.projectId));

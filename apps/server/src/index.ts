@@ -27,6 +27,7 @@ import { assertInstallationRestoreComplete } from "./persistence/installation-re
 import { createServerShutdown } from "./shutdown.js";
 import { CodePlanRuntime } from "./code-plan/index.js";
 import { CodePlanExecution } from "./code-plan/execution.js";
+import type { CodePlanPort } from "./code-plan/port.js";
 
 const serveWeb = process.argv.includes("--serve-web");
 const directory = resolve(process.env.OPENSLATE_DATA_DIR ?? ".openslate");
@@ -88,6 +89,8 @@ const studioSessions = new StudioSessions();
 const narrationSpeech = new NarrationSpeechService(narration), canonical = new NarrationCanonicalService(narration);
 const sceneCommands = new SceneConfirmationRunner(service, { narration, narrationSpeech, canonical });
 const app = createApp({ service, sceneCommands, director, runtimeSettings: director, providerCatalog, localToken, studioSessions, logger: true,
+  // P2b supplies the CodePlanPort implementation; the lead resolves this cast at merge.
+  codePlans: codePlans as unknown as CodePlanPort,
   // Each refresh reads several routes; set OPENSLATE_LOG_REQUESTS=1 to see every request while debugging.
   logRequests: process.env.OPENSLATE_LOG_REQUESTS === "1",
   mediaToolPaths: { ffmpeg: ffmpegPath, ffprobe: ffprobePath },
