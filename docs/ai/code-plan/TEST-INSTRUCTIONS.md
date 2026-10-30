@@ -1,0 +1,119 @@
+# 测试说明：这一轮的 9 项功能
+
+分支 `feature/last-ferry-ui`，还没有 push，`main` 没有变化。
+
+## 0. 启动（必做）
+
+你现在 3001 上的 studio 是昨晚 23:51 启动的旧代码，先停掉。在它的终端按 Ctrl+C；找不到那个终端就运行：
+
+```bash
+kill -INT $(lsof -nP -iTCP:3001 -sTCP:LISTEN -t)
+```
+
+然后**从 worktree** 启动。上次跑成了 `main`，就是因为没有先 `cd`：
+
+```bash
+cd /Users/michael/SideProject/OpenSlate/.claude/worktrees/last-ferry
+```
+
+```bash
+OPENSLATE_DATA_DIR="$HOME/openslate-code-$(date +%Y%m%d-%H%M)" node --env-file=/Users/michael/SideProject/OpenSlate/.env.live.local scripts/start-local.mjs
+```
+
+确认跑对了代码：构建日志里的路径含 `worktrees/last-ferry`，New film 里有 **Code plan (experimental)**。
+
+## 测试 1：竖屏 + 音乐，一部完整的片子（约 $0.28）
+
+对应：1 音乐、3 图片、6 视频缩略图、7 Plan 同步、竖屏 bug。
+
+**做法：** New film → **Code plan (experimental)** → **Talk to the Director** → Create film，然后发送：
+
+> 做一部竖屏 9:16 的片子，约 12 秒，两个镜头，没有旁白。Tofu 是一只圆滚滚的开心柯基。镜头 1：Tofu 坐在阳光厨房里的空碗旁，满怀期待地盯着碗。镜头 2：特写，Tofu 竖起耳朵摇尾巴，狗粮倒进碗里。每个镜头给我两张关键帧选，用我选的帧做 6 秒片段，再加上轻快的纯音乐背景，然后合成。
+
+**检查：**
+
+| # | 看哪里 | 应该看到 |
+|---|---|---|
+| 1 | Director 的回复 | 说明费用（约 $0.28）和 SynthID 水印 |
+| 2 | Keyframes | 竖图完整显示，没有被裁成横图 |
+| 3 | 聊天里的选择卡 | 镜头 1 的卡片在镜头 2 的图还没做完时就出现 |
+| 4 | 单击选择卡的缩略图 | 打开大图对比，在里面点 **Choose Option n** 才算选定；单击缩略图不会直接开始付费任务 |
+| 5 | 双击 Keyframes 的图 | 打开大图，←/→ 切换，Esc 关闭 |
+| 6 | Plan | 每个镜头显示选中的关键帧和带 ▶ 的片段缩略图；点开能看大图、播放片段 |
+| 7 | Film | 竖屏成片，有背景音乐；Renders 显示 "Film render"；Clips and sound 里有缩略图和一行音乐 |
+
+## 测试 2：Developer 模式（免费）
+
+对应：2。
+
+1. 打开影片：顶部**没有** Code 标签，界面文字也不提 Code。
+2. Settings › This computer › **Developer mode** 打开：Code 标签立刻出现。
+3. 关掉：Code 消失。如果当时停在 Code 页，会回到 Plan。
+
+## 测试 3：花费上限（免费）
+
+对应：4。
+
+1. Settings › This computer › **Spend limit for new films** 改成 `3`，点到别处保存。New film 里的 Code plan 说明应显示 **$3.00**；新建的片子上限也是 $3.00。
+2. 打开测试 1 的片子，Settings › Director › **This film's spend limit** 改成 `2` → Save：顶部进度条显示 $2.00。
+3. 同一处改成 `0.10`（低于已花的钱）→ 被拒绝，提示上限低于已花或已开始的金额。
+4. 在聊天里说「把这部片子的上限改到 $5」：出现回执 "Limit set to $5.00 at your request"。上限只有在你自己的消息里提出时才能改。
+
+## 测试 4：失败提示和重试，用你那部失败的片子（约 $0.10）
+
+对应：5、8。
+
+先 Ctrl+C 停掉 studio，再用**旧数据目录**启动：
+
+```bash
+OPENSLATE_DATA_DIR="$HOME/openslate-code-20261029-2351" node --env-file=/Users/michael/SideProject/OpenSlate/.env.live.local scripts/start-local.mjs
+```
+
+| # | 看哪里 | 应该看到 |
+|---|---|---|
+| 1 | 影片列表 | **Fun video for Tofu** 旁有红点 |
+| 2 | 打开影片 | Film 标签有红点，顶部有 **Needs attention**，点开能看到失败的片段，**Show** 能跳过去 |
+| 3 | 失败的那一行 | 用大白话说明：服务没有回应，不知道是否开始，可能已花 $0.10，重试可能再收一次费；错误码放在悬停提示里 |
+| 4 | 点 **Retry** | 先弹确认框并写明费用；确认后重新生成 |
+| 5 | 完成后 | 红点消失，30 秒的片子合成出来 |
+
+注意：这部片子的前四个片段是修复之前做的，仍然是被裁过的画面；这个测试只验证重试。它用的是旧版工具，所以这里只测 Retry 按钮。下面的测试 5 才测 Director 重试。
+
+## 测试 5：Director 主动提示并重试（可选，约 $0.10）
+
+对应：5、8。用新片子，关 Wi-Fi 制造一次连接失败。
+
+1. 在测试 1 那样的新片子里，等选择卡出现后**关掉 Wi-Fi**，再选帧。
+2. 应该看到：系统自动重试两次；因为请求没有到达服务，界面说明重试不会重复收费；Film 标签出现红点，列表也有提示。
+3. **打开 Wi-Fi**，点 Retry，或在聊天里说「重试那个片段」：片段重新生成，后续继续。
+
+## 测试 6：Seedance 和 fal 模型（需要你先开通）
+
+对应：9。真实 API **还没有调用过**，这是第一次真实验证。
+
+1. 开通 BytePlus ModelArk，激活 Seedance 2.x（至少 $30 credits），拿到 API key。其视频条款据报道不含美国；如果被挡住告诉我，我换 Replicate 路线。
+2. 在主 checkout 的 `.env.live.local` 里加上下面几行，并把 `OPENSLATE_PROVIDER_CONFIG` 改成这个路径（这个文件里有你现有的模型加 6 个新模型）。不要把 key 发到聊天里。
+
+```dotenv
+OPENSLATE_MODELARK_API_KEY=你的-modelark-key
+OPENSLATE_FAL_API_KEY=你的-fal-key
+OPENSLATE_ENABLE_SEEDANCE_GENERATION=1
+OPENSLATE_ENABLE_FAL_VIDEO_GENERATION=1
+OPENSLATE_PROVIDER_CONFIG=/Users/michael/SideProject/OpenSlate/.claude/worktrees/last-ferry/examples/live-provider-profiles-video.example.json
+```
+
+3. 重启 studio，**新建**一部 Code plan 影片（旧片子看不到新模型）。Settings › Models 里能看到新模型。
+4. 把上限调到 $3，然后对 Director 说：「做一个 5 秒的竖屏片段，用 seedance-mini。」应该得到竖屏片段，花费约 $0.38。人脸写实的图片会被 Seedance 2.x 拒绝，界面说明原因且不提供重试，这是对的；柯基没问题。
+5. 再试：「同一个镜头用 fal-kling 再做一版。」
+
+## 已知情况
+
+- **Viggle 有时很慢。** 这次一个片段用了 21 分钟，另一个不到 2 分钟。超过 10 分钟，步骤会显示「仍在等服务返回（N 分钟）」。它不会自动放弃；想换一版就让 Director 重做，但卡住的那次也可能收费。
+- **Lyria 的时长不准。** 要 20 秒给了 68 秒，所以计划总是裁到片长并淡出。每个文件都带 SynthID 水印。
+- **供应商生成的音频目前会被去掉。** 视频都先转成无声，声音来自旁白和音乐。
+- **旧片子** 保留它们创建时的模型列表，新模型和音乐要新建影片才有。
+- **Settings 里的新片上限和 Developer mode** 存在浏览器里，换浏览器要重设。
+
+## 出问题时告诉我
+
+发给我：测试编号、第几步、你看到了什么，以及启动时打印的 `Local data:` 路径。我可以只读查看那个目录里的记录。

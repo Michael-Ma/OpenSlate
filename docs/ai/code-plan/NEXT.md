@@ -144,3 +144,11 @@ Wave A cards touch disjoint files except the code-plan model table (N1 crop vs N
 - **Contract bump.** Tools `0.2.0` changes the Director's catalog and guidance digest; films pinned to `0.1.0` must keep running unchanged.
 - **New vendors.** Keys go into `.env.live.local` by the owner; adapters ship with offline fixtures only, and each vendor gets one small live check under $1.
 - **Music licensing.** Use only providers whose terms grant commercial use of generated music; the film records which model made it.
+
+## Live check (October 30)
+
+One real film on this branch, in a fresh data directory beside the owner's running studio: vertical 9:16, two shots, Lyria music. **Spend $0.28.** Result: 1080×1920, 30 fps, 12.000 s, AAC 48 kHz stereo.
+
+- **Verified live:** portrait frames reach Viggle as 9:16 (crop 936×1664 of 941×1672, previously 928×522); a shot's choice appears while the next shot's frames are still being made; Lyria installs from the Gemini key alone; music is trimmed to the film; Plan shows each shot's frame and clip still; `set_spend_limit` with a receipt.
+- **Found and fixed by the run:** Director turns had no conversation history; a film whose saved guidance predates the build failed every turn; a task stuck at a vendor looked like normal progress (one Viggle clip took 21 minutes, and polling has no deadline); comparison boxes were wrong for portrait frames.
+- **Not exercised live:** the Seedance and fal adapters (no keys yet), and a real provider failure followed by `retry_step`. The owner's instructions are in [TEST-INSTRUCTIONS.md](TEST-INSTRUCTIONS.md).
