@@ -30,7 +30,7 @@ async function fixture(t, samples = 48000) {
   mkdirSync(sourceRoot); const store = new Store(join(sourceRoot, "openslate.sqlite")), fake = new FakeProvider(join(sourceRoot, "fake-provider.sqlite"));
   t.after(() => { if (store.db.open) store.close(); if (fake.db.open) fake.close(); clean(root); });
   const project = projectFixture(randomUUID(), 0); store.createProject(project);
-  const request = { kind: "speech", attemptId: "speech-attempt", nodeId: "voice", args: { text: "Synthetic recording", voice: "demo", instructions: "" } };
+  const request = { kind: "speech", attemptId: "speech-attempt", nodeId: "voice", args: { text: "Synthetic recording", voice: "demo", instructions: "" }, execution: { adapter: "fake", version: "1" } };
   store.insert("attempt", request.attemptId, project.id, { candidateId: null, workKey: "audio-fixture", ordinal: 1, request, taskId: null });
   const output = new ExecutionOutputStore(store, { rootDir: join(sourceRoot, "execution-output") });
   const raw = wav(24000, 1, 24000), normalized = wav(48000, 2, samples);
@@ -102,7 +102,7 @@ test("published audio SQL closure must retain its exact derivation, source and a
 });
 
 test("raw transcription JSON remains private backup evidence with no cue ingestion and rejects a forged task identity", async t => {
-  const f = await fixture(t), request = { kind: "transcription", attemptId: "transcript-attempt", nodeId: "transcript", args: {} };
+  const f = await fixture(t), request = { kind: "transcription", attemptId: "transcript-attempt", nodeId: "transcript", args: {}, execution: { adapter: "fake", version: "1" } };
   f.store.insert("attempt", request.attemptId, f.project.id, { candidateId: null, workKey: "transcript-fixture", ordinal: 1, request, taskId: null });
   const raw = Buffer.from('{ "text":"Synthetic", "words":[] }\n');
   const receipt = f.output.recordReceipt(f.project.id, { attemptId: request.attemptId, expectedRequestDigest: digest(request), port: "cues", kind: "data",

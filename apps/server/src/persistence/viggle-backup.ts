@@ -30,9 +30,9 @@ export function viggleBackupClosure(reader: ViggleAuthorityStore, readJson: (pat
       const bytes = await readArtifact(frame), transport = mapping.transport;
       invariant(transport.firstFrame && !transport.lastFrame && transport.mode === "first_frame",
         "BACKUP_REFERENCE_INVALID", "Initial Viggle application mapping requires its reviewed first frame");
-      // Backups retain the approved source, not an extra cropped artifact. Reproduce only the recorded upload recipe.
-      const upload = mapping.firstFrameCrop ? centerCropPng(bytes, transport.aspectRatio) : { bytes };
-      invariant(!mapping.firstFrameCrop || upload.crop && canonical(upload.crop) === canonical(mapping.firstFrameCrop),
+      // Backups retain the approved source and reproduce its current upload recipe, including legitimate no-crop inputs.
+      const upload = centerCropPng(bytes, transport.aspectRatio);
+      invariant(canonical(upload.crop ?? null) === canonical(mapping.firstFrameCrop ?? null),
         "BACKUP_REFERENCE_INVALID", "Viggle crop recipe differs from its reviewed source bytes");
       const reconstructed = describeViggleH3Request({ prompt: String(attempt.request.args.prompt), quality: transport.quality,
         durationSeconds: transport.durationSeconds, resolution: transport.resolution, aspectRatio: transport.aspectRatio,

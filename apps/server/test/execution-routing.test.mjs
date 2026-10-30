@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { Store } from "../dist/persistence/store.js";
 import { Engine } from "../dist/execution/engine.js";
-import { DEFAULT_PROFILES, DomainError, compilePlan, digest } from "../../../packages/core/dist/index.js";
+import { RECIPE_DIGEST, DEFAULT_PROFILES, DomainError, compilePlan, digest } from "../../../packages/core/dist/index.js";
 import { ExecutionRegistry, FakeProvider, fixtureOutputs, registerExecutionProvider } from "../../../packages/providers/dist/index.js";
 import { projectFixture } from "./execution-fixture.mjs";
 
@@ -25,7 +25,7 @@ function fixture(t) {
 }
 function project(f, engine, profiles, selected = profiles) {
   const value = projectFixture(randomUUID(), 1); f.store.createProject(value);
-  f.store.insert("capability_lock", value.capabilityLockId, value.id, { profiles });
+  f.store.insert("capability_lock", value.capabilityLockId, value.id, { recipeDigest: RECIPE_DIGEST, profiles });
   const source = `definePlan({baseRevision:${JSON.stringify(value.revisionId)}},p=>{${selected.map((p, i) => `const frame${i}=p.image("image${i}",{profile:${JSON.stringify(p.id)},prompt:"A boot"});`).join("")}return [${selected.map((_, i) => `frame${i}`).join(",")}];});`;
   const plan = compilePlan(source, { project: value, profiles, logicalIds: {}, allocateId: randomUUID }), grants = {};
   for (const node of plan.nodes) grants[node.id] = engine.createGrant(value.id, value.id, "image", "human-offline-fixture", "initial_slot").id;

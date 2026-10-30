@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { canonical, digest } from "@openslate/core";
+import { RECIPE_DIGEST, canonical, digest } from "@openslate/core";
 import { FakeProvider } from "@openslate/providers";
 import { resolveSpeechAdmission, assertSpeechFirstDispatch, assertSpeechMappingAdmission } from "../dist/execution/audio-execution-authority.js";
 import { prepareSpeechExecutionRequest, assertSpeechExecutionMapping, assertSpeechExecutionResult } from "../dist/execution/audio-execution-receipts.js";
@@ -20,7 +20,7 @@ function mapping(f) {
     transport: prepared.description, bodyByteLength: prepared.bodyByteLength };
 }
 function replaceCurrentLock(f, profile = { ...f.profile, unitCostMicros: "999", maxConcurrency: 1 }) {
-  const id = randomUUID(); f.store.insert("capability_lock", id, f.project.id, { profiles: [profile] });
+  const id = randomUUID(); f.store.insert("capability_lock", id, f.project.id, { recipeDigest: RECIPE_DIGEST, profiles: [profile] });
   const project = f.store.getProject(f.project.id); f.store.saveProject({ ...project, capabilityLockId: id }, project.headVersion); return id;
 }
 function clean(path) { if (!existsSync(path)) return; if (lstatSync(path).isDirectory()) {
@@ -49,7 +49,7 @@ test("historical full-definition lookup avoids changed current defaults and pins
   const f = speechFixture(t); replaceCurrentLock(f);
   const saved = mapping(f); assert.equal(saved.capabilityLockId, f.project.capabilityLockId); assert.equal(saved.profileDefinition.unitCostMicros, "100");
   f.store.insert("speech_execution_mapping", saved.id, f.project.id, saved);
-  for (let i = 0; i < 129; i++) f.store.insert("capability_lock", `future-${i}`, f.project.id, { profiles: [{ ...f.profile, unitCostMicros: String(1000 + i) }] });
+  for (let i = 0; i < 129; i++) f.store.insert("capability_lock", `future-${i}`, f.project.id, { recipeDigest: RECIPE_DIGEST, profiles: [{ ...f.profile, unitCostMicros: String(1000 + i) }] });
   assert.throws(() => resolveSpeechAdmission(f.store, f.request), { code: "SPEECH_PROFILE_LOOKUP_LIMIT" });
   assert.equal(resolveSpeechAdmission(f.store, f.request, saved).capabilityLock.id, saved.capabilityLockId);
   assertSpeechMappingAdmission(resolveSpeechAdmission(f.store, f.request, saved), saved);

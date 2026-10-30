@@ -16,7 +16,8 @@ export const codexImageProfile={id:'codex-image-v1',revision:'v1',kind:'image',a
   configuration:{model:'codex-image-generation',settings:{runtimeVersion:'0.153.4',directorModel:'gpt-6-astra',width:1024,height:1024}}};
 export const codexApiProfile={...codexImageProfile,id:'api-image',adapter:'openai-image',unitCostMicros:'1000',configuration:{model:OPENAI_IMAGE_MODEL,settings:{width:1024,height:1024,quality:'medium'}}};
 const codex=codexImageProfile,api=codexApiProfile;
-export const codexRuntimeConfiguration=()=>({image:false,codexImage:true,h3:false,h3DownloadHosts:[]});
+export const codexRuntimeConfiguration=()=>({image:false,codexImage:true,h3:false,speech:false,transcription:false,viggleH3:false,
+  h3DownloadHosts:[],viggleH3DownloadHosts:[],falLipSync:false,falLipSyncDownloadHosts:[]});
 export function codexImageFixture(t,changes={}) {
   const directory=mkdtempSync(join(tmpdir(),'openslate-codex-runtime-')),store=new Store(join(directory,'openslate.sqlite')),fakeProvider=new FakeProvider(join(directory,'fake-provider.sqlite'));
   t.after(()=>{if(store.db.open)store.close();if(fakeProvider.db.open)fakeProvider.close();rmSync(directory,{recursive:true,force:true});});

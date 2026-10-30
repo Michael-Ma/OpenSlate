@@ -8,6 +8,8 @@ A **node** is a planned operation. A **candidate** is a human-origin creative re
 
 Configured admission rechecks the exact active candidate/node, pinned profile definition/options, credential/native/media readiness, epoch/hold/pause controls, accepted audio and exact keyframe review before video dispatch. It creates no usage allowance or hidden consumption step. Attempt/submission identity is committed before external effects. Technical retry requires trusted eligible failure evidence and bounded policy; it does not become a new aesthetic alternative.
 
+Every attempt request carries an explicit adapter/version identity. Demo requests use fake/v1 without a configured profile snapshot; missing identity never selects the demo adapter. Saved capability locks require the current recipe digest, and video dispatch always requires an explicit silent-shot decision or accepted measured narration. Provider failure/rejection outcomes carry an explicit `retryAllowed` boolean; incomplete outcomes remain unknown and cannot authorize a retry.
+
 ## State and recovery
 
 Attempt phases include `preparing`, `submitting`, `remote_pending`, `submission_unknown`, `ingesting`, `succeeded` and `failed`. Preparation can retain owned conversion work while media inputs are not ready; current selection is checked again before the first paid dispatch.

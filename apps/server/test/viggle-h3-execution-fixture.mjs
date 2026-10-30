@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync } from 'node:f
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compilePlan, digest, providerProfileArguments } from '@openslate/core';
+import { compilePlan, digest, providerProfileArguments, RECIPE_DIGEST } from '@openslate/core';
 import { FakeProvider } from '@openslate/providers';
 import { Store } from '../dist/persistence/store.js';
 import { Engine } from '../dist/execution/engine.js';
@@ -64,7 +64,7 @@ async function videoBytes(seconds) {
 }
 
 /** Actual owned PNG import, human frame review, finite allowance and durable admission.
- * The legacy-compatible project has no narrated-production lock; HTTP/download bytes and estimates are synthetic.
+ * The current recipe lock includes an explicit no-narration decision; HTTP/download bytes and estimates are synthetic.
  * `ingest:true` enables the real video normalizer. No provider keys or live calls are read.
  */
 export async function fixture(t, options = {}) {
@@ -103,7 +103,7 @@ export async function fixture(t, options = {}) {
   const engine = new Engine(store, bridge, engineOptions), production = new ProductionService(store, engine, profiles), allowances = new ExternalAllowanceService(store);
   let project = projectFixture(randomUUID(), 1); project.name = 'Offline Viggle bridge'; project.shots[0].desiredFrames = seconds * 30; refreshIntent(project.shots[0]);
   if (options.filmKind !== undefined) project.filmKind = options.filmKind;
-  store.createProject(project); store.insert('capability_lock', project.capabilityLockId, project.id, { profiles });
+  store.createProject(project); store.insert('capability_lock', project.capabilityLockId, project.id, { profiles, recipeDigest: RECIPE_DIGEST });
   store.insert('project_revision', project.revisionId, project.id, { project });
   const human = production.beginRequest(project.id, 'offline-human', 'Import and approve this exact synthetic first frame', { scopeIds: [project.id], editing: true });
   const images = new LocalImageStore({ rootDir: join(artifactRoot, 'images'), ffmpegPath: tool('ffmpeg'), ffprobePath: tool('ffprobe') });

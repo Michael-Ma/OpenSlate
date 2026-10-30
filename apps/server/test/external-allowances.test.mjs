@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
-import { DomainError, compilePlan, digest, providerProfileArguments } from "../../../packages/core/dist/index.js";
+import { RECIPE_DIGEST, DomainError, compilePlan, digest, providerProfileArguments } from "../../../packages/core/dist/index.js";
 import { fixtureOutputs, registerExecutionProvider } from "../../../packages/providers/dist/index.js";
 import { Store } from "../dist/persistence/store.js";
 import { Engine } from "../dist/execution/engine.js";
@@ -32,7 +32,7 @@ function fixture(t, options = {}) {
   const artifactDir = join(directory, "artifacts"), engine = new Engine(store, port, { artifactDir, profiles, externalAdmission: policy });
   const production = new ProductionService(store, engine, profiles), allowances = new ExternalAllowanceService(store);
   const project = projectFixture(randomUUID(), options.count ?? 2); store.createProject(project);
-  store.insert("capability_lock", project.capabilityLockId, project.id, { profiles });
+  store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles });
   const source = `definePlan({baseRevision:${JSON.stringify(project.revisionId)}},p=>{${project.shots.map((shot, i) => `const s${i}=p.shot(${JSON.stringify(shot.id)});const image${i}=p.image("image${i}",{intent:s${i},profile:"allowance-image",prompt:${JSON.stringify(shot.imagePrompt)}});`
     + (options.video ? `const review${i}=p.humanReview("review${i}",{shots:[{intent:s${i},keyframe:image${i},videoProfile:"allowance-video",motionPrompt:${JSON.stringify(shot.videoPrompt)},seconds:6}]});const video${i}=p.video("video${i}",{intent:s${i},profile:"allowance-video",firstFrame:p.approvedImage(image${i},review${i}),prompt:${JSON.stringify(shot.videoPrompt)},seconds:6});` : "")).join("")}return [${project.shots.map((_, i) => `${options.video ? "video" : "image"}${i}`).join(",")}];});`;
   const plan = compilePlan(source, { project, profiles, logicalIds: {}, allocateId: randomUUID });
@@ -245,7 +245,7 @@ test("full profile definition pins price and limits even when execution configur
   assert.equal(providerProfileArguments(changed).profileDigest, issued.allowance.profileDigest);
   assert.notEqual(digest(changed), issued.allowance.profileDefinitionDigest);
   const project = f.store.getProject(f.projectId), lockId = randomUUID();
-  f.store.insert("capability_lock", lockId, f.projectId, { profiles: [changed] });
+  f.store.insert("capability_lock", lockId, f.projectId, { recipeDigest: RECIPE_DIGEST, profiles: [changed] });
   f.store.saveProject({ ...project, capabilityLockId: lockId }, project.headVersion);
   assert.ok((await f.engine.runReady()).blocked.every(row => row.code === "EXTERNAL_ALLOWANCE_UNAVAILABLE"));
   assert.equal(rows(f, "attempt").length, 0);
@@ -260,7 +260,7 @@ test("recordAdmission rechecks the full profile definition before committing con
   const engine = new Engine(f.store, f.port, { artifactDir: f.artifactDir, externalAdmission: {
     authorize: f.policy.authorize.bind(f.policy), recordAdmission(attempt) {
       const project = f.store.getProject(f.projectId), lockId = randomUUID();
-      f.store.insert("capability_lock", lockId, f.projectId, { profiles: [{ ...f.profile, maxRetries: 2 }] });
+      f.store.insert("capability_lock", lockId, f.projectId, { recipeDigest: RECIPE_DIGEST, profiles: [{ ...f.profile, maxRetries: 2 }] });
       f.store.saveProject({ ...project, capabilityLockId: lockId }, project.headVersion);
       f.policy.recordAdmission(attempt);
     },

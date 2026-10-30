@@ -439,7 +439,7 @@ for (const kind of ['image','speech']) test(`a running ${kind} replacement is in
  const grant=f.engine.createGrant(project.id,shot.id,kind,f.human.requestId);
  f.store.insert('candidate',binding.candidateId,project.id,{grantId:grant.id,nodeId:id,origin:grant.origin});
  f.store.insert('attempt',`attempt-${kind}`,project.id,{nodeId:id,candidateId:binding.candidateId,specDigest:'exact-spec',phase:'submission_unknown',ordinal:1,
-  request:{attemptId:`attempt-${kind}`,nodeId:id,kind,fingerprint:'fixture',args:{},inputs:[]}});
+  request:{attemptId:`attempt-${kind}`,nodeId:id,kind,fingerprint:'fixture',args:{},inputs:[],execution:{adapter:'fake',version:'1'}}});
  const p=await propose(f,patch(kind==='image'?{imagePrompt:'New image'}:{narration:{mode:'generated',text:'New line',voice:'stock'}}));
  assert.ok(p.preview.effects.some(e=>e.effect==='discards_running'));
 });

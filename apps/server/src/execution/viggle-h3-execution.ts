@@ -92,7 +92,7 @@ export class ViggleH3Execution implements ExecutionProvider {
     try {
       const savedMapping = this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id);
       const admission = resolveViggleAdmission(this.#store, request, savedMapping), frame = resolveViggleFrame(this.#store, attempt, savedMapping?.firstFrame);
-      stopped(signal); const preparation = await this.prepare(attempt, signal, frame, savedMapping); stopped(signal);
+      stopped(signal); const preparation = await this.prepare(attempt, signal, frame); stopped(signal);
       prepared = preparation.request;
       const proposed: ViggleH3ExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
         profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile, capabilityLockId: admission.capabilityLock.id,
@@ -377,8 +377,7 @@ export class ViggleH3Execution implements ExecutionProvider {
     return { type: "accepted", taskId: observation.taskId };
   }
 
-  private async prepare(attempt: Attempt, signal: AbortSignal | undefined, captured: ViggleFrameEvidence,
-    savedMapping?: ViggleH3ExecutionMapping): Promise<{ request: ViggleH3Request; crop?: PngCenterCrop }> {
+  private async prepare(attempt: Attempt, signal: AbortSignal | undefined, captured: ViggleFrameEvidence): Promise<{ request: ViggleH3Request; crop?: PngCenterCrop }> {
     const request = attempt.request, configuration = request.profile!.configuration;
     const admission = resolveViggleAdmission(this.#store, request, this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id));
     assertViggleH3OperationOptions(admission.profile, request.args);
@@ -401,8 +400,7 @@ export class ViggleH3Execution implements ExecutionProvider {
     "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG dimensions differ from their validated record");
     assertViggleH3FirstFrameAspect(request.args, record.width, record.height);
     const aspectRatio = viggleH3RequestAspect(request.args, request.profile!);
-    // A saved mapping is an immutable byte recipe. Never upgrade a pre-crop preparation on restart.
-    const upload = savedMapping && !Object.hasOwn(savedMapping, "firstFrameCrop") ? { bytes } : centerCropPng(bytes, aspectRatio);
+    const upload = centerCropPng(bytes, aspectRatio);
     const width = upload.crop?.width ?? record.width!, height = upload.crop?.height ?? record.height!;
     return { ...(upload.crop ? { crop: upload.crop } : {}), request: { prompt: String(request.args.prompt), durationSeconds: Number(request.args.durationFrames) / 30,
       resolution: configuration.settings!.resolution as ViggleH3Resolution, quality: configuration.settings!.quality as ViggleH3Quality,

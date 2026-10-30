@@ -8,7 +8,7 @@ import { FakeProvider } from "../dist/fake.js";
 test("fake lost replies cannot discover jobs by attempt id, while known task ids still complete", async t => {
   const directory = mkdtempSync(join(tmpdir(), "openslate-provider-")); const path = join(directory, "backend.sqlite");
   t.after(() => rmSync(directory, { force: true, recursive: true }));
-  let provider = new FakeProvider(path); const request = { attemptId: "attempt", nodeId: "node", kind: "image", fingerprint: "a".repeat(64), args: {}, inputs: [] };
+  let provider = new FakeProvider(path); const request = { attemptId: "attempt", nodeId: "node", kind: "image", fingerprint: "a".repeat(64), args: {}, inputs: [], execution: { adapter: "fake", version: "1" } };
   provider.setMode("node", "unknown_after_accept"); assert.equal((await provider.submit(request)).type, "unknown"); provider.close();
   provider = new FakeProvider(path);
   try {

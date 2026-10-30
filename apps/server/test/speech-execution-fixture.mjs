@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compilePlan, digest, providerProfileArguments } from "../../../packages/core/dist/index.js";
+import { RECIPE_DIGEST, compilePlan, digest, providerProfileArguments } from "../../../packages/core/dist/index.js";
 import { OPENAI_SPEECH_MODEL } from "../../../packages/providers/dist/index.js";
 import { Store } from "../dist/persistence/store.js";
 import { Engine } from "../dist/execution/engine.js";
@@ -36,7 +36,7 @@ export function speechFixture(t, options = {}) {
   store.createProject(project);
   const profile = { id: "offline-speech", revision: "fixture-estimate-1", kind: "speech", adapter: "openai-speech", executionVersion: "1",
     configuration: { model: options.model ?? OPENAI_SPEECH_MODEL, settings: options.profileSettings ?? {} }, maxConcurrency: 2, unitCostMicros: "100", maxRetries: 0 };
-  store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: [profile] });
+  store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: [profile] });
   const outputs = new ExecutionOutputStore(store, { rootDir: join(directory, "execution-output") });
   const calls = { http: 0, credentials: 0 }, credentials = new EnvironmentMediaCredentials(name => {
     calls.credentials++; assert.equal(name, "OPENSLATE_OPENAI_API_KEY"); return options.credential ? options.credential() : key;

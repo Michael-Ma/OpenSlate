@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import { readMediaExecutionConfiguration } from "../dist/application/media-execution-config.js";
 
 test("a configured key enables its API routes without an extra enable approval", () => {
-  assert.deepEqual(readMediaExecutionConfiguration({}), { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+  assert.deepEqual(readMediaExecutionConfiguration({}), { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
   assert.deepEqual(readMediaExecutionConfiguration({ OPENSLATE_OPENAI_API_KEY: "synthetic-key" }),
-    { image: true, codexImage: false, h3: false, speech: true, transcription: true, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+    { image: true, codexImage: false, h3: false, speech: true, transcription: true, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
   const configuration = readMediaExecutionConfiguration({ OPENSLATE_MINIMAX_API_KEY: "synthetic-minimax-key", OPENSLATE_VIGGLE_API_KEY: "synthetic-viggle-key",
     OPENSLATE_H3_DOWNLOAD_HOSTS: "media.example.test", OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS: "viggle.example.test" });
   assert.equal(configuration.h3, true); assert.equal(configuration.viggleH3, true); assert.equal(configuration.image, false);
   assert.equal(JSON.stringify(configuration).includes("synthetic-"), false);
   assert.deepEqual(readMediaExecutionConfiguration({ OPENSLATE_ENABLE_IMAGE_GENERATION: "0", OPENSLATE_ENABLE_H3_GENERATION: "" }),
-    { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+    { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
 });
 
 test("explicit host disable and invalid credential values never silently activate a route", () => {
@@ -27,11 +27,11 @@ test("explicit independent switches capture an immutable exact host list without
   const environment = { OPENSLATE_ENABLE_IMAGE_GENERATION: "1", OPENSLATE_ENABLE_H3_GENERATION: "1",
     OPENSLATE_H3_DOWNLOAD_HOSTS: "media.example.test, video.example.test" };
   const value = readMediaExecutionConfiguration(environment);
-  assert.deepEqual(value, { image: true, codexImage: false, h3: true, speech: false, transcription: false, h3DownloadHosts: ["media.example.test", "video.example.test"], viggleH3: false, viggleH3DownloadHosts: [] });
+  assert.deepEqual(value, { image: true, codexImage: false, h3: true, speech: false, transcription: false, h3DownloadHosts: ["media.example.test", "video.example.test"], viggleH3: false, viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
   environment.OPENSLATE_ENABLE_IMAGE_GENERATION = "0"; environment.OPENSLATE_H3_DOWNLOAD_HOSTS = "other.example.test";
   assert.equal(value.image, true); assert.equal(Object.isFrozen(value), true); assert.equal(Object.isFrozen(value.h3DownloadHosts), true);
   assert.throws(() => value.h3DownloadHosts.push("other.example.test"), TypeError);
-  assert.deepEqual(readMediaExecutionConfiguration({ OPENSLATE_ENABLE_IMAGE_GENERATION: "1" }), { image: true, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+  assert.deepEqual(readMediaExecutionConfiguration({ OPENSLATE_ENABLE_IMAGE_GENERATION: "1" }), { image: true, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
 });
 
 test("speech and transcription are independent immutable switches and do not require H3 download configuration", () => {
@@ -39,7 +39,7 @@ test("speech and transcription are independent immutable switches and do not req
   for (const [speech, transcription] of [[false, false], [true, false], [false, true], [true, true]]) {
     const environment = { [names[0]]: speech ? "1" : "0", [names[1]]: transcription ? "1" : "" };
     const value = readMediaExecutionConfiguration(environment);
-    assert.deepEqual(value, { image: false, codexImage: false, h3: false, speech, transcription, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+    assert.deepEqual(value, { image: false, codexImage: false, h3: false, speech, transcription, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
     environment[names[0]] = speech ? "0" : "1"; environment[names[1]] = transcription ? "0" : "1";
     assert.equal(value.speech, speech); assert.equal(value.transcription, transcription); assert.ok(Object.isFrozen(value));
     assert.throws(() => { value.speech = !speech; }, TypeError);
@@ -66,7 +66,7 @@ test("ambiguous switches and missing or unsafe H3 output hosts fail before activ
 });
 
 
-test("Viggle switch and download hosts are independent from legacy MiniMax and remain detached", () => {
+test("Viggle switch and download hosts are independent from MiniMax and remain detached", () => {
   const environment = { OPENSLATE_ENABLE_VIGGLE_H3_GENERATION: "1", OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS: "viggle.example.test" };
   const captured = readMediaExecutionConfiguration(environment);
   assert.equal(captured.viggleH3, true); assert.equal(captured.h3, false);

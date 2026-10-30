@@ -19,7 +19,8 @@ const speech = { id: "runtime-speech", revision: "synthetic-estimate-1", kind: "
   configuration: { model: OPENAI_SPEECH_MODEL, settings: {} }, maxConcurrency: 2, unitCostMicros: "100", maxRetries: 0 };
 const transcription = { ...speech, id: "runtime-transcription", kind: "transcription", adapter: "openai-transcription", configuration: { model: "whisper-1", settings: {} } };
 const providerConfiguration = { version: 1, profiles: [{ label: "Synthetic speech estimate", profile: speech }, { label: "Synthetic recognition estimate", profile: transcription }] };
-const disabled = { image: false, h3: false, h3DownloadHosts: [] };
+const disabled = { image: false, codexImage: false, h3: false, speech: false, transcription: false, viggleH3: false,
+  h3DownloadHosts: [], viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] };
 const key = () => randomUUID();
 
 function fixture(t, options = {}) {

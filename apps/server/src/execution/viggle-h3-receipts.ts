@@ -14,7 +14,6 @@ export interface ViggleH3ExecutionMapping extends Identity {
   capabilityLockId: string; capabilityLockDigest: string;
   allowanceId: string | null; allowanceDigest: string | null; consumptionDigest: string | null; estimatedMicros: string;
   firstFrame: { artifactId: string; artifactDigest: string; approvalId: string; approvalDigest: string; snapshotId: string; snapshotDigest: string };
-  /** Omission in a saved mapping permanently selects the legacy, uncropped upload bytes. */
   firstFrameCrop?: PngCenterCrop;
   transport: ViggleH3Description;
 }
@@ -46,7 +45,7 @@ function base(attempt: Attempt, value: Identity, extras: string[], observation =
   viggleH3Fields(value, ["id", "version", "projectId", "attemptId", "requestDigest", ...extras], optional);
   invariant(value.version === 1 && (observation ? viggleH3Hash(value.id) : value.id === attempt.id) && value.projectId === attempt.projectId
     && value.attemptId === attempt.id && value.requestDigest === digest(attempt.request) && attempt.request.kind === "video"
-    && attempt.request.execution?.adapter === "viggle-h3" && attempt.request.execution.version === "1"
+    && attempt.request.execution.adapter === "viggle-h3" && attempt.request.execution.version === "1"
     && providerAdmissionRequest(attempt.request) && viggleH3Hash(attempt.request.profile?.digest)
     && Buffer.byteLength(canonical(value)) <= 32768, "VIGGLE_H3_EXECUTION_CONFLICT", "Viggle receipt differs from its exact admitted request");
 }

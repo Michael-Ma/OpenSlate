@@ -1,5 +1,5 @@
 import { configuredProviderUse, configuredProfileMatches, providerAdmissionRequest } from "./provider-use.js";
-import { canonical, digest, effectiveNodeDigest, invariant, shotIntentDigest, shotVideoTiming } from "@openslate/core";
+import { canonical, digest, effectiveNodeDigest, invariant, RECIPE_DIGEST, shotIntentDigest, shotVideoTiming } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import type { ExecutionCallOptions, ExecutionRequest } from "@openslate/providers";
 import type { Store } from "../persistence/store.js";
@@ -29,7 +29,7 @@ const fail = (condition: unknown, message: string): void => invariant(condition,
 export function assertViggleAdmission(value: ViggleAdmission): void {
   const { attempt, candidate, grant, reservation, allowance, consumption, allowanceRequest, profile, capabilityLock } = value;
   fail(attempt && attempt.id === attempt.request.attemptId && attempt.nodeId === attempt.request.nodeId && attempt.fingerprint === attempt.request.fingerprint
-    && attempt.request.kind === "video" && attempt.request.execution?.adapter === "viggle-h3" && attempt.request.execution.version === "1"
+    && attempt.request.kind === "video" && attempt.request.execution.adapter === "viggle-h3" && attempt.request.execution.version === "1"
     && candidate?.id === attempt.candidateId && candidate.projectId === attempt.projectId && candidate.nodeId === attempt.nodeId
     && grant?.id === candidate.grantId && grant.projectId === attempt.projectId && grant.kind === "video" && grant.origin === candidate.origin
     && reservation?.id === attempt.reservationId && reservation.projectId === attempt.projectId && reservation.attemptId === attempt.id
@@ -196,8 +196,9 @@ export function assertViggleCurrentSelection(store: ViggleAuthorityStore, attemp
     && node.args.prompt === shot.videoPrompt && (!cue || shotVideoTiming(project, shot).ready)
     && typeof node.args.durationFrames === 'number' && node.args.durationFrames >= shot.desiredFrames,
   "VIGGLE_H3_SELECTION_CHANGED", "Current shot intent or timing changed before submission");
-  const lock = store.get<{ recipeDigest?: string }>("capability_lock", project.capabilityLockId);
-  invariant(!lock?.recipeDigest || shotVideoTiming(project, shot).ready, "VIGGLE_H3_SELECTION_CHANGED", "Current shot requires an explicit narration decision or accepted measured audio");
+  const lock = store.get<{ recipeDigest: string }>("capability_lock", project.capabilityLockId);
+  invariant(lock?.recipeDigest === RECIPE_DIGEST, "VIGGLE_H3_SELECTION_CHANGED", "Current capability lock lacks the supported recipe digest");
+  invariant(shotVideoTiming(project, shot).ready, "VIGGLE_H3_SELECTION_CHANGED", "Current shot requires an explicit narration decision or accepted measured audio");
   invariant(plan?.projectId === project.id && node.requires.length > 0 && node.requires.every(id => plan.compiled.gates.some(gate => gate.id === id
     && gate.members.some(member => member.videoNodeId === node.id && member.recipeDigest === node.specDigest))), "VIGGLE_H3_SELECTION_CHANGED", "Current plan lost the exact review gate");
   const inputs = node.inputs.map(input => {

@@ -32,7 +32,7 @@ function configuration(value: unknown): asserts value is NonNullable<ProviderPro
   invariant(Buffer.byteLength(JSON.stringify(value)) <= 8192, "PROFILE_CONFIGURATION_INVALID", "Profile configuration exceeds its encoded byte limit");
 }
 
-/** Preserve exact legacy compiler arguments. New bindings are part of review/cache identity. */
+/** Demo profiles keep compact compiler arguments. Configured bindings are part of review/cache identity. */
 export function providerProfileArguments(profile: ProviderProfile): JsonObject {
   invariant(profile && [profile.id, profile.revision, profile.adapter].every(value => typeof value === "string" && ID.test(value)), "PROFILE_INCOMPATIBLE", "Invalid profile identity");
   const base = { profileRevision: profile.revision, profileIdentity: profile.id, adapter: profile.adapter };

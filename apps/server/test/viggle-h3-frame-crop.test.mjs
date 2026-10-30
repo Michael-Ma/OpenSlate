@@ -33,18 +33,17 @@ function restart(f, denyNetwork = false) {
   f.engine = new Engine(f.store, f.bridge, { ...f.engineOptions, outputStore: f.outputs });
 }
 async function prepare(f, saved) {
-  return f.bridge.prepare(f.attempt, undefined, resolveViggleFrame(f.store, f.attempt, saved?.firstFrame), saved);
+  return f.bridge.prepare(f.attempt, undefined, resolveViggleFrame(f.store, f.attempt, saved?.firstFrame));
 }
-async function saveLegacyMapping(f) {
+async function savePreparedMapping(f) {
   const admission = resolveViggleAdmission(f.store, f.request), frame = resolveViggleFrame(f.store, f.attempt);
   const prepared = await prepare(f);
-  const original = { ...prepared.request, firstFrame: { bytes: readFileSync(f.imagePath), sha256: f.reference.sha256,
-    width: f.image.width, height: f.image.height, byteLength: f.image.byteLength, mediaType: 'image/png' } };
   const value = { id: f.attempt.id, version: 1, projectId: f.project.id, attemptId: f.attempt.id, requestDigest: digest(f.request),
     profileDigest: f.request.profile.digest, profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile,
     capabilityLockId: admission.capabilityLock.id, capabilityLockDigest: digest(admission.capabilityLock),
     allowanceId: admission.allowance.id, allowanceDigest: digest(admission.allowance), consumptionDigest: digest(admission.consumption),
-    estimatedMicros: admission.reservation.micros, firstFrame: viggleFramePin(frame), transport: describeViggleH3Request(original) };
+    estimatedMicros: admission.reservation.micros, firstFrame: viggleFramePin(frame),
+    ...(prepared.crop ? { firstFrameCrop: prepared.crop } : {}), transport: describeViggleH3Request(prepared.request) };
   assertViggleH3ExecutionMapping(f.attempt, value);
   f.store.insert('viggle_h3_execution_mapping', value.id, f.project.id, value); return value;
 }
@@ -107,23 +106,39 @@ test('a profile-selected 9:16 attempt crops even without a film aspect argument'
 
 test('a saved crop mapping before first dispatch re-prepares canonically after restart', async t => {
   const f = await fixture(t, { filmKind: filmKind('9:16'), pngSize: [1024, 1536] });
-  const preparation = await prepare(f), legacy = await saveLegacyMapping(f);
-  const saved = { ...legacy, firstFrameCrop: preparation.crop, transport: describeViggleH3Request(preparation.request) };
-  tamper(f, saved); assertViggleRecords(f.store, f.attempt.id); restart(f);
+  const saved = await savePreparedMapping(f);
+  assert.ok(saved.firstFrameCrop); assertViggleRecords(f.store, f.attempt.id); restart(f);
   assert.equal((await f.bridge.submit(f.request, context(f))).type, 'accepted');
   assert.equal(canonical(mapping(f)), canonical(saved)); assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 0);
   assertViggleRecords(f.store, f.attempt.id);
 });
 
-test('a saved pre-crop mapping re-prepares, replays and reconciles using the exact original upload', async t => {
+test('an uncropped saved mapping cannot disable the current crop recipe before first dispatch', async t => {
+  const f = await fixture(t, { filmKind: filmKind('9:16'), pngSize: [1024, 1536] });
+  const preparation = await prepare(f), saved = await savePreparedMapping(f), { firstFrameCrop: _crop, ...withoutCrop } = saved;
+  const original = { ...preparation.request, firstFrame: { bytes: f.png, sha256: f.reference.sha256,
+    width: f.image.width, height: f.image.height, byteLength: f.image.byteLength, mediaType: 'image/png' } };
+  const uncropped = { ...withoutCrop, transport: describeViggleH3Request(original) };
+  tamper(f, uncropped); restart(f);
+  await assert.rejects(createInstallationBackup({ sourceRoot: f.root, destination: join(f.parent, 'invalid-backup') }),
+    { code: 'BACKUP_REFERENCE_INVALID' });
+  const outcome = await f.bridge.submit(f.request, context(f));
+  assert.equal(outcome.type, 'rejected'); assert.equal(outcome.retryAllowed, false);
+  assert.equal(canonical(mapping(f)), canonical(uncropped));
+  assert.equal(rows(f, 'viggle_h3_execution_submit')[0].observation.kind, 'not_dispatched');
+  assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0); assert.equal(f.calls.post, 0);
+});
+
+test('a saved exact-aspect mapping re-prepares, replays and reconciles using the exact original upload', async t => {
   let body, uploaded;
-  const f = await fixture(t, { filmKind: filmKind('9:16'), pngSize: [1024, 1536], fetch: async (url, init) => {
+  const f = await fixture(t, { filmKind: filmKind('9:16'), pngSize: [864, 1536], fetch: async (url, init) => {
     if (init.method !== 'POST') return completed();
     body = Buffer.from(init.body);
     const form = await new Request(url, { method: 'POST', headers: init.headers, body }).formData();
     uploaded = Buffer.from(await form.get('first_frame_image').arrayBuffer()); return accepted();
   } });
-  const saved = await saveLegacyMapping(f), identity = canonical(saved);
+  const saved = await savePreparedMapping(f), identity = canonical(saved);
+  assert.equal(Object.hasOwn(saved, 'firstFrameCrop'), false);
   restart(f);
   for (let n = 0; n < 2; n++) {
     const prepared = await prepare(f, saved);
@@ -187,11 +202,11 @@ test('a cropped upload with a lost POST reply remains charged and never submits 
   assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 0); assert.equal(rows(f, 'attempt').length, 1);
 });
 
-for (const legacy of [false, true]) test(`${legacy ? 'legacy uncropped' : 'cropped'} multipart identity survives backup inspection and same-root restore`, async t => {
-  const f = await fixture(t, { filmKind: filmKind('9:16'), pngSize: [1024, 1536],
+for (const cropped of [true, false]) test(`${cropped ? 'cropped' : 'exact-aspect uncropped'} multipart identity survives backup inspection and same-root restore`, async t => {
+  const f = await fixture(t, { filmKind: filmKind('9:16'), pngSize: cropped ? [1024, 1536] : [864, 1536],
     fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed() });
-  if (legacy) await saveLegacyMapping(f);
   assert.equal((await f.bridge.submit(f.request, context(f))).type, 'accepted');
+  assert.equal(Object.hasOwn(mapping(f), 'firstFrameCrop'), cropped);
   due(f); const result = await f.bridge.poll(taskId, f.request); assert.equal(result.type, 'completed');
   const saved = canonical(mapping(f)), calls = { ...f.calls };
   const exported = await createInstallationBackup({ sourceRoot: f.root, destination: join(f.parent, 'backup') });

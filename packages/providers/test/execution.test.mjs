@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { digest } from "../../core/dist/index.js";
 import { normalizeExecutionOutcome, executionTaskId, EXECUTION_SPOOL_LIMITS } from "../dist/index.js";
 
 const receiptId = "a".repeat(64), sha256 = "b".repeat(64);
@@ -9,13 +8,18 @@ function completed(kind = "image", byteLength = 123) {
     mimeType: kind === "image" ? "image/png" : "video/mp4", extension: kind === "image" ? "png" : "mp4",
     sha256, byteLength, fixture: false, storage: { type: "spool", spoolId: receiptId } }] };
 }
-test("historical outcomes keep their exact fields and digests", () => {
-  for (const old of [{ type: "completed", taskId: "legacy-task", outputs: [{ port: "image", kind: "image", mimeType: "image/svg+xml",
-    extension: "svg", bytesBase64: "Zml4dHVyZQ==", sha256, fixture: true }] },
-    { type: "failed", taskId: "legacy-task", failureId: "legacy-failure", technical: true },
-    { type: "unknown", diagnostic: "old lost response" }]) {
-    const normalized = normalizeExecutionOutcome(old); assert.deepEqual(normalized, old); assert.equal(digest(normalized), digest(old));
-    assert.equal(Object.hasOwn(normalized, "version"), false); assert.equal(Object.hasOwn(normalized, "retryAllowed"), false);
+test("failed and rejected outcomes require explicit retry authority", () => {
+  for (const outcome of [
+    { type: "failed", taskId: "task", failureId: "FAILED", technical: true },
+    { type: "rejected", certainty: "not_accepted", failureId: "REJECTED", technical: true },
+  ]) {
+    for (const retryAllowed of [true, false]) {
+      const explicit = { ...outcome, retryAllowed };
+      assert.deepEqual(normalizeExecutionOutcome(explicit), explicit);
+    }
+    for (const retryAllowed of [undefined, null, "true", 1])
+      assert.equal(normalizeExecutionOutcome({ ...outcome, retryAllowed }).type, "unknown");
+    assert.equal(normalizeExecutionOutcome(outcome).type, "unknown");
   }
 });
 test("synchronous spool completion preserves a null remote task and snapshots its descriptor", () => {

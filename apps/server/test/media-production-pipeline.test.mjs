@@ -37,7 +37,8 @@ test("production composition gates exact frames, then renders configured H3 medi
   const open = () => {
     store = new Store(join(directory, "state.sqlite")); provider = new FakeProvider(join(directory, "fake.sqlite"));
     runtime = createMediaExecutionRuntime({ store, fakeProvider: provider, dataDirectory: directory, ffmpegPath, ffprobePath,
-      configuration: { image: true, h3: true, h3DownloadHosts: ["media.example.test"] },
+      configuration: { image: true, codexImage: false, h3: true, speech: false, transcription: false, viggleH3: false,
+        h3DownloadHosts: ["media.example.test"], viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] },
       credentials: new EnvironmentMediaCredentials(() => "offline-synthetic-key-never-live"),
       providerConfiguration: { version: 1, profiles: [{ label: "Test image", profile: imageProfile }, { label: "Test video", profile: videoProfile }] },
       transport: {

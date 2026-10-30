@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { canonical, digest } from "@openslate/core";
+import { RECIPE_DIGEST, canonical, digest } from "@openslate/core";
 import { FakeProvider } from "@openslate/providers";
 import { assertTranscriptionMappingAdmission, resolveTranscriptionAdmission, resolveTranscriptionPreparation, assertTranscriptionFirstDispatch } from "../dist/execution/transcription-execution-authority.js";
 import { assertTranscriptionExecutionMapping, assertTranscriptionExecutionResult, transcriptionExecutionOptions, TRANSCRIPTION_EXECUTION_PARSER } from "../dist/execution/transcription-execution-receipts.js";
@@ -57,10 +57,10 @@ test("unsupported inherited segment timing and invalid language are rejected bef
 });
 
 test("transcription replay pins retained full profile and never falls back to changed current defaults", async t => {
-  const f = await completed(t), id = randomUUID(); f.store.insert("capability_lock", id, f.project.id, { profiles: [{ ...f.profile, unitCostMicros: "999" }] });
+  const f = await completed(t), id = randomUUID(); f.store.insert("capability_lock", id, f.project.id, { recipeDigest: RECIPE_DIGEST, profiles: [{ ...f.profile, unitCostMicros: "999" }] });
   const current = f.store.getProject(f.project.id); f.store.saveProject({ ...current, capabilityLockId: id }, current.headVersion);
   assert.equal(resolveTranscriptionAdmission(f.store, f.request).capabilityLock.id, f.mapping.capabilityLockId);
-  for (let i = 0; i < 129; i++) f.store.insert("capability_lock", `later-${i}`, f.project.id, { profiles: [{ ...f.profile, unitCostMicros: String(1000 + i) }] });
+  for (let i = 0; i < 129; i++) f.store.insert("capability_lock", `later-${i}`, f.project.id, { recipeDigest: RECIPE_DIGEST, profiles: [{ ...f.profile, unitCostMicros: String(1000 + i) }] });
   assert.throws(() => resolveTranscriptionAdmission(f.store, f.request), { code: "TRANSCRIPTION_PROFILE_LOOKUP_LIMIT" });
   assert.equal(resolveTranscriptionAdmission(f.store, f.request, f.mapping).profile.unitCostMicros, "100");
   assertTranscriptionMappingAdmission(resolveTranscriptionAdmission(f.store, f.request, f.mapping), f.mapping, f.prepared);

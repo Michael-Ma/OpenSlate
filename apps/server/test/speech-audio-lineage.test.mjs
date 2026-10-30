@@ -96,9 +96,9 @@ test("a saved normalization cannot bypass a missing completed speech observation
   assert.equal(f.calls.http, 1);
 });
 
-test("lineage guard is inert for historical fake and other execution contracts", () => {
-  const store = { get() { throw Error("legacy guard must not read records"); }, getProject() { throw Error("legacy guard must not inspect current project"); }, db: null };
-  for (const execution of [undefined, { adapter: "fake", version: "1" }, { adapter: "offline-speech-fixture", version: "1" }]) {
-    assert.doesNotThrow(() => assertSpeechSpoolLineage(store, { request: { kind: "speech", ...(execution ? { execution } : {}) } }, "legacy-spool"));
+test("lineage guard is inert for demo and other execution contracts", () => {
+  const store = { get() { throw Error("unrelated contract must not read records"); }, getProject() { throw Error("unrelated contract must not inspect current project"); }, db: null };
+  for (const execution of [{ adapter: "fake", version: "1" }, { adapter: "offline-speech-fixture", version: "1" }]) {
+    assert.doesNotThrow(() => assertSpeechSpoolLineage(store, { request: { kind: "speech", execution } }, "unrelated-spool"));
   }
 });

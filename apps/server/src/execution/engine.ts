@@ -7,9 +7,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, constants, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { open } from "node:fs/promises";
-import { DEFAULT_PROFILES, DomainError, canonical, digest, effectiveNodeDigest, invariant, moneyMicros, newId, providerProfileArguments, shotIntentDigest, shotVideoTiming, snapshotLocalExecution } from "@openslate/core";
+import { DEFAULT_PROFILES, DomainError, RECIPE_DIGEST, canonical, digest, effectiveNodeDigest, invariant, moneyMicros, newId, providerProfileArguments, shotIntentDigest, shotVideoTiming, snapshotLocalExecution } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan, InputSource, OperationKind, PlanNode, ProjectRecord, ProviderProfile } from "@openslate/core";
-import { ExecutionRegistry, executionFailureSource, executionIdentity, executionProfileSnapshot, executionSpoolRole, executionTaskId, fixtureOutputs, isLegacyExecution, isSpoolCompletion, isSpoolOutput, profileExecutionIdentity, requestExecutionIdentity, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
+import { ExecutionRegistry, executionFailureSource, executionIdentity, executionProfileSnapshot, executionSpoolRole, executionTaskId, fixtureOutputs, isDemoExecution, isSpoolCompletion, isSpoolOutput, profileExecutionIdentity, requestExecutionIdentity, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
 import type { ExecutionCallOptions, ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
@@ -963,9 +963,9 @@ export class Engine {
 
   private projects(): ProjectRecord[] { return (this.store.db.prepare("SELECT id FROM projects").all() as { id: string }[]).map(row => this.store.getProject(row.id)); }
   private lockedProfiles(project: ProjectRecord): ProviderProfile[] {
-    const lock = this.store.get<{ projectId: string; profiles: unknown }>("capability_lock", project.capabilityLockId);
+    const lock = this.store.get<{ projectId: string; profiles: unknown; recipeDigest: string }>("capability_lock", project.capabilityLockId);
     if (!lock) return this.profiles; // Isolated executor fixtures predate the application lock service.
-    invariant(lock.projectId === project.id && Array.isArray(lock.profiles) && lock.profiles.length > 0, "CAPABILITY_LOCK_UNSUPPORTED", "Invalid pinned provider catalog");
+    invariant(lock.projectId === project.id && lock.recipeDigest === RECIPE_DIGEST && Array.isArray(lock.profiles) && lock.profiles.length > 0, "CAPABILITY_LOCK_UNSUPPORTED", "Invalid pinned provider catalog or workflow recipe");
     const ids = new Set<string>();
     for (const value of lock.profiles) {
       invariant(value && typeof value === "object", "CAPABILITY_LOCK_UNSUPPORTED", "Invalid pinned profile");
@@ -1122,14 +1122,11 @@ export class Engine {
       if (node.kind === "video") {
         const shot = project.shots.find(item => item.id === node.shotId);
         const cue = shot?.cueId ? project.cues.find(item => item.id === shot.cueId) : undefined;
-        const applicationLock = this.store.get<{ recipeDigest?: string }>("capability_lock", project.capabilityLockId);
-        if (applicationLock?.recipeDigest) {
-          invariant(shot, 'TIMING_REQUIRED', 'Video requires a current shot');
-          const timing = shotVideoTiming(project, shot);
-          invariant(timing.ready, 'TIMING_REQUIRED', 'Choose no narration, or accept this shot’s recording and measured timing before video generation');
-          invariant(typeof node.args.durationFrames === 'number' && Number.isSafeInteger(node.args.durationFrames) && node.args.durationFrames >= timing.frames,
-            'TIMING_REQUIRED', 'Video must cover the accepted or planned shot duration');
-        }
+        invariant(shot, 'TIMING_REQUIRED', 'Video requires a current shot');
+        const timing = shotVideoTiming(project, shot);
+        invariant(timing.ready, 'TIMING_REQUIRED', 'Choose no narration, or accept this shot’s recording and measured timing before video generation');
+        invariant(typeof node.args.durationFrames === 'number' && Number.isSafeInteger(node.args.durationFrames) && node.args.durationFrames >= timing.frames,
+          'TIMING_REQUIRED', 'Video must cover the accepted or planned shot duration');
         if (cue) invariant(cue.accepted && cue.measured, "TIMING_REQUIRED", "Video requires accepted measured cue timing");
         const plan = this.activePlan(project);
         invariant(node.requires.length > 0 && node.requires.every(id => plan.compiled.gates.some(gate => gate.id === id && gate.members.some(member => member.videoNodeId === nodeId && member.recipeDigest === node.specDigest))), "HUMAN_REVIEW_REQUIRED", "Video lacks a current review contract");
@@ -1158,7 +1155,7 @@ export class Engine {
       const cost = profile ? moneyMicros(profile.unitCostMicros) : 0n;
       const id = newId(); const reservationId = profile ? newId() : null;
       let externalAllowanceId: string | undefined;
-      if (!isLegacyExecution(execution)) {
+      if (!isDemoExecution(execution)) {
         invariant(this.externalAdmission && profile && binding.candidateId, "EXTERNAL_EXECUTION_NOT_AUTHORIZED", "External generation requires configured provider admission");
         const approval = this.externalAdmission.authorize({ attemptId: id, projectId, nodeId, candidateId: binding.candidateId,
           profile: structuredClone(profile), estimatedMicros: cost.toString() });
@@ -1174,7 +1171,7 @@ export class Engine {
         specDigest: node.specDigest, fingerprint: inputs.fingerprint, workKey,
         request: { attemptId: id, nodeId, kind: node.kind, fingerprint: inputs.fingerprint, args: node.args, inputs: inputs.artifacts,
           execution: { ...execution }, ...(pinnedProfile ? { profile: pinnedProfile } : {}), ...(externalAllowanceId ? { externalAllowanceId }
-            : !isLegacyExecution(execution) && profile ? { providerUse: { kind: "configured" as const, capabilityLockId: project.capabilityLockId,
+            : !isDemoExecution(execution) && profile ? { providerUse: { kind: "configured" as const, capabilityLockId: project.capabilityLockId,
               capabilityLockDigest: digest(this.store.get("capability_lock", project.capabilityLockId)), profileDefinitionDigest: digest(profile) } } : {}) },
         phase: "submitting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.leaseMs,
         taskId: null, reservationId, failure: null, outputs: {}, createdAt: new Date().toISOString(),

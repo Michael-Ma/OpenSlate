@@ -11,6 +11,7 @@ import { ViggleH3Execution, ViggleDownloadPending, viggleHasCompletedObservation
 import { ExecutionOutputStore } from '../dist/execution/output-store.js';
 import { EnvironmentMediaCredentials } from '../dist/application/provider-credentials.js';
 import { assertViggleRecords, assertViggleSpoolLineage } from '../dist/execution/viggle-h3-lineage.js';
+import { assertViggleCurrentSelection } from '../dist/execution/viggle-h3-authority.js';
 import { assertViggleH3ExecutionMapping, assertViggleH3FirstFrameAspect, assertViggleH3OperationOptions, viggleH3CompletedObservationId, viggleH3RequestAspect } from '../dist/execution/viggle-h3-receipts.js';
 import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from '../dist/application/installation-recovery.js';
 import { fixture, context, due, rows, taskId, key, json, accepted, pending, completed, hash } from './viggle-h3-execution-fixture.mjs';
@@ -53,6 +54,23 @@ test('missing actual consumption or forged full profile cannot substitute a nomi
     else { const lock = f.store.get('capability_lock', f.project.capabilityLockId); tamper(f, 'capability_lock', { ...lock, profiles: [{ ...f.profile, unitCostMicros: '1' }] }); }
     await assert.rejects(f.bridge.submit(f.request, context(f)), { code: 'VIGGLE_H3_EXECUTION_CONFLICT' }); assert.equal(f.calls.post, 0);
     assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0);
+  }
+});
+
+test('current Viggle selection requires the supported recipe lock and explicit narration decision', async t => {
+  for (const mode of ['missing-recipe', 'unsupported-recipe', 'missing-narration']) {
+    const f = await fixture(t);
+    assert.doesNotThrow(() => assertViggleCurrentSelection(f.store, f.attempt));
+    if (mode === 'missing-narration') {
+      const project = f.store.getProject(f.project.id), { narration: _decision, ...shot } = project.shots[0];
+      f.store.saveProject({ ...project, shots: [shot] }, project.headVersion);
+    } else {
+      const lock = f.store.get('capability_lock', f.project.capabilityLockId), { recipeDigest: _recipe, ...withoutRecipe } = lock;
+      tamper(f, 'capability_lock', mode === 'missing-recipe' ? withoutRecipe : { ...lock, recipeDigest: 'unsupported-recipe' });
+    }
+    assert.throws(() => assertViggleCurrentSelection(f.store, f.attempt), { code: 'VIGGLE_H3_SELECTION_CHANGED' });
+    assert.equal((await f.bridge.submit(f.request, context(f))).type, 'rejected');
+    assert.equal(f.calls.post, 0); assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0);
   }
 });
 
@@ -416,7 +434,7 @@ test('a worker that died before the dispatch marker is fenced as never sent: rel
 });
 
 const reels = { version: 'film-kind@1', kind: 'social', format: { platform: 'ig_reels', aspect: '9:16' } };
-test('a 9:16 film sends aspect_ratio 9:16 with its portrait first frame; the profile aspect stays for older requests', async t => {
+test('a 9:16 film sends aspect_ratio 9:16 with its portrait first frame; requests without a film aspect use the profile aspect', async t => {
   let form;
   const f = await fixture(t, { filmKind: reels, pngSize: [180, 320], fetch: async (url, init) => {
     form = await new Request(url, { method: 'POST', headers: init.headers, body: Buffer.from(init.body) }).formData(); return accepted();
@@ -427,11 +445,11 @@ test('a 9:16 film sends aspect_ratio 9:16 with its portrait first frame; the pro
   const mapping = rows(f, 'viggle_h3_execution_mapping')[0];
   assert.equal(mapping.transport.aspectRatio, '9:16'); assert.deepEqual([mapping.transport.firstFrame.width, mapping.transport.firstFrame.height], [180, 320]);
   assertViggleRecords(f.store, f.attempt.id);
-  const legacy = await fixture(t, { fetch: async (url, init) => {
+  const profileAspect = await fixture(t, { fetch: async (url, init) => {
     form = await new Request(url, { method: 'POST', headers: init.headers, body: Buffer.from(init.body) }).formData(); return accepted();
   } });
-  assert.equal(Object.hasOwn(legacy.node.args, 'aspect'), false);
-  await legacy.bridge.submit(legacy.request, context(legacy)); assert.equal(form.get('aspect_ratio'), '16:9');
+  assert.equal(Object.hasOwn(profileAspect.node.args, 'aspect'), false);
+  await profileAspect.bridge.submit(profileAspect.request, context(profileAspect)); assert.equal(form.get('aspect_ratio'), '16:9');
 });
 
 test('a first frame of another shape is refused before any POST', async t => {

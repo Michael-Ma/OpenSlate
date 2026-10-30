@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { digest, DomainError } from "../../../packages/core/dist/index.js";
+import { RECIPE_DIGEST, digest, DomainError } from "../../../packages/core/dist/index.js";
 import { Store } from "../dist/persistence/store.js";
 import { OpenAISpeechExecution } from "../dist/execution/openai-speech-execution.js";
 import { ExecutionOutputStore } from "../dist/execution/output-store.js";
@@ -299,11 +299,11 @@ test("revocation and expiry stop new admissions without retroactively cancelling
 
 test("historical matching lock is pinned for replay and cannot be replaced by a later equivalent lock", async t => {
   const f = speechFixture(t), oldLock = f.store.get("capability_lock", f.project.capabilityLockId), current = f.store.getProject(f.project.id), nextLockId = randomUUID();
-  f.store.insert("capability_lock", nextLockId, f.project.id, { profiles: [{ ...f.profile, unitCostMicros: "200" }] });
+  f.store.insert("capability_lock", nextLockId, f.project.id, { recipeDigest: RECIPE_DIGEST, profiles: [{ ...f.profile, unitCostMicros: "200" }] });
   f.store.saveProject({ ...current, capabilityLockId: nextLockId }, current.headVersion);
   const completed = await f.bridge.submit(f.request, context(f)); assert.equal(completed.type, "completed");
   const mapping = rows(f, "speech_execution_mapping")[0]; assert.equal(mapping.capabilityLockId, oldLock.id); assert.equal(mapping.capabilityLockDigest, digest(oldLock));
-  const equivalent = randomUUID(); f.store.insert("capability_lock", equivalent, f.project.id, { profiles: [f.profile] });
+  const equivalent = randomUUID(); f.store.insert("capability_lock", equivalent, f.project.id, { recipeDigest: RECIPE_DIGEST, profiles: [f.profile] });
   f.store.db.prepare("DELETE FROM entities WHERE kind='capability_lock' AND id=?").run(oldLock.id);
   await assert.rejects(f.bridge.lookup(f.attempt.id), { code: "SPEECH_EXECUTION_CONFLICT" }); assert.equal(f.calls.http, 1);
 });

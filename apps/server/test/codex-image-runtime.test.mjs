@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {CodexImageWorkerTransport} from '@openslate/director';
 import {codexImageFixture as fixture,codexImageProfile as codex,codexRuntimeConfiguration as config,codexRowCounts as rowCounts} from './codex-image-execution-fixture.mjs';
 import { GenerationOverviewReader } from '../dist/generation-overview.js';
-test('disabled Codex remains unregistered despite trusted access and preserves legacy factory defaults',t=>{
-  const f=fixture(t,{configuration:{image:false,h3:false,h3DownloadHosts:[]}}),before=rowCounts(f),runtime=f.build();
+test('disabled Codex remains unregistered despite trusted access and preserves demo factory defaults',t=>{
+  const f=fixture(t,{configuration:{...config(),codexImage:false}}),before=rowCounts(f),runtime=f.build();
   assert.throws(()=>runtime.engine.registry.resolve({adapter:'codex-image',version:'1'}),{code:'PROVIDER_NOT_REGISTERED'});
   assert.deepEqual(runtime.productionOptions,{});assert.deepEqual(rowCounts(f),before);assert.equal(f.calls.prepare,0);assert.equal(f.calls.start,0);
   const native=runtime.providerCatalog.view().profiles.find(row=>row.id===codex.id);

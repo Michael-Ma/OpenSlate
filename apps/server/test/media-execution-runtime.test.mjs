@@ -30,7 +30,8 @@ const viggleProfile = { id: "configured-viggle-video", revision: "viggle-config-
   maxConcurrency: 1, unitCostMicros: "900000", maxRetries: 0, minFrames: 90, maxFrames: 450 };
 const viggleConfig = () => ({ ...config(), viggleH3: true, viggleH3DownloadHosts: ["viggle.example.test"] });
 const providerConfiguration = { version: 1, profiles: [{ label: "Configured image", profile: imageProfile }, { label: "Configured video", profile: videoProfile }] };
-const config = (image = false, h3 = false) => ({ image, h3, h3DownloadHosts: h3 ? ["media.example.test"] : [] });
+const config = (image = false, h3 = false) => ({ image, codexImage: false, h3, speech: false, transcription: false, viggleH3: false,
+  h3DownloadHosts: h3 ? ["media.example.test"] : [], viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 let inputDirectory, png, voice;
 before(async () => {
@@ -73,6 +74,7 @@ function fixture(t, options = {}) {
     const runtime = f.runtime, production = legacy ? new ProductionService(store, runtime.engine) : f.production, profile = kind === "image" ? imageProfile : options.videoProfile ?? videoProfile;
     const selection = runtime.providerCatalog.select(runtime.providerCatalog.digest, [profile.id]);
     const created = production.createProject("Offline runtime composition", selection), seed = projectFixture(created.id, 1);
+    if (kind === "video") seed.shots[0].narration = { mode: "uploaded", text: "Built to last.", voice: "stock" };
     let project = store.saveProject({ ...seed, capabilityLockId: created.capabilityLockId }, created.headVersion);
     const human = production.beginRequest(project.id, "offline-human", "Plan one exact media operation");
     let reference;
@@ -161,6 +163,20 @@ test("enabled routes require executable local tools, while disabled startup supp
   f.arguments_.ffmpegPath = f.directory; f.arguments_.ffprobePath = ffprobePath;
   assert.throws(f.build, { code: "MEDIA_EXECUTION_TOOLS_REQUIRED" });
   assert.equal(f.store.listProjects().length, 0); assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 });
+});
+
+test("runtime configuration requires every route switch and host list explicitly before construction", t => {
+  const f = fixture(t, { tools: false });
+  for (const field of Object.keys(config())) {
+    const configuration = config(); delete configuration[field]; f.arguments_.configuration = configuration;
+    assert.throws(f.build, { code: "MEDIA_EXECUTION_CONFIGURATION" }, `Missing ${field}`);
+    for (const value of field.endsWith("DownloadHosts") ? [null, "media.example.test", {}] : [null, 1, "1"]) {
+      f.arguments_.configuration = { ...config(), [field]: value };
+      assert.throws(f.build, { code: "MEDIA_EXECUTION_CONFIGURATION" }, `Malformed ${field}`);
+    }
+  }
+  assert.equal(f.store.listProjects().length, 0); assert.equal(existsSync(join(f.directory, "uploads")), false);
+  assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 }); assert.deepEqual(f.viggleCalls, { fetch: 0, lookup: 0, download: 0 });
 });
 
 test("readiness separates enabled host routes, credential availability and unregistered providers", t => {

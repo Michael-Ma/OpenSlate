@@ -22,6 +22,8 @@ A saved profile pins ID/revision/kind, adapter/version, exact model/settings, co
 
 Registered execution identities bind requests to the compiled-in adapter. Credentials resolve only through fixed backend aliases. No browser/model-supplied endpoint, key or arbitrary adapter code is accepted. There is no automatic provider fallback.
 
+Runtime configuration explicitly supplies every route switch and download-host array, with `false` switches and empty arrays when no routes or hosts are configured. Only optional Codex binary/home paths may be omitted. Viggle preparation and backup validation reproduce the current centre-crop recipe; crop metadata is absent only for inputs that already need no crop.
+
 ## Output boundary
 
 1. Retain a provider effect/receipt and exact task identity where available.

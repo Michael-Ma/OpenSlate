@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canonical, digest } from '@openslate/core';
+import { RECIPE_DIGEST, canonical, digest } from '@openslate/core';
 import { createTranscriptionPreparationIntent, resolveTranscriptionPreparationIntent } from '../dist/execution/transcription-preparation.js';
 import { assertTranscriptionPreparationAttemptState } from '../dist/persistence/transcription-preparation-state.js';
 import { transcriptionFixture, context, rows } from './transcription-execution-fixture.mjs';
@@ -115,7 +115,7 @@ test('the exact first dispatch exits preparing once and retains immutable protoc
 
 test('transport cannot replace the proof-pinned lock with another valid matching profile lock', async t => {
   const f = await waiting(t), lockId = 'alternate-retained-lock';
-  const lock = f.store.insert('capability_lock', lockId, f.project.id, { profiles: [f.profile] });
+  const lock = f.store.insert('capability_lock', lockId, f.project.id, { recipeDigest: RECIPE_DIGEST, profiles: [f.profile] });
   const insert = f.store.insert.bind(f.store); let rejected = false;
   f.store.insert = (kind, id, projectId, value) => {
     if (kind !== 'transcription_execution_mapping') return insert(kind, id, projectId, value);

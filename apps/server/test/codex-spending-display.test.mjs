@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {compilePlan,digest,providerProfileArguments} from '../../../packages/core/dist/index.js';
+import { RECIPE_DIGEST,compilePlan,digest,providerProfileArguments} from '../../../packages/core/dist/index.js';
 import {registerExecutionProvider,OPENAI_IMAGE_MODEL} from '../../../packages/providers/dist/index.js';
 import {Store} from '../dist/persistence/store.js';
 import {Engine} from '../dist/execution/engine.js';
@@ -26,7 +26,7 @@ test('one zero-dollar Codex allowance still exhausts its finite start permission
     async poll(){return {type:'unknown'};},async lookup(){return {type:'unknown'};}},{adapter:'codex-image',version:'1'});
   const admission=new DurableExternalAdmission(store,()=>{}),engine=new Engine(store,port,{artifactDir:join(directory,'artifacts'),profiles,externalAdmission:admission,budgetMicros:'0'});
   const service=new ProductionService(store,engine,profiles),allowances=new ExternalAllowanceService(store),project=projectFixture(randomUUID(),2);
-  store.createProject(project);store.insert('capability_lock',project.capabilityLockId,project.id,{profiles});
+  store.createProject(project);store.insert('capability_lock',project.capabilityLockId,project.id,{recipeDigest:RECIPE_DIGEST,profiles});
   const grantActor=service.beginRequest(project.id,'local-user','Create the two exact keyframes',{editing:false});
   const compiled=compilePlan(`definePlan({baseRevision:${JSON.stringify(project.revisionId)}},p=>{${project.shots.map((shot,i)=>`const image${i}=p.image("frame-${i}",{intent:p.shot(${JSON.stringify(shot.id)}),profile:"codex-image-v1",prompt:${JSON.stringify(shot.imagePrompt)}});`).join('')}return [image0,image1];});`,
     {project,profiles,logicalIds:{},allocateId:randomUUID});

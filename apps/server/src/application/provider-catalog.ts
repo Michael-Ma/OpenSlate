@@ -36,8 +36,8 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
     "PROVIDER_CATALOG_INVALID", "Provider limits and an explicit estimated unit cost are required");
   moneyMicros(profile.unitCostMicros);
   if (profile.adapter === "fake") {
-    const legacy = BUILT_IN_PROFILES.find(item => item.id === profile.id);
-    invariant(legacy && canonical(profile) === canonical(legacy), "PROVIDER_CATALOG_INVALID", "Built-in fake profiles cannot be redefined");
+    const demo = BUILT_IN_PROFILES.find(item => item.id === profile.id);
+    invariant(demo && canonical(profile) === canonical(demo), "PROVIDER_CATALOG_INVALID", "Built-in fake profiles cannot be redefined");
     return { credential: null, media: null, fixture: true };
   }
   invariant(profile.executionVersion === "1", "PROVIDER_CATALOG_INVALID", "Unsupported execution mapping version");

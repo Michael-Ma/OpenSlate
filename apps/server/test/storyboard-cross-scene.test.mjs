@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_PROFILES } from '@openslate/core';
+import { RECIPE_DIGEST, DEFAULT_PROFILES } from '@openslate/core';
 import { setup } from './execution-fixture.mjs';
 import { ProductionService } from '../dist/application/service.js';
 import { createApp } from '../dist/app.js';
@@ -10,7 +10,7 @@ import { GenerationOverviewReader } from '../dist/generation-overview.js';
 function fixture(t) {
   const f = setup(t, { count: 3 }), service = new ProductionService(f.store, f.engine);
   const project = f.store.getProject(f.projectId);
-  f.store.insert('capability_lock', project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES });
+  f.store.insert('capability_lock', project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: DEFAULT_PROFILES });
   const app = createApp({ service, localToken: 'cross-scene-test-token' });
   t.after(() => app.close());
   const head = () => f.store.getProject(f.projectId);

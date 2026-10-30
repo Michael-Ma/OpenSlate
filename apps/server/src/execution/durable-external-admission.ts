@@ -1,7 +1,7 @@
 import { characterSheetJobNode } from "./character-sheet-execution.js";
 import { canonical, digest, DomainError, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { ProjectRecord, ProviderProfile } from "@openslate/core";
-import { isLegacyExecution, profileExecutionIdentity } from "@openslate/providers";
+import { isDemoExecution, profileExecutionIdentity } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import type { Attempt, Candidate, ExternalExecutionAdmission, NodeBinding, PlanRecord } from "./engine.js";
@@ -25,7 +25,7 @@ export function currentExternalSelection(store: Store, projectId: string, select
     && candidate?.projectId === projectId && candidate.nodeId === selection.nodeId && profile?.kind === node.kind,
   "EXTERNAL_SELECTION_STALE", "Provider selection must match the current unfinished plan node and candidate");
   const args = providerProfileArguments(profile);
-  invariant(!isLegacyExecution(profileExecutionIdentity(profile)) && args.profileDigest === profileDigest && digest(profile) === profileDefinitionDigest
+  invariant(!isDemoExecution(profileExecutionIdentity(profile)) && args.profileDigest === profileDigest && digest(profile) === profileDefinitionDigest
     && Object.entries(args).every(([key, value]) => Object.hasOwn(node.args, key) && canonical(node.args[key]) === canonical(value)),
   "EXTERNAL_PROFILE_MISMATCH", "Dispatch requires the exact current external profile and compiled settings");
   return { project, binding, profile };

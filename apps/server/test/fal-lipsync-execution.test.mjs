@@ -271,11 +271,13 @@ test("quotes price lip sync per second of audio by resolution, with the long-cli
   assert.throws(() => profilePolicy({ ...profile, minFrames: 120 }), { code: "PROVIDER_CATALOG_INVALID" });
 });
 
-test("a fal key enables lip sync with the default fal CDN download hosts; without one the configuration reads as before", () => {
-  assert.deepEqual(readMediaExecutionConfiguration({}), { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+test("a fal key enables lip sync with the default fal CDN hosts and disabling it returns explicit empty configuration", () => {
+  assert.deepEqual(readMediaExecutionConfiguration({}), { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
   const configured = readMediaExecutionConfiguration({ OPENSLATE_FAL_API_KEY: "id:secret" });
   assert.equal(configured.falLipSync, true); assert.deepEqual(configured.falLipSyncDownloadHosts, ["v3.fal.media", "v3b.fal.media", "fal.media"]);
-  assert.equal(readMediaExecutionConfiguration({ OPENSLATE_FAL_API_KEY: "id:secret", OPENSLATE_ENABLE_FAL_LIPSYNC: "0" }).falLipSync, undefined);
+  const disabled = readMediaExecutionConfiguration({ OPENSLATE_FAL_API_KEY: "id:secret", OPENSLATE_ENABLE_FAL_LIPSYNC: "0" });
+  assert.equal(disabled.falLipSync, false); assert.deepEqual(disabled.falLipSyncDownloadHosts, []);
+  assert.ok(Object.isFrozen(disabled.falLipSyncDownloadHosts));
 });
 
 test("singing shots route to the lip-sync profile with their song window; ordinary shots stay on the video profile", () => {

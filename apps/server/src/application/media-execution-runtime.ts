@@ -62,15 +62,11 @@ function executable(path: string | null): path is string {
 export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOptions) {
   const startupTimeoutMs = readCodexStartupTimeout(options.startupTimeoutMs === undefined ? {} : { OPENSLATE_CODEX_STARTUP_TIMEOUT_MS: String(options.startupTimeoutMs) });
   const { store, fakeProvider, ffmpegPath, ffprobePath } = options;
-  const captured = structuredClone(options.configuration);
-  const configuration = { ...captured, codexImage: captured.codexImage === undefined ? false : captured.codexImage, speech: captured.speech === undefined ? false : captured.speech,
-    transcription: captured.transcription === undefined ? false : captured.transcription,
-    viggleH3: captured.viggleH3 === undefined ? false : captured.viggleH3,
-    viggleH3DownloadHosts: captured.viggleH3DownloadHosts === undefined ? [] : captured.viggleH3DownloadHosts,
-    falLipSync: captured.falLipSync === true, falLipSyncDownloadHosts: captured.falLipSyncDownloadHosts ?? [] };
+  const configuration = structuredClone(options.configuration);
   invariant(typeof configuration.image === "boolean" && typeof configuration.codexImage === "boolean" && typeof configuration.h3 === "boolean"
     && typeof configuration.speech === "boolean" && typeof configuration.transcription === "boolean" && typeof configuration.viggleH3 === "boolean"
-    && Array.isArray(configuration.h3DownloadHosts) && Array.isArray(configuration.viggleH3DownloadHosts),
+    && typeof configuration.falLipSync === "boolean" && Array.isArray(configuration.h3DownloadHosts)
+    && Array.isArray(configuration.viggleH3DownloadHosts) && Array.isArray(configuration.falLipSyncDownloadHosts),
     "MEDIA_EXECUTION_CONFIGURATION", "Use validated local generation configuration");
   const enabled = configuration.image || configuration.codexImage || configuration.h3 || configuration.viggleH3 || configuration.falLipSync || configuration.speech || configuration.transcription,
     haveTools = executable(ffmpegPath) && executable(ffprobePath);

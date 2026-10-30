@@ -20,13 +20,6 @@ function ingested({ attempt, output, artifactDir }) {
     artifact: { artifactId: id, sha256: output.sha256, kind: output.kind },
     path, mimeType: output.mimeType, fixture: output.fixture, physicalDurationSeconds: null };
 }
-// Deliberately construct a pre-refactor fixture; production Store APIs still forbid request mutation.
-function legacyAttempt(f, attempt) {
-  const old = structuredClone(attempt); delete old.request.execution;
-  f.store.db.prepare("UPDATE entities SET body=? WHERE kind='attempt' AND id=?").run(JSON.stringify(old), old.id);
-  return old;
-}
-
 test("execution requires trusted registration rather than a concrete provider class", async t => {
   const f = setup(t, { count: 1, imagesOnly: true }); const wrapped = wrap(f.provider);
   assert.throws(() => new Engine(f.store, wrapped, { artifactDir: f.artifactDir }), { code: "PROVIDER_NOT_REGISTERED" });
@@ -58,7 +51,7 @@ test("adapter mutation cannot alter the immutable submission request or current 
 });
 
 test("technical classification alone never grants an automatic retry", async t => {
-  for (const classification of [{ technical: true }, { technical: true, retryAllowed: false }, { technical: false, retryAllowed: true }]) {
+  for (const classification of [{ technical: true, retryAllowed: false }, { technical: false, retryAllowed: true }]) {
     const f = setup(t, { count: 1, imagesOnly: true }); let calls = 0;
     const provider = register({
       async submit() { calls++; return { type: "failed", taskId: "fixture-task", failureId: "fixture-failure", ...classification }; },
@@ -74,12 +67,15 @@ test("technical classification alone never grants an automatic retry", async t =
 });
 
 test("malformed provider failures remain unknown and keep their reservation", async t => {
-  const f = setup(t, { count: 1, imagesOnly: true });
-  f.provider.submit = async () => ({ type: "failed", taskId: "task", failureId: "failure", retryAllowed: true });
-  await f.engine.runReady(); await f.engine.runReady();
-  const [attempt] = f.engine.attempts(f.projectId);
-  assert.equal(attempt.phase, "submission_unknown"); assert.equal(attempt.failure, null);
-  assert.equal(f.engine.attempts(f.projectId).length, 1); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+  for (const classification of [{ retryAllowed: true }, { technical: true }]) {
+    const f = setup(t, { count: 1, imagesOnly: true }); let submissions = 0;
+    f.provider.submit = async () => { submissions++; return { type: "failed", taskId: "task", failureId: "failure", ...classification }; };
+    await f.engine.runReady(); await f.engine.runReady();
+    const [attempt] = f.engine.attempts(f.projectId);
+    assert.equal(attempt.phase, "submission_unknown"); assert.equal(attempt.failure, null);
+    assert.equal(f.engine.attempts(f.projectId).length, 1); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+    assert.equal(submissions, 1);
+  }
 });
 
 test("contradictory task receipts are retained without replacing the accepted task or blocking later recovery", async t => {
@@ -235,34 +231,34 @@ test("unusable initial completion retains its task receipt and recovers by polli
   assert.equal(f.engine.attempts(f.projectId)[0].phase, "succeeded");
 });
 
-test("legacy completed evidence replays byte-for-byte without another provider call", async t => {
+test("completed evidence replays byte-for-byte without another provider call", async t => {
   const f = setup(t, { count: 1, imagesOnly: true }); await f.engine.runReady();
-  const old = legacyAttempt(f, { ...f.engine.attempts(f.projectId)[0], leaseExpiresAt: 0 });
-  const outcome = await f.provider.poll(old.taskId), evidenceId = randomUUID();
-  f.store.insert("execution_evidence", evidenceId, f.projectId, { attemptId: old.id, outcome, outcomeDigest: digest(outcome), recordedAt: new Date().toISOString() });
+  const saved = { ...f.engine.attempts(f.projectId)[0], leaseExpiresAt: 0 };
+  f.store.put("attempt", saved.id, f.projectId, saved);
+  const outcome = await f.provider.poll(saved.taskId), evidenceId = randomUUID();
+  f.store.insert("execution_evidence", evidenceId, f.projectId, { attemptId: saved.id, outcome, outcomeDigest: digest(outcome), recordedAt: new Date().toISOString() });
   const evidence = f.store.get("execution_evidence", evidenceId);
   f.provider.poll = f.provider.lookup = async () => { throw Error("provider must not be contacted"); };
   const restarted = new Engine(f.store, f.provider, { artifactDir: f.artifactDir }); await restarted.reconcile();
   assert.equal(restarted.attempts(f.projectId)[0].phase, "succeeded");
   assert.deepEqual(f.store.get("execution_evidence", evidenceId), evidence);
-  assert.deepEqual(restarted.attempts(f.projectId)[0].request, old.request);
+  assert.deepEqual(restarted.attempts(f.projectId)[0].request, saved.request);
   assert.equal(f.provider.acceptedCount(), 1);
 });
 
-test("legacy failed attempts retain their recorded retry authority and immutable failure evidence", async t => {
+test("failed attempts retain their explicit retry authority and immutable failure evidence after restart", async t => {
   const f = setup(t, { count: 1, imagesOnly: true });
   f.provider.setMode(f.plan.nodes[0].id, ["technical_failure", "complete"]);
   await f.engine.runReady(); await f.engine.reconcile();
-  const old = legacyAttempt(f, f.engine.attempts(f.projectId)[0]);
+  const saved = f.engine.attempts(f.projectId)[0];
   const evidence = f.store.list("execution_evidence", f.projectId).find(row => row.outcome.type === "failed");
-  delete evidence.outcome.retryAllowed; evidence.outcomeDigest = digest(evidence.outcome);
-  f.store.db.prepare("UPDATE entities SET body=? WHERE kind='execution_evidence' AND id=?").run(JSON.stringify(evidence), evidence.id);
+  assert.equal(evidence.outcome.retryAllowed, true);
   const restarted = new Engine(f.store, f.provider, { artifactDir: f.artifactDir });
   await restarted.runReady(); await restarted.reconcile();
   const attempts = restarted.attempts(f.projectId);
   assert.equal(attempts.length, 2); assert.equal(attempts[1].phase, "succeeded");
-  assert.equal(attempts[1].candidateId, old.candidateId); assert.equal(attempts[1].ordinal, 2);
+  assert.equal(attempts[1].candidateId, saved.candidateId); assert.equal(attempts[1].ordinal, 2);
   assert.equal(attempts[0].failure.source, "fake_provider"); assert.equal(attempts[0].failure.retryAllowed, true);
   assert.deepEqual(f.store.get("execution_evidence", evidence.id), evidence);
-  assert.deepEqual(attempts[0].request, old.request); assert.deepEqual(attempts[1].request.execution, { adapter: "fake", version: "1" });
+  assert.deepEqual(attempts[0].request, saved.request); assert.deepEqual(attempts[1].request.execution, { adapter: "fake", version: "1" });
 });

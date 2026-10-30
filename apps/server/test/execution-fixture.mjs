@@ -12,7 +12,7 @@ export function projectFixture(id = randomUUID(), count = 2) {
     id: `shot-${index}`, revisionId: randomUUID(), sceneId: `scene-${index}`, purpose: "Show the product",
     action: "A boot on a bench", framing: "Wide", motion: "Slow push", desiredFrames: 180,
     imagePrompt: `Boot angle ${index}`, videoPrompt: `Slow push angle ${index}`, referenceArtifactIds: [], cueId: null,
-    promptIntent: { image: "", video: "" },
+    promptIntent: { image: "", video: "" }, narration: { mode: "none", text: "", voice: "stock" },
   }));
   for (const shot of shots) refreshIntent(shot);
   return { id, revisionId: randomUUID(), headVersion: 0, name: "Fake execution", brief: "A labeled fake test", story: "Product study", scenes: shots.map(shot => ({ id: shot.sceneId, revisionId: randomUUID(), purpose: "Product" })), narration: { script: "", source: "undecided" }, maxFrames: 10800, capabilityLockId: randomUUID(), shots, cues: [], artifacts: [], activePlanId: null };
