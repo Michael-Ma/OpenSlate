@@ -20,8 +20,8 @@ export interface ExecutionOutput {
 /** Small owned-byte descriptor. Raw bytes and protected vendor locators stay outside execution evidence. */
 export interface ExecutionSpoolOutput {
   port: "image" | "video" | "audio" | "cues"; kind: "image" | "video" | "audio" | "data";
-  mimeType: "image/png" | "video/mp4" | "audio/wav" | "application/json";
-  extension: "png" | "mp4" | "wav" | "json"; sha256: string; byteLength: number; fixture: false;
+  mimeType: "image/png" | "video/mp4" | "audio/wav" | "audio/mpeg" | "application/json";
+  extension: "png" | "mp4" | "wav" | "mp3" | "json"; sha256: string; byteLength: number; fixture: false;
   storage: { type: "spool"; spoolId: string };
 }
 export type ExecutionSpoolRole = Pick<ExecutionSpoolOutput, "port" | "kind" | "mimeType" | "extension">;
@@ -30,9 +30,11 @@ export const EXECUTION_SPOOL_ROLES = Object.freeze({
   image: Object.freeze({ port: "image", kind: "image", mimeType: "image/png", extension: "png" } as const),
   video: Object.freeze({ port: "video", kind: "video", mimeType: "video/mp4", extension: "mp4" } as const),
   speech: Object.freeze({ port: "audio", kind: "audio", mimeType: "audio/wav", extension: "wav" } as const),
+  musicMp3: Object.freeze({ port: "audio", kind: "audio", mimeType: "audio/mpeg", extension: "mp3" } as const),
   transcription: Object.freeze({ port: "cues", kind: "data", mimeType: "application/json", extension: "json" } as const),
 });
-export function executionSpoolRole(kind: OperationKind): Readonly<ExecutionSpoolRole> | null {
+export function executionSpoolRole(kind: OperationKind, mimeType?: string): Readonly<ExecutionSpoolRole> | null {
+  if (kind === "music") return mimeType === "audio/mpeg" ? EXECUTION_SPOOL_ROLES.musicMp3 : EXECUTION_SPOOL_ROLES.speech;
   return Object.hasOwn(EXECUTION_SPOOL_ROLES, kind) ? EXECUTION_SPOOL_ROLES[kind as keyof typeof EXECUTION_SPOOL_ROLES] : null;
 }
 export interface ExecutionSpoolCompletion {
@@ -62,7 +64,7 @@ export interface ExecutionCallOptions {
 
 const DEMO_EXECUTION_IDENTITY = Object.freeze({ adapter: "fake", version: "1" });
 const registrations = new WeakMap<ExecutionProvider, Readonly<ExecutionIdentity>>();
-const generated = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
+const generated = new Set<OperationKind>(["image", "video", "speech", "music", "transcription"]);
 
 const contractId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
 const identityKey = (identity: ExecutionIdentity) => JSON.stringify([identity.adapter, identity.version]);
@@ -177,13 +179,13 @@ function normalizeSpoolCompletion(value: Record<string, unknown>, request?: Exec
     || !hash(output.sha256) || !Number.isSafeInteger(output.byteLength) || Number(output.byteLength) <= 0
     || Number(output.byteLength) > EXECUTION_SPOOL_LIMITS[role.kind] || output.fixture !== false
     || !object(output.storage) || !exact(output.storage, ["type", "spoolId"]) || output.storage.type !== "spool"
-    || output.storage.spoolId !== value.receiptId || (request && executionSpoolRole(request.kind) !== role)) return null;
+    || output.storage.spoolId !== value.receiptId || (request && executionSpoolRole(request.kind, String(output.mimeType)) !== role)) return null;
   return structuredClone(value) as unknown as ExecutionSpoolCompletion;
 }
 
 /** Validate and copy normalized adapter observations before saving immutable evidence. */
 export function normalizeExecutionOutcome(value: unknown, request?: ExecutionRequest): ExecutionOutcome {
-  const synchronousRaw = request?.kind === "speech" || request?.kind === "transcription"
+  const synchronousRaw = request?.kind === "music" || request?.kind === "speech" || request?.kind === "transcription"
     || (object(value) && Array.isArray(value.outputs) && value.outputs.length === 1 && object(value.outputs[0])
       && (value.outputs[0].kind === "audio" || value.outputs[0].kind === "data"));
   const invalid = (): ExecutionOutcome => ({ type: "unknown", diagnostic: "Invalid execution provider observation",
@@ -206,7 +208,8 @@ export function normalizeExecutionOutcome(value: unknown, request?: ExecutionReq
         && request.execution?.adapter === "codex-image" && request.execution.version === "1"
         && value.technical === false && value.retryAllowed === false
         || value.taskId === null && value.failureId === "SUBMISSION_RESPONSE_LOST"
-        && value.retryAllowed === false) : value.certainty !== "not_accepted")) return invalid();
+        && value.retryAllowed === false
+        || value.taskId === null && request?.kind === "music" && ["LYRIA_AUDIO_MISSING", "LYRIA_AUDIO_INVALID"].includes(String(value.failureId)) && value.technical === true && value.retryAllowed === false) : value.certainty !== "not_accepted")) return invalid();
     return structuredClone(value) as unknown as ExecutionOutcome;
   }
   if (value.type !== "completed" || !exact(value, ["type", "taskId", "outputs"]) || !id(value.taskId)
@@ -226,7 +229,7 @@ export function normalizeExecutionOutcome(value: unknown, request?: ExecutionReq
   }
   if (request) {
     const roles: Record<OperationKind, [string, ArtifactRef["kind"]]> = {
-      image: ["image", "image"], video: ["video", "video"], speech: ["audio", "audio"],
+      image: ["image", "image"], video: ["video", "video"], speech: ["audio", "audio"], music: ["audio", "audio"],
       transcription: ["cues", "data"], timeline: ["timeline", "data"], render: ["video", "video"],
     };
     const expected = roles[request.kind];

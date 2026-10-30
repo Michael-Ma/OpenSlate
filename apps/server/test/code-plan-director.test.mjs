@@ -251,13 +251,15 @@ test('pinned example executes every ctx call through JSON, stable choices, varia
     calls.push({method,args});
     if(method==='scene'||method==='shot')return args[0];if(method==='log')return null;if(method==='choose')return args[1].options[0];
     if(method==='video'&&!args[0].variant)return{ok:false,error:{code:'FAILED',message:'Fixture fallback',retry:'consent',mayHaveCharged:true}};
-    const item=artifact(method==='image'?'image':'video');return{ok:true,artifact:item,artifacts:[item]};
+    const item=artifact(method==='image'?'image':method==='music'?'audio':'video');return{ok:true,artifact:item,artifacts:[item],...(method==='music'?{leadInSamples:12000,durationSamples:600000}:{})};
   }});
   assert.equal(result.state,'done',JSON.stringify(result));
   assert.equal(calls.filter(c=>c.method==='image').length,6);
   assert.deepEqual(calls.filter(c=>c.method==='choose').map(c=>c.args[0]),['shot-1-keyframe','shot-2-keyframe','shot-1-retry','shot-2-retry']);
+  assert.equal(calls.filter(c=>c.method==='music').length,1);
+  assert.deepEqual(calls.find(c=>c.method==='render').args[0].audio.map(row=>[row.startSample,row.durationSamples,row.fadeOutSamples]),[[12000,576000,96000]]);
   assert.equal(calls.filter(c=>c.method==='video').length,4);assert.equal(calls.filter(c=>c.method==='render').length,1);
-  assert.deepEqual(calls.find(c=>c.method==='render').args[0].map(row=>row.motion),
+  assert.deepEqual(calls.find(c=>c.method==='render').args[0].timeline.map(row=>row.motion),
     ['Slow gentle push in', 'Locked camera, subtle steam']);
 });
 

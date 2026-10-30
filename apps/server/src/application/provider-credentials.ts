@@ -1,6 +1,6 @@
 import { DomainError, invariant } from "@openslate/core";
 
-export type MediaCredentialId = "openai-media" | "minimax-video" | "viggle-video" | "fal-video" | "modelark-video" | "gemini-audio";
+export type MediaCredentialId = "openai-media" | "minimax-video" | "viggle-video" | "fal-video" | "modelark-video" | "gemini-audio" | "gemini-music";
 const VARIABLES: Readonly<Record<MediaCredentialId, string>> = Object.freeze({
   "openai-media": "OPENSLATE_OPENAI_API_KEY",
   "minimax-video": "OPENSLATE_MINIMAX_API_KEY",
@@ -10,6 +10,7 @@ const VARIABLES: Readonly<Record<MediaCredentialId, string>> = Object.freeze({
   "modelark-video": "OPENSLATE_MODELARK_API_KEY",
   /** Google Gemini API key for song analysis (sections, lyrics, mood); used only after the person presses Analyze song. */
   "gemini-audio": "OPENSLATE_GEMINI_API_KEY",
+  "gemini-music": "OPENSLATE_GEMINI_API_KEY",
 });
 export interface MediaCredentialStatus { id: MediaCredentialId; configured: boolean }
 const valid = (value: unknown): value is string => typeof value === "string" && value.length >= 1 && value.length <= 8192 && !/[\s\x00-\x1f\x7f]/.test(value);

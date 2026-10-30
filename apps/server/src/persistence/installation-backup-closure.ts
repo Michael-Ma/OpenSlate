@@ -1,3 +1,4 @@
+import { assertMusicArtifact } from "../execution/spool-music-ingester.js";
 import { composeOwnedTranscriptionPlan } from '../narration/owned-transcription-composition.js';
 import type { ArtifactRecord } from "../execution/engine.js";
 import { assertConfiguredProviderAdmission } from "../execution/provider-use.js";
@@ -401,8 +402,17 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         if (value.origin === "generated_video" && value.attemptId && viggle.applicable(get("attempt", value.attemptId) as Attempt))
           await viggle.derivation(get("video_derivation_intent", value.derivationId) as VideoDerivationIntent,
             get("video_derivation_receipt", value.derivationId) as VideoDerivationReceipt, true);
-        if (value.origin === "generated_audio") fail(get("audio_derivation_receipt", value.derivationId).source.artifactId === value.id,
-          "Generated audio artifact lost its derivation receipt");
+        if (value.origin === "generated_audio") {
+          const music = value.attemptId && get("attempt", value.attemptId).request.kind === "music";
+          const receipt = get(music ? "music_ingestion_receipt" : "audio_derivation_receipt", value.derivationId);
+          fail(receipt.source.artifactId === value.id, "Generated audio artifact lost its derivation receipt");
+          if (music) {
+            const output = get("execution_output_receipt", receipt.spoolId);
+            assertMusicArtifact(speechReader, get("attempt", value.attemptId) as Attempt, { port: "audio", kind: "audio", mimeType: output.mimeType,
+              extension: output.mimeType === "audio/mpeg" ? "mp3" : "wav", sha256: output.source.sha256, byteLength: output.source.byteLength,
+              fixture: false, storage: { type: "spool", spoolId: receipt.spoolId } }, value as ArtifactRecord);
+          }
+        }
         if (value.origin === "transcription_response") fail(get("transcript_candidate", value.transcriptCandidateId).artifactId === value.id,
           "Raw transcription artifact lost its unreviewed candidate");
       }
@@ -435,7 +445,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
           await viggle.derivation(get("video_derivation_intent", value.derivationId) as VideoDerivationIntent,
             get("video_derivation_receipt", value.derivationId) as VideoDerivationReceipt, true);
         if (value.origin === "generated_audio") {
-          const receipt = get("audio_derivation_receipt", value.derivationId);
+          const receipt = get(get("attempt", value.attemptId).request.kind === "music" ? "music_ingestion_receipt" : "audio_derivation_receipt", value.derivationId);
           fail(canonical(value) === canonical({ id: receipt.source.artifactId, projectId: receipt.projectId, source: receipt.source,
             origin: "generated_audio", attemptId: receipt.attemptId, derivationId: receipt.id }), "Generated audio source lost its exact provenance");
         }
@@ -471,6 +481,18 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       } else if (row.kind === "video_derivation_receipt") {
         await viggle.derivation(get("video_derivation_intent", row.id) as VideoDerivationIntent, value as VideoDerivationReceipt, true);
         fail(canonical(await json(`video-derivations/completions/${row.id}.json`)) === canonical(value), "Saved derivation differs from its published receipt");
+      } else if (row.kind === "music_ingestion_receipt") {
+        const intent = get("music_ingestion_intent", row.id), attempt = get("attempt", value.attemptId), result = get("lyria_result", value.attemptId);
+        const raw = get("execution_output_receipt", value.spoolId);
+        assertOutputReceiptIdentity(raw as OutputReceipt, attempt as Attempt);
+        fail(attempt.request.kind === "music" && attempt.request.execution.adapter === "gemini-lyria"
+          && value.requestDigest === digest(attempt.request) && result.requestDigest === value.requestDigest
+          && result.observationDigest === digest(result.observation) && result.dispatchDigest === digest(get("lyria_dispatch", value.attemptId))
+          && result.observation.kind === "completed" && result.observation.receiptId === value.spoolId
+          && canonical({ ...intent, source: value.source, leadInSamples: value.leadInSamples }) === canonical(value)
+          && raw.source.kind === "returned_bytes" && raw.source.sha256 === value.rawSha256 && value.source.originalSha256 === value.rawSha256
+          && value.source.originalByteLength === raw.source.byteLength, "Music receipt lost its exact request, returned bytes or normalization intent");
+        await source(value.source);
       } else if (row.kind === "audio_derivation_intent") {
         await audioIntent(value as AudioDerivationIntent);
       } else if (row.kind === "audio_derivation_receipt") {

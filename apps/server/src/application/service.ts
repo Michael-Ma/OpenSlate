@@ -61,8 +61,8 @@ export interface ProductionServiceOptions {
   newProjectLocalExecutionFor?: "all" | "external-video";
   /** Ready lip-sync profiles pinned beside a real video model on new projects; they make only singing shots. */
   newProjectLipSyncProfiles?: readonly ProviderProfile[];
-  /** Ready video models a new code film may also use; its plan picks one per shot. */
-  newCodeProjectVideoProfiles?: readonly ProviderProfile[];
+  /** Ready video and music models a new code film may also use; its plan picks one per shot. */
+  newCodeProjectMediaProfiles?: readonly ProviderProfile[];
 }
 interface ProjectCapabilityLock {
   projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string;
@@ -84,7 +84,7 @@ export class ProductionService {
   private readonly newProjectLocalExecution: Readonly<LocalExecutionIdentity> | undefined;
   private readonly newProjectLocalExecutionFor: "all" | "external-video";
   private readonly newProjectLipSyncProfiles: readonly ProviderProfile[];
-  private readonly newCodeProjectVideoProfiles: readonly ProviderProfile[];
+  private readonly newCodeProjectMediaProfiles: readonly ProviderProfile[];
   constructor(readonly store: Store, readonly engine: Engine, readonly profiles: ProviderProfile[] = DEFAULT_PROFILES,
     options: ProductionServiceOptions = {}) {
     const selected = options.newProjectLocalExecution;
@@ -94,7 +94,7 @@ export class ProductionService {
     invariant(scope !== "external-video" || this.newProjectLocalExecution, "LOCAL_EXECUTION_UNSUPPORTED", "External-video scope requires an exact local execution identity");
     this.newProjectLocalExecutionFor = scope;
     this.newProjectLipSyncProfiles = structuredClone([...(options.newProjectLipSyncProfiles ?? [])]);
-    this.newCodeProjectVideoProfiles = structuredClone([...(options.newCodeProjectVideoProfiles ?? [])]);
+    this.newCodeProjectMediaProfiles = structuredClone([...(options.newCodeProjectMediaProfiles ?? [])]);
     invariant(this.newProjectLipSyncProfiles.length <= 1 && this.newProjectLipSyncProfiles.every(profile => profile.kind === "video" && profile.adapter === "fal-h3-lipsync"),
       "PROVIDER_SELECTION_INVALID", "Pin at most one lip-sync profile");
     migrateLegacyRequestSources(this.store);
@@ -112,7 +112,7 @@ export class ProductionService {
       || chosen.some(profile => profile.kind === "video" && profile.adapter !== "fake"));
     // Appended after the chosen profiles, so every "first video profile" lookup still finds the chosen one.
     const realVideo = pinLocalExecution && !!selected && chosen.some(profile => profile.kind === "video" && profile.adapter !== "fake");
-    const beside = [...(realVideo ? this.newProjectLipSyncProfiles : []), ...(realVideo && planMode === "code" ? this.newCodeProjectVideoProfiles : [])];
+    const beside = [...(realVideo ? this.newProjectLipSyncProfiles : []), ...(realVideo && planMode === "code" ? this.newCodeProjectMediaProfiles : [])];
     const profiles = [...chosen, ...structuredClone(beside).filter((profile, index) => !chosen.some(row => row.id === profile.id)
       && beside.findIndex(row => row.id === profile.id) === index)];
     return this.store.transaction(() => {

@@ -14,6 +14,7 @@ export type OperationKind =
   | "image"
   | "video"
   | "speech"
+  | "music"
   | "transcription"
   | "timeline"
   | "render";

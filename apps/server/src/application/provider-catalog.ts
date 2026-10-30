@@ -12,8 +12,11 @@ import type { MediaCredentialId } from "./provider-credentials.js";
 
 const MAX_BYTES = 64 * 1024;
 const BUILT_IN_PROFILES: ProviderProfile[] = structuredClone(DEFAULT_PROFILES);
+/** Lyria needs only the Gemini key the studio already reads: with its route enabled and no music profile configured, it installs itself. */
+const LYRIA_PROFILE: ProviderProfile = { id: "lyria-3.5-music", revision: "1", kind: "music", adapter: "gemini-lyria", executionVersion: "1",
+  configuration: { model: "lyria-3.5", settings: {} }, maxConcurrency: 1, unitCostMicros: "80000", maxRetries: 0 };
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
-const generatedKinds = ["image", "video", "speech", "transcription"] as const;
+const generatedKinds = ["image", "video", "speech", "transcription", "music"] as const;
 interface Definition { label: string; profile: ProviderProfile }
 interface Configuration { version: 1; profiles: Definition[] }
 export interface InstalledProviderSelection { readonly catalogDigest: string; readonly profileIds: readonly string[] }
@@ -44,6 +47,12 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
   invariant(profile.executionVersion === "1", "PROVIDER_CATALOG_INVALID", "Unsupported execution mapping version");
   exact(profile.configuration, ["model", "settings"]);
   const configuration = profile.configuration;
+  if (profile.adapter === "gemini-lyria") {
+    invariant(profile.kind === "music" && configuration.model === "lyria-3.5" && profile.unitCostMicros === "80000" && profile.maxRetries === 0
+      && profile.minFrames === undefined && profile.maxFrames === undefined, "PROVIDER_CATALOG_INVALID", "Lyria requires a music profile priced at $0.08 per song with no automatic vendor retries");
+    exact(configuration.settings, []);
+    return { credential: "gemini-music", media: "audio", fixture: false };
+  }
   if (profile.adapter === "codex-image") {
     invariant(profile.kind === "image" && profile.configuration?.model === "codex-image-generation"
       && profile.maxConcurrency === 1 && profile.maxRetries === 0 && profile.unitCostMicros === "0"
@@ -156,14 +165,16 @@ export class InstalledProviderCatalog {
   constructor(options: { configuration?: unknown; registry?: ExecutionRegistry; credentials?: EnvironmentMediaCredentials;
     codexImageConfigured?: boolean; mediaTools?: { image: boolean; video: boolean; audio?: boolean }; enabledExecutions?: readonly ExecutionIdentity[] } = {}) {
     const configuration = options.configuration === undefined ? { version: 1 as const, profiles: [] } : validateConfiguration(options.configuration);
-    this.#definitions = [...BUILT_IN_PROFILES.map(profile => ({ label: `Demo ${profile.kind}`, profile: structuredClone(profile) })), ...configuration.profiles];
-    this.#digest = digest({ version: 1, profiles: this.#definitions }); this.#registry = options.registry;
     this.#credentials = options.credentials ?? new EnvironmentMediaCredentials();
+    const lyria = !configuration.profiles.some(row => row.profile.kind === "music") && (options.enabledExecutions ?? []).some(row => row.adapter === "gemini-lyria");
+    this.#definitions = [...BUILT_IN_PROFILES.map(profile => ({ label: `Demo ${profile.kind}`, profile: structuredClone(profile) })), ...configuration.profiles,
+      ...(lyria ? [{ label: "Google Lyria 3.5 · $0.08/song", profile: structuredClone(LYRIA_PROFILE) }] : [])];
+    this.#digest = digest({ version: 1, profiles: this.#definitions }); this.#registry = options.registry;
     this.#mediaTools = Object.freeze({ image: options.mediaTools?.image === true, video: options.mediaTools?.video === true, audio: options.mediaTools?.audio === true });
     this.#codexImageConfigured = options.codexImageConfigured === true;
     const enabled = options.enabledExecutions ?? [];
-    invariant(Array.isArray(enabled) && enabled.length <= 9 && enabled.every(value => object(value)
-      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription", "fal-h3-lipsync", "seedance", "fal-video-i2v"].includes(value.adapter) && value.version === "1"),
+    invariant(Array.isArray(enabled) && enabled.length <= 10 && enabled.every(value => object(value)
+      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription", "fal-h3-lipsync", "seedance", "fal-video-i2v", "gemini-lyria"].includes(value.adapter) && value.version === "1"),
     "PROVIDER_CATALOG_INVALID", "Only explicit supported external execution identities can be enabled");
     this.#enabledExecutions = new Set(enabled.map(value => canonical(value)));
     invariant(this.#enabledExecutions.size === enabled.length, "PROVIDER_CATALOG_INVALID", "Enabled execution identities must be distinct");
@@ -205,6 +216,7 @@ export class InstalledProviderCatalog {
     invariant(new Set(selected.map(profile => profile.kind)).size === selected.length,
       "PROVIDER_SELECTION_INVALID", "Select only one profile for each operation");
     const profiles = BUILT_IN_PROFILES.map(fallback => structuredClone(selected.find(profile => profile.kind === fallback.kind) ?? fallback));
+    profiles.push(...selected.filter(profile => profile.kind === "music").map(profile => structuredClone(profile)));
     const value = Object.freeze({ catalogDigest: this.digest, profileIds: Object.freeze([...profileIds]) });
     selections.set(value, { profiles, provenance: { catalogDigest: this.digest, profileIds: profiles.map(profile => profile.id) } }); return value;
   }
@@ -213,9 +225,9 @@ export class InstalledProviderCatalog {
     return this.#definitions.filter(definition => definition.profile.adapter === "fal-h3-lipsync" && this.describe(definition.profile).readiness.realExecutionEnabled)
       .map(definition => structuredClone(definition.profile)).slice(0, 1);
   }
-  /** Every ready video model, pinned on new code films: their plans choose a model per shot. */
-  codeVideoProfiles(): ProviderProfile[] {
-    return this.#definitions.filter(definition => definition.profile.kind === "video" && definition.profile.adapter !== "fal-h3-lipsync"
+  /** Every ready video and music model, pinned on new code films: their plans choose a model per shot. */
+  codeMediaProfiles(): ProviderProfile[] {
+    return this.#definitions.filter(definition => (definition.profile.kind === "video" || definition.profile.kind === "music") && definition.profile.adapter !== "fal-h3-lipsync"
       && this.describe(definition.profile).readiness.realExecutionEnabled).map(definition => structuredClone(definition.profile));
   }
   private describe(input: unknown, name?: string) {

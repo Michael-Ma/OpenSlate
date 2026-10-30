@@ -43,7 +43,7 @@ export function assertCodePlanProviderAdmission(value: CodePlanProviderAdmission
     && Object.entries(args).every(([key, item]) => canonical(request.args[key]) === canonical(item))
     && canonical(request.args) === canonical(codePlanProviderArgs(profile, record.normalizedInput))
     && record.normalizedInput.profileDefinitionDigest === digest(profile)
-    && record.priceMicros === modelPrice({ kind: request.kind as "image" | "video" | "speech", priceMicros: profile.unitCostMicros, profile }, record.normalizedInput, value.priceFrame)
+    && record.priceMicros === modelPrice({ kind: request.kind as "image" | "video" | "speech" | "music", priceMicros: profile.unitCostMicros, profile }, record.normalizedInput, value.priceFrame)
     && ["reserved", "charged", "released"].includes(record.liability)
     && value.reservation.id === attempt.id && value.reservation.attemptId === attempt.id && value.reservation.projectId === attempt.projectId
     && value.reservation.micros === record.priceMicros && value.reservation.state === record.liability);

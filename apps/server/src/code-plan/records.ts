@@ -8,7 +8,7 @@ export interface CodePlanVersion {
 }
 export interface CodePlanHold { id: string; projectId: string; holdId: string; released: boolean }
 export interface CodePlanInvocation { id: string; projectId: string; invocationId: string; version: number; diff: CodePlanDiff }
-export type CodePlanResult = { ok: true; artifact: ArtifactRef; artifacts: ArtifactRef[] }
+export type CodePlanResult = { ok: true; artifact: ArtifactRef; artifacts: ArtifactRef[]; leadInSamples?: number; durationSamples?: number }
   | { ok: false; error: { code: string; message: string; retry: "safe" | "consent" | "none"; mayHaveCharged: boolean } };
 export interface CodePlanStep {
   id: string; projectId: string; key: string; kind: CodePlanMediaKind; input: JsonObject;

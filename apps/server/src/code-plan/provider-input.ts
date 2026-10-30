@@ -1,3 +1,4 @@
+import { lyriaBody } from "@openslate/providers";
 import { codeOnlyVideoAdapter, videoI2vOptions } from "../execution/video-i2v-options.js";
 import { invariant, providerProfileArguments } from "@openslate/core";
 import type { JsonObject, ProviderProfile } from "@openslate/core";
@@ -59,6 +60,10 @@ export function codePlanProviderArgs(profile: ProviderProfile, input: JsonObject
       frameRate: { numerator: 30, denominator: 1 }, settings: {},
       ...(profile.adapter === "viggle-h3" && input.aspectRatio !== undefined ? { aspectRatio: input.aspectRatio } : {}) };
     if (profile.adapter === "viggle-h3") assertViggleH3OperationOptions(profile, operation);
+  } else if (profile.kind === "music") {
+    allowed.push("prompt", "durationSeconds", "instrumental");
+    lyriaBody({ prompt: input.prompt as string, durationSeconds: input.durationSeconds as number, instrumental: input.instrumental as boolean });
+    operation = { ...base, prompt: input.prompt!, durationSeconds: input.durationSeconds!, instrumental: input.instrumental ?? true };
   } else {
     invariant(profile.kind === "speech", "CODE_PLAN_MODEL", "Unsupported code-plan operation");
     allowed.push("text", "voice", "instructions");

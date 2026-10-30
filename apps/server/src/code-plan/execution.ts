@@ -19,6 +19,8 @@ import { codePlanProviderArgs, videoAspect } from "./provider-input.js";
 import type { CodePlanModel } from "./identity.js";
 import { VIDEO_DERIVATION_LIMITS, assertNormalizedVideoIngestion, type NormalizedVideoIngestion, type VideoDerivationIntent } from "../execution/video-derivation.js";
 import { AUDIO_DERIVATION_LIMITS, assertNormalizedAudioIngestion, type NormalizedAudioIngestion, type AudioDerivationIntent } from "../execution/audio-derivation.js";
+import type { MusicReceipt } from "../execution/spool-music-ingester.js";
+import { assertMusicArtifact } from "../execution/spool-music-ingester.js";
 import { assertCodePlanFirstDispatch } from "./provider-authority.js";
 import { makeCodePlanPoster } from "./posters.js";
 import type { CodePlanStep } from "./records.js";
@@ -134,7 +136,7 @@ export class CodePlanExecution {
     options: { previousAttemptId?: string; priceMicros?: string } = {}): Attempt {
     invariant(!this.stopping, "CODE_PLAN_CLOSED", "Code-plan execution is stopping");
     invariant(this.store.getProject(projectId).planMode === "code", "CODE_PLAN_MODE_INVALID", "Code execution requires a code-mode project");
-    invariant(/^[a-f0-9]{64}$/.test(key) && ["image", "video", "speech", "render"].includes(kind), "CODE_PLAN_INPUT_INVALID", "Use a content-addressed media step");
+    invariant(/^[a-f0-9]{64}$/.test(key) && ["image", "video", "speech", "music", "render"].includes(kind), "CODE_PLAN_INPUT_INVALID", "Use a content-addressed media step");
     const input = structuredClone(normalizedInput), model = this.ready(projectId, input, kind);
     const profile = model.profile;
     const lock = profile ? this.store.get<CodePlanCapabilityLock>("capability_lock", this.store.getProject(projectId).capabilityLockId)! : undefined;
@@ -187,7 +189,7 @@ export class CodePlanExecution {
         assertCodePlanFirstDispatch(this.store, attempt, { owner: attempt.leaseOwner!, epoch: attempt.leaseEpoch });
       }
       const observation = await this.callProvider(signal => this.registry.forRequest(attempt.request).submit(structuredClone(attempt.request),
-        { signal, expectedLease: { owner: attempt.leaseOwner!, epoch: attempt.leaseEpoch } }));
+        { signal, expectedLease: { owner: attempt.leaseOwner!, epoch: attempt.leaseEpoch } }), attempt.request.kind === "music" ? Math.max(this.providerTimeoutMs, 360000) : this.providerTimeoutMs);
       await this.observe(attemptId, observation);
     });
   }
@@ -206,7 +208,7 @@ export class CodePlanExecution {
       if (attempt.phase === "submitting") this.store.put("attempt", attempt.id, projectId, { ...attempt, phase: "submission_unknown" });
       const observation = await this.callProvider(signal => attempt.taskId && attempt.phase !== "submitting"
         ? this.registry.forRequest(attempt.request).poll(attempt.taskId, structuredClone(attempt.request), { signal, expectedLease: { owner: attempt.leaseOwner!, epoch: attempt.leaseEpoch } })
-        : this.registry.forRequest(attempt.request).lookup(attempt.id, structuredClone(attempt.request), { signal, expectedLease: { owner: attempt.leaseOwner!, epoch: attempt.leaseEpoch } }));
+        : this.registry.forRequest(attempt.request).lookup(attempt.id, structuredClone(attempt.request), { signal, expectedLease: { owner: attempt.leaseOwner!, epoch: attempt.leaseEpoch } }), attempt.request.kind === "music" ? Math.max(this.providerTimeoutMs, 360000) : this.providerTimeoutMs);
       await this.observe(attempt.id, observation);
     })));
     const rejected = results.find(result => result.status === "rejected"); if (rejected?.status === "rejected") throw rejected.reason;
@@ -241,14 +243,14 @@ export class CodePlanExecution {
     await Promise.allSettled([...this.operations.values()]);
   }
 
-  private async callProvider(call: (signal: AbortSignal) => Promise<ExecutionOutcome>): Promise<ExecutionOutcome> {
+  private async callProvider(call: (signal: AbortSignal) => Promise<ExecutionOutcome>, timeoutMs = this.providerTimeoutMs): Promise<ExecutionOutcome> {
     const controller = new AbortController(); this.controllers.add(controller);
     let abort!: () => void;
     const interrupted = new Promise<ExecutionOutcome>(resolveOutcome => {
       abort = () => resolveOutcome({ type: "unknown", diagnostic: "Provider call interrupted after its intent; reconcile without resubmission" });
       controller.signal.addEventListener("abort", abort, { once: true });
     });
-    const timer = setTimeout(() => controller.abort(), this.providerTimeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       if (this.stopping) controller.abort();
       const observed = Promise.resolve().then(() => controller.signal.aborted
@@ -379,7 +381,9 @@ export class CodePlanExecution {
           "INVALID_PROVIDER_OUTPUT", "Ingestion must return an immutable owned artifact");
         artifact = result as ArtifactRecord;
       }
-      await this.validateArtifact(attempt, output, artifact, derived.some(item => item.artifact === artifact));
+      const music = attempt.request.kind === "music" && output.fixture === false;
+      if (music) assertMusicArtifact(this.store, attempt, output, artifact);
+      await this.validateArtifact(attempt, output, artifact, music || derived.some(item => item.artifact === artifact));
       artifacts.push(artifact); outputs[output.port] = artifact.artifact;
     }
     if (attempt.request.execution.adapter === "seedance") {
@@ -390,7 +394,13 @@ export class CodePlanExecution {
       const current = this.attempt(id);
       if (current.phase === "succeeded") return;
       invariant(current.phase === "ingesting" && this.record(current).outcomeDigest === record.outcomeDigest, "CODE_PLAN_EXECUTION_CORRUPT", "Completion changed during ingestion");
-      for (const artifact of artifacts) this.store.insert("artifact", artifact.id, attempt.projectId, artifact);
+      for (const artifact of artifacts) {
+        this.store.insert("artifact", artifact.id, attempt.projectId, artifact);
+        if (attempt.request.kind === "music" && artifact.fixture === false) {
+          const receipt = this.store.get<MusicReceipt>("music_ingestion_receipt", artifact.id)!;
+          this.store.put("media_source", artifact.id, attempt.projectId, { source: receipt.source, origin: "generated_audio", attemptId: attempt.id, derivationId: receipt.id });
+        }
+      }
       for (const result of derived) {
         this.store.put(result.type === "normalized_video" ? "video_derivation_receipt" : "audio_derivation_receipt", result.derivation.id, attempt.projectId, result.derivation);
         this.store.put("media_source", result.mediaSource.id, attempt.projectId, result.mediaSource);
@@ -404,7 +414,7 @@ export class CodePlanExecution {
     invariant(typeof artifact.id === "string" && artifact.id.length > 0 && artifact.projectId === attempt.projectId
       && artifact.attemptId === attempt.id && artifact.id === artifact.artifact?.artifactId
       && (derived || artifact.artifact.sha256 === output.sha256) && artifact.artifact.kind === output.kind
-      && artifact.mimeType === output.mimeType && artifact.fixture === output.fixture && typeof artifact.path === "string" && isAbsolute(artifact.path)
+      && (attempt.request.kind === "music" && derived ? artifact.mimeType === "audio/wav" : artifact.mimeType === output.mimeType) && artifact.fixture === output.fixture && typeof artifact.path === "string" && isAbsolute(artifact.path)
       && (artifact.physicalDurationSeconds === null || Number.isFinite(artifact.physicalDurationSeconds) && artifact.physicalDurationSeconds > 0),
     "INVALID_PROVIDER_OUTPUT", "Ingested artifact differs from the provider completion");
     if (isSpoolOutput(output)) invariant(artifact.outputSpoolId === output.storage.spoolId && artifact.outputReceiptId === output.storage.spoolId

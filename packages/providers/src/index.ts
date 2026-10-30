@@ -32,6 +32,7 @@ export * from "./png-center-crop.js";
 export * from "./codex-image.js";
 export * from "./fal-h3-lipsync.js";
 export * from "./gemini-audio.js";
+export * from "./gemini-lyria.js";
 export * from "./seedance.js";
 export * from "./fal-video-i2v.js";
 export { FalQueueClient } from "./fal-queue.js";

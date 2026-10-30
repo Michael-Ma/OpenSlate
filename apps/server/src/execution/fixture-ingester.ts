@@ -26,5 +26,5 @@ export function materializeFixtureOutput(input: Parameters<ExecutionOutputIngest
   }
   invariant(createHash("sha256").update(readFileSync(path)).digest("hex") === output.sha256, "ARTIFACT_CORRUPT", "Published artifact hash mismatch");
   const id = newId();
-  return { id, projectId: attempt.projectId, artifact: { artifactId: id, sha256: output.sha256, kind: output.kind }, path, mimeType: output.mimeType, fixture: output.fixture, attemptId: attempt.id, physicalDurationSeconds: output.kind === "video" || output.kind === "audio" ? 1 : null };
+  return { id, projectId: attempt.projectId, artifact: { artifactId: id, sha256: output.sha256, kind: output.kind }, path, mimeType: output.mimeType, fixture: output.fixture, attemptId: attempt.id, physicalDurationSeconds: output.kind === "audio" ? bytes.readUInt32LE(40) / bytes.readUInt32LE(28) : output.kind === "video" ? 1 : null };
 }

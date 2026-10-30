@@ -122,7 +122,7 @@ function create(input: unknown): LocalTimelineDocument {
     const gainMilliDb = Object.hasOwn(placement, "gainMilliDb") ? placement.gainMilliDb : 0; integer(gainMilliDb, -60000, 12000);
     invalid(placement.startSample + placement.durationSamples <= media.probe.audio!.samples!, "Audio exceeds measured source samples");
     invalid(placement.atSample + placement.durationSamples <= totalFrames * 1600, "Audio extends beyond the timeline");
-    if (placement.fadeOutSamples !== undefined) integer(placement.fadeOutSamples, 1, Math.min(4800, placement.durationSamples));
+    if (placement.fadeOutSamples !== undefined) integer(placement.fadeOutSamples, 1, Math.min(240000, placement.durationSamples));
     audioSources.add(media.sha256); invalid(audioSources.size <= 65, "Too many distinct audio sources");
     return { source: media, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb, ...(placement.fadeOutSamples !== undefined ? { fadeOutSamples: placement.fadeOutSamples } : {}) };
   });

@@ -1,3 +1,4 @@
+import { assertMusicArtifact, type MusicReceipt } from "../execution/spool-music-ingester.js";
 import { CODEX_IMAGE_RECORD_KINDS, assertCodexImageArtifact } from "../execution/codex-image-lineage.js";
 import { assertConfiguredProviderAdmission, assertConfiguredProviderPin } from "../execution/provider-use.js";
 import { assertRequestedNarrationShotScope } from "../narration/narration-scope.js";
@@ -678,7 +679,21 @@ export class Store {
         { type: "normalized_audio", artifact, derivation: receipt, mediaSource: { id: intent.artifactId, projectId, source: receipt.source,
           origin: "generated_audio", attemptId: intent.attemptId, derivationId: id } });
     }
-    if (kind === "media_source" && body.origin === "generated_audio") {
+    const musicSource = kind === "media_source" && body.origin === "generated_audio"
+      && this.get<Attempt>("attempt", String(body.attemptId))?.request.kind === "music";
+    if (musicSource) {
+      reference("artifact", id); reference("attempt", body.attemptId); reference("music_ingestion_receipt", body.derivationId);
+      const receipt = this.get<MusicReceipt>("music_ingestion_receipt", String(body.derivationId))!;
+      const output = this.get<OutputReceipt>("execution_output_receipt", receipt.spoolId)!;
+      invariant(output && output.source.kind === "returned_bytes", "IDENTITY_MISMATCH", "Music source requires its retained raw bytes");
+      assertMusicArtifact(this, this.get<Attempt>("attempt", receipt.attemptId)!, { port: "audio", kind: "audio", mimeType: output.mimeType,
+        extension: output.mimeType === "audio/mpeg" ? "mp3" : "wav", sha256: receipt.rawSha256, byteLength: output.source.byteLength,
+        fixture: false, storage: { type: "spool", spoolId: receipt.spoolId } }, this.get<ArtifactRecord>("artifact", id)!);
+      invariant(canonical({ ...body, id, projectId }) === canonical({ id: receipt.source.artifactId, projectId: receipt.projectId,
+        source: receipt.source, origin: "generated_audio", attemptId: receipt.attemptId, derivationId: receipt.id }),
+      "IDENTITY_MISMATCH", "Generated music must retain its exact source without upload authority");
+    }
+    if (kind === "media_source" && body.origin === "generated_audio" && !musicSource) {
       reference("artifact", id); reference("attempt", body.attemptId); reference("audio_derivation_receipt", body.derivationId);
       const receipt = this.get<AudioDerivationReceipt>("audio_derivation_receipt", String(body.derivationId))!;
       const intent = this.get<AudioDerivationIntent>("audio_derivation_intent", receipt.id)!;
@@ -772,7 +787,7 @@ export class Store {
       }
       if (["code_plan_render_intent", "local_execution_intent", "local_execution_dispatch", "local_execution_completion", "installation_recovery_fence"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
-      if (["audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
+      if (["lyria_dispatch", "lyria_result", "music_ingestion_intent", "music_ingestion_receipt", "audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
         "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result",
         "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcription_preparation_intent", "transcript_candidate", "owned_transcription_source", "owned_transcription_proposal", "owned_transcription_review", "owned_transcription_application", "narration_speech_proposal", "narration_speech_review", "narration_speech_application"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");

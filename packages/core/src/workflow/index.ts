@@ -298,7 +298,7 @@ export function requiredStages(before: ProjectRecord, next: ProjectRecord, plan:
   for (const scene of next.scenes) if (digest(before.scenes.find(s => s.id === scene.id) ?? null) !== digest(scene)) add("scene_plan", scene.id);
   for (const shot of next.shots) if (digest(before.shots.find(s => s.id === shot.id) ?? null) !== digest(shot)) add("shot_plan", shot.id);
   for (const node of plan?.nodes ?? []) {
-    const stage = { image: "storyboard", video: "video", speech: "narration", transcription: "narration", timeline: "assembly", render: "assembly" }[node.kind] as StageId;
+    const stage = { image: "storyboard", video: "video", speech: "narration", music: "assembly", transcription: "narration", timeline: "assembly", render: "assembly" }[node.kind] as StageId;
     add(stage, node.shotId ?? next.id);
   }
   return [...requirements.values()];
