@@ -47,10 +47,16 @@ class FakeCodePlans {
     view.choices[0] = { ...view.choices[0], answer: input.answer, answeredAt: "2026-10-29T00:00:00.000Z" };
     view.state = "running"; return structuredClone(view);
   }
-  raiseCeiling(projectId, ceilingMicros) {
+  setCeiling(projectId, { ceilingMicros, by }) {
+    assert.equal(by, "person");
     const view = this.current(projectId); this.calls.raiseCeiling.push({ projectId, ceilingMicros });
-    invariant(moneyMicros(ceilingMicros) > moneyMicros(view.ceilingMicros), "CODE_PLAN_CEILING", "Raise the current ceiling");
+    moneyMicros(ceilingMicros);
     view.ceilingMicros = ceilingMicros; view.state = "running"; return structuredClone(view);
+  }
+  retryStep(projectId, input) {
+    assert.deepEqual(input.consent, {by:"person"});
+    this.calls.retryStep ??= []; this.calls.retryStep.push({projectId, input});
+    return this.view(projectId);
   }
   async submit(projectId, input) {
     const view = this.current(projectId); this.calls.submit.push({ projectId, input });
@@ -164,7 +170,7 @@ test("ceiling changes use integer micros and return the exact receipt", async t 
   assert.equal(response.statusCode, 200, response.body); assert.deepEqual(response.json(), { view: f.codePlans.view(f.project.id) });
   assert.deepEqual(f.codePlans.calls.raiseCeiling, [{ projectId: f.project.id, ceilingMicros: "2000000" }]);
   for (const ceilingMicros of ["2000000", "1000000"]) {
-    assert.equal((await f.http("POST", "/ceiling", { ceilingMicros }, randomUUID())).statusCode, 409);
+    assert.equal((await f.http("POST", "/ceiling", { ceilingMicros }, randomUUID())).statusCode, 200);
   }
 });
 
@@ -345,4 +351,21 @@ test("artifact content rejects another project, missing session, escaped paths a
   }
   writeFileSync(f.store.get("artifact", saved.ref.artifactId).path, "tampered");
   assert.equal((await media(f, f.project.id, saved.ref.artifactId)).json().error.code, "ARTIFACT_CORRUPT");
+});
+
+
+test("ceiling accepts lowering and retry requires an idempotent authenticated person command", async t => {
+ const f=fixture(t), stepKey="a".repeat(64), path=`/steps/${stepKey}/retry`;
+ assert.equal((await f.http("POST","/ceiling",{ceilingMicros:"500000"},"lower")).json().view.ceilingMicros,"500000");
+ for(const [headers,key] of [[{cookie:""},"auth"],[{"x-openslate-csrf":""},"csrf"],[{},undefined]])
+   assert.notEqual((await f.http("POST",path,{},key,headers)).statusCode,200);
+ assert.equal((await f.http("POST",path,{consent:{by:"director"}},"bad-body")).statusCode,400);
+ const first=await f.http("POST",path,{},"retry");assert.equal(first.statusCode,200,first.body);
+ assert.deepEqual((await f.http("POST",path,{},"retry")).json(),first.json());
+ assert.deepEqual((await f.http("POST",path,{},"retry",{},f.project.id,f.makeApp())).json(),first.json());
+ assert.equal(f.codePlans.calls.retryStep.length,1);
+ assert.equal((await f.http("POST",`/steps/${"b".repeat(64)}/retry`,{},"retry")).json().error.code,"IDEMPOTENCY_CONFLICT");
+ assert.equal((await f.http("POST",path,{},"graph",{},f.graph.id)).json().error.code,"CODE_PLAN_MODE");
+ assert.equal((await f.http("POST",path,{},"missing",{},"absent")).statusCode,404);
+ f.quarantine();assert.equal((await f.http("POST",path,{},"retry")).json().error.code,"INSTALLATION_QUARANTINED");
 });

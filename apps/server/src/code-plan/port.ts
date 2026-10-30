@@ -37,6 +37,9 @@ export interface CodePlanPort {
   /** The new ceiling must be higher than the current one. Wakes the run. */
   raiseCeiling(projectId: string, ceilingMicros: string): CodePlanView;
 
+  retryStep(projectId: string, input: { stepKey: string; consent: { by: "person" } | { by: "director"; quote: string; invocationId: string } }): CodePlanView;
+  setCeiling(projectId: string, input: { ceilingMicros: string; by: "person" } | { ceilingMicros: string; by: "director"; quote: string; invocationId: string }): CodePlanView;
+
   /**
    * While at least one hold is open, no new paid step is dispatched; in-flight work continues and
    * free steps (render) still run. Both calls are idempotent per holdId and survive restart.

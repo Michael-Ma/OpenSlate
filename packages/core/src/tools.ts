@@ -12,13 +12,17 @@ export const V6_TOOL_NAMES = Object.freeze([...V5_TOOL_NAMES, "make_keyframes", 
 export const V7_TOOL_NAMES = Object.freeze([...V6_TOOL_NAMES, "set_soundtrack", "move_shot", "move_scene", "start_export", "undo_edit",
   "delete_shots", "delete_scene", "use_take", "analyze_music", "make_character_sheets", "read_guidance", "propose_visual_style"] as const);
 /** Every tool name any catalog has advertised. */
-export const CODE_PLAN_TOOL_CONTRACT = "0.1.0";
-export const CODE_PLAN_TOOL_NAMES = Object.freeze(["read_film", "submit_plan"] as const);
+export const CODE_PLAN_TOOL_CONTRACT = "0.2.0";
+export const CODE_PLAN_TOOL_CONTRACTS = Object.freeze(["0.1.0", CODE_PLAN_TOOL_CONTRACT] as const);
+export const isCodePlanToolContract = (version: string | undefined): version is typeof CODE_PLAN_TOOL_CONTRACTS[number] =>
+  (CODE_PLAN_TOOL_CONTRACTS as readonly (string | undefined)[]).includes(version);
+const codePlanV1Names = Object.freeze(["read_film", "submit_plan"] as const);
+export const CODE_PLAN_TOOL_NAMES = Object.freeze([...codePlanV1Names, "set_spend_limit", "retry_step"] as const);
 export const ALL_TOOL_NAMES = Object.freeze([...V7_TOOL_NAMES, ...CODE_PLAN_TOOL_NAMES] as const);
 export type ToolName = typeof ALL_TOOL_NAMES[number];
 export const TOOL_CONTRACT_VERSION = "1.0.0";
 export const SUPPORTED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0", "7.0.0", "7.1.0"] as const);
-export type ToolContractVersion = typeof SUPPORTED_TOOL_CONTRACTS[number] | typeof CODE_PLAN_TOOL_CONTRACT;
+export type ToolContractVersion = typeof SUPPORTED_TOOL_CONTRACTS[number] | typeof CODE_PLAN_TOOL_CONTRACTS[number];
 /** Contracts that shipped two-package guidance locks. 7.0.0 ships as guidance release v8 (SHIPPED_DIRECTOR_RELEASES in the server). */
 export const RELEASED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"] as const);
 export const CURRENT_TOOL_CONTRACT: ToolContractVersion = "7.1.0";
@@ -243,8 +247,17 @@ const codePlanDescriptors = freeze([
     summary: { type: "string", maxLength: 500 },
   }, ["source", "basedOnVersion", "summary"]), false),
 ]);
+const codePlanV2Descriptors = freeze([...codePlanDescriptors,
+  descriptor("set_spend_limit", "Set this film's spend limit in integer USD micros, higher or lower. Quote the person's own words from the message that started this turn. Lowering below existing liability is refused.", object({
+    ceilingMicros: { type: "string", pattern: "^(0|[1-9][0-9]*)$", maxLength: 19 }, quote: { type: "string", minLength: 1, maxLength: 4096 },
+  }, ["ceilingMicros", "quote"]), false),
+  descriptor("retry_step", "Retry one reached failed or terminal-unknown step. Quote the person's consent from the message that started this turn. A new attempt can charge again; earlier liability remains counted.", object({
+    stepKey: { type: "string", pattern: "^[a-f0-9]{64}$" }, quote: { type: "string", minLength: 1, maxLength: 4096 },
+  }, ["stepKey", "quote"]), false),
+]);
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
-  [CODE_PLAN_TOOL_CONTRACT]: { version: CODE_PLAN_TOOL_CONTRACT, names: CODE_PLAN_TOOL_NAMES, descriptors: codePlanDescriptors, digest: digest({ version: CODE_PLAN_TOOL_CONTRACT, tools: codePlanDescriptors }) },
+  "0.1.0": { version: "0.1.0", names: codePlanV1Names, descriptors: codePlanDescriptors, digest: digest({ version: "0.1.0", tools: codePlanDescriptors }) },
+  [CODE_PLAN_TOOL_CONTRACT]: { version: CODE_PLAN_TOOL_CONTRACT, names: CODE_PLAN_TOOL_NAMES, descriptors: codePlanV2Descriptors, digest: digest({ version: CODE_PLAN_TOOL_CONTRACT, tools: codePlanV2Descriptors }) },
   "1.0.0": { version: "1.0.0", names: TOOL_NAMES, descriptors: TOOL_DESCRIPTORS, digest: TOOL_CATALOG_DIGEST },
   "2.0.0": { version: "2.0.0", names: V2_TOOL_NAMES, descriptors: v2Descriptors, digest: digest({ version: "2.0.0", tools: v2Descriptors }) },
   "3.0.0": { version: "3.0.0", names: V3_TOOL_NAMES, descriptors: v3Descriptors, digest: digest({ version: "3.0.0", tools: v3Descriptors }) },
@@ -261,7 +274,8 @@ export function toolCatalog(version: string = TOOL_CONTRACT_VERSION): ToolCatalo
 /** Exact implementation identity for each immutable catalog. */
 export function toolHandlerId(version: ToolContractVersion): string {
   toolCatalog(version);
-  if (version === CODE_PLAN_TOOL_CONTRACT) return "code-plan-tools@1";
+  if (version === "0.1.0") return "code-plan-tools@1";
+  if (version === CODE_PLAN_TOOL_CONTRACT) return "code-plan-tools@2";
   return ({ "1.0.0": "five-tools@1", "2.0.0": "director-tools@2", "3.0.0": "director-tools@3", "4.0.0": "director-tools@4", "5.0.0": "director-tools@5", "6.0.0": "director-tools@6", "7.0.0": "director-tools@7", "7.1.0": "director-tools@7.1" } as const)[version];
 }
 const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false });

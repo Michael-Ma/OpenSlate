@@ -15,11 +15,17 @@ export default async function film(ctx: Studio): Promise<void> {
     const clip = await ctx.video({ model: "fake-video", firstFrame, prompt: motion, durationSeconds: 6 });
     // Fake clips share their bytes. Retain the actual motion in the fixture timeline too.
     if (clip.ok) return { artifact: clip.artifact, motion };
-    await ctx.log(`Primary clip failed for ${id}: ${clip.error.code}`);
-    const fallbackMotion = "Locked camera, subtle natural movement";
-    const fallback = await ctx.video({ model: "fake-video", firstFrame, prompt: fallbackMotion, durationSeconds: 6, variant: "fallback" });
-    if (!fallback.ok) { await ctx.log(`Fallback failed for ${id}: ${fallback.error.code}`); return null; }
-    return { artifact: fallback.artifact, motion: fallbackMotion };
+    // In real films, fill these amounts from read_film.models (the fixture video costs $0).
+    const cost = clip.error.mayHaveCharged ? "The earlier clip may already have charged. " : "The earlier clip did not charge. ";
+    await ctx.log(`The clip for ${id} could not be completed. ${cost}`);
+    if (clip.error.retry === "none") return null;
+    const answer = await ctx.choose(`${id}-retry`, {
+      question: `${cost}Retry this shot for an estimated additional $0.00 (offline fixture), or skip?`, options: ["retry", "skip"],
+    });
+    if (answer !== "retry") return null;
+    const retried = await ctx.video({ model: "fake-video", firstFrame, prompt: motion, durationSeconds: 6, variant: "person-retry-1" });
+    if (!retried.ok) { await ctx.log(`The retried clip for ${id} also failed. Please choose how to continue in chat.`); return null; }
+    return { artifact: retried.artifact, motion };
   }));
   const ready = clips.filter((clip): clip is { artifact: Artifact; motion: string } => clip !== null);
   if (ready.length !== shots.length) return;

@@ -99,7 +99,7 @@ test("provider failures are terminal and charged; positive rejection releases li
     const f = fixture(t), attempt = f.prepare(); f.provider.setMode(attempt.nodeId, mode);
     await f.execution.submit(attempt.id); await f.execution.advance(f.projectId);
     const failed = f.execution.attempts(f.projectId)[0];
-    assert.equal(failed.phase, "failed"); assert.equal(failed.failure.retryAllowed, false);
+    assert.equal(failed.phase, "failed"); assert.equal(failed.failure.retryAllowed, mode === "reject_before_accept");
     assert.equal(f.execution.liability(attempt.id), mode === "technical_failure" ? "charged" : "released");
     assert.equal(f.store.list("artifact", f.projectId).length, 0);
     const accepted = f.provider.acceptedCount(); await f.execution.submit(attempt.id); await f.execution.advance(f.projectId);

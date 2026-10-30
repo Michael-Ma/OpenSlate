@@ -1,4 +1,4 @@
-import { CODE_PLAN_TOOL_CONTRACT, SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
+import { isCodePlanToolContract, SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -281,12 +281,12 @@ export class LocalDirectorController {
       const prepared = selection.mode === "native" ? await this.prepare(projectId, selection) : null;
       const changedMode = before.selection.mode !== selection.mode;
       const code = store.getProject(projectId).planMode === "code";
-      invariant(!oldLock || (code ? oldLock.lock.compatibility.toolContract === CODE_PLAN_TOOL_CONTRACT
+      invariant(!oldLock || (code ? isCodePlanToolContract(oldLock.lock.compatibility.toolContract)
         : (SUPPORTED_TOOL_CONTRACTS as readonly string[]).includes(oldLock.lock.compatibility.toolContract)), "CAPABILITY_MISMATCH", "Saved director guidance version is unsupported");
       const replacementConfiguration = { repositoryRoot: this.config.repositoryRoot,
         snapshotRoot: selection.mode === "native" ? join(this.config.dataDirectory, "native", projectId, "workspace", ".agents", "skills") : join(this.config.dataDirectory, "skill-snapshots"),
         runtimeId: selection.mode === "native" ? "codex-app-server" : "fake-workflow-v1" };
-      const replacement = changedMode && oldLock ? (code ? createDirectorSkillLock(replacementConfiguration, CODE_PLAN_TOOL_CONTRACT)
+      const replacement = changedMode && oldLock ? (code ? createDirectorSkillLock(replacementConfiguration, oldLock.lock.compatibility.toolContract as ToolContractVersion)
         : oldLock.lock.compatibility.toolContract === "6.0.0"
         ? createCurrentShippedDirectorSkillLock(replacementConfiguration, []) : oldLock.lock.compatibility.toolContract === currentShippedToolContract(this.config.releases)
           ? createCurrentShippedDirectorSkillLock(replacementConfiguration, this.config.releases) : createDirectorSkillLock(replacementConfiguration, oldLock.lock.compatibility.toolContract as ToolContractVersion)).lock : null;

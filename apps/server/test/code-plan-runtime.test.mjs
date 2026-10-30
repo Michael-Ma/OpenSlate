@@ -197,7 +197,7 @@ test("provider failure resolves ok:false and permits a different-model fallback 
     const initial = await ctx.image({ model: "primary", prompt: "boot" });
     if (!initial.ok) { ctx.log(initial.error.code); const next = await ctx.image({ model: "fallback", prompt: "boot" }); if (!next.ok) throw new Error("fallback failed"); }
   `));
-  await settle(f); assert.deepEqual(f.calls.submit.map(call => call.args.model), ["primary", "fallback"]);
+  await settle(f, "done_with_failures"); assert.deepEqual(f.calls.submit.map(call => call.args.model), ["primary", "fallback"]);
   assert.deepEqual(f.runtime.steps(f.projectId).map(step => step.state).sort(), ["failed", "succeeded"]);
   assert.equal(f.runtime.getRun(f.projectId).logs.length, 1);
   await replay(f); assert.equal(f.calls.submit.length, 2);

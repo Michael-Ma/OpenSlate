@@ -47,7 +47,7 @@ test('Codex and Viggle steps retain intent → submit → lookup/poll → spool 
   const artifact=f.store.get('artifact',step.result.artifact.artifactId); assert.equal(artifact.fixture,false); assert.ok(artifact.outputSpoolId);
  }
  const crop=f.store.list('viggle_h3_execution_mapping',f.project.id)[0];
- assert.equal(crop.firstFrameCrop.recipe,'center-crop-v1'); assert.equal(f.firstFrame.readUInt32BE(16),320); assert.equal(f.firstFrame.readUInt32BE(20),180);
+ assert.equal(crop.firstFrameCrop,undefined); assert.equal(crop.transport.aspectRatio,'1:1'); assert.equal(f.firstFrame.readUInt32BE(16),320); assert.equal(f.firstFrame.readUInt32BE(20),320);
  assert.ok(crop.firstFrame.codePlanAttemptId); assert.equal(crop.firstFrame.approvalId,undefined);
  assert.equal(f.plans.view(f.project.id).spentMicros,'200000');
  const rendered=f.store.get('artifact',steps.find(step=>step.kind==='render').result.artifact.artifactId);

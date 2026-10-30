@@ -318,3 +318,18 @@ test("a hold opened during a pass fences its later paid calls", async t => {
   await settle(f, "waiting"); assert.equal(f.calls.length, 1); assert.equal(f.calls[0].args.model, "free");
   f.runtime.release(f.projectId, "mid-pass"); await settle(f); assert.equal(f.calls.length, 2);
 });
+
+test('setCeiling lowers to liability, reports in-flight and unknown numbers, and supports the integer money range',async t=>{
+ const f=fixture(t,{models:paid,mode:'pending'});await submit(f,film('await ctx.image({model:"paid",prompt:"pending"});'));await settle(f,'waiting');
+ assert.equal(f.runtime.setCeiling(f.projectId,{ceilingMicros:'600000',by:'person'}).ceilingMicros,'600000');
+ assert.throws(()=>f.runtime.setCeiling(f.projectId,{ceilingMicros:'599999',by:'person'}),e=>{
+  assert.equal(e.code,'CODE_PLAN_CEILING');assert.equal(e.details.inFlightMicros,'600000');assert.equal(e.details.chargedMicros,'0');assert.equal(e.details.liabilityMicros,'600000');return true;
+ });
+ f.provider.poll=async()=>({type:'unknown',diagnostic:'remote status unavailable'});await f.runtime.tick();
+ assert.throws(()=>f.runtime.setCeiling(f.projectId,{ceilingMicros:'0',by:'person'}),e=>{assert.equal(e.details.unknownMicros,'600000');assert.equal(e.details.inFlightMicros,'0');return true;});
+ const input={ceilingMicros:'9223372036854775807',by:'director',quote:'raise my limit',invocationId:'limit-once'};
+ const receipt=f.runtime.setCeiling(f.projectId,input);assert.equal(receipt.ceilingMicros,input.ceilingMicros);
+ f.runtime.setCeiling(f.projectId,{ceilingMicros:'700000',by:'person'});
+ assert.deepEqual(f.runtime.setCeiling(f.projectId,input),receipt);
+ assert.throws(()=>f.runtime.setCeiling(f.projectId,{...input,ceilingMicros:'800000'}),{code:'IDEMPOTENCY_CONFLICT'});
+});

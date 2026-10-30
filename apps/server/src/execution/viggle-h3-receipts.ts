@@ -68,6 +68,11 @@ const VIGGLE_ARGUMENT_FIELDS = ["profileIdentity", "profileRevision", "adapter",
  * requests and projects without a format have none and send the profile's aspect, exactly as before.
  */
 export function viggleH3RequestAspect(args: JsonObject, profile: Pick<ProviderProfile, "configuration">): ViggleH3AspectRatio {
+  if (Object.hasOwn(args, "aspectRatio")) {
+    invariant(!Object.hasOwn(args, "aspect") && typeof args.aspectRatio === "string"
+      && ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"].includes(args.aspectRatio), "VIGGLE_H3_PREFLIGHT_INVALID", "Unsupported code-plan aspect ratio");
+    return args.aspectRatio as ViggleH3AspectRatio;
+  }
   if (!Object.hasOwn(args, "aspect")) return profile.configuration!.settings!.aspectRatio as ViggleH3AspectRatio;
   invariant(isProjectAspect(args.aspect), "VIGGLE_H3_PREFLIGHT_INVALID", "Video aspect must be 16:9, 9:16 or 1:1");
   return args.aspect;
@@ -81,7 +86,7 @@ export function assertViggleH3FirstFrameAspect(args: JsonObject, width: unknown,
 /** Cheap pre-admission validation. PNG ownership and approval are checked separately by the bridge. */
 export function assertViggleH3OperationOptions(profile: ProviderProfile, args: JsonObject): void {
   try {
-    viggleH3Fields(args, [...VIGGLE_ARGUMENT_FIELDS, ...(Object.hasOwn(args, "aspect") ? ["aspect"] : [])]);
+    viggleH3Fields(args, [...VIGGLE_ARGUMENT_FIELDS, ...(Object.hasOwn(args, "aspect") ? ["aspect"] : []), ...(Object.hasOwn(args, "aspectRatio") ? ["aspectRatio"] : [])]);
     viggleH3Fields(args.settings, []); viggleH3Fields(profile.configuration, ["model", "settings"]);
     viggleH3Fields(profile.configuration.settings, ["quality", "resolution", "aspectRatio"]);
     const expected = providerProfileArguments(profile), configuration = profile.configuration;
@@ -110,7 +115,7 @@ export function assertViggleH3ExecutionMapping(attempt: Attempt, mapping: Viggle
   const request = attempt.request, config = request.profile!.configuration, description = mapping.transport;
   viggleH3Fields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "providerUse"]);
   viggleH3Fields(config, ["model", "settings"]); viggleH3Fields(config.settings, ["quality", "resolution", "aspectRatio"]);
-  viggleH3Fields(request.args, [...VIGGLE_ARGUMENT_FIELDS, ...(Object.hasOwn(request.args, "aspect") ? ["aspect"] : [])]);
+  viggleH3Fields(request.args, [...VIGGLE_ARGUMENT_FIELDS, ...(Object.hasOwn(request.args, "aspect") ? ["aspect"] : []), ...(Object.hasOwn(request.args, "aspectRatio") ? ["aspectRatio"] : [])]);
   viggleH3Fields(request.args.settings, []);
   viggleH3Fields(description, ["adapterVersion", "model", "mode", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "firstFrame", "requestDigest", "bodySha256", "bodyByteLength"]);
   const codeFrame = "codePlanAttemptId" in mapping.firstFrame;

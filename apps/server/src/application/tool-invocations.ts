@@ -32,8 +32,8 @@ import { applyCharacterChange, makeCharacterSheets, readCharacters, type Charact
 import { analyzeMusic, LocalMusicAnalyzer, type MusicAnalyzers } from '../media/music-analyzer.js';
 import type { ExportLauncher } from '../media/export-launcher.js';
 import type { CodePlanPort } from '../code-plan/port.js';
-import { codePlanPort, readCodeFilm, wireCodePlans } from '../code-plan/director.js';
-import { CODE_PLAN_TOOL_CONTRACT } from '@openslate/core';
+import { codePlanPort, changeCodeFilm, readCodeFilm, wireCodePlans } from '../code-plan/director.js';
+import { isCodePlanToolContract } from '@openslate/core';
 
 const codeReconciliations = new WeakMap<ProductionService, Map<string, Promise<void>>>();
 
@@ -275,6 +275,8 @@ export class ToolInvocationService {
         "IMPORT_REVIEW_REQUIRED", "Interpret supplied material with prepare_change, then wait for human confirmation in Film plan. Other mutations and generation proposals are unavailable for this request.");
       switch (parsed.name) {
         case "read_film": value = readCodeFilm(this.service, projectId); break;
+        case "set_spend_limit": case "retry_step":
+          value = changeCodeFilm(this.service, projectId, actor, id, parsed.name, parsed.arguments as unknown as { quote: string; ceilingMicros?: string; stepKey?: string }); break;
         case "submit_plan": {
           invariant(this.service.store.getProject(projectId).planMode === "code", "CODE_PLAN_MODE", "Code-plan tools require a code project");
           const args = parsed.arguments as unknown as { source: string; basedOnVersion: number | null };
@@ -388,7 +390,7 @@ export class ToolInvocationService {
       const known = error instanceof DomainError && !((audioTool(parsed.name) || parsed.name === "make_keyframes" || parsed.name === "submit_plan") && (error.code.endsWith("CANCELLED") || error.code === "TOOL_CALL_UNRESOLVED"));
       this.finish(id, projectId, known ? "failed" : "unresolved", null,
         known ? { code: error.code, message: error.message.slice(0, 2000),
-          ...(parsed.name === "submit_plan" && error.details !== undefined ? { details: JSON.parse(canonical(error.details)) as JsonValue } : {}), ...(parsed.name === 'record_notes' ? {
+          ...(["submit_plan", "set_spend_limit", "retry_step"].includes(parsed.name) && error.details !== undefined ? { details: JSON.parse(canonical(error.details)) as JsonValue } : {}), ...(parsed.name === 'record_notes' ? {
           reason: (error.details as { reason?: ReviewNotesFailure['reason'] } | undefined)?.reason ?? (error.code === 'SCOPE_DENIED' ? 'outside_scope' : error.code === 'VALIDATION_ERROR' ? 'invalid_arguments' : 'unavailable'),
         } : {}) } : { code: "TOOL_CALL_UNRESOLVED", message: "Tool outcome needs application reconciliation" });
       if (known) throw error;
@@ -415,10 +417,15 @@ export class ToolInvocationService {
       invariant(epoch?.projectId === projectId && epoch.state === "revoked", "ACTOR_DENIED", "Reconciliation requires a fenced epoch");
       for (const call of store.list<ToolInvocation>("tool_invocation", projectId).filter(call => call.epochId === epochId && ["started", "unresolved"].includes(call.state))) {
         if (store.get("tool_reconciliation", call.id)) continue;
-        if (call.tool === "submit_plan" && call.toolContractVersion === CODE_PLAN_TOOL_CONTRACT) {
+        if (call.tool === "submit_plan" && isCodePlanToolContract(call.toolContractVersion)) {
           this.reconcileCodePlan(projectId, call, epoch); continue;
         }
         let receipt: unknown = null;
+        if ((call.tool === "set_spend_limit" || call.tool === "retry_step") && call.toolContractVersion === "0.2.0") {
+          const saved = store.get<{ projectId: string; requestId: string; epochId: string; tool: string; argumentsDigest: string; result: unknown }>("code_plan_director_change", call.id);
+          if (saved?.projectId === projectId && saved.requestId === epoch.requestId && saved.epochId === epochId
+            && saved.tool === call.tool && saved.argumentsDigest === call.argumentsDigest) receipt = saved.result;
+        }
         const catalogMatches = this.reconciliationCatalogMatches(projectId, call, epoch);
         if (call.tool === 'make_keyframes' && toolContractAtLeast(call.toolContractVersion, '6.0.0') && catalogMatches) {
           const saved = store.get<DirectorKeyframesReceipt>('director_keyframes_receipt', call.id);
@@ -533,12 +540,12 @@ export class ToolInvocationService {
       invariant(binding?.projectId === projectId && binding.requestId === epoch.requestId && call.requestId === epoch.requestId
         && binding.lockId === call.skillLockId && row?.projectId === projectId, "CAPABILITY_MISMATCH", "Code recovery lock belongs to different work");
       const { lockDigest, ...body } = row.lock;
-      const catalog = toolCatalog(CODE_PLAN_TOOL_CONTRACT);
-      invariant(digest(body) === lockDigest && row.lock.compatibility.toolContract === CODE_PLAN_TOOL_CONTRACT
-        && row.lock.bindings.some(binding => binding.kind === "handler" && binding.id === toolHandlerId(CODE_PLAN_TOOL_CONTRACT) && binding.digest === catalog.digest)
+      const catalog = toolCatalog(call.toolContractVersion);
+      invariant(digest(body) === lockDigest && isCodePlanToolContract(row.lock.compatibility.toolContract) && row.lock.compatibility.toolContract === call.toolContractVersion
+        && row.lock.bindings.some(binding => binding.kind === "handler" && binding.id === toolHandlerId(catalog.version) && binding.digest === catalog.digest)
         && call.catalogDigest === catalog.digest && call.recovery?.codePlan && digest(call.recovery.codePlan) === call.argumentsDigest,
         "CAPABILITY_MISMATCH", "Code recovery input differs from its original invocation");
-      const args = parseToolArguments("submit_plan", call.recovery.codePlan, CODE_PLAN_TOOL_CONTRACT).arguments;
+      const args = parseToolArguments("submit_plan", call.recovery.codePlan, catalog.version).arguments;
       let result: JsonValue | null = null, error: ToolInvocation["error"] = null;
       try {
         result = JSON.parse(canonical(await codePlanPort(this.service).submit(projectId, { source: args.source as string,
