@@ -121,6 +121,7 @@ export class ProductionService {
         ...(pinLocalExecution ? { localExecution: this.newProjectLocalExecution } : {}) });
       this.store.insert("project_revision", project.revisionId, project.id, { project });
       this.store.appendEvent(project.id, "project.created", { revisionId: project.revisionId });
+      if (planMode === "code") this.store.appendEvent(project.id, "code_plan.changed", { planVersion: null, state: "empty" });
       return project;
     });
   }

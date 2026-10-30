@@ -257,6 +257,8 @@ test('pinned example executes every ctx call through JSON, stable choices, varia
   assert.equal(calls.filter(c=>c.method==='image').length,6);
   assert.deepEqual(calls.filter(c=>c.method==='choose').map(c=>c.args[0]),['shot-1-keyframe','shot-2-keyframe']);
   assert.equal(calls.filter(c=>c.method==='video').length,4);assert.equal(calls.filter(c=>c.method==='render').length,1);
+  assert.deepEqual(calls.find(c=>c.method==='render').args[0].map(row=>row.motion),
+    ['Locked camera, subtle natural movement', 'Locked camera, subtle natural movement']);
 });
 
 test('code project changes fake/native selection with code locks and never runs a graph release upgrade', async t => {
