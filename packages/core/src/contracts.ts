@@ -160,6 +160,8 @@ export interface VisualStyle {
 }
 
 export interface ProjectRecord {
+  /** Experimental replay runtime; omitted projects retain graph planning. */
+  planMode?: "graph" | "code";
   soundtrack?: {
     audioId: string;
     gainMilliDb: number;

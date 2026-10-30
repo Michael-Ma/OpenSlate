@@ -25,6 +25,8 @@ import { createMediaExecutionRuntime } from "./application/media-execution-runti
 import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
 import { assertInstallationRestoreComplete } from "./persistence/installation-restore-state.js";
 import { createServerShutdown } from "./shutdown.js";
+import { CodePlanRuntime } from "./code-plan/index.js";
+import { CodePlanExecution } from "./code-plan/execution.js";
 
 const serveWeb = process.argv.includes("--serve-web");
 const directory = resolve(process.env.OPENSLATE_DATA_DIR ?? ".openslate");
@@ -74,6 +76,10 @@ const ffmpegPath = findMediaTool("ffmpeg", process.env.OPENSLATE_FFMPEG), ffprob
 const runtime = createMediaExecutionRuntime({ store, fakeProvider: provider, dataDirectory: directory, configuration: executionConfiguration,
   ffmpegPath, ffprobePath, startupTimeoutMs, ...(providerConfiguration === undefined ? {} : { providerConfiguration }) });
 const { engine, localMedia, imageStore, providerCatalog, uploadDirectory } = runtime;
+// Experimental code mode is deliberately pinned to fixture execution in P1.
+const codePlans = new CodePlanRuntime(store, { execution: new CodePlanExecution(store, {
+  provider, artifactDir: join(directory, "artifacts"),
+}) });
 const service = new ProductionService(store, engine, undefined, runtime.productionOptions);
 const narration = new NarrationService(service, localMedia ?? undefined);
 // Each project starts in demo mode until its user chooses and checks local Codex.
@@ -101,13 +107,15 @@ const timer = setInterval(() => {
   if (running) return;
   running = true;
   activeWork = engine.reconcile().then(() => { if (!stopping) return engine.runReady(); }).then(() => { if (!stopping) return sceneCommands.advance(); })
+    .then(() => { if (!stopping) return codePlans.tick(); })
     .catch(error => app.log.error(error)).finally(() => { running = false; });
 }, 500);
 const close = createServerShutdown(app, {
-  stop: () => { stopping = true; clearInterval(timer); engine.stop(); },
+  stop: () => { stopping = true; clearInterval(timer); engine.stop(); codePlans.stop(); },
   cleanup: [
     { name: "Director turns", close: () => director.close() },
     { name: "native media workers", close: () => runtime.close() },
+    { name: "code-plan fixture workers", close: () => codePlans.close() },
     { name: "media reconciliation", close: () => activeWork },
   ],
   resources: [

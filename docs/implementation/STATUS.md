@@ -2,7 +2,17 @@
 
 Reconciled October 16, 2026 (feature branch after the B18 merge, including B1–B18). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
+## October 29 L1–L2 — legacy compatibility removal (persistence, execution)
+
+L1 replaces the migration chain with one current schema (v4); data directories from earlier prototype builds need a new `OPENSLATE_DATA_DIR`.
+
 October 29 L2 removes provider/execution compatibility for requests without execution identity, capability locks without the current recipe digest, partial runtime configurations, failure outcomes without explicit retry authority, and Viggle pre-crop preparations. Demo execution remains explicit fake/v1; current exact-aspect frames still need no crop. Submission intent, unknown-outcome reconciliation, reservations and exact receipts remain authoritative. Offline build, **855/855 focused tests**, **4,576 passed / zero failed / one optional skip (4,577 total)** and all five typechecks passed; self-review and independent review found no remaining actionable issue. [L2 scope and file inventory](../ai/uiux-plan/codex/reports/L2-report.md).
+
+## October 29 P1 — experimental code-plan replay runtime
+
+Projects explicitly marked `planMode: "code"` can replay ordinary TypeScript in disposable QuickJS WASM workers. JSON journals preserve content-addressed media results, choices, plan versions and the latest declarations/logs. The fake-only bridge retains submission intent before dispatch, reconciles lost outcomes without resubmission and publishes success only after existing ingestion. The $1 integer-micro ceiling includes charged/unknown/in-flight work; unpriced work remains bounded by the 200-step run limit. CPU/heap/stack/data limits, stable clock/random, version fencing, per-project single-flight scheduling, quarantine and shutdown handling are implemented. The existing 500 ms loop ticks this mode; absent/graph projects retain graph execution. No Director, routes, UI or real-provider integration is added; rendering is a labeled fixture in P1.
+
+Pinned setup/preflight and build passed. The new suites passed **53/53**; full `pnpm test` passed **4,625**, with **zero failures/cancelled/todo and one optional native-probe skip (4,626 total)**. All **five** workspace typechecks and `git diff --check` passed. General error reporting still has an explicit limitation: the cached `@tootallnate/quickjs-emscripten@0.23.0` build lacks native unhandled-rejection tracking, so detached async failures can incorrectly report `done`. Awaited errors and synchronous throws are captured. The lead needs a reviewed sandbox build/dependency with rejection tracking before this broader semantic requirement can be called complete. Sandbox out-of-memory teardown faults are contained by discarding the entire worker. Verification, review corrections and the remaining dependency limitation are recorded in the [P1 report](../ai/code-plan/reports/P1-report.md). No live media/model call, external network access, browser run, production-state access or commit occurred.
 
 ## October 29 F3 — remake saved clips while keeping approved keyframes
 
