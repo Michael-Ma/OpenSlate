@@ -384,7 +384,7 @@ export class Engine {
     });
   }
 
-  attempts(projectId: string): Attempt[] { return this.store.list<Attempt>("attempt", projectId); }
+  attempts(projectId: string): Attempt[] { return this.store.list<Attempt>("attempt", projectId).filter(attempt => !attempt.workKey?.startsWith("code-plan:")); }
 
   /** Called in the Stop transaction. Only possibly dispatched intents keep monitoring authority. */
   detachUnsent(projectId: string, stopId: string): { sentJobs: number; detachedJobs: number } {
@@ -598,12 +598,12 @@ export class Engine {
     if (this.stopping) return { dispatched: 0, reused: 0, blocked: [] };
     this.recovery.assertWritable();
     this.store.transaction(() => {
-      for (const project of this.projects()) for (const binding of this.store.list<NodeBinding>("node_binding", project.id))
+      for (const project of this.projects().filter(project => project.planMode !== "code")) for (const binding of this.store.list<NodeBinding>("node_binding", project.id))
         if (binding.state === "active" && binding.planId === project.activePlanId && Object.hasOwn(binding.node.args, "localExecution")
           && Object.keys(binding.outputs).length && !this.localBindingCurrent(binding))
           this.store.put("node_binding", binding.id, project.id, { ...binding, outputs: {} });
     });
-    const candidates = this.projects().flatMap(project => this.store.list<NodeBinding>("node_binding", project.id).filter(binding => binding.state === "active"
+    const candidates = this.projects().filter(project => project.planMode !== "code").flatMap(project => this.store.list<NodeBinding>("node_binding", project.id).filter(binding => binding.state === "active"
       && (binding.planId === project.activePlanId || isCharacterSheetBinding(binding)) && Object.keys(binding.outputs).length === 0));
     const blocked: { nodeId: string; code: string }[] = []; let dispatched = 0; let reused = 0;
     const settled = await Promise.allSettled(candidates.map(async binding => {
