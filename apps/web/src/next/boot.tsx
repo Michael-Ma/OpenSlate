@@ -29,7 +29,7 @@ const clearStoredCarry = (): void => {
   try { storage?.removeItem(CARRY_STORAGE_KEY); } catch { /* storage unavailable */ }
 };
 
-interface Session { store: StudioStore; media: MediaSource; mode: "live" | "fixture"; close(): void }
+interface Session { store: StudioStore; media: MediaSource; codePlanMedia?: MediaSource; mode: "live" | "fixture"; close(): void }
 
 /** A link or a reload opens the view it names (`?view=plan`); the shell keeps the address up to date. */
 function openAskedView(store: StudioStore): void {
@@ -72,6 +72,11 @@ async function liveSession(): Promise<Session> {
     url: (artifact, signal) => client.artifactUrl(store.getState().projectId ?? "", artifact, signal),
     revoke: (url) => URL.revokeObjectURL(url),
   };
+  // A code-plan step's media has its own route (api/code-plan.ts), checked the same way.
+  const codePlanMedia: MediaSource = {
+    url: (artifact, signal) => client.codePlanArtifactUrl(store.getState().projectId ?? "", artifact, signal),
+    revoke: (url) => URL.revokeObjectURL(url),
+  };
   const close = () => { store.stop(); client.close(); };
   void store.start(new URLSearchParams(window.location.search).get("project"));
   await filmListRead(store);
@@ -80,7 +85,7 @@ async function liveSession(): Promise<Session> {
     close();
     throw new Error(`The film list could not be read: ${store.getState().loadErrors.projects}`);
   }
-  return { store, media, mode: "live", close };
+  return { store, media, codePlanMedia, mode: "live", close };
 }
 
 async function fixtureSession(): Promise<Session> {

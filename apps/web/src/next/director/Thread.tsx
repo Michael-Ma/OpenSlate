@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { placeByTime } from "../model/code-plan.ts";
 import { useI18n } from "../i18n/I18n.tsx";
 import type { DirectorGenerationBlock, MessageAttachmentView } from "@openslate/core/public";
 import { blockView, type GenerationProgress, type ShotProgress } from "../model/generation-progress.ts";
@@ -22,6 +23,15 @@ function pinToBottom(element: HTMLElement): Pick<ThreadBox, "height" | "client">
   return { height: element.scrollHeight, client: element.clientHeight };
 }
 
+export interface TimedThreadItem {
+  key: string;
+  /** When it happened; it is shown before the first message written after it (null: after every message). */
+  at: string | null;
+  node: ReactNode;
+}
+
+const NO_TIMED: TimedThreadItem[] = [];
+
 /**
  * The conversation, anchored to the bottom: bylines, the user's bubbles with @ chips and the pictures they showed,
  * the Director's replies as safe Markdown. It opens at its bottom (in either language), and new content, or a
@@ -29,7 +39,14 @@ function pinToBottom(element: HTMLElement): Pick<ThreadBox, "height" | "client">
  * scrolling takes it away (threadScrolled). Scrolled up, a "View new messages" button says something arrived and
  * takes them there.
  */
-export function Thread() {
+export function Thread({ extra = null, extraCount = 0, timed = NO_TIMED }: {
+  /** Cards that belong at the foot of the thread after the Director's questions (a code-plan film's waiting choices). */
+  extra?: ReactNode;
+  /** How many cards a film adds to its thread in all: a new one is new content at the bottom, like a new question. */
+  extraCount?: number;
+  /** Cards placed among the messages by their time (a code-plan film's answered choices). */
+  timed?: TimedThreadItem[];
+} = {}) {
   const { t, tm, locale } = useI18n();
   const snapshot = useStudio((s) => s.snapshot);
   const overview = useStudio((s) => s.overview);
@@ -44,6 +61,11 @@ export function Thread() {
     return () => clearInterval(timer);
   }, [view.working, snapshot?.project.id]);
   const elapsed = view.working ? directorElapsed(snapshot?.turns, clock) : null;
+  const placed = useMemo(() => {
+    if (!timed.length) return null;
+    const at = new Map((snapshot?.conversation ?? []).map((entry) => [entry.id, entry.at ?? null]));
+    return placeByTime(view.entries.map((entry) => at.get(entry.id) ?? null), timed);
+  }, [timed, snapshot?.conversation, view.entries]);
   const ref = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   // The box the thread was last pinned to its bottom at; null once the reader scrolled away from the bottom.
@@ -52,9 +74,9 @@ export function Thread() {
   const projectId = useStudio((s) => s.projectId);
   const last = view.entries.at(-1);
   const reviewNotesFailures = view.reviewNotesFailures.length + view.entries.filter((entry) => entry.reviewNotesFailure).length;
-  const now = { projectId, entries: view.entries.length, questions: view.questions.length, held: view.held.length, reviewNotesFailures, working: view.working };
+  const now = { projectId, entries: view.entries.length, questions: view.questions.length, held: view.held.length, reviewNotesFailures, working: view.working, extra: extraCount };
   // Mounted with nothing seen yet, so a thread that is already there starts at its bottom.
-  const before = useRef({ ...now, entries: 0, questions: 0, held: 0, reviewNotesFailures: 0, working: false });
+  const before = useRef({ ...now, entries: 0, questions: 0, held: 0, reviewNotesFailures: 0, working: false, extra: 0 });
 
   useLayoutEffect(() => {
     const element = ref.current;
@@ -65,7 +87,7 @@ export function Thread() {
     if (was.projectId !== now.projectId) { pinned.current = pinToBottom(element); setUnseen(false); return; }
     // Something new at the bottom: an entry, a question, a held edit, or the Director starting to work.
     const grew = now.entries > was.entries || now.questions > was.questions || now.held > was.held
-      || now.reviewNotesFailures > was.reviewNotesFailures || (now.working && !was.working);
+      || now.reviewNotesFailures > was.reviewNotesFailures || (now.working && !was.working) || now.extra > was.extra;
     if (!grew) return;
     // Follow new content when the reader is at the bottom, and always after the person's own message.
     if (pinned.current || (now.entries > was.entries && last?.who === "you")) { pinned.current = pinToBottom(element); setUnseen(false); }
@@ -108,13 +130,20 @@ export function Thread() {
     <div className="thread-wrap">
       <div className="thread" ref={ref} onScroll={onScroll} role="log" aria-label={t("director.thread")}>
         <div className="thread-body" ref={body}>
-          {!view.entries.length && !view.working && !view.reviewNotesFailures.length && <p className="dir-empty">{t("director.empty")}</p>}
-          {view.entries.map((entry) => <Entry key={entry.id} entry={entry} />)}
+          {!view.entries.length && !view.working && !view.reviewNotesFailures.length && !extraCount && <p className="dir-empty">{t("director.empty")}</p>}
+          {view.entries.map((entry, index) => (
+            <Fragment key={entry.id}>
+              {placed?.before[index]?.map((item) => <Fragment key={item.key}>{item.node}</Fragment>)}
+              <Entry entry={entry} />
+            </Fragment>
+          ))}
+          {placed?.after.map((item) => <Fragment key={item.key}>{item.node}</Fragment>)}
           {view.reviewNotesFailures.map((failure) => <p key={failure.id} className="dir-ending" role="status" data-review-notes="unsaved" data-turn={failure.id}>{tm(failure.message)}</p>)}
           {/* How the latest turn ended reads right under it; a held edit then says what that leaves waiting. */}
           {!view.working && view.ending && <p className="dir-ending" role="status" data-entry="ending">{tm(view.ending)}</p>}
           {view.questions.map((question) => <QuestionCard key={question.id} question={question} />)}
           {view.held.map((held) => <HeldEdits key={held.requestId} held={held} />)}
+          {extra}
           {view.working && (
             <div className="entry" data-entry="working">
               <div className="byline"><b>{t("director.title")}</b></div>

@@ -9,6 +9,8 @@ import { msg, type Msg, type ProjectSummary, type ViewName } from "./types.ts";
 export const NARROW_QUERY = "(max-width: 899px)";
 
 export const VIEWS: readonly ViewName[] = ["plan", "keyframes", "assets", "film"];
+/** A code-plan film's tabs: the same four, plus Code (its program and versions). */
+export const CODE_VIEWS: readonly ViewName[] = ["plan", "keyframes", "assets", "film", "code"];
 
 export interface ViewTab {
   view: ViewName;
@@ -23,13 +25,15 @@ const TAB_LABELS: Record<ViewName, MessageId> = {
   keyframes: "shell.tab.keyframes",
   assets: "shell.tab.assets",
   film: "shell.tab.film",
+  code: "shell.tab.code",
   settings: "shell.tab.settings",
   start: "shell.tab.start",
 };
 
-export function viewTabs(current: ViewName): ViewTab[] {
-  const anySelected = VIEWS.includes(current);
-  return VIEWS.map((view, index) => ({ view, label: TAB_LABELS[view], selected: view === current, focusable: anySelected ? view === current : index === 0 }));
+export function viewTabs(current: ViewName, codePlan = false): ViewTab[] {
+  const views = codePlan ? CODE_VIEWS : VIEWS;
+  const anySelected = views.includes(current);
+  return views.map((view, index) => ({ view, label: TAB_LABELS[view], selected: view === current, focusable: anySelected ? view === current : index === 0 }));
 }
 
 export const viewLabel = (view: ViewName): MessageId => TAB_LABELS[view];
@@ -42,8 +46,12 @@ export const hasNoFilms = (state: Pick<StudioState, "projectId" | "projects" | "
  * The view the workspace shows. A studio with no films at all opens on Start, whatever view was asked for,
  * because there is nothing to plan or make yet.
  */
-export function shownView(state: Pick<StudioState, "view" | "projectId" | "projects" | "connection">): ViewName {
-  return hasNoFilms(state) ? "start" : state.view;
+export function shownView(state: Pick<StudioState, "view" | "projectId" | "projects" | "connection"> & { snapshot?: StudioState["snapshot"] }): ViewName {
+  if (hasNoFilms(state)) return "start";
+  // Code is a code-plan film's tab: a graph film that is open (its snapshot read) shows Keyframes instead.
+  const snapshot = state.snapshot;
+  if (state.view === "code" && snapshot && snapshot.project.id === state.projectId && snapshot.project.planMode !== "code") return "keyframes";
+  return state.view;
 }
 
 /**
@@ -128,7 +136,7 @@ export function connectionPill(connection: Connection, offline = false): Connect
 // ---- the view in the address ------------------------------------------------------------------
 
 const URL_VIEWS: Record<string, ViewName> = {
-  plan: "plan", keyframes: "keyframes", film: "film", assets: "assets", settings: "settings", start: "start",
+  plan: "plan", keyframes: "keyframes", film: "film", assets: "assets", code: "code", settings: "settings", start: "start",
   // The classic studio's names, so a link from it opens the same view here.
   frames: "keyframes", cut: "film",
 };

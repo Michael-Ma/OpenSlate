@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { headerScope, labelList } from "../model/director.ts";
 import { currentScene } from "../model/keyframes.ts";
@@ -10,6 +10,9 @@ import { Thread } from "./Thread.tsx";
 import { useComposerDraft } from "./useComposerDraft.ts";
 import { useComposerUploads } from "./useComposerUploads.ts";
 import { droppedFiles } from "../model/composer-files.ts";
+import { useCodePlan } from "../codeplan/CodePlanContext.tsx";
+import { CodePlanChoiceGroup, useCodePlanChoices } from "../codeplan/ChoiceCards.tsx";
+import { CodePlanRunStrip } from "../codeplan/RunStrip.tsx";
 import "./director.css";
 
 /**
@@ -29,6 +32,10 @@ export function DirectorColumn() {
   const view = useStudio(shownView);
   const hasFilm = useStudio(directorHasFilm);
   const scene = overview ? currentScene(overview, sceneId) : null;
+  // A code-plan film: its run under the header, and the choices its plan asked at the foot of the thread.
+  const codePlan = useCodePlan();
+  const choices = useCodePlanChoices();
+  const timed = useMemo(() => choices.answered.map((card) => ({ key: `choice:${card.choiceId}:${card.optionsDigest}`, at: card.answeredAt, node: <CodePlanChoiceGroup cards={[card]} /> })), [choices.answered]);
   const draft = useComposerDraft();
   const uploads = useComposerUploads();
   // Files dragged over the column: the whole column takes them, with a quiet outline while they hover.
@@ -60,7 +67,12 @@ export function DirectorColumn() {
       {hasFilm ? (
         <>
           <DirectorNotices />
-          <Thread />
+          {codePlan.enabled ? (
+            <>
+              <CodePlanRunStrip />
+              <Thread extra={<CodePlanChoiceGroup cards={choices.pending} />} extraCount={choices.count} timed={timed} />
+            </>
+          ) : <Thread />}
         </>
       ) : (
         <div className="thread" role="log" aria-label={t("director.thread")}>

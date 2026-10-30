@@ -305,7 +305,7 @@ export function carryToApply(carry: Carry, overview: GenerationOverview): Carry 
 export const CARRY_STORAGE_KEY = "openslate.next.carry";
 export const CARRY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-const CARRY_VIEWS = new Set<ViewName>(["plan", "keyframes", "assets", "film", "settings", "start"]);
+const CARRY_VIEWS = new Set<ViewName>(["plan", "keyframes", "assets", "film", "code", "settings", "start"]);
 const EDIT_FIELDS = new Set<CarriedEdit["field"]>(["imagePrompt", "motion", "desiredFrames", "narration"]);
 const isId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 200;
 const optionalId = (value: unknown): string | null => (isId(value) ? value : null);

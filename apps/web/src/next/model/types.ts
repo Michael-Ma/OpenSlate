@@ -1,4 +1,4 @@
-import type { DirectorGenerationBlock, DirectorGenerationEffect, DirectorNote, GenerationOverview, MessageAttachmentView, NativeDiagnostic, ReviewNotesFailure } from "@openslate/core/public";
+import type { DirectorGenerationBlock, DirectorGenerationEffect, DirectorNote, GenerationOverview, MessageAttachmentView, NativeDiagnostic, PlanMode, ReviewNotesFailure } from "@openslate/core/public";
 import type { MessageValues } from "../i18n/format.ts";
 import type { MessageId } from "../i18n/messages.ts";
 
@@ -19,6 +19,8 @@ export interface ProjectSnapshot {
     name: string;
     revisionId: string;
     headVersion: number;
+    /** "code": the Director writes the plan as a program (docs/ai/code-plan/DESIGN.md). Absent on graph films. */
+    planMode?: PlanMode;
     brief: string;
     story: string;
     scenes: { id: string; revisionId: string; purpose: string; title?: string }[];
@@ -116,8 +118,8 @@ export interface ProjectSummary {
   name: string;
 }
 
-/** The four tabs, plus Settings (gear in the top bar) and Start (the film list). */
-export type ViewName = "plan" | "keyframes" | "assets" | "film" | "settings" | "start";
+/** The four tabs, plus Settings (gear in the top bar) and Start (the film list). A code-plan film adds Code. */
+export type ViewName = "plan" | "keyframes" | "assets" | "film" | "code" | "settings" | "start";
 
 /** What the composer points at. */
 export interface Target {

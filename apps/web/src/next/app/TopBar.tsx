@@ -9,6 +9,8 @@ import { StudioMenu } from "./StudioMenu.tsx";
 import { AttentionMenu } from "./AttentionMenu.tsx";
 import { useNarrow } from "./useNarrow.ts";
 import { useWriteGuard } from "./useWriteGuard.ts";
+import { useCodePlan } from "../codeplan/CodePlanContext.tsx";
+import { codePlanHeading } from "../model/code-plan.ts";
 
 /** First control inside the Director drawer, so opening it puts the person where they will type. */
 function focusIntoDirector() {
@@ -58,10 +60,13 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
   const stopping = useStudio((s) => !!s.pending["control:stop"]);
   const narrow = useNarrow();
   const reachable = useWriteGuard().server;
-  const heading = useMemo(() => filmHeading(name, projects, projectId, overview), [name, projects, projectId, overview]);
+  // A code-plan film says so under its title and counts what its plan declared; it has a Code tab too.
+  const codePlan = useCodePlan();
+  const heading = useMemo(() => (codePlan.enabled ? codePlanHeading(filmHeading(name, projects, projectId, null), codePlan.view) : filmHeading(name, projects, projectId, overview)),
+    [codePlan.enabled, codePlan.view, name, projects, projectId, overview]);
   const mode = topBarMode(view, !!projectId);
   const pill = connectionPill(connection, offline);
-  const tabs = viewTabs(view);
+  const tabs = viewTabs(view, codePlan.enabled);
   const stop = mode === "film" && showStop(overview, director, reachable, view);
   const [confirming, setConfirming] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);

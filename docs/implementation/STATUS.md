@@ -2,6 +2,10 @@
 
 Reconciled October 16, 2026 (feature branch after the B18 merge, including B1–B18). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
+## October 29 P3b — code-plan web UI (lead, against the fixture)
+
+The New film sheet offers **Code plan (experimental)** beside the default storyboard and sends `planMode: "code"` only for it. A film whose snapshot says `planMode: "code"` gets a run strip and inline choice cards in the Director column, Plan/Keyframes/Film projected from `CodePlanView`, and a Code tab with versions, dry-run diffs and a read-only line diff; graph films call no code-plan route and render as before. Writes use the existing press identities. The browser fixture (`?codeplan=waiting|budget|error|done|empty`) simulates the run; the P3a routes and P2a/P2b server are not merged here, so nothing was checked against a real server. Step media uses the assumed `GET .../code-plan/artifacts/:artifactId/content` behind one helper. Build, all five typechecks and the web suite (**1,000/1,000**, 31 new) passed; fixture-studio browser checks at 1440 px and 390 px in English and Chinese. [Report](../ai/code-plan/reports/P3b-report.md).
+
 ## October 29 P2a — isolated code-plan Director
 
 Code projects use the independent `0.1.0` tool catalog (`read_film`, `submit_plan`) and pinned schema 1 `code-plan@1.0.0` instructions, API declarations and two-shot example. Their context contains the code-plan view/current source and saved instruction provenance; graph context, catalogs, shipped guidance and upgrades remain separate. Submission carries the original invocation ID and Director author, preserves rejection diffs, refuses stale versions through the port and reconciles lost replies through same-ID replay. Durable request holds close on every terminal turn and restart reconciliation. Current Director-authored failures queue up to two application repair turns per version, then one message asking the person. Fake mode submits the pinned example.
