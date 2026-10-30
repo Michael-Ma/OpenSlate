@@ -2,6 +2,10 @@
 
 Reconciled October 16, 2026 (feature branch after the B18 merge, including B1–B18). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
+## October 29 P4b — first real code-plan film and follow-up fixes
+
+One Director message produced a real 12-second silent two-shot film (Codex keyframes, Viggle H3 clips, local render): $0.20 of the $1 ceiling, no failures or retries ([P4b report](../ai/code-plan/reports/P4b-report.md)). Follow-ups: the code-plan guidance and example run each shot as its own concurrent pipeline (a choice appears as soon as its shot's frames exist; the motion edit's preview now reaches seven reused steps); the Plan view says the plan is running before its first pass ends; media choices have a Compare larger dialog; an unlabelled render is named "Film render".
+
 ## October 29 P4a — code-plan installed providers and local rendering
 
 Code-mode media now uses the exact installed profiles in the project's capability lock and the existing Codex image, OpenAI Images, Viggle H3, MiniMax H3 and OpenAI speech adapters. `read_film` exposes their model ids, defaults, known/unknown prices and unit basis. Saved step intent, original plan version, one-use submit permits, current profile/readiness, priced holds, Stop, the ceiling and concurrency constrain new dispatch; recovery retains existing tasks/receipts without resubmission. Shared spool/ingestion/normalization and Viggle's current first-frame crop remain authoritative, with no graph candidate/grant/review admission.

@@ -32,10 +32,17 @@ The Director's program used the installed profile ids (`codex-keyframes`, `viggl
 1. **Parallel keyframes run serially.** The plan starts all four images with `Promise.all`, but Codex image runs them one at a time, so the frames took 1 min 49 s. Because the program waits for all four before the first `ctx.choose`, shot 1's choice could have appeared about a minute earlier. Fix: either the guidance tells the Director to ask per shot as soon as that shot's frames exist, or the Codex image profile gets more concurrency.
 2. **The Plan tab showed "This version declares no scenes or shots" for a few seconds**, until the first pass reached `ctx.scene`/`ctx.shot`. It should say the plan is still running instead.
 3. **The choice-card thumbnails are too small to compare.** Choosing meant looking at the Keyframes tab. The card needs a larger view on click or hover.
-4. **The render has no audio track.** That is acceptable for a silent film, but storyboard exports carry 48 kHz audio. A silent track would keep exports consistent for players and editors.
+4. **The render has no audio track.** ~~Storyboard exports carry 48 kHz audio~~. Correction: this is the shared renderer's contract. With no audio placements it writes no audio track and checks for exactly that (`Unexpected output audio`), so storyboard exports without narration are video-only too. No change.
 5. **Film › Renders lists the render as "No prompt".** A label such as "Film render" would read better.
 
 ## Setup and safety
 
 - Fresh data directory `~/openslate-live-code-20261029`. The studio loaded the owner's `.env.live.local` through `node --env-file`; the file was never opened. Port 3001 was free before the run, and the studio was stopped afterwards.
 - Spend under $1, so the lead confirmed both clip choices without asking (owner rule). No unsandboxed Codex agent was used: the studio itself ran the Codex CLI.
+
+## Follow-up fixes
+
+- **1:** the guidance and the two-shot example now run each shot as its own pipeline (frames, choose, clip), with all shots started together. A shot's choice appears as soon as its own frames exist, and its clip runs while the next shot is being chosen. The guidance digest is re-pinned. A side effect: the P2c motion edit's preview now reaches seven reused steps instead of three.
+- **2:** before the first pass ends, the Plan tab says the plan is running instead of "declares no scenes or shots".
+- **3:** a media choice card has **Compare larger**, a dialog with the options side by side, each with its own Choose. An answered card opens it read only.
+- **5:** a render with no label is named "Film render".
