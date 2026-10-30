@@ -364,6 +364,13 @@ async function runSandboxLocal(options: SandboxOptions): Promise<SandboxResult> 
 }
 
 if (!isMainThread && workerData?.kind === WORKER_KIND && parentPort) {
+  // Every pass is a fresh worker, so Node would repeat the stripTypeScriptTypes ExperimentalWarning on each one.
+  const host = globalThis.process, emitWarning = host.emitWarning.bind(host) as (...args: unknown[]) => void;
+  host.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
+    const type = typeof rest[0] === "string" ? rest[0] : (rest[0] as { type?: string } | undefined)?.type;
+    if (type === "ExperimentalWarning" && String(warning).includes("stripTypeScriptTypes")) return;
+    emitWarning(warning, ...rest);
+  }) as typeof host.emitWarning;
   const port = parentPort;
   const shared = workerData.shared as SharedArrayBuffer;
   const control = new Int32Array(shared, 0, 1);
