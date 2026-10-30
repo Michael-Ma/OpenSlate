@@ -22,11 +22,11 @@ Ensure inherited real-generation switches are off; use [the private config templ
 5. Edit the words, voice or range. Check old acceptance/speech proposal does not remain current and the other shot is preserved.
 6. Continue that edit in chat using saved scope/state. The director can update writing/plan; media routes remain disabled.
 
-If rehearsing generated speech, prepare/review its exact proposal and inspect model/voice/usage information, then stop before paid generation. For a real result follow [live testing](MANUAL-LIVE-PRODUCTION.md) within an explicitly authorized live-test scope.
+If rehearsing generated speech, inspect the shot's exact proposal and model/voice/usage information, then stop before paid generation. Final acceptance requires that shot's own session and current draft; project-wide acceptance is refused. For a real result follow [live testing](MANUAL-LIVE-PRODUCTION.md) within an explicitly authorized live-test scope.
 
 ## Transcription and music
 
-Owned recording transcription freezes exact source bytes/settings. With the API disabled, inspect preparation/review only; no transcript should be fabricated. After a real accepted transcript exists, compare/adopt exact word/sample selections explicitly rather than treating recognition as automatically accepted writing.
+Owned recording transcription freezes exact source bytes/settings. With the API disabled, inspect preparation/review only; no transcript should be fabricated. Recognition remains candidate evidence for Director attachments. Human transcript adoption is unavailable; write the shot's words or a truthful description and accept the recording's measured range through the shot workspace.
 
 Import an owned short music recording through chat **+ → Audio** or Timeline. Audition it and select background music. Library import/listening should not change narration, create creative holds or fence a Director request.
 

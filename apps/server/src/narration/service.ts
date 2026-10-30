@@ -3,23 +3,15 @@ import { digest, invariant, newId } from "@openslate/core";
 import type { ActorContext } from "@openslate/core";
 import type { ProductionService } from "../application/service.js";
 import type { LocalMediaService } from "../media/index.js";
-import type { NarrationAcceptance, NarrationAudio, NarrationCue, NarrationEntry, NarrationGap, NarrationImpact, NarrationProjection, NarrationReadiness, NarrationSegmentView, NarrationSnapshot, NarrationState, ReviseSegments, SegmentDraft, SegmentRevision } from "./types.js";
+import type { NarrationAcceptance, NarrationAudio, NarrationCue, NarrationEntry, NarrationGap, NarrationProjection, NarrationReadiness, NarrationSegmentView, NarrationSnapshot, NarrationState, ReviseSegments, SegmentDraft, SegmentRevision } from "./types.js";
 import { isVerifiedGeneratedNarrationAudio, narrationAudioOrigin, resolveGeneratedNarrationAudio, verifyGeneratedNarrationAudio } from "./generated-audio.js";
 import type { ResolvedGeneratedNarrationAudio } from "./generated-audio.js";
-import { createTranscriptSelection, resolvePublishedTranscriptCandidate } from "./transcript-selection.js";
-import type { ResolvedPublishedTranscriptCandidate } from "./transcript-selection.js";
-import { verifyTranscriptSelectionEvidence } from "./transcript-selection-media.js";
 import { assertNarrationAuthority, assertNarrationMutation, shotDraftId } from './narration-scope.js';
 import { completedSceneAttachmentScope, type CompletedSceneAttachment } from '../narration-reusable-speech.js';
 
 export interface AttachGeneratedNarrationAudio {
   expectedVersion: number; segmentId: string; segmentRevisionId: string;
   artifactId: string; artifactDigest: string; generationEvidenceDigest: string; key: string;
-}
-export interface UseTranscriptSelection {
-  expectedVersion: number; segmentId: string; segmentRevisionId: string; audioId: string;
-  candidateId: string; candidateDigest: string; startWordIndex: number; endWordIndex: number;
-  selectedTextDigest: string; key: string;
 }
 
 const MAX_SAMPLES = 48000 * 360;
@@ -108,11 +100,8 @@ export class NarrationService {
       invariant(request && [projectId, shot.id, shot.sceneId].some(scope => request.scopeIds.includes(scope)), 'SCOPE_DENIED', 'This request does not cover that shot narration.');
       invariant(shot.narration?.mode === 'generated' && shot.narration.text.trim(), 'NARRATION_SPEECH_INVALID', 'This shot has no generated narration script.');
       const state = this.read(projectId).state, saved = this.store.get<{ segmentId: string }>('narration_shot_draft', shotDraftId(projectId, shot.id));
-      const canonicalHead = this.store.get<{ canonicalId: string }>('narration_canonical_head', projectId);
-      const canonical = canonicalHead ? this.store.get<{ shotMappings: { shotId: string; segmentId: string | null }[] }>('narration_canonical', canonicalHead.canonicalId) : undefined;
-      const target = saved?.segmentId ?? canonical?.shotMappings.find(mapping => mapping.shotId === shot.id)?.segmentId;
-      const shared = target && (this.store.db.prepare("SELECT 1 FROM entities WHERE kind='narration_shot_draft' AND project_id=? AND json_extract(body,'$.segmentId')=? AND json_extract(body,'$.shotId')<>? LIMIT 1").get(projectId,target,shot.id)
-        || canonical?.shotMappings.some(mapping => mapping.segmentId === target && mapping.shotId !== shot.id));
+      const target = saved?.segmentId;
+      const shared = target && this.store.db.prepare("SELECT 1 FROM entities WHERE kind='narration_shot_draft' AND project_id=? AND json_extract(body,'$.segmentId')=? AND json_extract(body,'$.shotId')<>? LIMIT 1").get(projectId,target,shot.id);
       let entry = !shared && target ? state.entries.find(entry => entry.segmentId === target) : undefined;
       const draft = this.validateDraft({ text: shot.narration.text, textKind: 'draft', language: 'en', meaning: shot.purpose || 'Narration for this shot',
         source: { kind: 'generated', voice: input.voice ?? defaultNarratorVoice(this.store, project, shot), profileRevisionId: input.profileRevisionId } });
@@ -222,72 +211,6 @@ export class NarrationService {
     return verifyGeneratedNarrationAudio(this.store, this.media, { artifactDir: this.production.engine.artifactDir }, selected, signal ? { signal } : {});
   }
 
-  useTranscriptWords(projectId: string, human: ActorContext, input: UseTranscriptSelection, options: { signal?: AbortSignal } = {}): Promise<NarrationSnapshot> {
-    return this.useTranscript(projectId, human, input, "writing", options);
-  }
-  useTranscriptTiming(projectId: string, human: ActorContext, input: UseTranscriptSelection, options: { signal?: AbortSignal } = {}): Promise<NarrationSnapshot> {
-    return this.useTranscript(projectId, human, input, "timing", options);
-  }
-
-  /** Human editorial choice only. Recognition cannot grant acceptance or generate more media. */
-  private async useTranscript(projectId: string, human: ActorContext, input: UseTranscriptSelection, action: "writing" | "timing",
-    options: { signal?: AbortSignal }): Promise<NarrationSnapshot> {
-    const signal = options.signal; human = structuredClone(human); input = structuredClone(input);
-    const stopped = () => invariant(!signal?.aborted, "NARRATION_CANCELLED", "Transcript selection was cancelled");
-    this.authority(projectId, human, true, input.segmentId); stopped();
-    invariant(input && Object.keys(input).sort().join("\0") === ["expectedVersion", "segmentId", "segmentRevisionId", "audioId", "candidateId", "candidateDigest",
-      "startWordIndex", "endWordIndex", "selectedTextDigest", "key"].sort().join("\0"), "NARRATION_INVALID_INPUT", "Select an exact transcript range for one saved section");
-    integer(input.expectedVersion, 0, Number.MAX_SAFE_INTEGER); integer(input.startWordIndex, 0, 8191); integer(input.endWordIndex, input.startWordIndex + 1, 8192);
-    for (const value of [input.segmentId, input.segmentRevisionId, input.audioId, input.candidateId, input.key]) text(value, 160);
-    for (const value of [input.candidateDigest, input.selectedTextDigest]) invariant(typeof value === "string" && /^[a-f0-9]{64}$/.test(value), "NARRATION_INVALID_INPUT", "Transcript identity is invalid");
-    const { expectedVersion, key, ...selection } = input, commandAction = action === "writing" ? "transcript_words" : "transcript_timing";
-    const replay = this.store.commandReplay<NarrationSnapshot>(`${human.principalId}:${projectId}:${human.requestId}:narration`, key,
-      digest({ action: commandAction, expectedVersion, arguments: selection }));
-    if (replay) return replay.result;
-    const section = (state: NarrationState) => {
-      invariant(state.version === expectedVersion, "REVISION_CONFLICT", "Narration changed before this transcript selection");
-      const entry = this.entry(state, selection.segmentId);
-      invariant(entry.segmentRevisionId === selection.segmentRevisionId && entry.audioId === selection.audioId,
-        "REVISION_CONFLICT", "The selected section or recording changed");
-      return { entry, script: this.record<SegmentRevision>("narration_segment", entry.segmentRevisionId, projectId),
-        audio: this.record<NarrationAudio>("narration_audio", selection.audioId, projectId),
-        cue: entry.cueId ? this.record<NarrationCue>("narration_cue", entry.cueId, projectId) : null };
-    };
-    const resolve = () => {
-      const published = resolvePublishedTranscriptCandidate(this.store, projectId, selection.candidateId);
-      invariant(published.candidateDigest === selection.candidateDigest, "NARRATION_TRANSCRIPT_CHANGED", "Selected transcript evidence changed");
-      return published;
-    };
-    const initialState = this.read(projectId).state, initial = section(initialState), published = resolve(), selectionId = newId(), outputId = selectionId;
-    const derive = (state: NarrationState, current: ReturnType<typeof section>, candidate: ResolvedPublishedTranscriptCandidate) => createTranscriptSelection({
-      id: selectionId, outputId, projectId, requestId: human.requestId, principalId: human.principalId, action, state, ...current, published: candidate,
-      range: { startWordIndex: selection.startWordIndex, endWordIndex: selection.endWordIndex }, selectedTextDigest: selection.selectedTextDigest });
-    const proposed = derive(initialState, initial, published);
-    await this.verifyTranscript(published, initial.audio, signal);
-    stopped(); this.authority(projectId, human, true);
-    return this.mutate(projectId, human, expectedVersion, key, commandAction, selection, state => {
-      stopped(); this.authority(projectId, human, true);
-      const current = section(state), candidate = resolve();
-      invariant(digest(current) === digest(initial), "NARRATION_TRANSCRIPT_CHANGED", "Selected narration evidence changed during transcript verification");
-      const result = derive(state, current, candidate);
-      invariant(digest(result) === digest(proposed), "NARRATION_TRANSCRIPT_CHANGED", "Transcript selection changed during verification");
-      // A true no-op preserves even an existing manual cue and all accepted work.
-      if (!result.changed) return false;
-      this.store.insert("narration_transcript_selection", result.selection.id, projectId, result.selection);
-      this.store.insert(result.output.kind, result.output.record.id, projectId, result.output.record);
-      if (result.output.kind === "narration_segment") {
-        current.entry.segmentRevisionId = result.output.record.id; current.entry.cueId = null;
-        current.entry.scriptAcceptanceId = current.entry.audioAcceptanceId = current.entry.timingAcceptanceId = null;
-      } else { current.entry.cueId = result.output.record.id; current.entry.timingAcceptanceId = null; }
-      this.store.appendEvent(projectId, "narration.transcript_selected", { action, selectionId: result.selection.id, candidateId: selection.candidateId,
-        segmentId: selection.segmentId, outputId: result.output.record.id, requestId: human.requestId });
-    });
-  }
-
-  private verifyTranscript(published: ResolvedPublishedTranscriptCandidate, audio: NarrationAudio, signal?: AbortSignal): Promise<ResolvedPublishedTranscriptCandidate> {
-    return verifyTranscriptSelectionEvidence(this.store, this.media, { artifactDir: this.production.engine.artifactDir }, published, audio, signal ? { signal } : {});
-  }
-
   recordHumanCue(projectId: string, human: ActorContext, expectedVersion: number, key: string, input: { segmentId: string; startSample: number; endSample: number }): NarrationSnapshot {
     this.authority(projectId, human, true);
     return this.mutate(projectId, human, expectedVersion, key, "cue", input, state => {
@@ -329,24 +252,16 @@ export class NarrationService {
     });
   }
 
-  exportProjection(projectId: string, actor: ActorContext, options: { requireAccepted?: boolean } = {}): NarrationProjection {
-    return this.projectSnapshot(this.snapshot(projectId, actor), options);
-  }
-
   /** Trusted canonical adapter projection; callers must establish current authority and verify saved acceptances. */
-  projectSnapshot(view: NarrationSnapshot, options: { requireAccepted?: boolean; shotRelativeSegmentIds?: string[] } = {}): NarrationProjection {
+  projectSnapshot(view: NarrationSnapshot, options: { requireAccepted?: boolean } = {}): NarrationProjection {
     const projectId = view.state.projectId;
     const segments: NarrationProjection["segments"] = [], gaps = [...view.readiness.gaps];
-    let end = 0;
     for (const segment of view.segments) {
       if (!segment.cue || !segment.audio) continue;
       const cue = segment.cue, samples = cue.endSample - cue.startSample, timing = sampleIntervalToFrames(segment.entry.atSample, samples);
-      const shotRelative = options.shotRelativeSegmentIds?.includes(segment.entry.segmentId) ?? false;
-      const relativeDurationFrames = shotRelative ? Math.ceil(samples / 1600) : sampleIntervalToFrames(0, samples).durationFrames;
-      if (!shotRelative && segment.entry.atSample < end) gaps.push(gap(segment.entry.segmentId, "overlapping_or_unordered_narration", "export"));
-      end = segment.entry.atSample + samples;
-      if (end > MAX_SAMPLES || relativeDurationFrames < 1) gaps.push(gap(segment.entry.segmentId, "export_duration", "export"));
-      segments.push({ segmentId: segment.entry.segmentId, segmentRevisionId: segment.script.id, cue: { id: cue.id, meaning: segment.script.meaning, placementFrames: timing.placementFrames, durationFrames: relativeDurationFrames, audio: { artifactId: segment.audio.id, sha256: segment.audio.media.sha256, kind: "audio" }, accepted: segment.accepted.script && segment.accepted.audio && segment.accepted.timing, measured: true }, frameCoverage: { startFrame: timing.placementFrames, endFrame: timing.placementFrames + (shotRelative ? relativeDurationFrames : timing.durationFrames) }, audioPlacement: { source: segment.audio.media, startSample: cue.startSample, durationSamples: samples, atSample: segment.entry.atSample, gainMilliDb: 0 } });
+      const relativeDurationFrames = Math.ceil(samples / 1600);
+      if (segment.entry.atSample + samples > MAX_SAMPLES || relativeDurationFrames < 1) gaps.push(gap(segment.entry.segmentId, "export_duration", "export"));
+      segments.push({ segmentId: segment.entry.segmentId, segmentRevisionId: segment.script.id, cue: { id: cue.id, meaning: segment.script.meaning, placementFrames: timing.placementFrames, durationFrames: relativeDurationFrames, audio: { artifactId: segment.audio.id, sha256: segment.audio.media.sha256, kind: "audio" }, accepted: segment.accepted.script && segment.accepted.audio && segment.accepted.timing, measured: true }, frameCoverage: { startFrame: timing.placementFrames, endFrame: timing.placementFrames + relativeDurationFrames }, audioPlacement: { source: segment.audio.media, startSample: cue.startSample, durationSamples: samples, atSample: segment.entry.atSample, gainMilliDb: 0 } });
     }
     const accepted = view.segments.length > 0 && segments.length === view.segments.length && gaps.length === 0 && segments.every(s => s.cue.accepted);
     invariant(!options.requireAccepted || accepted, "NARRATION_NOT_READY", "Narration still requires current human acceptance or timing choices");
@@ -401,11 +316,14 @@ export class NarrationService {
     };
     return { state, segments, readiness, canonicalApplied: false };
   }
-  private mutate(projectId: string, actor: ActorContext, expectedVersion: number, key: string, action: string, argumentsValue: unknown, fn: (state: NarrationState) => void | false,
+  private mutate(projectId: string, actor: ActorContext, expectedVersion: number, key: string, action: string, argumentsValue: unknown, fn: (state: NarrationState) => void,
     completed?: { input: AttachGeneratedNarrationAudio; completion: CompletedSceneAttachment }): NarrationSnapshot {
-    const authority = () => completed
-      ? completedSceneAttachmentScope(this.production, projectId, actor, completed.input, completed.completion)
-      : (this.authority(projectId, actor), assertNarrationAuthority(this.production, projectId, actor));
+    const authority = () => {
+      if (completed) return completedSceneAttachmentScope(this.production, projectId, actor, completed.input, completed.completion);
+      const scope = this.authority(projectId, actor);
+      invariant(!["cue", "accept", "accept_audio", "place"].includes(action) || scope, "NARRATION_SHOT_SCOPE_REQUIRED", "Open a dedicated shot narration session before editing timing, placement or acceptance");
+      return scope;
+    };
     authority(); integer(expectedVersion, 0, Number.MAX_SAFE_INTEGER); text(key, 160);
     return this.store.transaction(() => {
       authority();
@@ -415,18 +333,14 @@ export class NarrationService {
         const before = structuredClone(state), scope = authority();
         // Refuse foreign targets before the callback creates any records or verifies media.
         assertNarrationMutation(this.store, scope, before, before, action, argumentsValue);
-        // Only new transcript callbacks return false. Legacy no-op mutation behavior is unchanged.
-        const changed = fn(state);
+        fn(state);
         assertNarrationMutation(this.store, scope, before, state, action, argumentsValue);
-        if (changed === false) return this.read(projectId);
         if (actor.kind === "human" && action === "revise") {
           const changedSegments = new Set([...before.entries, ...state.entries].filter(entry => {
             const previous = before.entries.find(e => e.segmentId === entry.segmentId), next = state.entries.find(e => e.segmentId === entry.segmentId);
             return previous?.segmentRevisionId !== next?.segmentRevisionId;
           }).map(e => e.segmentId));
           const mappings = this.store.list<{ shotId: string; segmentId: string }>("narration_shot_draft", projectId);
-          const head = this.store.get<{ canonicalId: string }>("narration_canonical_head", projectId);
-          if (head) mappings.push(...(this.store.get<{ shotMappings: { shotId: string; segmentId: string | null }[] }>("narration_canonical", head.canonicalId)?.shotMappings ?? []).filter((m): m is { shotId: string; segmentId: string } => m.segmentId !== null));
           const ids = new Set(mappings.filter(m => changedSegments.has(m.segmentId)).map(m => m.shotId));
           if (scope) ids.add(scope.shotId);
           if (changedSegments.size && ids.size) this.store.appendEvent(projectId, "human.fields_changed", { requestId: actor.requestId, fields: [...ids].map(shotId => ({ shotId, field: "narration" })) });
@@ -442,10 +356,10 @@ export class NarrationService {
     this.store.put('narration_state', projectId, projectId, next);
     this.store.appendEvent(projectId, 'narration.changed', { revisionId, version: next.version, action });
   }
-  private authority(projectId: string, actor: ActorContext, humanOnly = false, segmentId?: string): void {
+  private authority(projectId: string, actor: ActorContext, humanOnly = false, segmentId?: string) {
     this.production.assertActor(projectId, actor, true);
     invariant(!humanOnly || actor.kind === "human", "ACTOR_DENIED", "This narration decision requires an authenticated human");
-    assertNarrationAuthority(this.production, projectId, actor, segmentId);
+    return assertNarrationAuthority(this.production, projectId, actor, segmentId);
   }
   private entry(state: NarrationState, id: string): NarrationEntry { const entry = state.entries.find(e => e.segmentId === id); invariant(entry, "SCOPE_DENIED", "Unknown narration segment"); return entry; }
   private record<T extends { projectId: string }>(kind: string, id: string, projectId: string): T { const record = this.store.get<T>(kind, id); invariant(record?.projectId === projectId, "SCOPE_DENIED", "Narration reference belongs to another project or is absent"); return record; }
@@ -457,18 +371,4 @@ export class NarrationService {
     if (draft.source.kind === "generated") { if (draft.source.voice !== null) text(draft.source.voice, 160); if (draft.source.profileRevisionId !== null) text(draft.source.profileRevisionId, 160); }
     return { text: draft.text, textKind: draft.textKind, language: draft.language, meaning: draft.meaning, source: draft.source.kind === "generated" ? { kind: "generated", voice: draft.source.voice, profileRevisionId: draft.source.profileRevisionId } : { kind: draft.source.kind } };
   }
-}
-
-/** Visual fingerprints consume meaning/duration; rendering also consumes audio and placement. */
-export function compareNarrationProjections(before: NarrationProjection, after: NarrationProjection): NarrationImpact[] {
-  invariant(before.projectId === after.projectId, "SCOPE_DENIED", "Cannot compare narration across projects");
-  const ids = new Set([...before.segments.map(s => s.segmentId), ...after.segments.map(s => s.segmentId)]);
-  return [...ids].map(segmentId => {
-    const old = before.segments.find(s => s.segmentId === segmentId), next = after.segments.find(s => s.segmentId === segmentId);
-    if (!old || !next) return { segmentId, visual: "replan", render: "replace", reason: "added_or_removed", readinessChanged: true };
-    const visualChanged = digest({ meaning: old.cue.meaning, duration: old.cue.durationFrames }) !== digest({ meaning: next.cue.meaning, duration: next.cue.durationFrames });
-    const renderInputs = (value: typeof old) => ({ sha256: value.audioPlacement.source.sha256, startSample: value.audioPlacement.startSample, durationSamples: value.audioPlacement.durationSamples, atSample: value.audioPlacement.atSample, gainMilliDb: value.audioPlacement.gainMilliDb });
-    const renderChanged = digest(renderInputs(old)) !== digest(renderInputs(next)) || old.cue.meaning !== next.cue.meaning;
-    return { segmentId, visual: visualChanged ? "replan" : "reuse", render: renderChanged ? "replace" : "reuse", reason: visualChanged ? "meaning_or_duration" : renderChanged ? "audio_or_placement" : "unchanged", readinessChanged: old.cue.accepted !== next.cue.accepted };
-  });
 }

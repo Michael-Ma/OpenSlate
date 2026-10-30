@@ -98,7 +98,7 @@ test('post-marker unknown speech is reconciled without a fresh dispatch after ma
 
 test('scene deletion refuses an unresolved section speech job for every mapped shot without dispatching it',async t=>{
  const f=await mapped(t);await f.prepareAndReview();const attempt=f.admit(f.applied),project=f.store.getProject(f.project.id),segmentId=f.view().segments[0].entry.segmentId;
- const other=project.shots[1];f.store.put('narration_shot_draft',digest({projectId:project.id,shotId:other.id}),project.id,{shotId:other.id,segmentId});
+ const other=project.shots[1];f.store.put('narration_shot_draft',digest({projectId:project.id,shotId:other.id}),project.id,{shotId:other.id,segmentId,intentDigest:digest(other.narration ?? null)});
  for(const scene of project.scenes)assert.throws(()=>editStoryboard(f.production,project.id,{kind:'deleteScene',id:scene.id,withShots:true,expectedHeadVersion:project.headVersion},key()),{code:'ATTEMPTS_RUNNING'});
  assert.deepEqual(f.store.getProject(project.id),project);assert.deepEqual(f.store.get('attempt',attempt.id),attempt);assert.deepEqual(f.calls,{http:0,credentials:0});
 });

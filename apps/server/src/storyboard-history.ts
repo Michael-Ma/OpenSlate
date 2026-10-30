@@ -11,7 +11,7 @@ export interface MediaUndo {
   /** Event cursor at which the command started, not a wall-clock comparison. */
   cursor: number;
   canonicalId?: string | null;
-  narrationWorkspace?: { shotId: string; state: NarrationState; draft: { segmentId: string; intentDigest?: string } | null; expectedVersion: number };
+  narrationWorkspace?: { shotId: string; state: NarrationState; draft: { segmentId: string; intentDigest: string } | null; expectedVersion: number };
 }
 export function captureMediaUndo(s: ProductionService, projectId: string): MediaUndo {
   return { bindings: [], cursor: s.store.cursor(projectId) };

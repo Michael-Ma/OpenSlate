@@ -92,6 +92,7 @@ test('proposal retains bounded long historical alias snapshots and noncurrent st
 
 test('source pins actual verified generated narration and preserves original generated artifact metadata',async t=>{
  const f=await generatedNarrationFixture(t);await f.narration.attachGeneratedAudio(f.project.id,f.human,generatedSelection(f));
+ f.human=f.production.beginRequest(f.project.id,'local-user','Transcribe this retained generated recording.');
  const audio=f.view().segments[0].audio,artifact=f.store.get('artifact',audio.id),calls={...f.calls};
  const s={id:key(),version:1,projectId:f.project.id,requestId:f.human.requestId,principalId:f.human.principalId,epochId:null,
   consumerAlias:'owned-generated-recording',sourceRecord:{kind:'narration_audio',id:audio.id,digest:digest(audio)},source:audio.media,

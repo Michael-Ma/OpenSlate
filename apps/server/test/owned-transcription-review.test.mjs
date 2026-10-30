@@ -141,6 +141,7 @@ test('a second request appends a different recording while retaining the first r
 test('human review of a retained generated recording preserves exact speech and normalization provenance without another call', async t => {
   const f = await generatedNarrationFixture(t, { extraProfiles: [structuredClone(transcriptionProfile)] });
   await f.narration.attachGeneratedAudio(f.project.id, f.human, generatedSelection(f));
+ f.human=f.production.beginRequest(f.project.id,'local-user','Transcribe this retained generated recording.');
   // This shared fixture starts its speech plan directly in Engine. Supply the
   // saved aliases that ordinary application publication already maintains.
   const active = f.store.get('plan', f.store.getProject(f.project.id).activePlanId).compiled;

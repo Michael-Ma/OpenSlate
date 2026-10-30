@@ -3,7 +3,7 @@ import type { ProjectRecord } from '@openslate/core';
 import type { NarrationSpeechReader } from './narration-speech-records.js';
 import type { NarrationSpeechProposal } from './narration-speech-types.js';
 
-interface ShotDraft { id: string; projectId: string; shotId: string; segmentId: string; intentDigest?: string }
+interface ShotDraft { id: string; projectId: string; shotId: string; segmentId: string; intentDigest: string }
 const fail = (condition: unknown) => invariant(condition, 'NARRATION_SPEECH_STALE', 'This shot’s narration choice or writing changed. Save and review its current speech plan before generation.');
 function mappings(reader: NarrationSpeechReader, projectId: string, segmentId: string): ShotDraft[] {
   const rows = reader.db.prepare("SELECT id,length(CAST(body AS BLOB)) bytes FROM entities WHERE kind='narration_shot_draft' AND project_id=? AND json_extract(body,'$.segmentId')=? LIMIT 65").all(projectId, segmentId) as { id: string; bytes: number }[];
@@ -11,7 +11,7 @@ function mappings(reader: NarrationSpeechReader, projectId: string, segmentId: s
   return rows.map(row => {
     fail(row.bytes <= 4096); const draft = reader.get<ShotDraft>('narration_shot_draft', row.id);
     fail(draft?.id === row.id && draft.projectId === projectId && draft.segmentId === segmentId && typeof draft.shotId === 'string'
-      && row.id === digest({ projectId, shotId: draft.shotId }) && (draft.intentDigest === undefined || /^[a-f0-9]{64}$/.test(draft.intentDigest)));
+      && row.id === digest({ projectId, shotId: draft.shotId }) && typeof draft.intentDigest === 'string' && /^[a-f0-9]{64}$/.test(draft.intentDigest));
     return draft!;
   });
 }
@@ -28,7 +28,7 @@ export function assertMappedSpeechPreparation(reader: NarrationSpeechReader, pro
   for (const mapping of mappings(reader, project.id, segmentId)) {
     selectedIntent(project, mapping, voice);
     const shot = project.shots.find(shot => shot.id === mapping.shotId)!;
-    fail(mapping.intentDigest === undefined || mapping.intentDigest === digest(shot.narration ?? null));
+    fail(mapping.intentDigest === digest(shot.narration ?? null));
   }
 }
 

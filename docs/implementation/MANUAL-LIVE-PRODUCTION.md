@@ -62,7 +62,7 @@ Refresh and restart/reopen. Confirm the same attempt/take/export identities rema
 
 - **API images:** test the alternate image route in a separate small project so account/provider identity stays clear.
 - **Speech:** generate one exact short stock-voice script, listen/accept current bytes/range and verify overlay playback/export.
-- **Transcription:** recognize one short owned recording; compare returned words/timing with what you hear, then explicitly adopt only the intended evidence. Rewritten text is not automatically aligned.
+- **Transcription:** recognize one short owned recording; compare returned words/timing with what you hear as candidate evidence for Director attachments. Human transcript adoption is unavailable. Rewritten text is not automatically aligned.
 - **Two-shot edit:** after a successful small run, add a second shot and revise only that shot. Confirm the first image/take is reused, only affected reviews renew and export reflects the edit.
 - **Longer film:** expand only after the small flows pass. Synthetic six-minute tests do not prove real long-form quality.
 

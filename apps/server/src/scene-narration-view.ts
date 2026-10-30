@@ -20,30 +20,17 @@ export function sceneNarrationView(
 ) {
   let error: string | null = null;
   const workspace = narration?.workspaceSnapshot(project.id);
-  const canonicalHead = production.store.get<{ canonicalId: string }>(
-    "narration_canonical_head",
-    project.id,
-  );
-  const canonical = canonicalHead
-    ? production.store.get<{
-        shotMappings: { shotId: string; segmentId: string | null }[];
-        segments?: { segmentId: string; audioPlacement: { durationSamples: number } }[];
-      }>("narration_canonical", canonicalHead.canonicalId)
-    : undefined;
   let options: ReturnType<typeof projectNarrationSpeechOptions> | null = null;
   const rows = project.shots
     .filter((shot) => shot.sceneId === sceneId)
     .map((shot) => {
       const ready = shotVideoTiming(project, shot).ready,
         mode = shot.narration?.mode ?? "undecided";
-      const draft = production.store.get<{ segmentId: string; intentDigest?: string }>(
+      const draft = production.store.get<{ segmentId: string; intentDigest: string }>(
         "narration_shot_draft",
         shotDraftId(project.id, shot.id),
       );
-      const segmentId =
-        draft?.segmentId ??
-        canonical?.shotMappings.find((mapping) => mapping.shotId === shot.id)
-          ?.segmentId;
+      const segmentId = draft?.segmentId;
       const row = workspace?.segments.find(
         (row) => row.entry.segmentId === segmentId,
       );
@@ -61,7 +48,7 @@ export function sceneNarrationView(
           options ??= projectNarrationSpeechOptions(production, project.id);
           const source = row?.script.source;
           const savedVoice = source?.kind === "generated" ? source.voice : null;
-          const writingCurrent = draft?.intentDigest === undefined || draft.intentDigest === digest(shot.narration ?? null);
+          const writingCurrent = draft?.intentDigest === digest(shot.narration ?? null);
           const selectedVoice = shot.narration?.voice;
           const voiceCurrent = selectedVoice === "stock" || selectedVoice === "personal" && savedVoice?.startsWith("openai-custom:") || savedVoice === selectedVoice;
           invariant(!savedVoice || !writingCurrent || !voiceCurrent || !/^(openai-custom|elevenlabs-personal):/.test(savedVoice) || options.personalVoices.some(value => value.id === savedVoice && value.ready),

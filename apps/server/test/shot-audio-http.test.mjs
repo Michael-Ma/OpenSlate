@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, chmod, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -39,7 +39,7 @@ async function fixture(t,options={}) {
   const narration = new NarrationService(production, media), canonical = new NarrationCanonicalService(narration), app = createApp({ service: production, localToken: token });
   const speechService=options.speech?new NarrationSpeechService(narration):undefined;
   registerNarrationRoutes(app, { production, narration, canonical, uploadDirectory, ...(speechService?{narrationSpeech:speechService}:{}) }); await app.ready();
-  const f = { dir, project, store, provider, engine, production, narration, canonical, app, session: null, speechService };
+  const f = { dir, project, store, provider, engine, production, narration, canonical, media, app, session: null, speechService };
   f.testToken = token; f.request = narrationServiceHarness(f, { uploadDirectory: f.uploadDirectory ?? join(f.root ?? f.dir, 'uploads'), speech: f.speechService ?? (f.profile?.kind === 'speech' ? f.service : undefined) });
   f.view = () => narration.workspaceSnapshot(project.id);
   f.start = async () => { const response = await f.request(`/shots/${project.shots[0].id}/sessions`, {}); assert.equal(response.statusCode, 200, response.body); f.session = response.json().session; };
@@ -138,42 +138,7 @@ test('compact accepted narration follows shot/scene order and covers an exact ra
   assert.equal(f.canonical.workspaceCurrent(project.id).segments[0].audioPlacement.atSample, 0, 'accepted historical source placement remains immutable');
 });
 
-test('playback omits legacy absolute narration after reorder and earlier lengthening without changing accepted history', async t => {
-  const f = await fixture(t), { audio, segment } = await f.ready(), shotId = f.project.shots[0].id;
-  const response = await f.request(`/shots/${shotId}/accept`, f.acceptBody(audio, segment)); assert.equal(response.statusCode, 200, response.body);
-  const saved = f.canonical.workspaceCurrent(f.project.id), legacy = structuredClone(saved);
-  legacy.id = randomUUID();
-  delete legacy.segments[0].placementMode;
-  legacy.segments[0].audioPlacement.atSample = 180 * 1600;
-  let project = f.store.getProject(f.project.id); project.shots.reverse(); f.store.saveProject(project, project.headVersion);
-  f.store.insert('narration_canonical', legacy.id, f.project.id, legacy);
-  f.store.put('narration_canonical_head', f.project.id, f.project.id, { canonicalId: legacy.id });
-  const playback = async () => { const response = await f.request('/playback'); assert.equal(response.statusCode, 200, response.body); return response.json().placements; };
-  assert.deepEqual((await playback()).map(row => [row.atSample, row.shotIds]), [[180 * 1600, [shotId]]]);
-  project = f.store.getProject(f.project.id);
-  editStoryboard(f.production, project.id, { kind: 'moveShot', id: shotId, beforeId: project.shots[0].id, sceneId: project.shots[0].sceneId, expectedHeadVersion: project.headVersion }, randomUUID());
-  assert.deepEqual(await playback(), [], 'the line at its old absolute time is no longer current under another shot');
-  project = f.store.getProject(f.project.id);
-  editStoryboard(f.production, project.id, { kind: 'moveShot', id: project.shots[1].id, beforeId: shotId, sceneId: project.shots[0].sceneId, expectedHeadVersion: project.headVersion }, randomUUID());
-  assert.equal((await playback())[0].atSample, 180 * 1600, 'restoring the cut restores the already accepted absolute placement');
-  project = f.store.getProject(f.project.id); project.shots[0].desiredFrames = 210; f.store.saveProject(project, project.headVersion);
-  const cursor = f.store.cursor(f.project.id);
-  assert.deepEqual(await playback(), [], 'an earlier length change also refuses the stale absolute anchor');
-  assert.equal(f.store.cursor(f.project.id), cursor, 'the playback projection stays read only');
-  assert.deepEqual(f.canonical.workspaceCurrent(f.project.id), legacy); assert.equal(f.provider.acceptedCount(), 0);
-});
 
-test('playback maps a shared legacy absolute cue only to the cut aligned with its sample', async t => {
-  const f = await fixture(t), { audio, segment } = await f.ready();
-  const response = await f.request(`/shots/${f.project.shots[0].id}/accept`, f.acceptBody(audio, segment)); assert.equal(response.statusCode, 200, response.body);
-  const saved = structuredClone(f.canonical.workspaceCurrent(f.project.id)); saved.id = randomUUID(); delete saved.segments[0].placementMode;
-  f.store.insert('narration_canonical', saved.id, f.project.id, saved);
-  f.store.put('narration_canonical_head', f.project.id, f.project.id, { canonicalId: saved.id });
-  const project = f.store.getProject(f.project.id); project.shots[1].cueId = saved.segments[0].cue.id; f.store.saveProject(project, project.headVersion);
-  const playback = await f.request('/playback'); assert.equal(playback.statusCode, 200, playback.body);
-  assert.equal(playback.json().placements.length, 1); assert.deepEqual(playback.json().placements[0].shotIds, [project.shots[0].id]);
-  assert.equal(playback.json().placements[0].atSample, 0); assert.deepEqual(f.canonical.workspaceCurrent(project.id), saved);
-});
 
 test('editing and accepting one shot preserves another cue while its lost video reply is charged once',async t=>{
  const f=await fixture(t),project=f.store.getProject(f.project.id),q=JSON.stringify;
@@ -359,4 +324,78 @@ test('project narratorVoice is captured by new voice jobs and scene review witho
  assert.equal(f.store.get('narration_speech_proposal',proposal.id).operation.voice,'coral');
  const {sceneNarrationView}=await import('../dist/scene-narration-view.js');
  const view=sceneNarrationView(f.production,f.store.getProject(p.id),p.scenes[0].id,f.narration);assert.equal(view.rows[0].narration.voice,'coral','existing writing/takes retain the selected voice');
+});
+
+
+test('shot acceptance replay survives a reopened database without duplicate canonical state or artifacts', async t => {
+  const f=await fixture(t),{audio,segment}=await f.ready(),body=f.acceptBody(audio,segment),path=`/shots/${f.project.shots[0].id}/accept`,extras={headers:{'idempotency-key':'reopen-accept'}};
+  const accepted=await f.request(path,body,extras);assert.equal(accepted.statusCode,200,accepted.body);
+  const before=f.store.getProject(f.project.id),artifacts=f.store.list('artifact',f.project.id),decisions=f.store.list('narration_acceptance',f.project.id),saved=f.canonical.workspaceCurrent(f.project.id);
+  const reopened=new Store(f.store.path);
+  try {
+    const production=new ProductionService(reopened,f.engine),narration=new NarrationService(production,f.media),canonical=new NarrationCanonicalService(narration);
+    const invoke=narrationServiceHarness({...f,production,store:reopened,narration,canonical});
+    const replay=await invoke(path,body,extras);assert.equal(replay.statusCode,200,replay.body);assert.deepEqual(replay.json(),accepted.json());
+    assert.deepEqual(reopened.getProject(f.project.id),before);assert.deepEqual(reopened.list('artifact',f.project.id),artifacts);assert.deepEqual(reopened.list('narration_acceptance',f.project.id),decisions);
+    assert.deepEqual(canonical.workspaceCurrent(f.project.id),saved);assert.equal(reopened.list('narration_canonical',f.project.id).length,1);
+    const changed=await invoke(path,{...body,endSample:body.endSample-1600},extras);assert.equal(changed.json().error.code,'IDEMPOTENCY_CONFLICT');
+  } finally {reopened.close();}
+});
+
+test('artifact identity conflicts roll back the complete shot canonical transaction', async t => {
+  const f=await fixture(t),{audio,segment}=await f.ready(),before=f.store.getProject(f.project.id),path=`/shots/${f.project.shots[0].id}/accept`;
+  f.store.insert('artifact',audio.id,f.project.id,{artifact:{artifactId:audio.id,sha256:'0'.repeat(64),kind:'audio'},path:'/unused',mimeType:'audio/wav'});
+  const artifacts=f.store.list('artifact',f.project.id),response=await f.request(path,f.acceptBody(audio,segment));
+  assert.equal(response.json().error.code,'NARRATION_INTEGRITY_ERROR');assert.deepEqual(f.store.getProject(f.project.id),before);
+  assert.deepEqual(f.store.list('artifact',f.project.id),artifacts);assert.equal(f.store.list('narration_canonical',f.project.id).length,0);assert.equal(f.store.list('narration_commit_receipt',f.project.id).length,0);
+});
+
+test('corrupt accepted audio cannot publish a shot canonical version or artifact', async t => {
+  const f=await fixture(t),{audio,segment}=await f.ready(),before=f.store.getProject(f.project.id),artifacts=f.store.list('artifact',f.project.id);
+  const path=join(f.media.rootDir,'blobs',`${audio.media.sha256}.wav`);await chmod(path,0o600);await writeFile(path,'corrupt');
+  const response=await f.request(`/shots/${f.project.shots[0].id}/accept`,f.acceptBody(audio,segment));
+  assert.equal(response.json().error.code,'MEDIA_INTEGRITY_ERROR');assert.deepEqual(f.store.getProject(f.project.id),before);assert.deepEqual(f.store.list('artifact',f.project.id),artifacts);assert.equal(f.store.list('narration_canonical',f.project.id).length,0);
+});
+
+for(const boundary of ['narration','head','request'])test(`shot acceptance rechecks the ${boundary} fence after asynchronous media verification`,async t=>{
+  const f=await fixture(t),{audio,segment}=await f.ready(),before=f.store.getProject(f.project.id),artifacts=f.store.list('artifact',f.project.id),body=f.acceptBody(audio,segment);
+  let enter,release;const entered=new Promise(resolve=>enter=resolve),wait=new Promise(resolve=>release=resolve),verify=f.media.verifiedSource.bind(f.media);
+  f.media.verifiedSource=async(...args)=>{enter();await wait;return verify(...args);};
+  const pending=f.request(`/shots/${f.project.shots[0].id}/accept`,body);await entered;
+  if(boundary==='narration')f.narration.reviseSegments(f.project.id,{kind:'human',principalId:'local-user',requestId:f.session.requestId},f.view().state.version,randomUUID(),{update:[{segmentId:segment.entry.segmentId,draft:{text:'Changed while verifying.',meaning:'Changed while verifying.',textKind:'draft',language:'en',source:{kind:'uploaded'}}}]});
+  else if(boundary==='head')f.store.saveProject({...before,name:'Concurrent trusted change'},before.headVersion);
+  else f.production.beginRequest(f.project.id,'local-user','Supersede the prepared acceptance');
+  const expected=f.store.getProject(f.project.id);release();const response=await pending;
+  assert.notEqual(response.statusCode,200,response.body);if(boundary!=='request')assert.equal(response.json().error.code,'REVISION_CONFLICT');
+  assert.deepEqual(f.store.getProject(f.project.id),expected);assert.deepEqual(f.store.list('artifact',f.project.id),artifacts);assert.equal(f.store.list('narration_canonical',f.project.id).length,0);assert.equal(f.store.list('narration_commit_receipt',f.project.id).length,0);assert.equal(f.provider.acceptedCount(),0);
+});
+
+test('missing shot draft never borrows canonical mappings for reads, scene writing or a new scope pin',async t=>{
+  const f=await fixture(t),{audio,segment}=await f.ready(),shotId=f.project.shots[0].id;
+  const accepted=await f.request(`/shots/${shotId}/accept`,f.acceptBody(audio,segment));assert.equal(accepted.statusCode,200,accepted.body);
+  const canonical=f.canonical.workspaceCurrent(f.project.id),draftId=digest({projectId:f.project.id,shotId});
+  assert.equal(canonical.shotMappings[0].segmentId,segment.entry.segmentId);
+  f.store.db.prepare("DELETE FROM entities WHERE kind='narration_shot_draft' AND id=?").run(draftId);
+  const cursor=f.store.cursor(f.project.id),detail=await f.request(`/shots/${shotId}`);assert.equal(detail.json().segment,null);assert.equal(f.store.cursor(f.project.id),cursor);
+  const {sceneNarrationView}=await import('../dist/scene-narration-view.js'),view=sceneNarrationView(f.production,f.store.getProject(f.project.id),f.project.scenes[0].id,f.narration);
+  assert.equal(view.rows[0].narration.segmentId,null);assert.deepEqual(f.canonical.workspaceCurrent(f.project.id),canonical);
+  const next=await f.request(`/shots/${shotId}/sessions`,{continuationSessionId:f.session.id});assert.equal(next.statusCode,200,next.body);
+  assert.equal(f.store.get('narration_shot_scope_target',next.json().session.requestId),undefined);
+});
+
+test('mapped speech preparation refuses a shot draft without its required intent digest',async t=>{
+  const f=await fixture(t,{speech:true});await f.start();const shotId=f.project.shots[0].id;
+  const writing=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedVersion:f.view().state.version,text:'Current words.',language:'en',mode:'generated',voice:'coral',profileRevisionId:speechProfile.revision});assert.equal(writing.statusCode,200,writing.body);
+  const id=digest({projectId:f.project.id,shotId}),draft=f.store.get('narration_shot_draft',id),{intentDigest:_digest,...unversioned}=draft;
+  f.store.put('narration_shot_draft',id,f.project.id,unversioned);
+  const row=f.view().segments[0],before=f.store.list('narration_speech_proposal',f.project.id),response=await f.request('/speech-proposals',{sessionId:f.session.id,expectedHeadVersion:f.store.getProject(f.project.id).headVersion,segmentId:row.entry.segmentId,segmentRevisionId:row.script.id,profileId:speechProfile.id,voice:'coral',instructions:''});
+  assert.equal(response.json().error.code,'NARRATION_SPEECH_STALE');assert.deepEqual(f.store.list('narration_speech_proposal',f.project.id),before);assert.equal(f.provider.acceptedCount(),0);
+});
+
+test('shot-local cue bounds and foreign recording references refuse partial narration mutations',async t=>{
+ const f=await fixture(t),{audio,segment}=await f.ready(),actor={kind:'human',principalId:'local-user',requestId:f.session.requestId},before=f.view(),cursor=f.store.cursor(f.project.id);
+ for(const input of [{startSample:0,endSample:audio.media.probe.audio.samples+1},{startSample:0.5,endSample:1600}])assert.throws(()=>f.narration.recordHumanCue(f.project.id,actor,before.state.version,randomUUID(),{segmentId:segment.entry.segmentId,...input}),{code:input.startSample?'NARRATION_INVALID_INPUT':'NARRATION_CUE_OUT_OF_RANGE'});
+ const foreign=f.production.createProject('Other recording owner'),id=randomUUID();f.store.insert('narration_audio',id,foreign.id,{id,projectId:foreign.id,media:audio.media,declaredOrigin:'uploaded',requestId:'foreign-fixture'});
+ assert.throws(()=>f.narration.bindAudio(f.project.id,actor,before.state.version,randomUUID(),segment.entry.segmentId,id),{code:'SCOPE_DENIED'});
+ assert.deepEqual(f.view(),before);assert.equal(f.store.cursor(f.project.id),cursor);assert.equal(f.store.list('narration_acceptance',f.project.id).length,0);assert.equal(f.store.list('narration_canonical',f.project.id).length,0);
 });

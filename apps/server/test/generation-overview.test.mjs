@@ -343,7 +343,7 @@ test('current voice attempts project making and failed without dispatching', asy
   project.shots[0].narration={mode:'generated',text:segment.script.text,voice:'stock'}; project.shots[0].narrationPending=true;
   project.revisionId=randomUUID();
   const saved=f.store.saveProject(project,project.headVersion); f.store.insert('project_revision',saved.revisionId,project.id,{project:saved});
-  f.store.put('narration_shot_draft',digest({projectId:project.id,shotId:'shot-0'}),project.id,{shotId:'shot-0',segmentId:segment.entry.segmentId});
+  f.store.put('narration_shot_draft',digest({projectId:project.id,shotId:'shot-0'}),project.id,{shotId:'shot-0',segmentId:segment.entry.segmentId,intentDigest:digest(saved.shots[0].narration ?? null)});
   const proposal=await f.prepare(), application=await f.review(proposal), attempt=f.admit(application);
   const reader=new GenerationOverviewReader(f.production,f.narration);
   assert.equal(reader.read(project.id).shots['shot-0'].narration.state,'making');

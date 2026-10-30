@@ -1,4 +1,4 @@
-import { narrationServiceHarness } from './narration-service-harness.mjs';
+import { narrationServiceHarness, fixtureAudioRequestSession } from './narration-service-harness.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -14,7 +14,7 @@ async function setup(t){
  registerNarrationRoutes(f.app,{production:f.production,narration:f.narration,canonical:new NarrationCanonicalService(f.narration),narrationSpeech:f.service,uploadDirectory:join(f.root,'uploads')});
  await f.app.ready();t.after(()=>f.app.close());
  f.testToken=token;const invoke=narrationServiceHarness(f,{uploadDirectory:join(f.root,'uploads'),speech:f.service});f.request=(suffix,body,headers={})=>invoke(suffix,body,{headers});
- const response=await f.request('/sessions',{});assert.equal(response.statusCode,200,response.body);f.session=response.json().session;
+ f.session=fixtureAudioRequestSession(f);
  const {key:unused,...input}=f.input();f.inputBody={...input,sessionId:f.session.id};
  f.propose=async()=>{const r=await f.request('/speech-proposals',f.inputBody);assert.equal(r.statusCode,200,r.body);return r.json().proposal;};
  return f;

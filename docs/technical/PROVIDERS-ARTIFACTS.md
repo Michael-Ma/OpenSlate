@@ -12,7 +12,7 @@ Provider adapters implement exact transport contracts. OpenSlate owns planning, 
 | Viggle H3 | Separate server-side Viggle key | Fixed video request/task/poll/download bridge |
 | Direct MiniMax H3 | Separate MiniMax key | Fixed H3 request/task/poll/download bridge |
 | OpenAI speech | Server-side OpenAI key | Exact script/voice/instructions and owned PCM audio |
-| OpenAI transcription | Server-side OpenAI key | Exact owned audio request with required word timing and reviewed adoption |
+| OpenAI transcription | Server-side OpenAI key | Exact owned audio request with required word timing; candidate evidence for Director attachments |
 
 Each route needs an installed supported profile, explicit host enablement, credentials/tools, current project compatibility and in-app authority. Credential presence is not a live access/eligibility check. Prices in example profiles are configured estimates, not verified charges. One real Codex-image/Viggle six-second export is established; other media paths retain their [live acceptance limits](../implementation/STATUS.md).
 
