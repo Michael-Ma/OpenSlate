@@ -19,7 +19,7 @@ import { SpoolTranscriptIngestor } from "../execution/spool-transcript-ingestor.
 import { TranscriptionAudioService } from "../execution/transcription-audio-service.js";
 import { TranscriptionAudioStore } from "../media/transcription-audio-store.js";
 import { LocalMediaExecutor } from "../execution/local-media-executor.js";
-import { ConfiguredExternalAdmission } from "../execution/durable-external-admission.js";
+import { ConfiguredExternalAdmission } from "../execution/configured-external-admission.js";
 import { CodexImageExecution } from "../execution/codex-image-execution.js";
 import { assertCodexImageOperationOptions } from "../execution/codex-image-receipts.js";
 import { OpenAIImageExecution } from "../execution/openai-image-execution.js";
@@ -35,7 +35,6 @@ import type { VideoDownloadOptions } from "../execution/video-download.js";
 import { LocalImageStore, LocalMediaService } from "../media/index.js";
 import { EnvironmentMediaCredentials } from "./provider-credentials.js";
 import { InstalledProviderCatalog, profilePolicy } from "./provider-catalog.js";
-import { ExternalAllowanceService } from "./external-allowances.js";
 import type { ProductionServiceOptions } from "./service.js";
 import type { MediaExecutionConfiguration } from "./media-execution-config.js";
 import { readCodexStartupTimeout } from "./director-run-config.js";
@@ -62,15 +61,11 @@ function executable(path: string | null): path is string {
 export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOptions) {
   const startupTimeoutMs = readCodexStartupTimeout(options.startupTimeoutMs === undefined ? {} : { OPENSLATE_CODEX_STARTUP_TIMEOUT_MS: String(options.startupTimeoutMs) });
   const { store, fakeProvider, ffmpegPath, ffprobePath } = options;
-  const captured = structuredClone(options.configuration);
-  const configuration = { ...captured, codexImage: captured.codexImage === undefined ? false : captured.codexImage, speech: captured.speech === undefined ? false : captured.speech,
-    transcription: captured.transcription === undefined ? false : captured.transcription,
-    viggleH3: captured.viggleH3 === undefined ? false : captured.viggleH3,
-    viggleH3DownloadHosts: captured.viggleH3DownloadHosts === undefined ? [] : captured.viggleH3DownloadHosts,
-    falLipSync: captured.falLipSync === true, falLipSyncDownloadHosts: captured.falLipSyncDownloadHosts ?? [] };
+  const configuration = structuredClone(options.configuration);
   invariant(typeof configuration.image === "boolean" && typeof configuration.codexImage === "boolean" && typeof configuration.h3 === "boolean"
     && typeof configuration.speech === "boolean" && typeof configuration.transcription === "boolean" && typeof configuration.viggleH3 === "boolean"
-    && Array.isArray(configuration.h3DownloadHosts) && Array.isArray(configuration.viggleH3DownloadHosts),
+    && typeof configuration.falLipSync === "boolean" && Array.isArray(configuration.h3DownloadHosts)
+    && Array.isArray(configuration.viggleH3DownloadHosts) && Array.isArray(configuration.falLipSyncDownloadHosts),
     "MEDIA_EXECUTION_CONFIGURATION", "Use validated local generation configuration");
   const enabled = configuration.image || configuration.codexImage || configuration.h3 || configuration.viggleH3 || configuration.falLipSync || configuration.speech || configuration.transcription,
     haveTools = executable(ffmpegPath) && executable(ffprobePath);
@@ -230,5 +225,5 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   const productionOptions: ProductionServiceOptions = configuration.h3 || configuration.viggleH3
     ? { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video",
       ...(lipSyncProfiles.length ? { newProjectLipSyncProfiles: lipSyncProfiles } : {}) } : {};
-  return { close: () => closing ??= nativeWorker?.close() ?? Promise.resolve(), engine, localMedia, imageStore, outputStore, allowances: new ExternalAllowanceService(store), providerCatalog, uploadDirectory, productionOptions };
+  return { close: () => closing ??= nativeWorker?.close() ?? Promise.resolve(), engine, localMedia, imageStore, outputStore, providerCatalog, uploadDirectory, productionOptions };
 }

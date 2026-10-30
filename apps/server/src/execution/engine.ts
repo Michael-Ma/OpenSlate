@@ -7,9 +7,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, constants, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { open } from "node:fs/promises";
-import { DEFAULT_PROFILES, DomainError, canonical, digest, effectiveNodeDigest, invariant, moneyMicros, newId, providerProfileArguments, shotIntentDigest, shotVideoTiming, snapshotLocalExecution } from "@openslate/core";
+import { DEFAULT_PROFILES, DomainError, RECIPE_DIGEST, canonical, digest, effectiveNodeDigest, invariant, moneyMicros, newId, providerProfileArguments, shotIntentDigest, shotVideoTiming, snapshotLocalExecution } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan, InputSource, OperationKind, PlanNode, ProjectRecord, ProviderProfile } from "@openslate/core";
-import { ExecutionRegistry, executionFailureSource, executionIdentity, executionProfileSnapshot, executionSpoolRole, executionTaskId, fixtureOutputs, isLegacyExecution, isSpoolCompletion, isSpoolOutput, profileExecutionIdentity, requestExecutionIdentity, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
+import { ExecutionRegistry, executionFailureSource, executionIdentity, executionProfileSnapshot, executionSpoolRole, executionTaskId, fixtureOutputs, isDemoExecution, isSpoolCompletion, isSpoolOutput, profileExecutionIdentity, requestExecutionIdentity, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
 import type { ExecutionCallOptions, ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
@@ -108,10 +108,8 @@ export interface ExecutionOutputIngestor {
 interface IngestedOutput { output: IngestibleExecutionOutput; record: ArtifactRecord; normalized?: NormalizedIngestion; transcript?: TranscriptCandidateIngestion }
 interface ResolvedInputs { artifacts: ArtifactRef[]; fingerprint: string }
 export interface ExternalExecutionAdmission {
-  /** Trusted synchronous readiness check. Legacy receipts may retain an allowance identity. */
-  authorize(input: { attemptId: string; projectId: string; nodeId: string; candidateId: string; profile: Readonly<ProviderProfile>; estimatedMicros: string }): { allowanceId?: string };
-  /** Record exact consumption after attempt and reservation insertion, before the same transaction commits. */
-  recordAdmission?(attempt: Readonly<Attempt>): void;
+  /** Trusted synchronous readiness check for the exact configured provider. */
+  authorize(input: { attemptId: string; projectId: string; nodeId: string; candidateId: string; profile: Readonly<ProviderProfile>; estimatedMicros: string }): Record<string, never>;
 }
 const GENERATED = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
 const TERMINAL = new Set<AttemptPhase>(["succeeded", "failed"]);
@@ -135,14 +133,13 @@ export class Engine {
   readonly profiles: ProviderProfile[];
   readonly artifactDir: string;
   readonly leaseMs: number;
-  readonly defaultBudgetMicros: string;
   readonly outputIngestor: ExecutionOutputIngestor | undefined;
   readonly outputStore: ExecutionOutputStore | undefined;
   readonly localExecutor: LocalExecutionPort | undefined;
   private stopping = false;
   private readonly operations = new Set<AbortController>();
   constructor(readonly store: Store, readonly provider: ExecutionProvider | ExecutionRegistry, options: {
-    artifactDir: string; profiles?: ProviderProfile[]; budgetMicros?: string; workerId?: string; leaseMs?: number;
+    artifactDir: string; profiles?: ProviderProfile[]; workerId?: string; leaseMs?: number;
     outputIngestor?: ExecutionOutputIngestor;
     outputStore?: ExecutionOutputStore;
     externalAdmission?: ExternalExecutionAdmission;
@@ -154,8 +151,6 @@ export class Engine {
     this.registry = provider instanceof ExecutionRegistry ? provider : new ExecutionRegistry([provider]);
     this.externalAdmission = options.externalAdmission;
     invariant(!options.externalAdmission || (typeof options.externalAdmission.authorize === "function" && options.externalAdmission.authorize.constructor.name !== "AsyncFunction"), "ASYNC_TRANSACTION", "External admission policy must be synchronous");
-    invariant(!options.externalAdmission?.recordAdmission || (typeof options.externalAdmission.recordAdmission === "function"
-      && options.externalAdmission.recordAdmission.constructor.name !== "AsyncFunction"), "ASYNC_TRANSACTION", "Admission recording must be synchronous");
     this.providerTimeoutMs = options.providerTimeoutMs ?? 600000;
     invariant(Number.isSafeInteger(this.providerTimeoutMs) && this.providerTimeoutMs >= 10 && this.providerTimeoutMs <= 600000, "PROVIDER_CONFIGURATION_INVALID", "Provider operation deadline must be bounded");
     if (options.submissionPreparation) {
@@ -170,7 +165,6 @@ export class Engine {
     this.profiles = options.profiles ?? DEFAULT_PROFILES;
     this.artifactDir = resolve(options.artifactDir);
     this.leaseMs = options.leaseMs ?? 30_000;
-    this.defaultBudgetMicros = options.budgetMicros ?? "1000000";
     this.outputIngestor = options.outputIngestor;
     invariant(!options.outputStore || options.outputStore.store === store, "OUTPUT_STORE_CONFIGURATION", "Executor and output storage must share the same application store");
     this.outputStore = options.outputStore;
@@ -182,7 +176,6 @@ export class Engine {
         && this.localExecutor.maxOutputBytes > 0 && this.localExecutor.maxOutputBytes <= 1024 * 1024 * 1024,
       "LOCAL_EXECUTION_UNSUPPORTED", "Install a bounded complete local execution port");
     }
-    moneyMicros(this.defaultBudgetMicros);
     mkdirSync(this.artifactDir, { recursive: true });
   }
 
@@ -216,7 +209,6 @@ export class Engine {
       "DEFERRED_VIDEO_INVALID", "Only video nodes without generation grants can be deferred by trusted scene publication");
       assertOwnedTranscriptionInstallation(this.store, project, planId, compiled, grantBindings);
       assertNarrationSpeechInstallation(this.store, project, planId, compiled, grantBindings);
-      if (!this.store.get("budget", projectId)) this.store.insert("budget", projectId, projectId, { capMicros: this.defaultBudgetMicros, currency: "USD" });
       const saved = this.store.get<PlanRecord>("plan", planId);
       if (saved) {
         invariant(saved.projectId === projectId && saved.compiled.graphDigest === compiled.graphDigest, "IDEMPOTENCY_CONFLICT", "Plan identity already has different content");
@@ -317,14 +309,10 @@ export class Engine {
       this.store.appendEvent(projectId, "execution.pause_changed", { paused });
     });
   }
-  setBudget(projectId: string, capMicros: string): void {
-    this.recovery.assertWritable(projectId);
-    moneyMicros(capMicros); this.store.put("budget", projectId, projectId, { capMicros, currency: "USD" });
-  }
-  budget(projectId: string): { capMicros: string; committedMicros: string; currency: "USD" } {
-    const capMicros = this.store.get<{ capMicros: string }>("budget", projectId)?.capMicros ?? this.defaultBudgetMicros;
-    const committed = this.store.list<Reservation>("reservation", projectId).filter(item => item.state !== "released").reduce((sum, item) => sum + moneyMicros(item.micros), 0n);
-    return { capMicros, committedMicros: committed.toString(), currency: "USD" };
+  /** Retained liability includes reserved and charged work; released reservations no longer count. */
+  committedMicros(projectId: string): string {
+    return this.store.list<Reservation>("reservation", projectId).filter(item => item.state !== "released")
+      .reduce((sum, item) => sum + moneyMicros(item.micros), 0n).toString();
   }
 
   reviewSnapshot(projectId: string, gateId?: string): ReviewSnapshot {
@@ -963,9 +951,9 @@ export class Engine {
 
   private projects(): ProjectRecord[] { return (this.store.db.prepare("SELECT id FROM projects").all() as { id: string }[]).map(row => this.store.getProject(row.id)); }
   private lockedProfiles(project: ProjectRecord): ProviderProfile[] {
-    const lock = this.store.get<{ projectId: string; profiles: unknown }>("capability_lock", project.capabilityLockId);
+    const lock = this.store.get<{ projectId: string; profiles: unknown; recipeDigest: string }>("capability_lock", project.capabilityLockId);
     if (!lock) return this.profiles; // Isolated executor fixtures predate the application lock service.
-    invariant(lock.projectId === project.id && Array.isArray(lock.profiles) && lock.profiles.length > 0, "CAPABILITY_LOCK_UNSUPPORTED", "Invalid pinned provider catalog");
+    invariant(lock.projectId === project.id && lock.recipeDigest === RECIPE_DIGEST && Array.isArray(lock.profiles) && lock.profiles.length > 0, "CAPABILITY_LOCK_UNSUPPORTED", "Invalid pinned provider catalog or workflow recipe");
     const ids = new Set<string>();
     for (const value of lock.profiles) {
       invariant(value && typeof value === "object", "CAPABILITY_LOCK_UNSUPPORTED", "Invalid pinned profile");
@@ -1122,14 +1110,11 @@ export class Engine {
       if (node.kind === "video") {
         const shot = project.shots.find(item => item.id === node.shotId);
         const cue = shot?.cueId ? project.cues.find(item => item.id === shot.cueId) : undefined;
-        const applicationLock = this.store.get<{ recipeDigest?: string }>("capability_lock", project.capabilityLockId);
-        if (applicationLock?.recipeDigest) {
-          invariant(shot, 'TIMING_REQUIRED', 'Video requires a current shot');
-          const timing = shotVideoTiming(project, shot);
-          invariant(timing.ready, 'TIMING_REQUIRED', 'Choose no narration, or accept this shot’s recording and measured timing before video generation');
-          invariant(typeof node.args.durationFrames === 'number' && Number.isSafeInteger(node.args.durationFrames) && node.args.durationFrames >= timing.frames,
-            'TIMING_REQUIRED', 'Video must cover the accepted or planned shot duration');
-        }
+        invariant(shot, 'TIMING_REQUIRED', 'Video requires a current shot');
+        const timing = shotVideoTiming(project, shot);
+        invariant(timing.ready, 'TIMING_REQUIRED', 'Choose no narration, or accept this shot’s recording and measured timing before video generation');
+        invariant(typeof node.args.durationFrames === 'number' && Number.isSafeInteger(node.args.durationFrames) && node.args.durationFrames >= timing.frames,
+          'TIMING_REQUIRED', 'Video must cover the accepted or planned shot duration');
         if (cue) invariant(cue.accepted && cue.measured, "TIMING_REQUIRED", "Video requires accepted measured cue timing");
         const plan = this.activePlan(project);
         invariant(node.requires.length > 0 && node.requires.every(id => plan.compiled.gates.some(gate => gate.id === id && gate.members.some(member => member.videoNodeId === nodeId && member.recipeDigest === node.specDigest))), "HUMAN_REVIEW_REQUIRED", "Video lacks a current review contract");
@@ -1157,14 +1142,14 @@ export class Engine {
       // Estimates remain audit information, not an additional generation gate.
       const cost = profile ? moneyMicros(profile.unitCostMicros) : 0n;
       const id = newId(); const reservationId = profile ? newId() : null;
-      let externalAllowanceId: string | undefined;
-      if (!isLegacyExecution(execution)) {
+      if (!isDemoExecution(execution)) {
         invariant(this.externalAdmission && profile && binding.candidateId, "EXTERNAL_EXECUTION_NOT_AUTHORIZED", "External generation requires configured provider admission");
         const approval = this.externalAdmission.authorize({ attemptId: id, projectId, nodeId, candidateId: binding.candidateId,
           profile: structuredClone(profile), estimatedMicros: cost.toString() });
-        invariant(approval && Object.keys(approval).every(key => key === "allowanceId") && (approval.allowanceId === undefined || typeof approval.allowanceId === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(approval.allowanceId)),
+        invariant(!(approval && typeof (approval as { then?: unknown }).then === "function"),
+          "ASYNC_TRANSACTION", "Provider admission cannot return a promise");
+        invariant(approval && typeof approval === "object" && !Array.isArray(approval) && Object.keys(approval).length === 0,
           "EXTERNAL_EXECUTION_NOT_AUTHORIZED", "Provider admission returned an invalid receipt");
-        externalAllowanceId = approval.allowanceId;
       }
       const pinnedProfile = profile ? executionProfileSnapshot(profile) : undefined;
       invariant(!binding.candidateId || !this.store.get("candidate_stop", binding.candidateId),
@@ -1173,8 +1158,7 @@ export class Engine {
         id, projectId, nodeId, candidateId: binding.candidateId, ordinal: (previous?.ordinal ?? 0) + 1,
         specDigest: node.specDigest, fingerprint: inputs.fingerprint, workKey,
         request: { attemptId: id, nodeId, kind: node.kind, fingerprint: inputs.fingerprint, args: node.args, inputs: inputs.artifacts,
-          execution: { ...execution }, ...(pinnedProfile ? { profile: pinnedProfile } : {}), ...(externalAllowanceId ? { externalAllowanceId }
-            : !isLegacyExecution(execution) && profile ? { providerUse: { kind: "configured" as const, capabilityLockId: project.capabilityLockId,
+          execution: { ...execution }, ...(pinnedProfile ? { profile: pinnedProfile } : {}), ...(!isDemoExecution(execution) && profile ? { providerUse: { kind: "configured" as const, capabilityLockId: project.capabilityLockId,
               capabilityLockDigest: digest(this.store.get("capability_lock", project.capabilityLockId)), profileDefinitionDigest: digest(profile) } } : {}) },
         phase: "submitting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.leaseMs,
         taskId: null, reservationId, failure: null, outputs: {}, createdAt: new Date().toISOString(),
@@ -1184,10 +1168,6 @@ export class Engine {
       this.clearNodeWait(projectId, nodeId);
       this.store.insert("attempt", id, projectId, attempt);
       if (reservationId) this.store.insert("reservation", reservationId, projectId, { attemptId: id, micros: cost.toString(), state: "reserved" });
-      if (externalAllowanceId && this.externalAdmission?.recordAdmission) {
-        const recorded = this.externalAdmission.recordAdmission(structuredClone(attempt)) as unknown;
-        invariant(!(recorded && typeof (recorded as { then?: unknown }).then === "function"), "ASYNC_TRANSACTION", "Admission recording cannot return a promise");
-      }
       this.store.appendEvent(projectId, "attempt.state_changed", { attemptId: id, phase: "submitting", nodeId }); return attempt;
     });
   }

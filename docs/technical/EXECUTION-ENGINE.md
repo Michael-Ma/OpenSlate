@@ -8,6 +8,8 @@ A **node** is a planned operation. A **candidate** is a human-origin creative re
 
 Configured admission rechecks the exact active candidate/node, pinned profile definition/options, credential/native/media readiness, epoch/hold/pause controls, accepted audio and exact keyframe review before video dispatch. It creates no usage allowance or hidden consumption step. Attempt/submission identity is committed before external effects. Technical retry requires trusted eligible failure evidence and bounded policy; it does not become a new aesthetic alternative.
 
+Every attempt request carries an explicit adapter/version identity. Demo requests use fake/v1 without a configured profile snapshot; missing identity never selects the demo adapter. Saved capability locks require the current recipe digest, and video dispatch always requires an explicit silent-shot decision or accepted measured narration. Provider failure/rejection outcomes carry an explicit `retryAllowed` boolean; incomplete outcomes remain unknown and cannot authorize a retry.
+
 ## State and recovery
 
 Attempt phases include `preparing`, `submitting`, `remote_pending`, `submission_unknown`, `ingesting`, `succeeded` and `failed`. Preparation can retain owned conversion work while media inputs are not ready; current selection is checked again before the first paid dispatch.
@@ -29,12 +31,12 @@ Files are outside short database transactions. [Output storage](../implementatio
 ## Source and checks
 
 - [Engine](../../apps/server/src/execution/engine.ts)
-- Configured external admission in `apps/server/src/execution/`, [current selection guard](../../apps/server/src/execution/current-generated-selection.ts); earlier durable accounting remains available for historical records
+- [Configured external admission](../../apps/server/src/execution/configured-external-admission.ts), [current selection guard](../../apps/server/src/execution/current-generated-selection.ts)
 - [Submission preparation](../../apps/server/src/execution/submission-preparation.ts), [output store](../../apps/server/src/execution/output-store.ts), [ingestion router](../../apps/server/src/execution/ingestion-router.ts)
 - Provider-specific execution/authority/receipt modules in `apps/server/src/execution/`.
 - Tests: execution/recovery/routing/spool suites, competing admission, lease loss, Stop/selection races, rejected-versus-unknown outcome and provider bridges.
 
-The engine executes the user's requested scoped work using configured providers. Historical accounting is retained; the active flow has no project spending-cap or usage-allowance prompt. Offline tests do not establish undocumented provider idempotency.
+The engine executes the user's requested scoped work using configured providers, with no project spending cap or usage allowance. `committedMicros(projectId)` sums reserved and charged `reservation` liabilities, excluding released records; reservations remain authoritative for unknown outcomes and undispatched transcription preparation. Every external v1 attempt requires a `providerUse` pin to the exact saved profile. Offline tests do not establish undocumented provider idempotency.
 
 ## Code plans (experimental)
 

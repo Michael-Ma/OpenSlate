@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canonical, digest } from '@openslate/core';
+import { RECIPE_DIGEST, canonical, digest } from '@openslate/core';
 import { createTranscriptionPreparationIntent, resolveTranscriptionPreparationIntent } from '../dist/execution/transcription-preparation.js';
 import { assertTranscriptionPreparationAttemptState } from '../dist/persistence/transcription-preparation-state.js';
 import { transcriptionFixture, context, rows } from './transcription-execution-fixture.mjs';
@@ -22,14 +22,17 @@ test('legacy attempts retain exact absent-protocol JSON and cannot enter prepari
   assert.equal(canonical(now(f)), before); assert.equal(rows(f, 'transcription_preparation_intent').length, 0);
 });
 
-test('waiting proof pins real consumed authority, full recording and historical profile without new spending or media work', async t => {
+test('waiting proof pins configured authority, full recording and historical profile without another reservation or media work', async t => {
   const f = await waiting(t), proof = resolveTranscriptionPreparationIntent(f.store, f.attempt);
   assert.equal(proof.id, f.attempt.id); assert.equal(proof.requestDigest, digest(f.request));
   assert.equal(proof.reservation.id, f.attempt.reservationId); assert.equal(proof.reservation.micros, '100');
   assert.equal(proof.profileDefinitionDigest, digest(f.profile)); assert.equal(proof.sourceRecord.id, f.audio.id);
   assert.equal(proof.source.sha256, f.request.inputs[0].sha256); assert.equal(proof.sourceStartSample, 0); assert.equal(proof.sourceEndSample, 48000);
   assert.deepEqual(f.attempt.preparation, { intentId: f.attempt.id, intentDigest: digest(proof), waitCount: 0, nextEligibleAt: 0 });
-  for (const kind of ['attempt', 'reservation', 'external_allowance_consumption']) assert.equal(rows(f, kind).length, 1);
+  for (const kind of ['attempt', 'reservation']) assert.equal(rows(f, kind).length, 1);
+  assert.equal(proof.capabilityLockId, f.request.providerUse.capabilityLockId);
+  assert.equal(proof.capabilityLockDigest, f.request.providerUse.capabilityLockDigest);
+  assert.equal(proof.profileDefinitionDigest, f.request.providerUse.profileDefinitionDigest);
   for (const kind of ['transcription_audio_intent', 'transcription_execution_mapping', 'transcription_execution_dispatch', 'transcription_execution_result']) assert.equal(rows(f, kind).length, 0);
   assert.deepEqual(f.calls, { http: 0, credentials: 0, prepare: 0, upload: 0 });
   f.store.put('transcription_preparation_intent', proof.id, f.project.id, proof);
@@ -63,8 +66,8 @@ test('proof installation rolls back with its attempt transition and cannot attac
   assert.throws(() => f.store.insert('transcription_preparation_intent', proof.id, f.project.id, proof), { code: 'SUBMISSION_PREPARATION_INVALID' });
 });
 
-test('busy metadata can advance while waiting; exact pre-marker obsolete settlement preserves proof and consumed history', async t => {
-  const f = await waiting(t), proof = rows(f, 'transcription_preparation_intent')[0], consumption = canonical(rows(f, 'external_allowance_consumption'));
+test('busy metadata can advance while waiting; exact pre-marker obsolete settlement preserves proof and original reservation', async t => {
+  const f = await waiting(t), proof = rows(f, 'transcription_preparation_intent')[0], original = f.store.get('reservation', f.attempt.reservationId);
   const updated = put(f, { ...f.attempt, preparation: { ...f.attempt.preparation, waitCount: 2, nextEligibleAt: Date.now() + 500 }, leaseExpiresAt: 0 });
   assert.throws(() => put(f, f.attempt), { code: 'SUBMISSION_PREPARATION_INVALID' });
   const failed = { ...updated, phase: 'failed', failure: { id: 'PREPARATION_OBSOLETE', technical: false, source: 'application:submission-preparation/1', retryAllowed: false } };
@@ -73,7 +76,7 @@ test('busy metadata can advance while waiting; exact pre-marker obsolete settlem
     f.store.put('reservation', reservation.id, f.project.id, { ...reservation, state: 'released' });
   });
   assertTranscriptionPreparationAttemptState(f.store, now(f)); assert.deepEqual(resolveTranscriptionPreparationIntent(f.store, now(f)), proof);
-  assert.equal(canonical(rows(f, 'external_allowance_consumption')), consumption);
+  assert.deepEqual(rows(f, 'reservation'), [{ ...original, state: 'released' }]);
   assert.throws(() => put(f, { ...now(f), phase: 'preparing' }), { code: 'SUBMISSION_PREPARATION_INVALID' });
   assert.throws(() => put(f, { ...now(f), preparation: { ...updated.preparation, waitCount: 3 } }), { code: 'SUBMISSION_PREPARATION_INVALID' });
 });
@@ -115,15 +118,16 @@ test('the exact first dispatch exits preparing once and retains immutable protoc
 
 test('transport cannot replace the proof-pinned lock with another valid matching profile lock', async t => {
   const f = await waiting(t), lockId = 'alternate-retained-lock';
-  const lock = f.store.insert('capability_lock', lockId, f.project.id, { profiles: [f.profile] });
+  const lock = f.store.insert('capability_lock', lockId, f.project.id, { recipeDigest: RECIPE_DIGEST, profiles: [f.profile] });
   const insert = f.store.insert.bind(f.store); let rejected = false;
   f.store.insert = (kind, id, projectId, value) => {
     if (kind !== 'transcription_execution_mapping') return insert(kind, id, projectId, value);
     try { return insert(kind, id, projectId, { ...value, capabilityLockId: lock.id, capabilityLockDigest: digest(lock) }); }
-    catch (error) { rejected = error.code === 'SUBMISSION_PREPARATION_INVALID'; throw error; }
+    catch (error) { rejected = error.code === 'TRANSCRIPTION_EXECUTION_CONFLICT'; throw error; }
   };
-  await assert.rejects(f.bridge.resume(f.request, { ...context(f), signal: new AbortController().signal, eligibility: () => ({ type: 'ready' }) }),
-    { code: 'SUBMISSION_PREPARATION_INVALID' });
-  assert.equal(rejected, true); assert.equal(f.calls.http, 0);
+  const outcome = await f.bridge.resume(f.request, { ...context(f), signal: new AbortController().signal, eligibility: () => ({ type: 'ready' }) });
+  assert.equal(outcome.type, 'rejected'); assert.equal(outcome.retryAllowed, false);
+  assert.equal(rejected, true); assert.equal(f.calls.http, 0); assert.equal(f.calls.credentials, 0);
+  assert.deepEqual(rows(f, 'transcription_execution_result')[0].observation, { kind: 'not_dispatched', code: 'LOCAL_INPUT_INVALID' });
   assert.equal(rows(f, 'transcription_execution_mapping').length, 0); assert.equal(rows(f, 'transcription_execution_dispatch').length, 0);
 });

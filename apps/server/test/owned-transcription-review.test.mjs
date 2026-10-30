@@ -1,11 +1,9 @@
-import { allowanceSummary } from './allowance-usage-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
-import { canonical, digest, providerProfileArguments } from '@openslate/core';
-import { ExternalAllowanceService, allowanceIssueContextDigest } from '../dist/application/external-allowances.js';
+import { canonical, digest } from '@openslate/core';
 import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from '../dist/application/installation-recovery.js';
 import { OwnedTranscriptionService } from '../dist/narration/owned-transcription-service.js';
 import { resolveOwnedTranscriptionApplication } from '../dist/narration/owned-transcription-authorization.js';
@@ -371,21 +369,6 @@ test(`original cancellation after ${boundary} insertion still rolls back the com
   finally { f.store.insert = insert; f.store.db.prepare = sql; }
   assert.equal(hits, 1); assert.deepEqual(data(f), before); noSpending(f);
   assertReceipt(f, await f.review()); assert.equal(rows(f, 'candidate').length, 1); noSpending(f);
-});
-
-test('a separate exact one-start spending allowance does not create another candidate or automatically execute review', async t => {
-  const f = await fixture(t), result = await f.review(); assertReceipt(f, result); noSpending(f);
-  const node = f.proposal.compiled.nodes.find(node => node.alias === f.proposal.operation.alias), allowances = new ExternalAllowanceService(f.store);
-  const input = { profileDigest: providerProfileArguments(f.profile).profileDigest, profileDefinitionDigest: digest(f.profile),
-    selections: [{ candidateId: result.candidateId, nodeId: node.id, specDigest: node.specDigest }], maxAttempts: 1,
-    maxEstimatedMicros: f.profile.unitCostMicros, expiresAt: new Date(Date.now() + 3600000).toISOString() };
-  const before = bodies(f, [...authorityKinds, ...narrationKinds, 'hold', 'epoch']), project = f.store.getProject(f.project.id);
-  const human = f.production.beginRequest(f.project.id, 'human', 'Approve this exact one-start recognition estimate.',
-    { editing: false, contextDigest: allowanceIssueContextDigest(f.project.id, input) });
-  const allowance = allowances.issue(f.project.id, human, input), summary = allowanceSummary(f.store, f.project.id)[0];
-  assert.equal(allowance.maxAttempts, 1); assert.equal(summary.remainingAttempts, 1); assert.equal(summary.usedAttempts, 0);
-  assert.equal(summary.remainingEstimatedMicros, f.profile.unitCostMicros); assert.deepEqual(f.store.getProject(f.project.id), project);
-  assert.equal(bodies(f, [...authorityKinds, ...narrationKinds, 'hold', 'epoch']), before); assert.equal(f.provider.acceptedCount(), 0); noSpending(f);
 });
 
 test('released restoration cannot turn an imported ungranted proposal into fresh human generation authority', async t => {

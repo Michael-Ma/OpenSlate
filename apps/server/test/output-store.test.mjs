@@ -89,7 +89,7 @@ test("byte, hash, chunk and total-stream limits fail without completion or liabi
     const chunk = Buffer.alloc(OUTPUT_STORE_LIMITS.chunkBytes); for (let i = 0; i < 33; i++) yield chunk;
   }), { code: "OUTPUT_BYTES_INVALID" });
   assert.equal(f.store.list("execution_output_spool", f.projectId).length, 0);
-  assert.equal(readdirSync(join(f.rootDir, "tmp")).length, 0); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+  assert.equal(readdirSync(join(f.rootDir, "tmp")).length, 0); assert.equal(f.engine.committedMicros(f.projectId), "100");
 });
 
 test("pre-abort and stalled streams cancel within the deadline and free writer capacity", async t => {

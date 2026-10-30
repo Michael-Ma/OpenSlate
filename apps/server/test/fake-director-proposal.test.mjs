@@ -59,11 +59,11 @@ function fixture(t, { toolContract = '6.0.0' } = {}) {
     if (demoCommand) store.insert('demo_command', active.human.requestId, project.id, demoCommand);
     const before = { accepted: provider.acceptedCount(), attempts: engine.attempts(project.id),
       candidates: store.list('candidate', project.id), grants: store.list('grant', project.id),
-      confirmations: store.list('scene_confirmation', project.id), budget: engine.budget(project.id) };
+      confirmations: store.list('scene_confirmation', project.id), budget: engine.committedMicros(project.id) };
     const result = await new FakeWorkflowDirector(service).start(active.input, { onEvent: event => events.push(event) });
     assert.deepEqual({ accepted: provider.acceptedCount(), attempts: engine.attempts(project.id),
       candidates: store.list('candidate', project.id), grants: store.list('grant', project.id),
-      confirmations: store.list('scene_confirmation', project.id), budget: engine.budget(project.id) }, before,
+      confirmations: store.list('scene_confirmation', project.id), budget: engine.committedMicros(project.id) }, before,
     'a proposal decision has no paid generation effect');
     return { ...active, result, events, calls: store.list('tool_invocation', project.id).filter(call => call.requestId === active.human.requestId) };
   };

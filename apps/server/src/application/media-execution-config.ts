@@ -5,19 +5,18 @@ import { EnvironmentMediaCredentials } from "./provider-credentials.js";
 
 export interface MediaExecutionConfiguration {
   image: boolean;
-  codexImage?: boolean;
+  codexImage: boolean;
   codexImageBinary?: string;
   codexImageHome?: string;
   h3: boolean;
-  /** Omission preserves trusted pre-audio programmatic callers; environment parsing returns explicit booleans. */
-  speech?: boolean;
-  transcription?: boolean;
-  viggleH3?: boolean;
-  viggleH3DownloadHosts?: readonly string[];
+  speech: boolean;
+  transcription: boolean;
+  viggleH3: boolean;
+  viggleH3DownloadHosts: readonly string[];
   h3DownloadHosts: readonly string[];
-  /** fal MiniMax H3 Max lip sync for singing shots. Omission keeps it off for trusted programmatic callers. */
-  falLipSync?: boolean;
-  falLipSyncDownloadHosts?: readonly string[];
+  /** fal MiniMax H3 Max lip sync for singing shots. */
+  falLipSync: boolean;
+  falLipSyncDownloadHosts: readonly string[];
 }
 /** fal serves outputs from its CDN; the owner may narrow or replace these exact hosts. */
 export const FAL_DEFAULT_DOWNLOAD_HOSTS: readonly string[] = Object.freeze(["v3.fal.media", "v3b.fal.media", "fal.media"]);
@@ -55,8 +54,7 @@ export function readMediaExecutionConfiguration(environment: Readonly<Record<str
   const h3DownloadHosts = downloadHosts(environment.OPENSLATE_H3_DOWNLOAD_HOSTS, h3);
   const viggleH3DownloadHosts = downloadHosts(environment.OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS, viggleH3);
   const falLipSync = enabled("OPENSLATE_ENABLE_FAL_LIPSYNC", configured("fal-video"));
-  const falLipSyncDownloadHosts = falLipSync ? downloadHosts(environment.OPENSLATE_FAL_DOWNLOAD_HOSTS || FAL_DEFAULT_DOWNLOAD_HOSTS.join(","), true) : undefined;
+  const falLipSyncDownloadHosts = falLipSync ? downloadHosts(environment.OPENSLATE_FAL_DOWNLOAD_HOSTS || FAL_DEFAULT_DOWNLOAD_HOSTS.join(","), true) : Object.freeze([]);
   return Object.freeze({ image, codexImage, ...(codexImageBinary ? { codexImageBinary } : {}), ...(codexImageHome ? { codexImageHome } : {}), h3, speech, transcription, viggleH3, h3DownloadHosts, viggleH3DownloadHosts,
-    // Present only when enabled, so hosts without a fal key read exactly as before.
-    ...(falLipSync && falLipSyncDownloadHosts ? { falLipSync, falLipSyncDownloadHosts } : {}) });
+    falLipSync, falLipSyncDownloadHosts });
 }

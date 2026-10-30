@@ -54,14 +54,21 @@ for (const sameBytes of [true, false]) test(`Engine's spool-first recovery rejec
   assert.equal(f.calls.http, 1); assert.equal(rows(f, "execution_output_spool").some(item => item.id === alternate.id), true);
 });
 
-test("speech mapping, dispatch, result and consumed authority are independently required by ingestion", async t => {
-  for (const kind of ["speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result", "external_allowance_consumption"]) {
+test("speech mapping, dispatch, result and pinned provider authority are independently required by ingestion", async t => {
+  for (const kind of ["speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result"]) {
     const f = speechFixture(t); assert.equal((await f.bridge.submit(f.request, context(f))).type, "completed");
     f.store.db.prepare("DELETE FROM entities WHERE kind=?").run(kind); pending(f);
     const worker = ingestion(f, { noTools: true });
     await assert.rejects(worker.engine.reconcile(), { code: "SPEECH_EXECUTION_CONFLICT" }); unpublished(f);
     assert.deepEqual(worker.calls, { describe: 0, normalize: 0, verified: 0, lookup: 0 }); assert.equal(f.calls.http, 1);
   }
+  const f = speechFixture(t); assert.equal((await f.bridge.submit(f.request, context(f))).type, "completed"); pending(f);
+  f.store.db.prepare("DELETE FROM entities WHERE kind='capability_lock' AND id=?").run(f.request.providerUse.capabilityLockId);
+  const worker = ingestion(f, { noTools: true });
+  await assert.rejects(worker.engine.reconcile(), { code: "CONFIGURED_PROVIDER_ADMISSION_CONFLICT" });
+  assert.equal(rows(f, "artifact").length, 0); assert.equal(rows(f, "media_source").length, 0);
+  assert.equal(f.store.get("reservation", f.attempt.reservationId).state, "reserved");
+  assert.deepEqual(worker.calls, { describe: 0, normalize: 0, verified: 0, lookup: 0 }); assert.equal(f.calls.http, 1);
 });
 
 async function completedBeforeSql(t) {
@@ -96,9 +103,9 @@ test("a saved normalization cannot bypass a missing completed speech observation
   assert.equal(f.calls.http, 1);
 });
 
-test("lineage guard is inert for historical fake and other execution contracts", () => {
-  const store = { get() { throw Error("legacy guard must not read records"); }, getProject() { throw Error("legacy guard must not inspect current project"); }, db: null };
-  for (const execution of [undefined, { adapter: "fake", version: "1" }, { adapter: "offline-speech-fixture", version: "1" }]) {
-    assert.doesNotThrow(() => assertSpeechSpoolLineage(store, { request: { kind: "speech", ...(execution ? { execution } : {}) } }, "legacy-spool"));
+test("lineage guard is inert for demo and other execution contracts", () => {
+  const store = { get() { throw Error("unrelated contract must not read records"); }, getProject() { throw Error("unrelated contract must not inspect current project"); }, db: null };
+  for (const execution of [{ adapter: "fake", version: "1" }, { adapter: "offline-speech-fixture", version: "1" }]) {
+    assert.doesNotThrow(() => assertSpeechSpoolLineage(store, { request: { kind: "speech", execution } }, "unrelated-spool"));
   }
 });

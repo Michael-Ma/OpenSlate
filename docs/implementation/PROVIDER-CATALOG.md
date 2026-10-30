@@ -16,7 +16,7 @@ Authenticated catalog/project views report installed definitions, saved provenan
 
 New-project selection is paired with an exact catalog digest and one profile per chosen kind; omitted kinds remain demo. The server creates a trusted selection inside the replay-safe command. A completed replay returns its original project even if the current catalog changed.
 
-Existing projects use revision-bound model preview/apply. The preview names changes and preserved work; apply creates a successor lock and compatible pending graph. Completed outputs, in-flight work, dependencies protecting that work and separately reviewed audio plans remain pinned. A redefined saved profile ID must be installed under a distinct identity. Saving choices creates no generation grant or allowance and starts no director turn.
+Existing projects use revision-bound model preview/apply. The preview names changes and preserved work; apply creates a successor lock and compatible pending graph. Completed outputs, in-flight work, dependencies protecting that work and separately reviewed audio plans remain pinned. A redefined saved profile ID must be installed under a distinct identity. Saving choices creates no generation grant and starts no director turn.
 
 The compact settings UI shows model-per-job choices first and selected-account setup only on demand. An explicit Save automatically applies a current zero-impact server preview; actual pending changes receive an exact impact review. Separate Director/media saves and unknown-result checks retain their command identities. Backend preview/protection rules remain the authority. See [settings](PROJECT-SETTINGS-AND-UPDATES.md).
 
@@ -27,4 +27,4 @@ The compact settings UI shows model-per-job choices first and selected-account s
 - [Profile validation](../../packages/core/src/provider-profile.ts), provider execution registry and app routes.
 - Tests: `provider-catalog.test.mjs`, `project-model-settings.test.mjs`, core composition and web settings/model suites.
 
-See [activation](MEDIA-EXECUTION-LAUNCHER.md), [settings](PROJECT-SETTINGS-AND-UPDATES.md) and [spending review](SPENDING-REVIEW.md).
+See [activation](MEDIA-EXECUTION-LAUNCHER.md), [settings](PROJECT-SETTINGS-AND-UPDATES.md) and [configured admission](../technical/EXECUTION-ENGINE.md).

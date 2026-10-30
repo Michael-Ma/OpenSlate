@@ -11,6 +11,7 @@ import { ViggleH3Execution, ViggleDownloadPending, viggleHasCompletedObservation
 import { ExecutionOutputStore } from '../dist/execution/output-store.js';
 import { EnvironmentMediaCredentials } from '../dist/application/provider-credentials.js';
 import { assertViggleRecords, assertViggleSpoolLineage } from '../dist/execution/viggle-h3-lineage.js';
+import { assertViggleCurrentSelection } from '../dist/execution/viggle-h3-authority.js';
 import { assertViggleH3ExecutionMapping, assertViggleH3FirstFrameAspect, assertViggleH3OperationOptions, viggleH3CompletedObservationId, viggleH3RequestAspect } from '../dist/execution/viggle-h3-receipts.js';
 import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from '../dist/application/installation-recovery.js';
 import { fixture, context, due, rows, taskId, key, json, accepted, pending, completed, hash } from './viggle-h3-execution-fixture.mjs';
@@ -37,22 +38,44 @@ test('Viggle submits exact reviewed PNG multipart only after immutable full-admi
     assert.deepEqual(Buffer.from(await form.get('first_frame_image').arrayBuffer()), readFileSync(f.image.path)); return accepted();
   } });
   assert.deepEqual(await f.bridge.submit(f.request, context(f)), { type: 'accepted', taskId });
-  const mapping = rows(f, 'viggle_h3_execution_mapping')[0], consumption = rows(f, 'external_allowance_consumption')[0];
+  const mapping = rows(f, 'viggle_h3_execution_mapping')[0];
   assert.equal(mapping.transport.bodySha256, hash(body)); assert.equal(mapping.transport.bodyByteLength, body.length);
-  assert.equal(mapping.profileDefinitionDigest, digest(f.profile)); assert.equal(mapping.consumptionDigest, digest(consumption));
-  assert.equal(mapping.allowanceDigest, digest(f.allowance)); assert.equal(mapping.firstFrame.artifactDigest, digest(f.image));
+  assert.equal(mapping.profileDefinitionDigest, digest(f.profile));
+  assert.equal(mapping.firstFrame.artifactDigest, digest(f.image));
   assert.equal(mapping.firstFrame.approvalDigest, digest(f.approval)); assert.equal(mapping.firstFrame.snapshotDigest, digest(f.review));
   assert.equal(JSON.stringify(rows(f, 'viggle_h3_execution_mapping')).includes(key), false);
   assertViggleRecords(f.store, f.attempt.id); assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 0);
 });
 
-test('missing actual consumption or forged full profile cannot substitute a nominal allowance ID', async t => {
-  for (const mode of ['missing-consumption', 'profile-cost']) {
+test('forged providerUse or a profile cannot substitute exact Viggle admission evidence', async t => {
+  for (const mode of ['provider-use', 'profile-cost']) {
     const f = await fixture(t);
-    if (mode === 'missing-consumption') f.store.db.prepare("DELETE FROM entities WHERE kind='external_allowance_consumption' AND id=?").run(f.attempt.id);
+    if (mode === 'provider-use') {
+      f.request = { ...f.request, providerUse: { ...f.request.providerUse, profileDefinitionDigest: 'f'.repeat(64) } };
+      tamper(f, 'attempt', { ...f.attempt, request: f.request });
+    }
     else { const lock = f.store.get('capability_lock', f.project.capabilityLockId); tamper(f, 'capability_lock', { ...lock, profiles: [{ ...f.profile, unitCostMicros: '1' }] }); }
     await assert.rejects(f.bridge.submit(f.request, context(f)), { code: 'VIGGLE_H3_EXECUTION_CONFLICT' }); assert.equal(f.calls.post, 0);
     assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0);
+  }
+});
+
+test('current Viggle selection requires the supported recipe lock and explicit narration decision', async t => {
+  for (const mode of ['missing-recipe', 'unsupported-recipe', 'missing-narration']) {
+    const f = await fixture(t);
+    assert.doesNotThrow(() => assertViggleCurrentSelection(f.store, f.attempt));
+    if (mode === 'missing-narration') {
+      const project = f.store.getProject(f.project.id), { narration: _decision, ...shot } = project.shots[0];
+      f.store.saveProject({ ...project, shots: [shot] }, project.headVersion);
+    } else {
+      const lock = f.store.get('capability_lock', f.project.capabilityLockId), { recipeDigest: _recipe, ...withoutRecipe } = lock;
+      const id = randomUUID(), current = f.store.getProject(f.project.id);
+      f.store.insert('capability_lock', id, f.project.id, mode === 'missing-recipe' ? { ...withoutRecipe, id } : { ...lock, id, recipeDigest: 'unsupported-recipe' });
+      f.store.saveProject({ ...current, capabilityLockId: id }, current.headVersion);
+    }
+    assert.throws(() => assertViggleCurrentSelection(f.store, f.attempt), { code: 'VIGGLE_H3_SELECTION_CHANGED' });
+    assert.equal((await f.bridge.submit(f.request, context(f))).type, 'rejected');
+    assert.equal(f.calls.post, 0); assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0);
   }
 });
 
@@ -94,7 +117,7 @@ for(const action of ['Stop','edit'])test(`Viggle ${action} before POST releases 
  if(action==='Stop')f.engine.setPaused(f.project.id,true,'stop-before-post');else f.engine.setHold(f.project.id,{scopeId:f.project.shots[0].id,ownerId:'edit-before-post'});
  b.release();await running;
  const attempt=f.engine.attempts(f.project.id)[0];assert.equal(attempt.phase,'failed');assert.equal(f.calls.post,0);assert.equal(rows(f,'viggle_h3_execution_dispatch').length,0);
- assert.equal(rows(f,'viggle_h3_execution_submit')[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.budget(f.project.id).committedMicros,'0');
+ assert.equal(rows(f,'viggle_h3_execution_submit')[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.committedMicros(f.project.id),'0');
  await f.engine.reconcile();await f.engine.runReady();assert.equal(f.calls.post,0);assert.equal(f.engine.attempts(f.project.id).length,1);
 });
 
@@ -416,7 +439,7 @@ test('a worker that died before the dispatch marker is fenced as never sent: rel
 });
 
 const reels = { version: 'film-kind@1', kind: 'social', format: { platform: 'ig_reels', aspect: '9:16' } };
-test('a 9:16 film sends aspect_ratio 9:16 with its portrait first frame; the profile aspect stays for older requests', async t => {
+test('a 9:16 film sends aspect_ratio 9:16 with its portrait first frame; requests without a film aspect use the profile aspect', async t => {
   let form;
   const f = await fixture(t, { filmKind: reels, pngSize: [180, 320], fetch: async (url, init) => {
     form = await new Request(url, { method: 'POST', headers: init.headers, body: Buffer.from(init.body) }).formData(); return accepted();
@@ -427,11 +450,11 @@ test('a 9:16 film sends aspect_ratio 9:16 with its portrait first frame; the pro
   const mapping = rows(f, 'viggle_h3_execution_mapping')[0];
   assert.equal(mapping.transport.aspectRatio, '9:16'); assert.deepEqual([mapping.transport.firstFrame.width, mapping.transport.firstFrame.height], [180, 320]);
   assertViggleRecords(f.store, f.attempt.id);
-  const legacy = await fixture(t, { fetch: async (url, init) => {
+  const profileAspect = await fixture(t, { fetch: async (url, init) => {
     form = await new Request(url, { method: 'POST', headers: init.headers, body: Buffer.from(init.body) }).formData(); return accepted();
   } });
-  assert.equal(Object.hasOwn(legacy.node.args, 'aspect'), false);
-  await legacy.bridge.submit(legacy.request, context(legacy)); assert.equal(form.get('aspect_ratio'), '16:9');
+  assert.equal(Object.hasOwn(profileAspect.node.args, 'aspect'), false);
+  await profileAspect.bridge.submit(profileAspect.request, context(profileAspect)); assert.equal(form.get('aspect_ratio'), '16:9');
 });
 
 test('a first frame of another shape is refused before any POST', async t => {

@@ -1,3 +1,4 @@
+import { ConfiguredExternalAdmission } from "../dist/execution/configured-external-admission.js";
 import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
@@ -9,7 +10,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync,
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { compilePlan, digest } from "../../../packages/core/dist/index.js";
+import { RECIPE_DIGEST, compilePlan, digest } from "../../../packages/core/dist/index.js";
 import { MiniMaxH3Execution } from "../dist/execution/minimax-h3-execution.js";
 import { EnvironmentMediaCredentials } from "../dist/application/provider-credentials.js";
 import { ExecutionOutputStore } from "../dist/execution/output-store.js";
@@ -49,6 +50,7 @@ function fixture(t, options = {}) {
   const profile = { id: "offline-h3-video", revision: "1", kind: "video", adapter: "minimax-h3", executionVersion: "1",
     configuration: { model: options.model ?? "MiniMax-H3", settings: { resolution: "768P", ...options.profileSettings } },
     minFrames: 120, maxFrames: 450, maxConcurrency: options.maxConcurrency ?? 2, unitCostMicros: "300", maxRetries: options.maxRetries ?? 0 };
+  store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: [profile] });
   const outputs = new ExecutionOutputStore(store, { rootDir: join(directory, "outputs") }), clock = { value: Date.now() };
   const calls = { post: 0, query: 0, download: 0, credentials: 0 };
   const credentials = new EnvironmentMediaCredentials(name => { calls.credentials++; assert.equal(name, "OPENSLATE_MINIMAX_API_KEY"); return options.credential ? options.credential() : key; });
@@ -68,7 +70,7 @@ function fixture(t, options = {}) {
   const media = options.ingest ? new LocalMediaService({ rootDir: join(directory, "normalized"), allowedInputRoots: [outputs.rootDir], ffmpegPath, ffprobePath }) : undefined;
   const engine = new Engine(store, bridge, { artifactDir: artifactRoot, profiles: [profile], outputStore: outputs,
     ...(media ? { outputIngestor: new SpoolVideoIngestor(outputs, media, { rootDir: join(directory, "derivations") }) } : {}),
-    externalAdmission: { authorize: claim => { const id = randomUUID(); store.insert("offline_h3_allowance", id, claim.projectId, { attemptId: claim.attemptId }); return { allowanceId: id }; } } });
+    externalAdmission: new ConfiguredExternalAdmission(store, () => {}) });
   const q = JSON.stringify, shot = project.shots[0], settings = options.shotSettings ? `,settings:${q(options.shotSettings)}` : "";
   const source = `definePlan({baseRevision:${q(project.revisionId)}},p=>{const shot=p.shot(${q(shot.id)});const frame=p.asset(${q(reference.artifactId)});const review=p.humanReview("review",{shots:[{intent:shot,keyframe:frame,videoProfile:${q(profile.id)},motionPrompt:${q(shot.videoPrompt)},seconds:6${settings}}]});return p.video("video",{intent:shot,profile:${q(profile.id)},firstFrame:p.approvedImage(frame,review),prompt:${q(shot.videoPrompt)},seconds:6${settings}});});`;
   const plan = compilePlan(source, { project, profiles: [profile], logicalIds: {}, allocateId: randomUUID }), node = plan.nodes.find(node => node.kind === "video"), planId = randomUUID();
@@ -160,7 +162,7 @@ for(const action of ['Stop','edit'])test(`MiniMax ${action} before POST records 
  if(action==='Stop')f.engine.setPaused(f.project.id,true,'stop-before-post');else f.engine.setHold(f.project.id,{scopeId:f.project.shots[0].id,ownerId:'edit-before-post'});
  barrier.release();await running;
  const attempt=f.engine.attempts(f.project.id)[0];assert.equal(attempt.phase,'failed');assert.equal(f.calls.post,0);assert.equal(rows(f,'h3_execution_dispatch').length,0);
- assert.equal(rows(f,'h3_execution_submit')[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.budget(f.project.id).committedMicros,'0');
+ assert.equal(rows(f,'h3_execution_submit')[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.committedMicros(f.project.id),'0');
  await f.engine.reconcile();await f.engine.runReady();assert.equal(f.calls.post,0);assert.equal(f.engine.attempts(f.project.id).length,1);
 });
 
@@ -420,6 +422,7 @@ function competingMiniMaxAdmission(f) {
   project.artifacts = [artifact]; f.store.createProject(project);
   const { id: _id, projectId: _projectId, ...record } = f.store.get("artifact", f.reference.artifactId);
   f.store.insert("artifact", artifact.artifactId, project.id, { ...record, artifact });
+  f.store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: [f.profile] });
   const q = JSON.stringify, shot = project.shots[0];
   const source = `definePlan({baseRevision:${q(project.revisionId)}},p=>{const shot=p.shot(${q(shot.id)});const frame=p.asset(${q(artifact.artifactId)});const review=p.humanReview("review",{shots:[{intent:shot,keyframe:frame,videoProfile:${q(f.profile.id)},motionPrompt:${q(shot.videoPrompt)},seconds:6}]});return p.video("video",{intent:shot,profile:${q(f.profile.id)},firstFrame:p.approvedImage(frame,review),prompt:${q(shot.videoPrompt)},seconds:6});});`;
   const plan = compilePlan(source, { project, profiles: [f.profile], logicalIds: {}, allocateId: randomUUID }), node = plan.nodes.find(value => value.kind === "video"), planId = randomUUID();
@@ -447,7 +450,7 @@ for (const receipt of ["unknown", "missing"]) test(`MiniMax L1 ${receipt} POST r
   assert.deepEqual(await other.lookup(f.attempt.id), minimaxLostReply);
   wakeMiniMax(f); await f.engine.reconcile();
   const final = attempt(f); assert.equal(final.phase, "failed"); assert.equal(final.failure.id, "SUBMISSION_RESPONSE_LOST"); assert.equal(final.failure.retryAllowed, false);
-  assert.equal(f.store.get("reservation", final.reservationId).state, "charged"); assert.equal(f.engine.budget(f.project.id).committedMicros, "300");
+  assert.equal(f.store.get("reservation", final.reservationId).state, "charged"); assert.equal(f.engine.committedMicros(f.project.id), "300");
   for (let cycle = 0; cycle < 5; cycle++) { await f.engine.reconcile(); const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); }
   assert.equal(f.engine.attempts(f.project.id).length, 1); assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 0);
   assert.equal(competing().phase, "submitting", "the failed attempt released its concurrency slot");
@@ -460,7 +463,7 @@ test("MiniMax L1 fenced pre-dispatch recovery releases the reservation and perma
   assert.equal(rows(f, "h3_execution_submit").length, 0);
   wakeMiniMax(f); await f.engine.reconcile();
   const final = attempt(f); assert.equal(final.phase, "failed"); assert.equal(final.failure.retryAllowed, false);
-  assert.equal(f.store.get("reservation", final.reservationId).state, "released"); assert.equal(f.engine.budget(f.project.id).committedMicros, "0");
+  assert.equal(f.store.get("reservation", final.reservationId).state, "released"); assert.equal(f.engine.committedMicros(f.project.id), "0");
   const proof = rows(f, "h3_execution_submit")[0]; assert.equal(proof.observation.kind, "not_dispatched");
   assert.equal((await f.bridge.submit(f.request, old)).type, "rejected");
   assert.equal(rows(f, "h3_execution_dispatch").length, 0); assert.equal(f.calls.post, 0); assert.equal(f.calls.credentials, 0);

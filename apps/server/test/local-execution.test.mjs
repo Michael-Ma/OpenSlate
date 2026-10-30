@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonical, compilePlan, DEFAULT_PROFILES, digest, DomainError } from "../../../packages/core/dist/index.js";
+import { RECIPE_DIGEST, canonical, compilePlan, DEFAULT_PROFILES, digest, DomainError } from "../../../packages/core/dist/index.js";
 import { FakeProvider } from "../../../packages/providers/dist/index.js";
 import { Store } from "../dist/persistence/store.js";
 import { Engine } from "../dist/execution/engine.js";
@@ -21,7 +21,7 @@ function fixture(t, options = {}) {
   t.after(() => { if (store.db.open) store.close(); provider.close(); rmSync(directory, { recursive: true, force: true }); });
   const project = projectFixture(randomUUID(), 1), input = { artifactId: randomUUID(), sha256: "a".repeat(64), kind: "video" };
   project.artifacts = [input]; store.createProject(project);
-  store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES, localExecution: identity });
+  store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: DEFAULT_PROFILES, localExecution: identity });
   store.insert("artifact", input.artifactId, project.id, { artifact: input, path: join(directory, "source.mp4"), fixture: false, mimeType: "video/mp4", attemptId: null, physicalDurationSeconds: 1 });
   let semantic = 1, executes = 0, recoveries = 0;
   const source = `definePlan({baseRevision:${JSON.stringify(project.revisionId)}},p=>{const take=p.asset(${JSON.stringify(input.artifactId)});return p.timeline("assembly",{takes:[take]});});`;
@@ -132,7 +132,7 @@ test("missing runtime or incompatible saved lock never falls back to fake assemb
   const f = fixture(t), noRuntime = new Engine(f.store, f.provider, { artifactDir: f.artifactDir });
   assert.equal((await noRuntime.runReady()).blocked[0].code, "LOCAL_EXECUTION_UNAVAILABLE");
   const current = f.store.getProject(f.projectId), lock = randomUUID();
-  f.store.insert("capability_lock", lock, f.projectId, { profiles: DEFAULT_PROFILES }); f.store.saveProject({ ...current, capabilityLockId: lock }, current.headVersion);
+  f.store.insert("capability_lock", lock, f.projectId, { recipeDigest: RECIPE_DIGEST, profiles: DEFAULT_PROFILES }); f.store.saveProject({ ...current, capabilityLockId: lock }, current.headVersion);
   assert.equal((await f.engine.runReady()).blocked[0].code, "LOCAL_EXECUTION_UNSUPPORTED");
   assert.equal(f.engine.attempts(f.projectId).length, 0); assert.equal(f.provider.acceptedCount(), 0);
 });

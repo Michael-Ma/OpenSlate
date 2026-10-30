@@ -29,14 +29,14 @@ test('speech backup recomposes source and rejects modified source despite unchan
 });
 
 for(const family of ['attempt','candidate'])for(const field of ['id','project_id'])test(`speech backup rejects ${family} SQL ${field} drift from retained body identity`,async t=>{
- const f=await narrationSpeechFixture(t,{realSpeech:true}),p=await f.prepare(),applied=await f.review(p);f.issue(applied);const attempt=f.admit(applied);
+ const f=await narrationSpeechFixture(t,{realSpeech:true}),p=await f.prepare(),applied=await f.review(p);const attempt=f.admit(applied);
  const identity=family==='attempt'?attempt.id:applied.candidateId;
  const replacement=field==='project_id'?f.production.createProject('Other installation project').id:key();
  f.store.db.prepare(`UPDATE entities SET ${field}=? WHERE kind=? AND id=?`).run(replacement,family,identity);
  f.store.close();f.provider.close();await assert.rejects(backup(f));
 });
 test('speech backup retains a valid admitted pre-marker attempt and its exact purpose metadata',async t=>{
- const f=await narrationSpeechFixture(t,{realSpeech:true}),p=await f.prepare(),applied=await f.review(p);f.issue(applied);const attempt=f.admit(applied);
+ const f=await narrationSpeechFixture(t,{realSpeech:true}),p=await f.prepare(),applied=await f.review(p);const attempt=f.admit(applied);
  assert.equal(attempt.phase,'submitting');assert.equal(f.calls.http,0);assert.ok(attempt.narrationSpeech);
  f.store.close();f.provider.close();const saved=await backup(f);assert.deepEqual(await inspectInstallationBackup({directory:saved.directory}),saved);
 });

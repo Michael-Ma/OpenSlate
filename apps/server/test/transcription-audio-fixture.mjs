@@ -37,7 +37,7 @@ export async function fixture(t, { sourceKind = "media_source", samples = 48000 
     ? store.insert(sourceKind, source.artifactId, project.id, { source, requestId })
     : store.insert(sourceKind, source.artifactId, project.id, { media: source, declaredOrigin: "uploaded", requestId });
   const attemptId = randomUUID(), request = { attemptId, nodeId: "transcript", kind: "transcription", fingerprint: "frozen-input",
-    args: { profileIdentity: "fake-transcription-v1", language: "en" }, inputs: [{ artifactId: source.artifactId, kind: "audio", sha256: source.sha256 }] };
+    args: { profileIdentity: "fake-transcription-v1", language: "en" }, inputs: [{ artifactId: source.artifactId, kind: "audio", sha256: source.sha256 }], execution: { adapter: "fake", version: "1" } };
   const grantId = randomUUID(), candidateId = randomUUID();
   store.insert("grant", grantId, project.id, { scopeId: project.id, kind: "transcription", authorityId: requestId, origin: "initial_slot" });
   store.insert("candidate", candidateId, project.id, { nodeId: request.nodeId, grantId, origin: "initial_slot" });

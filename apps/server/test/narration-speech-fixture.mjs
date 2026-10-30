@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { canonical, DEFAULT_PROFILES, digest, providerProfileArguments } from "@openslate/core";
+import { canonical, DEFAULT_PROFILES, digest } from "@openslate/core";
 import { FakeProvider, OPENAI_SPEECH_MODEL } from "@openslate/providers";
 import { Store } from "../dist/persistence/store.js";
 import { Engine } from "../dist/execution/engine.js";
@@ -12,9 +12,8 @@ import { NarrationService } from "../dist/narration/service.js";
 import { NarrationSpeechService } from "../dist/narration/narration-speech-service.js";
 import { OpenAISpeechExecution } from "../dist/execution/openai-speech-execution.js";
 import { ExecutionOutputStore } from "../dist/execution/output-store.js";
-import { DurableExternalAdmission } from "../dist/execution/durable-external-admission.js";
+import { ConfiguredExternalAdmission } from "../dist/execution/configured-external-admission.js";
 import { EnvironmentMediaCredentials } from "../dist/application/provider-credentials.js";
-import { ExternalAllowanceService, allowanceIssueContextDigest } from "../dist/application/external-allowances.js";
 import { projectFixture } from "./execution-fixture.mjs";
 import { response } from "./speech-execution-fixture.mjs";
 
@@ -45,14 +44,14 @@ export async function narrationSpeechFixture(t, options = {}) {
   const fetch = async (...args) => { calls.http++; return options.fetch ? options.fetch(...args) : response(); };
   const bridge = new OpenAISpeechExecution({ store, outputStore: outputs, credentials, fetch });
   const engine = new Engine(store, options.realSpeech ? bridge : provider, { artifactDir, profiles, outputStore: outputs,
-    externalAdmission: options.configuredAdmission ? { authorize: () => ({}) } : new DurableExternalAdmission(store, () => {}) });
+    externalAdmission: new ConfiguredExternalAdmission(store, () => {}) });
   const production = new ProductionService(store, engine, profiles); let project = production.createProject("Narration speech proposal");
   if (options.plan) project = store.saveProject({ ...projectFixture(project.id, 2), capabilityLockId: project.capabilityLockId }, project.headVersion);
   const human = production.beginRequest(project.id, "human", "Prepare my saved narration section."), actor = production.openEpoch(project.id, human).actor;
   const media = new LocalMediaService({ rootDir: join(root, "media"), allowedInputRoots: [parent], ffmpegPath: "/missing/offline-ffmpeg", ffprobePath: "/missing/offline-ffprobe" });
-  const narration = new NarrationService(production, media), service = new NarrationSpeechService(narration), allowances = new ExternalAllowanceService(store);
+  const narration = new NarrationService(production, media), service = new NarrationSpeechService(narration);
   const f = { root, parent, directory: root, path, store, stores, provider, profile, profiles, outputs, calls, bridge, credentials, fetch,
-    engine, production, human, actor, media, narration, service, project, artifactDir, allowances };
+    engine, production, human, actor, media, narration, service, project, artifactDir };
   t.after(() => { for (const item of stores) if (item.db.open) item.close(); if (provider.db.open) provider.close(); rmSync(parent, { recursive: true, force: true }); });
   if (options.plan) {
     const before = store.getProject(project.id);
@@ -69,15 +68,6 @@ export async function narrationSpeechFixture(t, options = {}) {
   f.prepare = (input = f.input(), prepareOptions = {}) => service.prepare(project.id, actor, input, prepareOptions);
   f.review = (proposal, input = {}, reviewOptions = {}) => service.review(project.id, human,
     { key: key(), proposalId: proposal.id, proposalDigest: digest(proposal), ...input }, reviewOptions);
-  f.issue = application => {
-    const candidate = store.get("candidate", application.candidateId), node = store.get("node_binding", candidate.nodeId).node;
-    const input = { profileDigest: String(providerProfileArguments(profile).profileDigest), profileDefinitionDigest: digest(profile),
-      selections: [{ candidateId: candidate.id, nodeId: node.id, specDigest: node.specDigest }], maxAttempts: 1,
-      maxEstimatedMicros: "100", expiresAt: new Date(Date.now() + 3600000).toISOString() };
-    const spendingActor = production.beginRequest(project.id, "human", "Approve one exact offline fixture start", { editing: false,
-      scopeIds: [project.id], contextDigest: allowanceIssueContextDigest(project.id, input) });
-    return allowances.issue(project.id, spendingActor, input);
-  };
   f.admit = application => { const candidate = store.get("candidate", application.candidateId), node = store.get("node_binding", candidate.nodeId).node;
     return engine.admit(project.id, node.id, engine.resolveInputs(project.id, node).fingerprint); };
   f.project = store.getProject(project.id); return f;

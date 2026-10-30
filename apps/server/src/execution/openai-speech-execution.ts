@@ -17,7 +17,7 @@ const MAX_SUBMIT_TIMEOUT_MS = 120000;
 const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false });
 const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "SPEECH_EXECUTION_CANCELLED", "Speech preparation was cancelled");
 
-/** Explicit host bridge: registration is availability, never a spending allowance or default activation. */
+/** Explicit host bridge: registration exposes availability; execution still requires configured admission. */
 export class OpenAISpeechExecution implements ExecutionProvider {
   readonly #store: Store;
   readonly #outputs: ExecutionOutputStore;
@@ -46,7 +46,6 @@ export class OpenAISpeechExecution implements ExecutionProvider {
       const proposed: SpeechExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
         profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile,
         capabilityLockId: admission.capabilityLock.id, capabilityLockDigest: digest(admission.capabilityLock),
-        allowanceId: (admission.allowance?.id ?? null), allowanceDigest: (admission.allowance ? digest(admission.allowance) : null), consumptionDigest: (admission.consumption ? digest(admission.consumption) : null),
         estimatedMicros: admission.reservation.micros, transport: prepared.description, bodyByteLength: prepared.bodyByteLength };
       mapping = this.#store.transaction(() => {
         stopped(signal); assertSpeechFirstDispatch(this.#store, admission, expectedLease);
@@ -78,7 +77,7 @@ export class OpenAISpeechExecution implements ExecutionProvider {
         assertPersonalVoiceCurrent(this.#store, attempt.projectId, String(request.args.voice));
         const marker: SpeechExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping),
           transportDigest: mapping.transport.requestDigest, bodySha256: mapping.transport.bodySha256,
-          allowanceId: (admission.allowance?.id ?? null), createdAt: new Date().toISOString() };
+          createdAt: new Date().toISOString() };
         this.#store.insert("speech_execution_dispatch", attempt.id, attempt.projectId, marker); return true;
       });
     } catch (error) {

@@ -117,7 +117,7 @@ export function assertOutputReceiptIdentity(receipt: OutputReceipt, attempt: Pic
   const role = assertObservation(receipt);
   invariant(receipt.version === 1 && receipt.projectId === attempt.projectId && receipt.attemptId === attempt.id
     && receipt.requestDigest === digest(attempt.request) && role === executionSpoolRole(attempt.request.kind)
-    && canonical(receipt.execution) === canonical(attempt.request.execution ?? { adapter: "fake", version: "1" }),
+    && canonical(receipt.execution) === canonical(attempt.request.execution),
   "OUTPUT_RECEIPT_CONFLICT", "Stored output role or execution differs from its admitted request");
 }
 
@@ -171,7 +171,7 @@ export class ExecutionOutputStore {
         "OUTPUT_RECEIPT_CONFLICT", "Output does not match the admitted operation or accepted task");
       const { expectedRequestDigest, ...observation } = value;
       const body = { ...observation, version: 1 as const, projectId, requestDigest: expectedRequestDigest,
-        execution: attempt.request.execution ?? { adapter: "fake", version: "1" } };
+        execution: attempt.request.execution };
       small(body); const id = digest(body);
       const saved = this.store.get<OutputReceipt>("execution_output_receipt", id);
       if (saved) { invariant(canonical(saved) === canonical({ ...body, id }), "OUTPUT_RECEIPT_CONFLICT", "Receipt identity already has different content"); return saved; }
@@ -338,7 +338,7 @@ export class ExecutionOutputStore {
     const receipt = this.receipt(projectId, receiptId), attempt = this.attempt(projectId, attemptId, receipt.requestDigest);
     const role = executionSpoolRole(attempt.request.kind);
     invariant(role && receipt.attemptId === attemptId && receipt.kind === role.kind && receipt.port === role.port && receipt.mimeType === role.mimeType
-      && canonical(receipt.execution) === canonical(attempt.request.execution ?? { adapter: "fake", version: "1" })
+      && canonical(receipt.execution) === canonical(attempt.request.execution)
       && (!attempt.taskId || receipt.vendorTaskId === attempt.taskId), "OUTPUT_RECEIPT_CONFLICT", "Completion receipt does not match its admitted operation or accepted task");
     const spool = this.store.get<OutputSpool>("execution_output_spool", receiptId);
     invariant(spool && canonical(spool) === canonical(this.descriptor(receipt, spool.sha256, spool.byteLength)),

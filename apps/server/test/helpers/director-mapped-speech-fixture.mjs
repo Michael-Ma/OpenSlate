@@ -19,7 +19,7 @@ export async function directorMappedSpeechFixture(t, { admit = false } = {}) {
   const application = await f.service.review(project.id, scoped, { key: key(), proposalId: proposal.id, proposalDigest: digest(proposal) });
   const candidate = f.store.get('candidate', application.candidateId), binding = f.store.get('node_binding', candidate.nodeId);
   for (const hold of f.store.list('hold', project.id).filter(hold => hold.active)) f.engine.releaseHold(project.id, hold.id, hold.ownerId);
-  const attempt = admit ? (f.issue(application), f.admit(application)) : null;
+  const attempt = admit ? f.admit(application) : null;
   return { ...f, service: f.production, speech: f.service, session, scoped, proposal, application, binding, attempt,
     shotScopes: narrationSpeechShotScopes(f.store, project.id, candidate.id) };
 }

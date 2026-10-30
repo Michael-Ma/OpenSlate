@@ -13,7 +13,7 @@ import { directorTurnViews } from '../dist/application/director-turn-view.js';
 import { EnvironmentMediaCredentials } from '../dist/application/provider-credentials.js';
 import { Engine } from '../dist/execution/engine.js';
 import { GenerationOverviewReader } from '../dist/generation-overview.js';
-import { ConfiguredExternalAdmission } from '../dist/execution/durable-external-admission.js';
+import { ConfiguredExternalAdmission } from '../dist/execution/configured-external-admission.js';
 import { ExecutionOutputStore } from '../dist/execution/output-store.js';
 import { ExecutionIngestionRouter } from '../dist/execution/ingestion-router.js';
 import { OpenAITranscriptionExecution } from '../dist/execution/openai-transcription-execution.js';

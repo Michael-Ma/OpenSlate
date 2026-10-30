@@ -4,7 +4,7 @@ import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
 import { checkOutcome, computerView } from '../../src/next/model/settings-computer.ts';
 
 const en = (m) => translateMsg('en', m);
-const ready = { configurationValid: true, registered: true, mediaTools: { required: true, available: true }, credential: { required: true, present: true, backendUnavailable: false, apiValidated: false }, spendingPermissionRequired: false, enabledByHost: true, realExecutionEnabled: true };
+const ready = { configurationValid: true, registered: true, mediaTools: { required: true, available: true }, credential: { required: true, present: true, backendUnavailable: false, apiValidated: false }, enabledByHost: true, realExecutionEnabled: true };
 const demo = { ...ready, mediaTools: { required: false, available: true }, credential: { required: false, present: null, backendUnavailable: false, apiValidated: false }, enabledByHost: false, realExecutionEnabled: false };
 const option = (id, kind, adapter, readiness = ready) => ({ id, label: id, profile: { id, kind, adapter, unitCostMicros: '1' }, estimatedCost: { currency: 'USD', unitMicros: '1', basis: adapter === 'fake' ? 'fixture' : 'host_configured', actualVendorPriceVerified: false }, readiness });
 const setup = (patch = {}) => ({ selection: { mode: 'native', binaryPath: '/usr/local/bin/codex', model: 'gpt-6-astra' }, selectionDigest: 'd'.repeat(64), busy: false, changeAvailable: true, changeAppliesTo: 'next_turn', defaults: { binaryPath: '/usr/local/bin/codex', model: 'gpt-6-astra' }, locked: true, modelCalls: 0, modelChoices: [], modelCatalogStatus: 'ready', modelCatalogCheckedAt: null, ...patch });

@@ -18,7 +18,6 @@ function fixture(t, { sharedScene = false } = {}) {
     provider = new FakeProvider(join(directory, "provider.sqlite")),
     engine = new Engine(store, provider, {
       artifactDir: join(directory, "artifacts"),
-      budgetMicros: "0",
     }),
     service = new ProductionService(store, engine);
   let project = service.createProject("Scene approval fixture");

@@ -17,7 +17,6 @@ export function fixture(t, { sharedScene = false, profiles = DEFAULT_PROFILES } 
     provider = new FakeProvider(join(directory, "provider.sqlite")),
     engine = new Engine(store, provider, {
       artifactDir: join(directory, "artifacts"),
-      budgetMicros: "0",
       profiles,
     }),
     service = new ProductionService(store, engine, profiles);

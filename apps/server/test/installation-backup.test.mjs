@@ -61,7 +61,7 @@ test("offline export snapshots committed WAL in both databases and preserves pri
   f.store.db.pragma("wal_autocheckpoint=0"); f.fake.db.pragma("wal_autocheckpoint=0");
   f.store.db.prepare("INSERT INTO entities VALUES(?,?,?,?,?)").run("historic", "receipt", f.project.id, '{ "value" : "exact bytes", "locator":"https://private.invalid/result?signed=synthetic" }', 1);
   f.store.appendEvent(f.project.id, "saved", {}); f.store.command("human", "old", "digest", () => ({ saved: true }));
-  await f.fake.submit({ attemptId: "synthetic", nodeId: "node", kind: "image", fingerprint: "a".repeat(64) });
+  await f.fake.submit({ attemptId: "synthetic", nodeId: "node", kind: "image", fingerprint: "a".repeat(64), args: {}, inputs: [], execution: { adapter: "fake", version: "1" } });
   assert.ok(existsSync(join(f.source, "openslate.sqlite-wal"))); assert.ok(existsSync(join(f.source, "fake-provider.sqlite-wal")));
   const rows = savedRows(f.store.db), mainHash = sha(readFileSync(join(f.source, "openslate.sqlite")));
   const result = await f.backup(); assert.equal(result.manifest.applicationSchemaVersion, CURRENT_SCHEMA_VERSION);
@@ -99,7 +99,7 @@ test("published render/source completions survive without SQL publication and te
 });
 
 test("filesystem-only winning spool keeps original storage identity, locator and unknown liability", async t => {
-  const f = fixture(t), request = { kind: "video", attemptId: "attempt", nodeId: "node" }, bytes = Buffer.from("synthetic raw MP4 storage fixture");
+  const f = fixture(t), request = { kind: "video", attemptId: "attempt", nodeId: "node", execution: { adapter: "fake", version: "1" } }, bytes = Buffer.from("synthetic raw MP4 storage fixture");
   f.store.insert("attempt", "attempt", f.project.id, { candidateId: null, workKey: "fixture", ordinal: 1, request, phase: "submission_unknown", taskId: null });
   f.store.insert("reservation", "reserved", f.project.id, { attemptId: "attempt", micros: "100000", state: "reserved" });
   const output = new ExecutionOutputStore(f.store, { rootDir: join(f.source, "execution-output") });
@@ -268,7 +268,7 @@ test("fixture inspection is read-only, rejects unsupported versions and preserve
 
 test("generated-video derivation retains distinct exact raw and normalized identities before SQL completion", async t => {
   const f = fixture(t), id = videoDerivationId(f.project.id, "attempt"), media = mediaFixture(f, { artifactId: videoArtifactId(id) });
-  const request = { kind: "video", attemptId: "attempt", nodeId: "node", args: { durationFrames: 30 } };
+  const request = { kind: "video", attemptId: "attempt", nodeId: "node", args: { durationFrames: 30 }, execution: { adapter: "fake", version: "1" } };
   f.store.insert("attempt", "attempt", f.project.id, { candidateId: null, workKey: "fixture", ordinal: 1, request, taskId: null });
   const output = new ExecutionOutputStore(f.store, { rootDir: join(f.source, "execution-output") });
   const bytes = readFileSync(join(f.source, `media/blobs/${media.source.originalSha256}.source`));

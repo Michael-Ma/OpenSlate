@@ -22,7 +22,7 @@ Ensure inherited real-generation switches are off; use [the private config templ
 5. Edit the words, voice or range. Check old acceptance/speech proposal does not remain current and the other shot is preserved.
 6. Continue that edit in chat using saved scope/state. The director can update writing/plan; media routes remain disabled.
 
-If rehearsing generated speech, prepare/review its exact proposal and inspect model/voice/usage information, then stop before paid generation. For a real result follow [live testing](MANUAL-LIVE-PRODUCTION.md) with a current finite allowance.
+If rehearsing generated speech, prepare/review its exact proposal and inspect model/voice/usage information, then stop before paid generation. For a real result follow [live testing](MANUAL-LIVE-PRODUCTION.md) within an explicitly authorized live-test scope.
 
 ## Transcription and music
 

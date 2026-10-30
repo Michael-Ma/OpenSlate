@@ -50,8 +50,7 @@ export class CodexImageExecution implements ExecutionProvider {
       const native=saved?.native??await this.#transport.prepare(structuredClone(prepared),signal?{signal}:{});acquired=structuredClone(native);stopped(signal);
       const refs=resolveCodexImageReferences(this.#store,attempt),value:CodexImageExecutionMapping={...identity(attempt),profileDigest:request.profile!.digest,
         profileDefinition:admission.profile,profileDefinitionDigest:digest(admission.profile),capabilityLockId:admission.capabilityLock.id,
-        capabilityLockDigest:digest(admission.capabilityLock),allowanceId:(admission.allowance?.id ?? null),allowanceDigest:(admission.allowance ? digest(admission.allowance) : null),
-        consumptionDigest:(admission.consumption ? digest(admission.consumption) : null),estimatedMicros:'0',transport:describeCodexImageInput(prepared),native:structuredClone(native),
+        capabilityLockDigest:digest(admission.capabilityLock),estimatedMicros:'0',transport:describeCodexImageInput(prepared),native:structuredClone(native),
         references:refs.map(ref=>({artifactId:ref.id,artifactDigest:digest(ref)}))};
       mapping=this.#store.transaction(()=>{
         stopped(signal);assertCodexImageFirstDispatch(this.#store,admission,lease);

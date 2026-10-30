@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { Engine } from "../dist/execution/engine.js";
 import { LocalMediaService } from "../dist/media/local-media.js";
 import { SpoolAudioIngestor } from "../dist/execution/spool-audio-ingester.js";
-import { DurableExternalAdmission } from "../dist/execution/durable-external-admission.js";
+import { ConfiguredExternalAdmission } from "../dist/execution/configured-external-admission.js";
 import { resolveGeneratedNarrationAudio } from "../dist/narration/generated-audio.js";
 import { inspectPcmWave } from "../dist/media/pcm-wave.js";
 
@@ -37,7 +37,7 @@ test("fresh human review can approve an older director proposal without borrowin
   const applied = await f.service.review(f.project.id, human, { key: key(), proposalId: proposal.id, proposalDigest: digest(proposal) });
   const chain = resolveNarrationSpeechApplication(f.store, f.project.id, applied.candidateId);
   assert.equal(chain.review.requestId, human.requestId); assert.notEqual(chain.review.requestId, chain.proposal.requestId);
-  assert.equal(f.store.get("grant", applied.grantId).authorityId, human.requestId); assert.equal(rows(f, "external_allowance").length, 0);
+  assert.equal(f.store.get("grant", applied.grantId).authorityId, human.requestId); assert.equal(rows(f, "attempt").length, 0); assert.equal(rows(f, "reservation").length, 0);
 });
 
 test("proposal and application history validates after section edits and later request replacement", async t => {
@@ -81,11 +81,12 @@ test("ordinary full-plan reinstallation retains the exact reviewed speech node a
   assert.equal(f.store.get("node_binding", f.node.id).candidateId, f.applied.candidateId); resolveNarrationSpeechApplication(f.store, f.project.id, f.applied.candidateId);
 });
 
-test("review plus separate finite allowance produces immutable attempt metadata outside provider args", async t => {
-  const f = await reviewed(t), allowance = f.issue(f.applied), attempt = f.admit(f.applied), application = f.store.get("narration_speech_application", f.applied.applicationId);
+test("review plus configured admission produces immutable attempt metadata outside provider args", async t => {
+  const f = await reviewed(t), attempt = f.admit(f.applied), application = f.store.get("narration_speech_application", f.applied.applicationId);
   assert.deepEqual(attempt.narrationSpeech, { version: 1, application: { id: application.id, digest: digest(application) } });
   assert.deepEqual(attempt.request.args, f.node.args); assert.equal(Object.hasOwn(attempt.request, "narrationSpeech"), false); assert.deepEqual(attempt.request.inputs, []);
-  assert.equal(attempt.request.externalAllowanceId, allowance.id); assert.equal(rows(f, "external_allowance_consumption").length, 1);
+  assert.equal(attempt.request.providerUse.profileDefinitionDigest, digest(f.profile));
+  assert.equal(f.store.get("reservation", attempt.reservationId).attemptId, attempt.id);
   const before = data(f);
   for (const mutate of [a => { delete a.narrationSpeech; }, a => { a.narrationSpeech.application.digest = "a".repeat(64); }, a => { a.request.args.text = "Unreviewed words"; }, a => { a.fingerprint = a.request.fingerprint = "b".repeat(64); }]) {
     const a = structuredClone(attempt); mutate(a); assert.throws(() => assertNarrationSpeechAttemptInput(f.store, a)); assert.throws(() => f.store.put("attempt", a.id, f.project.id, a));
@@ -93,17 +94,18 @@ test("review plus separate finite allowance produces immutable attempt metadata 
   assert.deepEqual(data(f), before); assert.equal(f.calls.http, 0);
 });
 
-test("selected section changes block normal admission before consumption while unrelated section edits stay eligible", async t => {
-  const f = await reviewed(t); const allowance = f.issue(f.applied); edit(f, 1); const attempt = f.admit(f.applied); assert.equal(attempt.ordinal, 1);
-  const g = await reviewed(t); const second = g.issue(g.applied); edit(g);
-  const before = bodies(g, ["attempt", "reservation", "external_allowance_consumption", "external_allowance"]), outcome = await g.engine.runReady();
+test("selected section changes block normal admission before any attempt while unrelated section edits stay eligible", async t => {
+  const f = await reviewed(t); edit(f, 1); const attempt = f.admit(f.applied); assert.equal(attempt.ordinal, 1);
+  const g = await reviewed(t); edit(g);
+  const before = bodies(g, ["attempt", "reservation"]), outcome = await g.engine.runReady();
   assert.equal(outcome.dispatched, 0); assert.ok(outcome.blocked.some(item => item.code === "NARRATION_SPEECH_STALE"));
-  assert.equal(bodies(g, ["attempt", "reservation", "external_allowance_consumption", "external_allowance"]), before);
-  assert.equal(g.store.get("external_allowance", second.id).id, second.id); assert.equal(f.store.get("external_allowance", allowance.id).id, allowance.id);
+  assert.equal(bodies(g, ["attempt", "reservation"]), before);
+  assert.equal(rows(g, "attempt").length, 0); assert.equal(rows(g, "reservation").length, 0);
+  assert.equal(f.store.get("reservation", attempt.reservationId).attemptId, attempt.id);
 });
 
 for (const change of ["section", "pause", "hold", "lease"]) test(`first marker rechecks ${change} after credentials without dispatch or fabricated terminal evidence`, async t => {
-  let checkpoint; const f = await reviewed(t, { credential: () => { checkpoint(); return "offline-only"; } }); f.issue(f.applied); const attempt = f.admit(f.applied);
+  let checkpoint; const f = await reviewed(t, { credential: () => { checkpoint(); return "offline-only"; } }); const attempt = f.admit(f.applied);
   checkpoint = () => {
     if (change === "section") edit(f);
     if (change === "pause") f.engine.setPaused(f.project.id, true, f.human.requestId);
@@ -115,14 +117,14 @@ for (const change of ["section", "pause", "hold", "lease"]) test(`first marker r
 });
 
 test("original cancellation during credentials makes no POST and retains only a definite local cancellation", async t => {
-  const controller = new AbortController(); const f = await reviewed(t, { credential: () => { controller.abort(); return "offline-only"; } }); f.issue(f.applied); const attempt = f.admit(f.applied);
+  const controller = new AbortController(); const f = await reviewed(t, { credential: () => { controller.abort(); return "offline-only"; } }); const attempt = f.admit(f.applied);
   const result = await f.bridge.submit(attempt.request, { ...context(attempt), signal: controller.signal });
   assert.equal(result.type, "rejected"); assert.equal(f.calls.http, 0); assert.equal(rows(f, "speech_execution_dispatch").length, 0);
   assert.equal(rows(f, "speech_execution_result")[0].observation.code, "LOCAL_CANCELLED");
 });
 
 test("completed speech reopens after selected-section edits with no current authority, key or repeat POST", async t => {
-  const f = await reviewed(t); f.issue(f.applied); const attempt = f.admit(f.applied), result = await f.bridge.submit(attempt.request, context(attempt));
+  const f = await reviewed(t); const attempt = f.admit(f.applied), result = await f.bridge.submit(attempt.request, context(attempt));
   assert.equal(result.type, "completed"); assert.equal(f.calls.http, 1); edit(f); const savedNarration = bodies(f, ["narration_state", "narration_segment", "narration_audio", "narration_acceptance"]);
   const g = reopen(f), replay = await g.bridge.lookup(attempt.id, attempt.request);
   assert.deepEqual(replay, result); assert.deepEqual(g.store.get("attempt", attempt.id).narrationSpeech, attempt.narrationSpeech);
@@ -131,21 +133,21 @@ test("completed speech reopens after selected-section edits with no current auth
 });
 
 test("ambiguous post-marker failure never resubmits even after section edit and reopen", async t => {
-  const f = await reviewed(t, { fetch: async () => { throw Error("connection lost after dispatch"); } }); f.issue(f.applied); const attempt = f.admit(f.applied);
+  const f = await reviewed(t, { fetch: async () => { throw Error("connection lost after dispatch"); } }); const attempt = f.admit(f.applied);
   const first = await f.bridge.submit(attempt.request, context(attempt)); assert.equal(first.type, "unknown"); assert.equal(f.calls.http, 1); edit(f);
   const g = reopen(f); assert.equal((await g.bridge.lookup(attempt.id, attempt.request)).type, "unknown");
   assert.equal((await g.bridge.submit(attempt.request, context(attempt))).type, "unknown"); assert.equal(f.calls.http, 1);
 });
 
 test("actual Engine normalization preserves section-purpose proof through filesystem completion failure and tool-free reopen", async t => {
-  const f = await reviewed(t); f.issue(f.applied);
+  const f = await reviewed(t);
   const paths = { ffmpegPath: process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync("/opt/homebrew/bin/ffmpeg") ? "/opt/homebrew/bin/ffmpeg" : "/usr/bin/ffmpeg"),
     ffprobePath: process.env.OPENSLATE_FFPROBE_PATH ?? (existsSync("/opt/homebrew/bin/ffprobe") ? "/opt/homebrew/bin/ffprobe" : "/usr/bin/ffprobe") };
   const media = new LocalMediaService({ rootDir: join(f.root, "media"), allowedInputRoots: [f.outputs.rootDir], ...paths });
   let conversions = 0; const convert = media.importMedia.bind(media); media.importMedia = async (...args) => { conversions++; return convert(...args); };
   const engine = new Engine(f.store, f.bridge, { artifactDir: f.artifactDir, profiles: f.profiles, outputStore: f.outputs,
     outputIngestor: new SpoolAudioIngestor(f.outputs, media, { rootDir: join(f.root, "audio-derivations") }),
-    externalAdmission: new DurableExternalAdmission(f.store, () => {}) });
+    externalAdmission: new ConfiguredExternalAdmission(f.store, () => {}) });
   const insert = f.store.insert.bind(f.store); let failures = 0;
   f.store.insert = (...args) => { if (args[0] === "audio_derivation_receipt") { failures++; throw Error("INJECTED_SPEECH_DERIVATION_SQL_FAILURE"); } return insert(...args); };
   const run = await engine.runReady().then(value => ({ value }), error => ({ error }));
@@ -164,7 +166,7 @@ test("actual Engine normalization preserves section-purpose proof through filesy
   assert.equal((await recovered.reconcile()).reconciled, 1);
   const done = g.store.get("attempt", attempt.id), artifact = g.store.get("artifact", done.outputs.audio.artifactId);
   assert.equal(done.phase, "succeeded"); assert.deepEqual(done.narrationSpeech, identity); assert.equal(g.store.get("reservation", done.reservationId).state, "charged");
-  assert.equal(g.store.list("external_allowance_consumption", f.project.id).length, 1); assert.equal(artifact.origin, "generated_audio");
+  assert.equal(g.store.list("attempt", f.project.id).length, 1); assert.deepEqual(done.request.providerUse, attempt.request.providerUse); assert.equal(artifact.origin, "generated_audio");
   const { pcm } = await inspectPcmWave(artifact.path, 1024 * 1024, new AbortController().signal);
   assert.equal(pcm.sampleRate, 48000); assert.equal(pcm.channels, 2); assert.equal(pcm.sampleCount, 48000);
   const generated = resolveGeneratedNarrationAudio(g.store, f.project.id, artifact.id); assert.equal(generated.attempt.id, done.id);

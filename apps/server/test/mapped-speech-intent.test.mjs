@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { Engine } from '../dist/execution/engine.js';
 import { LocalMediaService } from '../dist/media/local-media.js';
 import { SpoolAudioIngestor } from '../dist/execution/spool-audio-ingester.js';
-import { DurableExternalAdmission } from '../dist/execution/durable-external-admission.js';
+import { ConfiguredExternalAdmission } from '../dist/execution/configured-external-admission.js';
 import { response } from './speech-execution-fixture.mjs';
 
 async function mapped(t, options = {}) {
@@ -24,7 +24,7 @@ async function mapped(t, options = {}) {
   const segmentId = f.view().segments[0].entry.segmentId, shotId = f.project.shots[0].id;
   f.store.put('narration_shot_draft', digest({ projectId: f.project.id, shotId }), f.project.id, { projectId: f.project.id, shotId, segmentId, intentDigest: digest(f.project.shots[0].narration) });
   f.edit = (field, value, id = shotId) => editStoryboard(f.production, f.project.id, { expectedHeadVersion: f.store.getProject(f.project.id).headVersion, kind: 'narration', id, field, value }, key());
-  f.prepareAndReview = async () => { f.proposal = await f.prepare(); f.applied = await f.review(f.proposal); f.issue(f.applied); };
+  f.prepareAndReview = async () => { f.proposal = await f.prepare(); f.applied = await f.review(f.proposal); };
   return f;
 }
 const context = attempt => ({ expectedLease: { owner: attempt.leaseOwner, epoch: attempt.leaseEpoch } });
@@ -80,7 +80,7 @@ test('a late actual normalized speech result stays historical after the shot swi
     ffprobePath: process.env.OPENSLATE_FFPROBE_PATH ?? (existsSync('/opt/homebrew/bin/ffprobe') ? '/opt/homebrew/bin/ffprobe' : '/usr/bin/ffprobe') });
   const engine = new Engine(f.store, f.bridge, { artifactDir: f.artifactDir, profiles: f.profiles, outputStore: f.outputs,
     outputIngestor: new SpoolAudioIngestor(f.outputs, media, { rootDir: join(f.root, 'audio-derivations') }),
-    externalAdmission: new DurableExternalAdmission(f.store, () => {}) });
+    externalAdmission: new ConfiguredExternalAdmission(f.store, () => {}) });
   const running = engine.runReady(); await entered.promise; f.edit('voice', 'personal'); release.resolve(); await running;
   const attempt = f.store.list('attempt', f.project.id)[0]; assert.equal(attempt.phase, 'succeeded');
   assert.equal(f.store.list('artifact', f.project.id).length, 1); assert.equal(f.store.list('audio_derivation_receipt', f.project.id).length, 1);

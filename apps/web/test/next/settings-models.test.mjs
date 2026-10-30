@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
 import { activeSection, blockedBy, estimateMsg, impactOf, modelRows, previewCurrent, previewRequest, previewUsable, readiness, sharedRequest, shotList, applyRequest, choiceFor } from '../../src/next/model/settings.ts';
 
-const ready = { configurationValid: true, registered: true, mediaTools: { required: true, available: true }, credential: { required: true, present: true, backendUnavailable: false, apiValidated: false }, spendingPermissionRequired: false, enabledByHost: true, realExecutionEnabled: true };
+const ready = { configurationValid: true, registered: true, mediaTools: { required: true, available: true }, credential: { required: true, present: true, backendUnavailable: false, apiValidated: false }, enabledByHost: true, realExecutionEnabled: true };
 const option = (id, label, kind, adapter, micros, extra = {}) => ({
   id, label, profile: { id, kind, adapter, unitCostMicros: micros },
   estimatedCost: { currency: 'USD', unitMicros: micros, basis: adapter === 'fake' ? 'fixture' : 'host_configured', actualVendorPriceVerified: false },
@@ -92,7 +92,7 @@ const preview = (patch = {}) => ({
   selected: { ...status.selected, video: 'fake-video-v1' }, scope: { kind: 'unfinished' },
   changes: ['shot-2-1', 'shot-2-2', 'shot-2-3', 'shot-3-1', 'shot-3-2'].map((shotId) => ({ nodeId: `v-${shotId}`, alias: shotId, kind: 'video', shotId, fromProfileId: 'minimax', toProfileId: 'fake-video-v1' })),
   preserved: ['shot-1-1', 'shot-1-2', 'shot-1-3'].map((shotId) => ({ nodeId: `v-${shotId}`, alias: shotId, kind: 'video', shotId, reason: 'completed' })),
-  counts: { changed: 5, preserved: 3 }, generationApprovalRequired: true, allowanceRequired: false, ...patch,
+  counts: { changed: 5, preserved: 3 }, generationApprovalRequired: true, ...patch,
 });
 const labels = { 'shot-1-1': '1.1', 'shot-1-2': '1.2', 'shot-1-3': '1.3', 'shot-2-1': '2.1', 'shot-2-2': '2.2', 'shot-2-3': '2.3', 'shot-3-1': '3.1', 'shot-3-2': '3.2' };
 

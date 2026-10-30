@@ -9,13 +9,13 @@ import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync } from 'node:f
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compilePlan, digest, providerProfileArguments } from '@openslate/core';
+import { compilePlan, digest, RECIPE_DIGEST } from '@openslate/core';
 import { FakeProvider } from '@openslate/providers';
 import { Store } from '../dist/persistence/store.js';
 import { Engine } from '../dist/execution/engine.js';
 import { ViggleH3Execution } from '../dist/execution/viggle-h3-execution.js';
 import { ExecutionOutputStore } from '../dist/execution/output-store.js';
-import { DurableExternalAdmission } from '../dist/execution/durable-external-admission.js';
+import { ConfiguredExternalAdmission } from '../dist/execution/configured-external-admission.js';
 import { ProtectedVideoDownloader } from '../dist/execution/video-download.js';
 import { SpoolVideoIngestor } from '../dist/execution/spool-video-ingester.js';
 import { LocalMediaService } from '../dist/media/local-media.js';
@@ -23,7 +23,6 @@ import { LocalImageStore } from '../dist/media/local-images.js';
 import { ImageApplicationService } from '../dist/media/image-application.js';
 import { ProductionService } from '../dist/application/service.js';
 import { EnvironmentMediaCredentials } from '../dist/application/provider-credentials.js';
-import { ExternalAllowanceService, allowanceIssueContextDigest } from '../dist/application/external-allowances.js';
 import { projectFixture, refreshIntent } from './execution-fixture.mjs';
 
 export const key = 'offline-viggle-h3-fixture-key', taskId = 'vid_offline_h3';
@@ -63,8 +62,8 @@ async function videoBytes(seconds) {
   return Buffer.from(await videos.get(seconds));
 }
 
-/** Actual owned PNG import, human frame review, finite allowance and durable admission.
- * The legacy-compatible project has no narrated-production lock; HTTP/download bytes and estimates are synthetic.
+/** Actual owned PNG import, human frame review and configured admission.
+ * The current recipe lock includes an explicit no-narration decision; HTTP/download bytes and estimates are synthetic.
  * `ingest:true` enables the real video normalizer. No provider keys or live calls are read.
  */
 export async function fixture(t, options = {}) {
@@ -99,11 +98,11 @@ export async function fixture(t, options = {}) {
   const ingester = media ? new SpoolVideoIngestor(outputs, media, { rootDir: join(directory, 'video-derivations') }) : undefined;
   const profiles = [profile, ...(options.additionalProfiles ?? [])];
   const engineOptions = { artifactDir: artifactRoot, profiles, outputStore: outputs,
-    ...(ingester ? { outputIngestor: ingester } : {}), externalAdmission: new DurableExternalAdmission(store, () => {}) };
-  const engine = new Engine(store, bridge, engineOptions), production = new ProductionService(store, engine, profiles), allowances = new ExternalAllowanceService(store);
+    ...(ingester ? { outputIngestor: ingester } : {}), externalAdmission: new ConfiguredExternalAdmission(store, () => {}) };
+  const engine = new Engine(store, bridge, engineOptions), production = new ProductionService(store, engine, profiles);
   let project = projectFixture(randomUUID(), 1); project.name = 'Offline Viggle bridge'; project.shots[0].desiredFrames = seconds * 30; refreshIntent(project.shots[0]);
   if (options.filmKind !== undefined) project.filmKind = options.filmKind;
-  store.createProject(project); store.insert('capability_lock', project.capabilityLockId, project.id, { profiles });
+  store.createProject(project); store.insert('capability_lock', project.capabilityLockId, project.id, { profiles, recipeDigest: RECIPE_DIGEST });
   store.insert('project_revision', project.revisionId, project.id, { project });
   const human = production.beginRequest(project.id, 'offline-human', 'Import and approve this exact synthetic first frame', { scopeIds: [project.id], editing: true });
   const images = new LocalImageStore({ rootDir: join(artifactRoot, 'images'), ffmpegPath: tool('ffmpeg'), ffprobePath: tool('ffprobe') });
@@ -117,14 +116,9 @@ export async function fixture(t, options = {}) {
   store.transaction(() => { engine.installPlan(project.id, planId, plan, { [node.id]: grant.id }); project = store.saveProject({ ...project, activePlanId: planId }, project.headVersion); });
   const review = engine.reviewSnapshot(project.id), approval = production.approve(project.id, human, review.id, [node.id])[0];
   for (const hold of store.list('hold', project.id)) if (hold.active && hold.ownerId === human.requestId) engine.releaseHold(project.id, hold.id, human.requestId);
-  const binding = store.get('node_binding', node.id), allowanceInput = { profileDigest: String(providerProfileArguments(profile).profileDigest), profileDefinitionDigest: digest(profile),
-    selections: [{ candidateId: binding.candidateId, nodeId: node.id, specDigest: node.specDigest }], maxAttempts: 1, maxEstimatedMicros: profile.unitCostMicros,
-    expiresAt: new Date(Date.now() + 3600000).toISOString() };
-  const spender = production.beginRequest(project.id, 'offline-human', 'Approve this exact synthetic video estimate', { editing: false, scopeIds: [project.id], contextDigest: allowanceIssueContextDigest(project.id, allowanceInput) });
-  const allowance = allowances.issue(project.id, spender, allowanceInput);
   const f = { parent, root: directory, directory, path, providerPath, store, stores, project, artifactRoot, reference, image, imagePath, png, video,
-    profile, outputs, clock, calls, credentials, fetch, downloader, bridgeOptions, bridge, engineOptions, engine, production, allowances, allowance,
-    media, ingester, node, plan, grant, review, approval, human, spender, seconds, attempt: undefined, request: undefined };
+    profile, outputs, clock, calls, credentials, fetch, downloader, bridgeOptions, bridge, engineOptions, engine, production,
+    media, ingester, node, plan, grant, review, approval, human, seconds, attempt: undefined, request: undefined };
   f.admit = () => { f.attempt = engine.admit(project.id, node.id, engine.resolveInputs(project.id, node).fingerprint); f.request = f.attempt.request; return f.attempt; };
   if (!options.deferAdmission) f.admit();
   return f;

@@ -1,4 +1,4 @@
-import { canonical, effectiveNodeDigest, invariant, shotIntentDigest, shotVideoTiming } from '@openslate/core';
+import { RECIPE_DIGEST, canonical, effectiveNodeDigest, invariant, shotIntentDigest, shotVideoTiming } from '@openslate/core';
 import type { ArtifactRef } from '@openslate/core';
 import type { Store } from '../persistence/store.js';
 import type { Attempt, NodeBinding, PlanRecord } from './engine.js';
@@ -23,8 +23,9 @@ export function assertCurrentGeneratedSelection(store: Pick<Store, 'get' | 'getP
     if (node.kind === 'video') {
       fail(typeof node.args.durationFrames === 'number' && node.args.durationFrames >= shot.desiredFrames
         && (!cue || shotVideoTiming(project, shot).ready), 'Shot timing changed before first dispatch');
-      const lock = store.get<{ recipeDigest?: string }>('capability_lock', project.capabilityLockId);
-      fail(!lock?.recipeDigest || shotVideoTiming(project, shot).ready, 'The current narration decision or accepted recording changed');
+      const lock = store.get<{ recipeDigest: string }>('capability_lock', project.capabilityLockId);
+      fail(!lock || lock.recipeDigest === RECIPE_DIGEST, 'The current workflow lock is unsupported');
+      fail(shotVideoTiming(project, shot).ready, 'The current narration decision or accepted recording changed');
       fail(node.requires.length > 0 && node.requires.every(id => plan!.compiled.gates.some(gate => gate.id === id
         && gate.members.some(member => member.videoNodeId === node.id && member.recipeDigest === node.specDigest))), 'The current video lost its exact review contract');
       fail(store.db.prepare("SELECT id FROM entities WHERE kind='approval' AND project_id=? AND json_extract(body,'$.videoNodeId')=? AND json_extract(body,'$.approvalDigest')=? LIMIT 1")

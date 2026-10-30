@@ -21,12 +21,10 @@ test("registry pins adapter contracts separately from profile revisions and reje
   assert.throws(() => assertExecutionRequest(video, request(p)), { code: "PROVIDER_NOT_REGISTERED" });
 });
 
-test("frozen request profiles bind exact configuration and preserve absent legacy fields", () => {
+test("frozen request profiles bind exact configuration", () => {
   const fake = registerExecutionProvider(provider(), { adapter: "fake", version: "1" });
   const image = registerExecutionProvider(provider(), { adapter: "openai-image", version: "1" });
   const registry = new ExecutionRegistry([fake, image]);
-  const old = { attemptId: "old", nodeId: "node", kind: "image", fingerprint: "old", args: { adapter: "fake" }, inputs: [] }, before = canonical(old);
-  assert.equal(registry.forRequest(old), fake); assert.equal(canonical(old), before); assert.equal(Object.hasOwn(old, "execution"), false);
   const saved = request(profile()); assert.equal(registry.forRequest(saved), image);
   for (const changed of [
     { ...saved, profile: { ...saved.profile, digest: "b".repeat(64) } },
@@ -34,6 +32,16 @@ test("frozen request profiles bind exact configuration and preserve absent legac
     { ...saved, args: { ...saved.args, profileConfiguration: { model: "different" } } },
     { ...saved, profile: undefined },
   ]) assert.throws(() => registry.forRequest(changed), { code: "PROFILE_INCOMPATIBLE" });
+});
+
+test("requests require an explicit identity while demo requests need no profile snapshot", () => {
+  const fake = registerExecutionProvider(provider(), { adapter: "fake", version: "1" });
+  const registry = new ExecutionRegistry([fake]);
+  const demo = { attemptId: "demo", nodeId: "node", kind: "image", fingerprint: "demo", args: { adapter: "fake" }, inputs: [],
+    execution: { adapter: "fake", version: "1" } }, before = canonical(demo);
+  assert.equal(registry.forRequest(demo), fake); assert.equal(canonical(demo), before);
+  for (const execution of [undefined, null, {}, { adapter: "fake" }, { adapter: "fake", version: "1", extra: true }])
+    assert.throws(() => registry.forRequest({ ...demo, execution }), { code: "PROVIDER_NOT_REGISTERED" });
 });
 
 test("profile configuration is bounded plain model data and excludes known credential and host fields", () => {

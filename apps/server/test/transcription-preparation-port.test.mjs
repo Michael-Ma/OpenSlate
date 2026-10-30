@@ -39,7 +39,7 @@ test("proof pins admission and source without IO and stays independent of mutabl
 
 test("proof rejects forged source/approval fields and accessors without invoking them", async t => {
   const f = await transcriptionFixture(t), proof = createTranscriptionPreparationIntent(f.store, f.attempt);
-  for (const edit of [v => { v.sourceEndSample--; }, v => { v.consumptionDigest = "f".repeat(64); },
+  for (const edit of [v => { v.sourceEndSample--; }, v => { v.profileDefinitionDigest = "f".repeat(64); },
     v => { v.reservation.micros = "101"; }, v => { v.candidateDigest = "f".repeat(64); }, v => { v.extra = true; }]) {
     const changed = structuredClone(proof); edit(changed);
     assert.throws(() => assertTranscriptionPreparationIntent(f.store, f.attempt, changed), { code: "SUBMISSION_PREPARATION_INVALID" });
@@ -69,7 +69,7 @@ for (const reason of ["paused", "held"]) test(`initial ${reason} installs proof 
   assert.deepEqual(outcome, { type: "preparation_deferred", intentId: proof.id, intentDigest: digest(proof), reason });
   assert.equal(saved.phase, "preparing"); assert.deepEqual(saved.preparation, { intentId: proof.id, intentDigest: digest(proof), waitCount: 0, nextEligibleAt: 0 });
   assert.deepEqual(f.calls, before); assert.equal(result(f), undefined); noDispatch(f);
-  assert.equal(rows(f, "external_allowance_consumption").length, 1); assert.equal(f.store.get("reservation", saved.reservationId).state, "reserved");
+  assert.equal(rows(f, "reservation").length, 1); assert.equal(f.store.get("reservation", saved.reservationId).state, "reserved");
 });
 
 test("busy preparation is installed before first await; lookup/direct submit never resume it", async t => {
@@ -91,7 +91,7 @@ test("busy preparation is installed before first await; lookup/direct submit nev
   assert.deepEqual(f.calls, before);
   f.preparation.prepare = prepare;
   const completed = await f.bridge.resume(f.request, reclaim(f)); assert.equal(completed.type, "completed");
-  assert.equal(f.calls.http, 1); assert.equal(rows(f, "attempt").length, 1); assert.equal(rows(f, "external_allowance_consumption").length, 1);
+  assert.equal(f.calls.http, 1); assert.equal(rows(f, "attempt").length, 1); assert.equal(rows(f, "reservation").length, 1);
   assert.equal(current(f).phase, "submitting"); assert.equal(current(f).preparation.intentDigest, deferred.intentDigest);
   assert.equal(preparingEvents().length, 1);
 });
@@ -130,7 +130,7 @@ test("late pre-marker error cannot settle a replacement lease; reopened owner re
   const preparation = new TranscriptionAudioService(store, f.media, f.files);
   const bridge = new OpenAITranscriptionExecution({ store, outputStore: outputs, preparation, credentials: f.credentials, fetch: f.fetch });
   const completed = await bridge.resume(f.request, context(f)); assert.equal(completed.type, "completed");
-  assert.equal(f.calls.http, 1); assert.equal(rows(f, "external_allowance_consumption").length, 1);
+  assert.equal(f.calls.http, 1); assert.equal(rows(f, "reservation").length, 1);
 });
 
 test("eligibility after upload blocks obsolete work before credentials or marker", async t => {
@@ -184,7 +184,7 @@ test("missing owned source before proof retains a definite local rejection and t
   const outcome = await f.bridge.start(f.request, context(f)); assert.equal(outcome.type, "rejected");
   assert.deepEqual(result(f).observation, { kind: "not_dispatched", code: "LOCAL_INPUT_INVALID" });
   assert.equal(rows(f, "transcription_preparation_intent").length, 0); assert.equal(current(f).preparation, undefined);
-  assert.deepEqual(f.calls, before); noDispatch(f); assert.equal(rows(f, "external_allowance_consumption").length, 1);
+  assert.deepEqual(f.calls, before); noDispatch(f); assert.equal(rows(f, "reservation").length, 1);
   assert.equal((await f.bridge.start(f.request, context(f))).type, "rejected"); assert.deepEqual(f.calls, before);
 });
 

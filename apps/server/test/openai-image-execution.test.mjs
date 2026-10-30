@@ -1,3 +1,4 @@
+import { ConfiguredExternalAdmission } from "../dist/execution/configured-external-admission.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
@@ -5,7 +6,7 @@ import { deflateSync } from "node:zlib";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { compilePlan, digest } from "../../../packages/core/dist/index.js";
+import { RECIPE_DIGEST, compilePlan, digest } from "../../../packages/core/dist/index.js";
 import { OPENAI_IMAGE_MODEL } from "../../../packages/providers/dist/index.js";
 import { OpenAIImageExecution } from "../dist/execution/openai-image-execution.js";
 import { EnvironmentMediaCredentials } from "../dist/application/provider-credentials.js";
@@ -49,6 +50,7 @@ function fixture(t, options = {}) {
     configuration: { model: OPENAI_IMAGE_MODEL, settings: { width: 1024, height: 1024, quality: "medium", ...options.settings } },
     maxConcurrency: options.maxConcurrency ?? 2, unitCostMicros: "100", maxRetries: options.maxRetries ?? 0 };
   if (options.omitQuality) delete profile.configuration.settings.quality;
+  store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: [profile] });
   const outputs = new ExecutionOutputStore(store, { rootDir: join(directory, "outputs") });
   const calls = { http: 0, credentials: 0 }, readCredential = options.credential ?? (() => key);
   const credentials = new EnvironmentMediaCredentials(name => { calls.credentials++; assert.equal(name, "OPENSLATE_OPENAI_API_KEY"); return readCredential(); });
@@ -60,9 +62,7 @@ function fixture(t, options = {}) {
     ffprobePath: process.env.OPENSLATE_FFPROBE_PATH ?? (existsSync("/opt/homebrew/bin/ffprobe") ? "/opt/homebrew/bin/ffprobe" : "/usr/bin/ffprobe") }) : undefined;
   const engine = new Engine(store, bridge, { artifactDir: artifactRoot, profiles: [profile], outputStore: outputs,
     ...(images ? { outputIngestor: new SpoolImageIngestor(outputs, images) } : {}),
-    externalAdmission: { authorize: claim => {
-      const id = randomUUID(); store.insert("offline_test_allowance", id, claim.projectId, { attemptId: claim.attemptId, claimed: true }); return { allowanceId: id };
-    } } });
+    externalAdmission: new ConfiguredExternalAdmission(store, () => {}) });
   const shot = project.shots[0], q = JSON.stringify;
   const source = `definePlan({baseRevision:${q(project.revisionId)}},p=>{const shot=p.shot(${q(shot.id)});return p.image("frame",{intent:shot,profile:${q(profile.id)},prompt:${q(shot.imagePrompt)},references:[${references.map(ref => `p.asset(${q(ref.artifactId)})`).join(",")}]});});`;
   const plan = compilePlan(source, { project, profiles: [profile], logicalIds: {}, allocateId: randomUUID });
@@ -103,7 +103,7 @@ for(const action of ['Stop','edit'])test(`OpenAI image ${action} before POST rel
  if(action==='Stop')f.engine.setPaused(f.project.id,true,'stop-before-post');else f.engine.setHold(f.project.id,{scopeId:f.project.shots[0].id,ownerId:'edit-before-post'});
  barrier.release();await running;
  const attempt=f.engine.attempts(f.project.id)[0];assert.equal(attempt.phase,'failed');assert.equal(f.calls.http,0);assert.equal(f.store.list('image_execution_dispatch',f.project.id).length,0);
- assert.equal(f.store.list('image_execution_result',f.project.id)[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.budget(f.project.id).committedMicros,'0');
+ assert.equal(f.store.list('image_execution_result',f.project.id)[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.committedMicros(f.project.id),'0');
  await f.engine.reconcile();await f.engine.runReady();assert.equal(f.calls.http,0);assert.equal(f.engine.attempts(f.project.id).length,1);
 });
 function restoreImageFixture(f) {
@@ -225,10 +225,10 @@ test("missing use-time credential is a durable definite non-dispatch, even if co
   assert.equal(rows(f, "image_execution_result")[0].observation.code, "LOCAL_CREDENTIAL_UNAVAILABLE"); assert.deepEqual(f.calls, { http: 0, credentials: 1 });
 });
 
-test("changed profile/configuration or absent/mismatched allowance cannot borrow an admitted attempt", async t => {
+test("changed profile/configuration or absent/mismatched providerUse cannot borrow an admitted attempt", async t => {
   const f = fixture(t);
   for (const mutate of [r => { r.profile.configuration.settings.quality = "high"; }, r => { r.args.width = 1536; },
-    r => { r.externalAllowanceId = "different"; }, r => { delete r.externalAllowanceId; }]) {
+    r => { r.providerUse.profileDefinitionDigest = "f".repeat(64); }, r => { delete r.providerUse; }]) {
     const request = structuredClone(f.request); mutate(request); await assert.rejects(f.bridge.submit(request));
   }
   assert.deepEqual(f.calls, { http: 0, credentials: 0 }); assert.equal(rows(f, "image_execution_dispatch").length, 0);
@@ -377,7 +377,7 @@ test("real Engine admission, injected transport, spool and exact PNG decode prod
   const artifact = rows(f, "artifact")[0]; assert.equal(artifact.fixture, false); assert.equal(artifact.width, 1024); assert.equal(artifact.height, 1024);
   assert.equal(artifact.artifact.sha256, hash(bytes)); assert.deepEqual(readFileSync(artifact.path), bytes); assert.equal(artifact.validationDigest.length, 64);
   assert.equal(f.store.get("reservation", attempt.reservationId).state, "charged");
-  assert.equal(rows(f, "grant").length, 1); assert.equal(rows(f, "offline_test_allowance").length, 1); assert.equal(rows(f, "image_execution_dispatch").length, 1);
+  assert.equal(rows(f, "grant").length, 1); assert.equal(rows(f, "reservation").length, 1); assert.equal(rows(f, "image_execution_dispatch").length, 1);
   await f.engine.reconcile(); await f.engine.runReady(); assert.deepEqual(f.calls, { http: 1, credentials: 1 });
 });
 
@@ -400,6 +400,7 @@ function wakeImage(f) {
 }
 function competingImageAdmission(f) {
   const project = projectFixture(randomUUID(), 1); f.store.createProject(project);
+  f.store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: [f.profile] });
   const q = JSON.stringify, shot = project.shots[0];
   const source = `definePlan({baseRevision:${q(project.revisionId)}},p=>{const shot=p.shot(${q(shot.id)});return p.image("frame",{intent:shot,profile:${q(f.profile.id)},prompt:${q(shot.imagePrompt)},references:[]});});`;
   const plan = compilePlan(source, { project, profiles: [f.profile], logicalIds: {}, allocateId: randomUUID }), node = plan.nodes.find(value => value.kind === "image"), planId = randomUUID();
@@ -426,7 +427,7 @@ for (const receipt of ["unknown", "missing"]) test(`OpenAI image L1 ${receipt} P
   assert.deepEqual(await other.lookup(f.attempt.id), imageLostReply);
   wakeImage(f); await f.engine.reconcile();
   const final = currentImage(f); assert.equal(final.phase, "failed"); assert.equal(final.failure.id, "SUBMISSION_RESPONSE_LOST"); assert.equal(final.failure.retryAllowed, false);
-  assert.equal(f.store.get("reservation", final.reservationId).state, "charged"); assert.equal(f.engine.budget(f.project.id).committedMicros, "100");
+  assert.equal(f.store.get("reservation", final.reservationId).state, "charged"); assert.equal(f.engine.committedMicros(f.project.id), "100");
   for (let cycle = 0; cycle < 5; cycle++) { await f.engine.reconcile(); const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); }
   assert.equal(f.engine.attempts(f.project.id).length, 1); assert.equal(f.calls.http, 1);
   assert.equal(competing().phase, "submitting", "the failed attempt released its concurrency slot");
@@ -439,7 +440,7 @@ test("OpenAI image L1 fenced pre-dispatch recovery releases the reservation and 
   assert.equal(rows(f, "image_execution_result").length, 0);
   wakeImage(f); await f.engine.reconcile();
   const final = currentImage(f); assert.equal(final.phase, "failed"); assert.equal(final.failure.retryAllowed, false);
-  assert.equal(f.store.get("reservation", final.reservationId).state, "released"); assert.equal(f.engine.budget(f.project.id).committedMicros, "0");
+  assert.equal(f.store.get("reservation", final.reservationId).state, "released"); assert.equal(f.engine.committedMicros(f.project.id), "0");
   const proof = rows(f, "image_execution_result")[0]; assert.equal(proof.observation.kind, "not_dispatched");
   assert.equal((await f.bridge.submit(f.request, old)).type, "rejected");
   assert.equal(rows(f, "image_execution_dispatch").length, 0); assert.equal(f.calls.http, 0); assert.equal(f.calls.credentials, 0);

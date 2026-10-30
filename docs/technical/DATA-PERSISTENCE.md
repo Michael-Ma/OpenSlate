@@ -10,7 +10,7 @@ OpenSlate's local database owns production state. Conversation history and brows
 | Requests/epochs/holds | Human scope, ownership, continuations, pause/Stop and current director authority |
 | Prepared changes/plans | Exact proposal, source, compiled graph, read-set, bindings and reuse/replace impact |
 | Candidates/grants/attempts | Human generation origin, one-use consumption, dispatch identity, leases and uncertainty |
-| Reviews/allowances/reservations | Exact input approval, finite usage permission and retained liabilities |
+| Reviews/reservations/provider-use pins | Exact input approval, retained liabilities and immutable profile identity |
 | Artifacts/receipts | Owned content hashes, provenance, measurements, raw/normalized outputs and recovery |
 | Director/tool records | Runtime selection, locked instructions, turns, questions, output and idempotent tool receipts |
 | Events/commands | Monotonic per-project event cursors and replay-safe command results |

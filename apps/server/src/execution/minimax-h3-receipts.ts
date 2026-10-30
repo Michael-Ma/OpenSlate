@@ -1,4 +1,4 @@
-import { providerAdmissionRequest, externalAllowanceMatches } from "./provider-use.js";
+import { providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, invariant } from "@openslate/core";
 import { MINIMAX_H3_ADAPTER_VERSION, miniMaxH3MetadataDigest } from "@openslate/providers";
 import type { MiniMaxH3Description, MiniMaxH3Diagnostic, MiniMaxH3PollResult, MiniMaxH3SubmitResult } from "@openslate/providers";
@@ -7,9 +7,9 @@ import type { OutputReceipt } from "./output-store.js";
 
 interface Identity { id: string; version: 1; projectId: string; attemptId: string; requestDigest: string }
 export interface H3ExecutionMapping extends Identity {
-  profileDigest: string; externalAllowanceId: string | null; firstFrameArtifactId: string; transport: MiniMaxH3Description;
+  profileDigest: string; firstFrameArtifactId: string; transport: MiniMaxH3Description;
 }
-export interface H3ExecutionDispatch extends Identity { mappingDigest: string; bodySha256: string; externalAllowanceId: string | null; createdAt: number }
+export interface H3ExecutionDispatch extends Identity { mappingDigest: string; bodySha256: string; createdAt: number }
 export type H3SubmitObservation = MiniMaxH3SubmitResult | { kind: "not_dispatched"; code: "LOCAL_INPUT_INVALID" | "LOCAL_CREDENTIAL_UNAVAILABLE" | "LOCAL_CANCELLED" };
 export interface H3ExecutionSubmit extends Identity {
   mappingDigest: string | null; dispatchDigest: string | null; observedAt: number; observation: H3SubmitObservation;
@@ -39,7 +39,7 @@ function base(attempt: Attempt, value: Identity, extras: string[], observation =
     && Buffer.byteLength(canonical(value)) <= 16384, "H3_EXECUTION_CONFLICT", "H3 receipt differs from its exact admitted request");
 }
 export function assertH3ExecutionMapping(attempt: Attempt, mapping: H3ExecutionMapping): void {
-  base(attempt, mapping, ["profileDigest", "externalAllowanceId", "firstFrameArtifactId", "transport"]);
+  base(attempt, mapping, ["profileDigest", "firstFrameArtifactId", "transport"]);
   const request = attempt.request, config = request.profile!.configuration, description = mapping.transport;
   h3Fields(config, ["model", "settings"]); h3Fields(config.settings, ["resolution"]);
   h3Fields(request.args, ["profileIdentity", "profileRevision", "adapter", "executionVersion", "profileConfiguration", "profileDigest", "prompt", "durationFrames", "frameRate", "settings"]);
@@ -53,7 +53,7 @@ export function assertH3ExecutionMapping(attempt: Attempt, mapping: H3ExecutionM
     && request.args.durationFrames === description.durationSeconds * 30
     && canonical(request.args.frameRate) === canonical({ numerator: 30, denominator: 1 })
     && typeof request.args.prompt === "string" && request.args.prompt.trim().length > 0 && Buffer.byteLength(request.args.prompt) <= 32768
-    && mapping.profileDigest === request.profile!.digest && externalAllowanceMatches(request, mapping.externalAllowanceId)
+    && mapping.profileDigest === request.profile!.digest
     && request.inputs.length === 1 && request.inputs[0]!.kind === "image" && mapping.firstFrameArtifactId === request.inputs[0]!.artifactId,
   "H3_EXECUTION_CONFLICT", "H3 mapping must preserve the pinned model, exact duration and reviewed first frame");
   const image = description.firstFrame; h3Fields(image, ["sha256", "width", "height", "byteLength", "mediaType", "transport"]);
@@ -65,9 +65,9 @@ export function assertH3ExecutionMapping(attempt: Attempt, mapping: H3ExecutionM
   // The body hash includes encoded bytes: Store cannot reconstruct it from an artifact hash alone.
 }
 export function assertH3ExecutionDispatch(attempt: Attempt, mapping: H3ExecutionMapping, dispatch: H3ExecutionDispatch): void {
-  base(attempt, dispatch, ["mappingDigest", "bodySha256", "externalAllowanceId", "createdAt"]); assertH3ExecutionMapping(attempt, mapping);
+  base(attempt, dispatch, ["mappingDigest", "bodySha256", "createdAt"]); assertH3ExecutionMapping(attempt, mapping);
   invariant(dispatch.mappingDigest === digest(mapping) && dispatch.bodySha256 === mapping.transport.bodySha256
-    && dispatch.externalAllowanceId === mapping.externalAllowanceId && integer(dispatch.createdAt, 0, Number.MAX_SAFE_INTEGER),
+    && integer(dispatch.createdAt, 0, Number.MAX_SAFE_INTEGER),
   "H3_EXECUTION_CONFLICT", "H3 dispatch marker differs from its prepared mapping");
 }
 function diagnostic(value: MiniMaxH3Diagnostic): void {

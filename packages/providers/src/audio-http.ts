@@ -119,7 +119,7 @@ async function readResponse(response: Response, limit: number, signal: AbortSign
   }
 }
 
-/** One bounded POST. This transport is not an application allowance or durable dispatch ledger. */
+/** One bounded POST. Application admission and durable dispatch recording remain outside this transport. */
 export class AudioHttpClient {
   readonly #adapter: AudioAdapterId;
   readonly #key: string;

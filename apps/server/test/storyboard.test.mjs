@@ -5,7 +5,7 @@ import { setup } from './execution-fixture.mjs';
 import { ProductionService } from '../dist/application/service.js';
 import { createApp } from '../dist/app.js';
 import { editStoryboard } from '../dist/storyboard.js';
-import { shotIntentDigest } from '@openslate/core';
+import { RECIPE_DIGEST, shotIntentDigest } from '@openslate/core';
 function fixture(t) {
  const f=setup(t), service=new ProductionService(f.store,f.engine),token=randomBytes(32).toString('base64url');
  const app=createApp({service,localToken:token});t.after(()=>app.close());
@@ -73,7 +73,7 @@ test('soundtrack rejects another project recording and out-of-range gain atomica
 
 test('no narration detaches just the selected cue and video while retaining frames, other shots and canonical history', t=>{
  const f=fixture(t), p=f.store.getProject(f.projectId), cue={id:'cue',meaning:'Boot',durationFrames:180,placementFrames:0,audio:{artifactId:'a',sha256:'a'.repeat(64),kind:'audio'},accepted:true,measured:true};
- p.shots[0].cueId=cue.id;p.cues=[cue];f.store.saveProject(p,p.headVersion);
+ p.shots[0].cueId=cue.id;p.shots[0].narration={mode:'uploaded',text:'Boot',voice:'stock'};p.cues=[cue];f.store.saveProject(p,p.headVersion);
  f.store.insert('narration_canonical','canonical',f.projectId,{id:'canonical',projectId:f.projectId,segments:[{cue}]});
  const bindings=f.store.list('node_binding',f.projectId),receipt=f.edit({kind:'narration',id:'shot-0',field:'mode',value:'none'}),next=f.store.getProject(f.projectId);
  assert.equal(next.shots[0].cueId,null);assert.deepEqual(next.cues,[cue]);assert.equal(f.store.get('narration_canonical','canonical').segments.length,1);
@@ -207,7 +207,7 @@ test('shot hold and binding detachment roll back when commit fails, and the same
 
 test('duration below accepted within-shot narration returns 409 with exact frame details and makes no writes',async t=>{
  const f=fixture(t),p=f.store.getProject(f.projectId),cue={id:'accepted-voice',meaning:'Voice',durationFrames:210,placementFrames:0,accepted:true,measured:true};
- p.cues=[cue];p.shots[0].cueId=cue.id;p.shots[0].narrationTimingMode='within_shot';p.shots[0].desiredFrames=240;f.store.saveProject(p,p.headVersion);
+ p.cues=[cue];p.shots[0].cueId=cue.id;p.shots[0].narration={mode:'uploaded',text:'Voice',voice:'stock'};p.shots[0].narrationTimingMode='within_shot';p.shots[0].desiredFrames=240;f.store.saveProject(p,p.headVersion);
  const head=f.store.getProject(f.projectId).headVersion,cursor=f.store.cursor(f.projectId),body={kind:'shot',id:'shot-0',field:'desiredFrames',value:'180',expectedHeadVersion:head};
  const response=await f.app.inject({method:'POST',url:`/api/projects/${f.projectId}/storyboard`,headers:{host:'127.0.0.1',authorization:`Bearer ${f.token}`,'idempotency-key':randomUUID()},payload:body});
  assert.equal(response.statusCode,409,response.body);assert.equal(response.json().error.code,'SHOT_SHORTER_THAN_NARRATION');assert.deepEqual(response.json().error.details,{shotId:'shot-0',narrationFrames:210,requestedFrames:180});
@@ -218,7 +218,7 @@ test('duration below accepted within-shot narration returns 409 with exact frame
 test('duration floor ignores unaccepted or other-shot cues',t=>{
  const f=fixture(t),p=f.store.getProject(f.projectId);
  p.cues=[{id:'draft',meaning:'Draft',durationFrames:300,accepted:false},{id:'other',meaning:'Other line',durationFrames:400,accepted:true}];
- p.shots[0].cueId='draft';p.shots[0].narrationTimingMode='within_shot';p.shots[1].cueId='other';f.store.saveProject(p,p.headVersion);
+ p.shots[0].cueId='draft';p.shots[0].narration={mode:'uploaded',text:'Draft',voice:'stock'};p.shots[0].narrationTimingMode='within_shot';p.shots[1].cueId='other';p.shots[1].narration={mode:'uploaded',text:'Other line',voice:'stock'};f.store.saveProject(p,p.headVersion);
  f.edit({kind:'shot',id:'shot-0',field:'desiredFrames',value:'120'});assert.equal(f.store.getProject(f.projectId).shots[0].desiredFrames,120);
 });
 
@@ -228,7 +228,7 @@ test('scene titles preserve every binding and hold; overview and Director contex
  const bindings=f.store.list('node_binding',f.projectId),holds=f.store.list('hold',f.projectId);
  f.edit({kind:'sceneTitle',id:p.scenes[0].id,value:'Harbour at dawn'});
  assert.deepEqual(f.store.list('node_binding',f.projectId),bindings);assert.deepEqual(f.store.list('hold',f.projectId),holds);
- const { DEFAULT_PROFILES }=await import("@openslate/core");f.store.insert("capability_lock",p.capabilityLockId,p.id,{profiles:DEFAULT_PROFILES});
+ const { DEFAULT_PROFILES }=await import("@openslate/core");f.store.insert("capability_lock",p.capabilityLockId,p.id,{recipeDigest:RECIPE_DIGEST,profiles:DEFAULT_PROFILES});
  const overview=await f.app.inject({url:`/api/projects/${f.projectId}/generation`,headers:{host:'127.0.0.1',authorization:`Bearer ${f.token}`}});
  assert.equal(overview.statusCode,200,overview.body);assert.equal(overview.json().scenes[0].title,'Harbour at dawn');
  const { projectDirectorContext }=await import('../dist/application/context-projection.js');
@@ -312,7 +312,7 @@ test('HTTP shotFields saves one alongside command, computes combined direction a
 
 test('HTTP shotFields rejects invalid fields and accepted-line shortening with no partial edit or authority',async t=>{
  const f=fixture(t),p=f.store.getProject(f.projectId),row=p.shots[0],cue={id:'accepted-line',meaning:'Line',durationFrames:210,placementFrames:0,accepted:true,measured:true};
- row.cueId=cue.id;row.narrationTimingMode='within_shot';p.cues=[cue];f.store.saveProject(p,p.headVersion);
+ row.cueId=cue.id;row.narration={mode:'uploaded',text:'Line',voice:'stock'};row.narrationTimingMode='within_shot';p.cues=[cue];f.store.saveProject(p,p.headVersion);
  const before=f.store.getProject(f.projectId),cursor=f.store.cursor(f.projectId),headers={host:'127.0.0.1',authorization:`Bearer ${f.token}`};
  for(const [fields,code] of [[{motion:'Must roll back',desiredFrames:180},'SHOT_SHORTER_THAN_NARRATION'],[{},'VALIDATION_ERROR'],[{unknown:'no'},'VALIDATION_ERROR'],[{motion:' '},'VALIDATION_ERROR'],[{desiredFrames:'240'},'VALIDATION_ERROR'],[{desiredFrames:89},'VALIDATION_ERROR']]){
   const response=await f.app.inject({method:'POST',url:`/api/projects/${f.projectId}/storyboard`,headers:{...headers,'idempotency-key':randomUUID()},payload:{kind:'shotFields',id:row.id,fields,expectedHeadVersion:before.headVersion}});

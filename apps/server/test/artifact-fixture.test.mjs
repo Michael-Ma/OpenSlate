@@ -40,7 +40,7 @@ test("previous preview metadata follows each exact saved render output without i
   for (const fixture of [true, false, undefined]) {
     const artifact = savedArtifact(f, fixture), id = randomUUID();
     f.store.insert("attempt", id, f.projectId, { candidateId: null, workKey: id, ordinal: 1, nodeId: `render-${id}`,
-      request: { kind: "render" }, phase: "succeeded", outputs: { video: artifact } });
+      request: { kind: "render", execution: { adapter: "fake", version: "1" } }, phase: "succeeded", outputs: { video: artifact } });
   }
   const rows = service.snapshot(f.projectId).previousPreviews;
   assert.equal(rows.length, 3); assert.deepEqual(rows.map(row => row.fixture), [null, false, true]);

@@ -110,7 +110,7 @@ for (const [kind, field, value] of [['image', 'framing', 'Close up'], ['video', 
   const f = fixture(t), started = output(f, kind), binding = { ...started, outputs: {}, node: { ...started.node, specDigest: 'running-spec' } };
   f.store.put('node_binding', binding.id, f.project.id, binding);
   f.store.insert('attempt', randomUUID(), f.project.id, { nodeId: binding.id, candidateId: null, workKey: 'synthetic-running-paid-work', ordinal: 1,
-    specDigest: 'running-spec', phase: 'remote_pending', request: { kind, profileId: 'fake', args: {}, inputs: [] }, outputs: {} });
+    specDigest: 'running-spec', phase: 'remote_pending', request: { kind, profileId: 'fake', args: {}, inputs: [], execution: { adapter: 'fake', version: '1' } }, outputs: {} });
   const actor = director(f);
   await assert.rejects(prepare(f, actor, field, value), requiresProposal(field));
 });

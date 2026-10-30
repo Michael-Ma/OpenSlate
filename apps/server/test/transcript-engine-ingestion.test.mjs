@@ -8,7 +8,7 @@ import { Engine } from '../dist/execution/engine.js';
 import { ExecutionIngestionRouter } from '../dist/execution/ingestion-router.js';
 import { SpoolTranscriptIngestor } from '../dist/execution/spool-transcript-ingestor.js';
 import { ExecutionOutputStore } from '../dist/execution/output-store.js';
-import { DurableExternalAdmission } from '../dist/execution/durable-external-admission.js';
+import { ConfiguredExternalAdmission } from '../dist/execution/configured-external-admission.js';
 import { Store } from '../dist/persistence/store.js';
 import { LocalMediaService } from '../dist/media/local-media.js';
 import { TranscriptionAudioStore } from '../dist/media/transcription-audio-store.js';
@@ -21,7 +21,7 @@ function ingester(f) { return new SpoolTranscriptIngestor(f.outputs, f.media, f.
 function executor(f, handler = ingester(f), provider = f.bridge) {
   return new Engine(f.store, provider, { artifactDir: f.artifactRoot, profiles: [f.profile], outputStore: f.outputs,
     outputIngestor: new ExecutionIngestionRouter({ transcription: handler }),
-    externalAdmission: new DurableExternalAdmission(f.store, () => {}) });
+    externalAdmission: new ConfiguredExternalAdmission(f.store, () => {}) });
 }
 function expire(f) {
   const attempt = rows(f, 'attempt')[0]; f.store.put('attempt', attempt.id, f.project.id, { ...attempt, leaseExpiresAt: 0 }); return attempt;
@@ -51,7 +51,7 @@ test('actual Engine publishes one exact unreviewed candidate and settles only af
   assert.equal(rows(f, 'media_source').length, 0, 'a transcript never creates a media source');
   assert.equal(protectedState(f), before);
   const calls = structuredClone(f.calls); await engine.reconcile(); await engine.runReady(); assert.deepEqual(f.calls, calls);
-  assert.equal(f.calls.http, 1); assert.equal(rows(f, 'external_allowance_consumption').length, 1);
+  assert.equal(f.calls.http, 1); assert.equal(rows(f, 'reservation').length, 1);
 });
 
 test('a plain artifact cannot bypass the exact transcription candidate result contract', async t => {

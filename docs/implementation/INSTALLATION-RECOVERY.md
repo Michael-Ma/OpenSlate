@@ -32,9 +32,9 @@ Restore must match `originalDataRoot` because retained receipts/descriptors incl
 
 ## Human recovery review
 
-After startup, inspect saved projects/media and choose **Review release → Finish recovery review**. Release is bound to the exact restore/backup receipt and replay-safe human command. It keeps projects paused. Existing known-job/output recovery may continue after release, while old unused imported requests/grants/reviews/allowances cannot authorize a first new provider submission. Start a fresh conversation and exact current review for new paid work.
+After startup, inspect saved projects/media and choose **Review release → Finish recovery review**. Release is bound to the exact restore/backup receipt and replay-safe human command. It keeps projects paused. Existing known-job/output recovery may continue after release, while old unused imported requests/grants/reviews cannot authorize a first new provider submission. Start a fresh conversation and exact current review for new paid work.
 
-The backup excludes changes made after its snapshot. Unknown provider submissions stay attached to their original attempt/liability. A missing/expired output is not permission to regenerate. Consumed accounting, candidate identity, old media and immutable authority fences remain retained through re-export/recovery.
+The backup excludes changes made after its snapshot. Unknown provider submissions stay attached to their original attempt/liability. A missing/expired output is not permission to regenerate. Reservation liabilities, candidate identity, old media and immutable authority fences remain retained through re-export/recovery.
 
 ## Source and verification
 

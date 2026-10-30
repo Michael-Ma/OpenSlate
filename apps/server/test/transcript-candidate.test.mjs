@@ -114,7 +114,7 @@ test('lineage resolver requires exact actual approval, source, dispatch and obse
   assert.deepEqual(resolveTranscriptionSpoolLineage(f.store, f.attempt, lineage.spool.id), lineage);
   const reader = transform => ({ db: f.store.db, getProject: f.store.getProject.bind(f.store), get: (kind, id) => transform(kind, id, f.store.get(kind, id)) });
   for (const missing of ['transcription_execution_mapping', 'transcription_execution_dispatch', 'transcription_execution_result', 'transcription_audio_intent', 'transcription_audio_receipt',
-    'external_allowance_consumption', 'external_allowance', 'grant', 'candidate', 'reservation', 'execution_output_receipt', 'execution_output_spool', 'execution_output_slot', 'narration_audio'])
+    'capability_lock', 'grant', 'candidate', 'reservation', 'execution_output_receipt', 'execution_output_spool', 'execution_output_slot', 'narration_audio'])
     assert.throws(() => resolveTranscriptionSpoolLineage(reader((kind, _id, value) => kind === missing ? undefined : value), f.attempt, lineage.spool.id), missing);
   assert.throws(() => resolveTranscriptionSpoolLineage(reader((kind, _id, value) => kind === 'execution_output_slot' ? { ...value, spoolId: 'f'.repeat(64) } : value), f.attempt, lineage.spool.id));
   assert.throws(() => resolveTranscriptionSpoolLineage(f.store, { ...f.attempt, request: { ...f.request, execution: { adapter: 'fake', version: '1' } } }, lineage.spool.id));

@@ -60,7 +60,7 @@ function fixture(t, { toolContract = '6.0.0' } = {}) {
   };
   const mediaState = () => ({ accepted: provider.acceptedCount(), attempts: engine.attempts(project.id),
     candidates: store.list('candidate', project.id), grants: store.list('grant', project.id),
-    confirmations: store.list('scene_confirmation', project.id), budget: engine.budget(project.id), outputs: engine.outputs(project.id) });
+    confirmations: store.list('scene_confirmation', project.id), budget: engine.committedMicros(project.id), outputs: engine.outputs(project.id) });
   t.after(async () => { await app.close(); store.close(); provider.close(); writable(root); rmSync(root, { recursive: true, force: true }); });
   const saveScene = async (sceneId = 'scene-0') => {
     await readyScene(sceneId);

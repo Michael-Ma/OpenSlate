@@ -60,11 +60,11 @@ test('a lost submission is never resubmitted: it waits for a human press and the
 
 test('refused jobs are not charged; accepted jobs that fail are charged unless the provider refunds them', () => {
   const start = { phase: 'not_started' }, running = { phase: 'running', taskId: 't9' };
-  const refused = lipSyncTransition(start, { type: 'rejected', certainty: 'not_accepted', failureId: 'AUDIO_TOO_LONG', technical: false }, { refundsFailedJobs: false });
+  const refused = lipSyncTransition(start, { type: 'rejected', certainty: 'not_accepted', failureId: 'AUDIO_TOO_LONG', technical: false, retryAllowed: false }, { refundsFailedJobs: false });
   assert.deepEqual(lipSyncDisplay(refused), { state: 'failed', charged: 'no', retry: 'human_press', keepsOriginalClip: true });
-  const busy = lipSyncTransition(start, { type: 'rejected', certainty: 'not_accepted', failureId: 'RATE_LIMITED', technical: true }, { refundsFailedJobs: false });
+  const busy = lipSyncTransition(start, { type: 'rejected', certainty: 'not_accepted', failureId: 'RATE_LIMITED', technical: true, retryAllowed: true }, { refundsFailedJobs: false });
   assert.equal(lipSyncDisplay(busy).retry, 'offered');
-  const failed = lipSyncTransition(running, { type: 'failed', taskId: 't9', failureId: 'NO_FACE', technical: false }, { refundsFailedJobs: false });
+  const failed = lipSyncTransition(running, { type: 'failed', taskId: 't9', failureId: 'NO_FACE', technical: false, retryAllowed: false }, { refundsFailedJobs: false });
   assert.deepEqual([failed.charged, failed.taskId], ['unknown', 't9']);
   const refunded = lipSyncTransition(running, { type: 'failed', taskId: null, failureId: 'NO_FACE', technical: false, retryAllowed: true }, { refundsFailedJobs: true });
   assert.deepEqual([refunded.charged, refunded.taskId, lipSyncDisplay(refunded).retry], ['no', 't9', 'offered']);

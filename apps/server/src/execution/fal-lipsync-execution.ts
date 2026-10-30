@@ -1,4 +1,4 @@
-import { assertConfiguredProviderAdmission, configuredProviderUse, providerAdmissionRequest } from "./provider-use.js";
+import { assertConfiguredProviderAdmission, providerAdmissionRequest } from "./provider-use.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open, realpath } from "node:fs/promises";
@@ -73,7 +73,7 @@ export class FalH3LipSyncExecution implements ExecutionProvider {
       stopped(signal); prepared = await this.prepare(attempt, signal); stopped(signal);
       assertLipSyncSettings(request.args.settings);
       const proposed: FalLipSyncMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
-        externalAllowanceId: (request.externalAllowanceId ?? null), firstFrameArtifactId: request.inputs[0]!.artifactId,
+        firstFrameArtifactId: request.inputs[0]!.artifactId,
         lipSync: structuredClone(request.args.settings.lipSync), transport: describeFalH3LipSyncRequest(prepared) };
       assertFalLipSyncMapping(attempt, proposed);
       mapping = this.#store.transaction(() => {
@@ -103,7 +103,7 @@ export class FalH3LipSyncExecution implements ExecutionProvider {
         if (this.started(attempt.id)) return false;
         stopped(signal); this.dispatchable(attempt, expected);
         const dispatch: FalLipSyncDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping), bodySha256,
-          externalAllowanceId: (request.externalAllowanceId ?? null), createdAt: this.now() };
+          createdAt: this.now() };
         this.#store.insert("fal_lipsync_execution_dispatch", attempt.id, attempt.projectId, dispatch); return true;
       });
     } catch { return this.notDispatched(attempt, expected, "LOCAL_CANCELLED", signal); }
@@ -323,7 +323,7 @@ export class FalH3LipSyncExecution implements ExecutionProvider {
 
   private async prepare(attempt: Attempt, signal?: AbortSignal): Promise<FalH3LipSyncRequest> {
     const request = attempt.request, configuration = request.profile!.configuration;
-    falFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", ...(configuredProviderUse(request) ? ["providerUse"] : ["externalAllowanceId"])]);
+    falFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "providerUse"]);
     assertFalLipSyncOperationOptions({ kind: request.kind, adapter: "fal-h3-lipsync", configuration: configuration as never }, request.args);
     assertLipSyncSettings(request.args.settings);
     const lipSync = request.args.settings.lipSync;

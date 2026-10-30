@@ -57,7 +57,7 @@ test("ordinary status has no recovery authority; restored inspection stays authe
     const response = await f.request("GET", path); assert.equal(response.statusCode, 200, `${path}: ${response.body}`);
   }
   const state = (await f.request("GET", statusPath)).json(); assert.equal(state.state, "quarantined"); assert.equal(state.receipt.backupCreatedAt, "2026-09-11T00:00:00.000Z");
-  assert.deepEqual(state.counts, { projects: 1, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, unusedAllowances: 0, preparingJobs: 0 });
+  assert.deepEqual(state.counts, { projects: 1, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, preparingJobs: 0 });
   assert.equal((await f.request("GET", `${f.path}/review`)).json().id, null);
   assert.deepEqual(rows(f.store), before); assert.deepEqual(readdirSync(f.uploads.rootDir), files); assert.equal(f.provider.acceptedCount(), 0);
 });
@@ -115,7 +115,7 @@ test("recovery status reads the saved backup time, project, pending, uncertain a
   const response = await app.inject({ url: statusPath, headers: { host: "127.0.0.1", authorization: `Bearer ${token}` } });
   assert.equal(response.statusCode, 200, response.body); const state = response.json();
   assert.equal(state.receipt.backupCreatedAt, "2026-09-11T00:00:00.000Z");
-  assert.deepEqual(state.counts, { projects: 2, knownJobs: 1, unknownJobs: 1, nativeRequests: 1, unusedAllowances: 0, preparingJobs: 0 });
+  assert.deepEqual(state.counts, { projects: 2, knownJobs: 1, unknownJobs: 1, nativeRequests: 1, preparingJobs: 0 });
   assert.deepEqual(rows(f.store), before); assert.equal(f.provider.acceptedCount(), 2);
 });
 

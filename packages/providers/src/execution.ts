@@ -7,13 +7,10 @@ export interface ExecutionProfileSnapshot { id: string; revision: string; config
 export interface ExecutionRequest {
   attemptId: string; nodeId: string; kind: OperationKind; fingerprint: string;
   args: JsonObject; inputs: ArtifactRef[];
-  /** Absent only on historical requests, which used the fake/v1 contract. */
-  execution?: ExecutionIdentity;
-  /** Pinned only on new explicit profiles; never backfilled into historical requests. */
+  execution: ExecutionIdentity;
+  /** Configured profiles are pinned; fake/v1 demo requests have no profile snapshot. */
   profile?: ExecutionProfileSnapshot;
-  /** Application-issued spending correlation, never a credential. */
-  externalAllowanceId?: string;
-  /** Host-created readiness proof; retains the exact original profile lock without a spending allowance. */
+  /** Host-created readiness proof retaining the exact original profile lock. */
   providerUse?: { kind: "configured"; capabilityLockId: string; capabilityLockDigest: string; profileDefinitionDigest: string };
 }
 export interface ExecutionOutput {
@@ -48,8 +45,8 @@ export type ExecutionOutcome =
   | { type: "completed"; taskId: string; outputs: ExecutionOutput[] }
   | ExecutionSpoolCompletion
   // Native Codex failures and terminal lost POST replies may have no vendor job id.
-  | { type: "failed"; taskId: string | null; failureId: string; technical: boolean; retryAllowed?: boolean }
-  | { type: "rejected"; certainty: "not_accepted"; failureId: string; technical: boolean; retryAllowed?: boolean }
+  | { type: "failed"; taskId: string | null; failureId: string; technical: boolean; retryAllowed: boolean }
+  | { type: "rejected"; certainty: "not_accepted"; failureId: string; technical: boolean; retryAllowed: boolean }
   | { type: "unknown"; diagnostic: string; taskId?: string };
 export interface ExecutionProvider {
   submit(request: ExecutionRequest, options?: ExecutionCallOptions): Promise<ExecutionOutcome>;
@@ -63,15 +60,17 @@ export interface ExecutionCallOptions {
   expectedLease?: Readonly<{ owner: string; epoch: number }>;
 }
 
-const LEGACY_IDENTITY = Object.freeze({ adapter: "fake", version: "1" });
+const DEMO_EXECUTION_IDENTITY = Object.freeze({ adapter: "fake", version: "1" });
 const registrations = new WeakMap<ExecutionProvider, Readonly<ExecutionIdentity>>();
 const generated = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
 
 const contractId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
 const identityKey = (identity: ExecutionIdentity) => JSON.stringify([identity.adapter, identity.version]);
-export function isLegacyExecution(identity: ExecutionIdentity): boolean { return identity.adapter === "fake" && identity.version === "1"; }
+export function isDemoExecution(identity: ExecutionIdentity): boolean {
+  return identity.adapter === DEMO_EXECUTION_IDENTITY.adapter && identity.version === DEMO_EXECUTION_IDENTITY.version;
+}
 export function requestExecutionIdentity(request: ExecutionRequest): Readonly<ExecutionIdentity> {
-  const identity = request.execution ?? LEGACY_IDENTITY;
+  const identity = request.execution;
   invariant(identity && contractId(identity.adapter) && contractId(identity.version)
     && Object.keys(identity).every(key => ["adapter", "version"].includes(key)), "PROVIDER_NOT_REGISTERED", "Invalid saved execution identity");
   return Object.freeze({ adapter: identity.adapter, version: identity.version });
@@ -113,7 +112,7 @@ export function assertExecutionRequest(provider: ExecutionProvider, request: Exe
   const registered = executionIdentity(provider), saved = requestExecutionIdentity(request);
   invariant(saved.adapter === registered.adapter && saved.version === registered.version,
     "PROVIDER_NOT_REGISTERED", "Attempt belongs to a different execution contract");
-  if (!isLegacyExecution(saved) || request.profile !== undefined || request.args.executionVersion !== undefined || request.args.profileConfiguration !== undefined) {
+  if (!isDemoExecution(saved) || request.profile !== undefined || request.args.executionVersion !== undefined || request.args.profileConfiguration !== undefined) {
     const profile = request.profile;
     invariant(profile && Object.keys(profile).every(key => ["id", "revision", "configuration", "digest"].includes(key)), "PROFILE_INCOMPATIBLE", "Attempt has no exact frozen profile");
     const args = providerProfileArguments({ id: profile.id, revision: profile.revision, kind: request.kind, adapter: saved.adapter,
@@ -144,7 +143,7 @@ export class ExecutionRegistry {
     const provider = this.resolve(requestExecutionIdentity(request)); assertExecutionRequest(provider, request); return provider;
   }
 }
-/** Preserve the historical source label without making Engine depend on FakeProvider. */
+/** Stable diagnostic source label, independent of a provider's implementation class. */
 export function executionFailureSource(provider: ExecutionProvider): string {
   return `${executionIdentity(provider).adapter}_provider`;
 }
@@ -202,13 +201,12 @@ export function normalizeExecutionOutcome(value: unknown, request?: ExecutionReq
     const fields = value.type === "failed" ? ["type", "taskId", "failureId", "technical", "retryAllowed"]
       : ["type", "certainty", "failureId", "technical", "retryAllowed"];
     if (!exact(value, fields) || !id(value.failureId) || typeof value.technical !== "boolean"
-      || (value.retryAllowed !== undefined && typeof value.retryAllowed !== "boolean")
+      || typeof value.retryAllowed !== "boolean"
       || (value.type === "failed" ? !(id(value.taskId) || value.taskId === null && request?.kind === "image"
         && request.execution?.adapter === "codex-image" && request.execution.version === "1"
         && value.technical === false && value.retryAllowed === false
         || value.taskId === null && value.failureId === "SUBMISSION_RESPONSE_LOST"
         && value.retryAllowed === false) : value.certainty !== "not_accepted")) return invalid();
-    // Missing retryAllowed remains missing for historical evidence; the engine requires explicit true.
     return structuredClone(value) as unknown as ExecutionOutcome;
   }
   if (value.type !== "completed" || !exact(value, ["type", "taskId", "outputs"]) || !id(value.taskId)

@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { DomainError, compilePlan, digest, providerProfileArguments, DEFAULT_PROFILES } from "../../../packages/core/dist/index.js";
+import { DomainError, compilePlan, digest, DEFAULT_PROFILES } from "../../../packages/core/dist/index.js";
 import { Store } from "../dist/persistence/store.js";
 import { Engine } from "../dist/execution/engine.js";
 import { OpenAITranscriptionExecution } from "../dist/execution/openai-transcription-execution.js";
 import { ExecutionOutputStore } from "../dist/execution/output-store.js";
 import { TranscriptionAudioService } from "../dist/execution/transcription-audio-service.js";
-import { DurableExternalAdmission } from "../dist/execution/durable-external-admission.js";
-import { allowanceIssueContextDigest } from "../dist/application/external-allowances.js";
+import { ConfiguredExternalAdmission } from "../dist/execution/configured-external-admission.js";
 import { transcriptionFixture } from "./transcription-execution-fixture.mjs";
 
 export const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -24,9 +23,9 @@ export function due(f) {
     preparation: { ...attempt.preparation, nextEligibleAt: 0 } });
 }
 export const liability = f => ({ attempts: rows(f, "attempt").map(({ id, candidateId, ordinal, reservationId, request }) => ({ id, candidateId, ordinal, reservationId, request })),
-  candidates: rows(f, "candidate"), grants: rows(f, "grant"), consumptions: rows(f, "external_allowance_consumption"), reservations: rows(f, "reservation") });
+  candidates: rows(f, "candidate"), grants: rows(f, "grant"), reservations: rows(f, "reservation") });
 
-/** Real imported/accepted audio and durable human allowance, with only preparation scheduling and HTTP controlled by this fixture. */
+/** Real imported/accepted audio and configured admission, with only preparation scheduling and HTTP controlled by this fixture. */
 export async function preparationEngineFixture(t, options = {}) {
   const f = await transcriptionFixture(t, { ...options, deferAdmission: true });
   f.control = { busy: true, beforePrepare: undefined, beforeStart: undefined, afterOutcome: undefined };
@@ -49,7 +48,7 @@ export async function preparationEngineFixture(t, options = {}) {
       async start(...args) { f.calls.starts++; if (f.control.beforeStart) await f.control.beforeStart(...args); const result = await bridge.start(...args); return f.control.afterOutcome ? f.control.afterOutcome(result) : result; },
       async resume(...args) { f.calls.resumes++; const result = await bridge.resume(...args); return f.control.afterOutcome ? f.control.afterOutcome(result) : result; } };
     const engine = new Engine(store, bridge, { artifactDir: f.artifactRoot, profiles: [f.profile], outputStore: outputs,
-      externalAdmission: new DurableExternalAdmission(store, () => {}), submissionPreparation: port,
+      externalAdmission: new ConfiguredExternalAdmission(store, () => {}), submissionPreparation: port,
       leaseMs: options.leaseMs ?? 30000, providerTimeoutMs: 5000, ...workerOptions });
     return { store, engine, bridge, port, outputs, preparation };
   };
@@ -67,20 +66,13 @@ export function install(f, plan, grants = {}) {
   f.store.transaction(() => { f.engine.installPlan(project.id, planId, plan, grants); f.store.saveProject({ ...project, activePlanId: planId }, project.headVersion); });
   return planId;
 }
-function approveNode(f, node) {
-  const target = f.store.get("node_binding", node.id), input = { profileDigest: String(providerProfileArguments(f.profile).profileDigest), profileDefinitionDigest: digest(f.profile),
-    selections: [{ candidateId: target.candidateId, nodeId: target.id, specDigest: target.node.specDigest }], maxAttempts: 1, maxEstimatedMicros: "100",
-    expiresAt: new Date(Date.now() + 3600000).toISOString() };
-  const human = f.production.beginRequest(f.project.id, "offline-human", "Approve this exact controlled transcription", { editing: false, scopeIds: [f.project.id], contextDigest: allowanceIssueContextDigest(f.project.id, input) });
-  return f.allowances.issue(f.project.id, human, input);
-}
 export function addSecondTranscription(f) {
   const project = f.store.getProject(f.project.id), q = JSON.stringify;
   const spec = `{profile:${q(f.profile.id)},audio:p.asset(${q(f.audio.id)}),language:"auto",timing:"word",settings:{}}`;
   const plan = compilePlan(`definePlan({baseRevision:${q(project.revisionId)}},p=>{const first=p.transcription("transcript",${spec});const second=p.transcription("second",${spec});return [first,second];});`,
     { project, profiles: [f.profile], logicalIds: { transcript: f.node.id }, allocateId: randomUUID });
   const second = plan.nodes[1]; install(f, plan, { [second.id]: f.engine.createGrant(project.id, project.id, "transcription", "human-second-transcription").id });
-  approveNode(f, second); return second.id;
+  return second.id;
 }
 export function replan(f, { language = "auto", freshCandidate = false, brief = "An unrelated editorial update", alias = "transcript" } = {}) {
   const before = f.store.getProject(f.project.id);
@@ -103,6 +95,5 @@ export function useOutputSource(f) {
   const upstream = plan.nodes.find(node => node.kind === "speech"), binding = f.store.get("node_binding", upstream.id);
   f.store.put("node_binding", upstream.id, project.id, { ...binding, outputs: { audio: f.store.get("artifact", f.audio.id).artifact } });
   f.node = plan.nodes.find(node => node.kind === "transcription");
-  f.allowance = approveNode(f, f.node);
   return upstream.id;
 }

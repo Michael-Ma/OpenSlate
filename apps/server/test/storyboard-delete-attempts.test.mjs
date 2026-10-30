@@ -144,7 +144,7 @@ test('deleteShot refuses unresolved section speech for every mapped shot without
   const before = f.store.getProject(f.project.id);
   const project = { ...projectFixture(f.project.id, 2), capabilityLockId: before.capabilityLockId };
   const segment = f.view().segments[0];
-  project.shots[0].narration = { mode: 'generated', text: segment.script.text, voice: 'stock' };
+  for (const shot of project.shots) shot.narration = { mode: 'generated', text: segment.script.text, voice: 'stock' };
   f.store.saveProject(project, before.headVersion);
   const current = f.store.getProject(project.id);
   f.store.insert('project_revision', current.revisionId, current.id, { project: current });
@@ -153,7 +153,6 @@ test('deleteShot refuses unresolved section speech for every mapped shot without
     ...(shot.narration ? { intentDigest: digest(shot.narration) } : {}),
   });
   const proposal = await f.prepare(), applied = await f.review(proposal);
-  f.issue(applied);
   const attempt = f.admit(applied);
   assert.equal(attempt.request.kind, 'speech');
   assert.equal(f.store.get('node_binding', attempt.nodeId).node.shotId, null);

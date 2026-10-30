@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { digest, DomainError } from "../../../packages/core/dist/index.js";
+import { canonical, digest, DomainError } from "../../../packages/core/dist/index.js";
 import { parseOpenAITranscriptionResponse } from "../../../packages/providers/dist/index.js";
 import { OpenAITranscriptionExecution } from "../dist/execution/openai-transcription-execution.js";
 import { installRecoveryQuarantine, InstallationRecoveryGuard, releaseRecovery } from "../dist/application/installation-recovery.js";
@@ -17,10 +17,10 @@ test("accepted canonical audio and real consumed approval bind exact multipart a
   const large = Buffer.concat([Buffer.alloc(1200000, 32), raw, Buffer.alloc(1200000, 10)]);
   const f = await transcriptionFixture(t, { fetch: async (url, init) => {
     assert.equal(url, "https://api.openai.com/v1/audio/transcriptions"); assert.equal(init.method, "POST");
-    const mapping = rows(f, "transcription_execution_mapping")[0], marker = rows(f, "transcription_execution_dispatch")[0], consumption = rows(f, "external_allowance_consumption")[0];
+    const mapping = rows(f, "transcription_execution_mapping")[0], marker = rows(f, "transcription_execution_dispatch")[0];
     assert.equal(mapping.requestDigest, digest(f.request)); assert.notEqual(mapping.requestDigest, mapping.transport.requestDigest);
-    assert.equal(mapping.profileDefinitionDigest, digest(f.profile)); assert.equal(mapping.consumptionDigest, digest(consumption));
-    assert.equal(mapping.allowanceDigest, digest(f.allowance)); assert.equal(mapping.estimatedMicros, "100");
+    assert.equal(mapping.profileDefinitionDigest, digest(f.profile));
+    assert.equal(mapping.estimatedMicros, "100");
     assert.equal(mapping.capabilityLockDigest, digest(f.store.get("capability_lock", mapping.capabilityLockId)));
     assert.equal(marker.mappingDigest, digest(mapping)); assert.equal(marker.transportDigest, mapping.transport.requestDigest);
     assert.equal(marker.bodySha256, hash(init.body)); assert.equal(mapping.transport.bodyByteLength, init.body.byteLength);
@@ -72,9 +72,16 @@ test("language hint is exact while compiler's historical default segment timing 
   }
 });
 
-test("allowance ID cannot replace actual consumption, full approved profile and reserved cost", async t => {
-  for (const kind of ["external_allowance_consumption", "external_allowance", "candidate", "grant", "reservation"]) {
-    const f = await transcriptionFixture(t); f.store.db.prepare("DELETE FROM entities WHERE kind=?").run(kind);
+test("forged providerUse or a profile cannot substitute exact transcription admission evidence", async t => {
+  for (const kind of ["provider-use", "profile-definition", "candidate", "grant", "reservation"]) {
+    const f = await transcriptionFixture(t);
+    if (kind === "provider-use") {
+      f.request = { ...f.request, providerUse: { ...f.request.providerUse, profileDefinitionDigest: "f".repeat(64) } };
+      f.store.db.prepare("UPDATE entities SET body=? WHERE kind='attempt' AND id=?").run(canonical({ ...f.attempt, request: f.request }), f.attempt.id);
+    } else if (kind === "profile-definition") {
+      const lock = f.store.get("capability_lock", f.project.capabilityLockId);
+      f.store.db.prepare("UPDATE entities SET body=? WHERE kind='capability_lock' AND id=?").run(canonical({ ...lock, profiles: [{ ...f.profile, unitCostMicros: "101" }] }), lock.id);
+    } else f.store.db.prepare("DELETE FROM entities WHERE kind=?").run(kind);
     await assert.rejects(f.bridge.submit(f.request, context(f)), code("TRANSCRIPTION_EXECUTION_CONFLICT"));
     assert.deepEqual(f.calls, { http: 0, credentials: 0, prepare: 0, upload: 0 });
   }
@@ -103,7 +110,7 @@ test("owned MEDIA_BUSY is a definite local non-dispatch and never automatically 
   assert.equal(rows(f, "transcription_execution_result")[0].observation.code, "LOCAL_PREPARATION_BUSY");
   assert.deepEqual(await cloneBridge(f).submit(f.request, context(f)), result); assert.equal(called, 1); assert.equal(f.calls.http, 0);
   assert.equal(rows(f, "transcription_audio_intent").length, 0); assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
-  assert.equal(rows(f, "external_allowance_consumption").length, 1, "local failure never restores allowance attempt capacity");
+  assert.equal(rows(f, "reservation").length, 1, "local failure retains the original admitted reservation");
 });
 
 test("stale preparation failure does not install a local decision ahead of replacement", async t => {

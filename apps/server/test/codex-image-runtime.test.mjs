@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {CodexImageWorkerTransport} from '@openslate/director';
 import {codexImageFixture as fixture,codexImageProfile as codex,codexRuntimeConfiguration as config,codexRowCounts as rowCounts} from './codex-image-execution-fixture.mjs';
 import { GenerationOverviewReader } from '../dist/generation-overview.js';
-test('disabled Codex remains unregistered despite trusted access and preserves legacy factory defaults',t=>{
-  const f=fixture(t,{configuration:{image:false,h3:false,h3DownloadHosts:[]}}),before=rowCounts(f),runtime=f.build();
+test('disabled Codex remains unregistered despite trusted access and preserves demo factory defaults',t=>{
+  const f=fixture(t,{configuration:{...config(),codexImage:false}}),before=rowCounts(f),runtime=f.build();
   assert.throws(()=>runtime.engine.registry.resolve({adapter:'codex-image',version:'1'}),{code:'PROVIDER_NOT_REGISTERED'});
   assert.deepEqual(runtime.productionOptions,{});assert.deepEqual(rowCounts(f),before);assert.equal(f.calls.prepare,0);assert.equal(f.calls.start,0);
   const native=runtime.providerCatalog.view().profiles.find(row=>row.id===codex.id);
@@ -52,15 +52,14 @@ test('Codex admission uses zero USD and captured native transport without consul
 });
 test('unsupported native operation options fail preflight before preparation or durable consumption',async t=>{
   for(const options of [{width:768},{settings:{quality:'medium'}}]) {
-    const f=fixture(t);f.build();const selected=await f.seed(options);f.issue(selected);
-    const result=await f.runtime.engine.runReady();assert.equal(result.dispatched,0);assert.ok(result.blocked.some(row=>['CODEX_IMAGE_PREFLIGHT_INVALID','CODEX_IMAGE_EXECUTION_CONFLICT'].includes(row.code)));
+    const f=fixture(t);f.build();const selected=await f.seed(options);const result=await f.runtime.engine.runReady();assert.equal(result.dispatched,0);assert.ok(result.blocked.some(row=>['CODEX_IMAGE_PREFLIGHT_INVALID','CODEX_IMAGE_EXECUTION_CONFLICT'].includes(row.code)));
     for(const family of ['attempt','reservation','external_allowance_consumption'])assert.equal(f.store.list(family,selected.projectId).length,0);
-    assert.equal(f.store.list('external_allowance',selected.projectId).length,1);assert.equal(f.calls.prepare,0);assert.equal(f.calls.start,0);assert.equal(f.calls.api,0);
+    assert.equal(f.calls.prepare,0);assert.equal(f.calls.start,0);assert.equal(f.calls.api,0);
   }
 });
 test('native preparation failure retains its attempt and never substitutes the enabled direct API route',async t=>{
   const f=fixture(t,{configuration:{...config(),image:true}});f.transport.prepare=async()=>{f.calls.prepare++;throw Error('Synthetic native authentication unavailable');};
-  f.build();const selected=await f.seed();f.issue(selected);await f.runtime.engine.runReady();
+  f.build();const selected=await f.seed();await f.runtime.engine.runReady();
   const attempt=f.store.list('attempt',selected.projectId)[0];assert.equal(f.calls.prepare,1);assert.equal(f.calls.start,0);assert.equal(f.calls.api,0);
   assert.equal(f.store.get('codex_image_execution_dispatch',attempt.id),undefined);assert.equal(f.store.list('external_allowance_consumption',selected.projectId).length,0);
   await f.runtime.engine.reconcile();await f.runtime.engine.runReady();assert.equal(f.calls.prepare,1);assert.equal(f.calls.api,0);
@@ -76,10 +75,9 @@ test('runtime close retires its constructed worker once without a native start',
 });
 
 test('first Codex route rejects project-scoped images before consuming their usage permission',async t=>{
-  const f=fixture(t);f.build();const selected=await f.seed({}, {unscoped:true});assert.equal(selected.binding.node.shotId,null);f.issue(selected);
-  const result=await f.runtime.engine.runReady();assert.equal(result.dispatched,0);assert.ok(result.blocked.some(row=>row.code==='CODEX_IMAGE_PREFLIGHT_INVALID'));
+  const f=fixture(t);f.build();const selected=await f.seed({}, {unscoped:true});assert.equal(selected.binding.node.shotId,null);const result=await f.runtime.engine.runReady();assert.equal(result.dispatched,0);assert.ok(result.blocked.some(row=>row.code==='CODEX_IMAGE_PREFLIGHT_INVALID'));
   for(const family of ['attempt','reservation','external_allowance_consumption'])assert.equal(f.store.list(family,selected.projectId).length,0);
-  assert.equal(f.store.list('external_allowance',selected.projectId).length,1);assert.equal(f.calls.prepare,0);assert.equal(f.calls.start,0);assert.equal(f.calls.api,0);
+  assert.equal(f.calls.prepare,0);assert.equal(f.calls.start,0);assert.equal(f.calls.api,0);
 });
 
 test('an inconsistent native image record leaves the overview readable, without its diagnostic (lead review)',async t=>{

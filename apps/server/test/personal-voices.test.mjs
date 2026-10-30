@@ -111,7 +111,7 @@ test('revoking a reviewed personal voice blocks admission before any attempt, re
   const identity = service.register(f.project.id, human, { key: key(), expectedHeadVersion: f.store.getProject(f.project.id).headVersion,
     label: 'My voice', provider: 'openai', providerVoiceId: 'voice_fixture', ownVoice: true, permitSynthesis: true });
   const proposal = await f.prepare(f.input({ voice: identity.selector })), applied = await f.review(proposal);
-  f.issue(applied); service.revoke(f.project.id, human, { key: key(), identityId: identity.id });
+  service.revoke(f.project.id, human, { key: key(), identityId: identity.id });
   assert.throws(() => f.admit(applied), { code: 'PERSONAL_VOICE_REVOKED' });
   for (const kind of ['attempt', 'reservation', 'external_allowance_consumption', 'speech_execution_dispatch']) assert.equal(f.store.list(kind, f.project.id).length, 0);
   assert.deepEqual(f.calls, { http: 0, credentials: 0 });

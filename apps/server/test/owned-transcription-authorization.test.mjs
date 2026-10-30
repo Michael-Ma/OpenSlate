@@ -2,11 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,renameSync,unlinkSync} from 'node:fs';
 import {join} from 'node:path';
-import {canonical,digest,providerProfileArguments} from '@openslate/core';
+import {canonical,digest} from '@openslate/core';
 import {registerExecutionProvider} from '@openslate/providers';
 import {Engine} from '../dist/execution/engine.js';
-import {DurableExternalAdmission} from '../dist/execution/durable-external-admission.js';
-import {ExternalAllowanceService,allowanceIssueContextDigest} from '../dist/application/external-allowances.js';
+import {ConfiguredExternalAdmission} from '../dist/execution/configured-external-admission.js';
 import {Store} from '../dist/persistence/store.js';
 import {createInstallationBackup,inspectInstallationBackup} from '../dist/persistence/installation-backup.js';
 import {restoreInstallationBackup} from '../dist/persistence/installation-restore.js';
@@ -22,16 +21,11 @@ async function applied(t,options={}){
  return f;
 }
 async function admitted(f){
- const {review}=f.resolved,input={profileDigest:String(providerProfileArguments(f.profile).profileDigest),profileDefinitionDigest:digest(f.profile),
-  selections:[{candidateId:f.result.candidateId,nodeId:review.nodeId,specDigest:review.specDigest}],maxAttempts:1,maxEstimatedMicros:'100',
-  expiresAt:new Date(Date.now()+3600000).toISOString()};
- const actor=f.production.beginRequest(f.project.id,'spender','Approve this exact synthetic attempt.',{editing:false,scopeIds:[f.project.id],contextDigest:allowanceIssueContextDigest(f.project.id,input)});
- new ExternalAllowanceService(f.store).issue(f.project.id,actor,input);
  const calls={submit:0,lookup:0,poll:0},provider=registerExecutionProvider({async submit(){calls.submit++;return{type:'unknown',diagnostic:'controlled offline admission'};},
   async lookup(){calls.lookup++;return{type:'unknown',diagnostic:'controlled offline lookup'};},async poll(){calls.poll++;return{type:'unknown',diagnostic:'controlled offline poll'};}},{adapter:'openai-transcription',version:'1'});
- const engine=new Engine(f.store,provider,{artifactDir:f.artifactDir,profiles:f.profiles,externalAdmission:new DurableExternalAdmission(f.store,()=>{})});
+ const engine=new Engine(f.store,provider,{artifactDir:f.artifactDir,profiles:f.profiles,externalAdmission:new ConfiguredExternalAdmission(f.store,()=>{})});
  await engine.runReady(f.project.id);const attempt=rows(f,'attempt')[0];assert.ok(attempt);assert.equal(calls.submit,1);
- assert.equal(rows(f,'external_allowance_consumption').length,1);return{attempt,engine,calls};
+ assert.equal(rows(f,'reservation').length,1);return{attempt,engine,calls};
 }
 const saved=(f,kind,id)=>f.store.get(kind,id);
 const tamper=(f,kind,id,value)=>f.store.db.prepare('UPDATE entities SET body=? WHERE kind=? AND id=?').run(canonical(value),kind,id);

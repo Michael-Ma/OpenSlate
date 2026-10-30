@@ -17,7 +17,7 @@ export function viggleObservations(reader: ViggleAuthorityStore, attempt: Attemp
 /** All retained facts are historical; incomplete pre-submit/unknown/accepted history remains exportable. */
 export function assertViggleRecords(reader: ViggleAuthorityStore, attemptId: string): void {
   const attempt = reader.get<Attempt>("attempt", attemptId);
-  invariant(attempt?.id === attemptId && attempt.request.execution?.adapter === "viggle-h3" && attempt.request.execution.version === "1", "VIGGLE_H3_EXECUTION_CONFLICT", "Invalid Viggle attempt");
+  invariant(attempt?.id === attemptId && attempt.request.execution.adapter === "viggle-h3" && attempt.request.execution.version === "1", "VIGGLE_H3_EXECUTION_CONFLICT", "Invalid Viggle attempt");
   const mapping = viggleRecord<ViggleH3ExecutionMapping>(reader, "viggle_h3_execution_mapping", attemptId, attempt.projectId);
   const dispatch = viggleRecord<ViggleH3ExecutionDispatch>(reader, "viggle_h3_execution_dispatch", attemptId, attempt.projectId);
   const submit = viggleRecord<ViggleH3ExecutionSubmit>(reader, "viggle_h3_execution_submit", attemptId, attempt.projectId);
@@ -38,7 +38,7 @@ export function assertViggleRecords(reader: ViggleAuthorityStore, attemptId: str
 
 /** Caller may overlay get() with verified filesystem spool/slot manifests before SQL repair. */
 export function assertViggleSpoolLineage(reader: ViggleAuthorityStore, attempt: Readonly<Attempt>, spoolId: string): void {
-  if (attempt.request.execution?.adapter !== "viggle-h3") return;
+  if (attempt.request.execution.adapter !== "viggle-h3") return;
   invariant(attempt.request.execution.version === "1", "VIGGLE_H3_EXECUTION_CONFLICT", "Unsupported Viggle execution version");
   const mapping = reader.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id);
   const dispatch = reader.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id);

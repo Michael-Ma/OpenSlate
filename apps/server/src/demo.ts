@@ -122,7 +122,7 @@ export async function runDemo(directory = mkdtempSync(join(tmpdir(), "openslate-
   let service = new ProductionService(store, engine);
   try {
     const project = seedFixture(service, destination); const projectId = project.id;
-    const human = service.beginRequest(projectId, "simulated-demo-human", "Approve this fake two-shot plan and its initial image/video allowance.");
+    const human = service.beginRequest(projectId, "simulated-demo-human", "Approve this fake two-shot plan and its initial image/video generation.");
     service.authorize(projectId, human, project.shots.flatMap(shot => [{ scopeId: shot.id, kind: "image" as const }, { scopeId: shot.id, kind: "video" as const }]), "initial-fake-slots", "initial_slot");
     const director = service.openEpoch(projectId, human).actor;
     const prepared = await service.prepare(projectId, director, { variant: "plan", expectedHeadVersion: project.headVersion, source: sourceFor(project) });
@@ -214,7 +214,7 @@ export async function runDemo(directory = mkdtempSync(join(tmpdir(), "openslate-
       mode: "fake", label: "FAKE integration demo: placeholder media, simulated human decisions, no model or network calls. The preview is a one-second fixture, not the planned commercial.",
       directory: destination, projectId, plannedDurationSeconds: 12, videoFixtureDurationSeconds: 1, networkCalls: 0,
       fakeAcceptances: { initial: 4, afterEditAndRestart: provider.acceptedCount(), duplicateAttempts },
-      fakeCommittedMicros: engine.budget(projectId).committedMicros, changedShotId,
+      fakeCommittedMicros: engine.committedMicros(projectId), changedShotId,
       preserved: { shotId: current.shots[1]!.id, candidateId: kept.candidateId!, artifactId: kept.outputs.video!.artifactId, sha256: kept.outputs.video!.sha256 },
       recoveredAttemptId, artifacts, previousKeyframePath, previewPath: preview.path, summaryPath: join(destination, "demo-summary.json"),
     };

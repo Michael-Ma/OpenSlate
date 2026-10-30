@@ -7,7 +7,7 @@ import { ProductionService } from "../dist/application/service.js";
 import { Store } from "../dist/persistence/index.js";
 import { Engine } from "../dist/execution/index.js";
 import { FakeProvider } from "../../../packages/providers/dist/index.js";
-import { compilePlan, DEFAULT_PROFILES } from "../../../packages/core/dist/index.js";
+import { RECIPE_DIGEST, compilePlan, DEFAULT_PROFILES } from "../../../packages/core/dist/index.js";
 import { setup, refreshIntent, sourceFor, elapseUnknownBackoff } from "./execution-fixture.mjs";
 
 async function images(f) { assert.equal((await f.engine.runReady()).dispatched, 2); await f.engine.reconcile(); }
@@ -34,7 +34,7 @@ test("owned scoped holds and user pauses compose without stopping accepted-job m
 test("lost submission acknowledgment is charged after restart and never automatically resubmitted", async t => {
   const f = setup(t, { count: 1, imagesOnly: true }); const image = f.plan.nodes.find(node => node.kind === "image");
   f.provider.setMode(image.id, "unknown_after_accept"); await f.engine.runReady();
-  assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+  assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); assert.equal(f.engine.committedMicros(f.projectId), "100");
   await f.engine.runReady(); assert.equal(f.provider.acceptedCount(), 1);
   f.store.close(); f.provider.close();
   const store = new Store(f.dbPath); const provider = new FakeProvider(f.providerPath); const engine = new Engine(store, provider, { artifactDir: f.artifactDir });
@@ -57,7 +57,7 @@ test("trusted technical failure retries the same candidate under a new attempt o
   f.provider.setMode(image.id, ["technical_failure", "complete"]);
   await f.engine.runReady(); await f.engine.reconcile(); await f.engine.runReady(); await f.engine.reconcile();
   const attempts = f.engine.attempts(f.projectId); assert.equal(attempts.length, 2); assert.equal(attempts[0].candidateId, attempts[1].candidateId);
-  assert.deepEqual(attempts.map(attempt => attempt.ordinal), [1, 2]); assert.equal(attempts[1].phase, "succeeded"); assert.equal(f.engine.budget(f.projectId).committedMicros, "200");
+  assert.deepEqual(attempts.map(attempt => attempt.ordinal), [1, 2]); assert.equal(attempts[1].phase, "succeeded"); assert.equal(f.engine.committedMicros(f.projectId), "200");
   await f.engine.runReady(); assert.equal(f.provider.acceptedCount(), 2);
 });
 test("a scoped replacement preserves the other branch and rejects old review while retaining old artifacts", async t => {
@@ -87,7 +87,7 @@ test("a recreated logical node cannot consume a previously used grant", t => {
 });
 test("live measured cue readiness is rechecked even after keyframe approval", async t => {
   const f = setup(t, { count: 1 }); const project = f.store.getProject(f.projectId); const cue = { id: "cue", meaning: "Boot", durationFrames: 180, placementFrames: 0, audio: { artifactId: "audio", sha256: "a".repeat(64), kind: "audio" }, accepted: true, measured: true };
-  project.cues = [cue]; project.shots[0].cueId = cue.id; refreshIntent(project.shots[0], cue); project.revisionId = randomUUID();
+  project.cues = [cue]; project.shots[0].cueId = cue.id; project.shots[0].narration = { mode: "uploaded", text: "Boot", voice: "stock" }; refreshIntent(project.shots[0], cue); project.revisionId = randomUUID();
   const plan = f.compile(project); const video = plan.nodes.find(node => node.kind === "video"); const grant = f.engine.createGrant(f.projectId, "shot-0", "video", "human-cue"); const planId = randomUUID();
   f.store.transaction(() => { f.engine.installPlan(f.projectId, planId, plan, { [video.id]: grant.id }); f.store.saveProject({ ...project, activePlanId: planId }, project.headVersion); });
   await f.engine.runReady(); await f.engine.reconcile(); const snapshot = f.engine.reviewSnapshot(f.projectId); f.engine.approve(f.projectId, snapshot.id, [video.id], "human");
@@ -112,29 +112,29 @@ test("late stale-lease evidence is retained and cannot overwrite the active fenc
     assert.equal(provider.acceptedCount(), 1); assert.equal(second.list("execution_evidence", f.projectId).length, 3); assert.equal(engine.outputs(f.projectId).length, 1);
   } finally { second.close(); provider.close(); }
 });
-test("two real worker connections admit each covered submission once while an old project cap does not block them", async t => {
-  const f = setup(t, { imagesOnly: true, budgetMicros: "100" }); const shared = new SharedArrayBuffer(4);
+test("two real worker connections admit each covered submission once without a project spending cap", async t => {
+  const f = setup(t, { imagesOnly: true }); const shared = new SharedArrayBuffer(4);
   const modulePaths = { store: new URL("../dist/persistence/index.js", import.meta.url).href, engine: new URL("../dist/execution/index.js", import.meta.url).href, provider: new URL("../../../packages/providers/dist/index.js", import.meta.url).href };
-  const workers = [0, 1].map(() => new Worker(`const {parentPort,workerData}=require('node:worker_threads'); (async()=>{const {Store}=await import(workerData.modules.store);const {Engine}=await import(workerData.modules.engine);const {FakeProvider}=await import(workerData.modules.provider);const store=new Store(workerData.dbPath);const provider=new FakeProvider(workerData.providerPath);const engine=new Engine(store,provider,{artifactDir:workerData.artifactDir,budgetMicros:'100'});parentPort.postMessage('ready');Atomics.wait(new Int32Array(workerData.shared),0,0);try {parentPort.postMessage(await engine.runReady());}finally{store.close();provider.close();}})().catch(error=>{throw error;});`, { eval: true, workerData: { modules: modulePaths, shared, dbPath: f.dbPath, providerPath: f.providerPath, artifactDir: f.artifactDir } }));
+  const workers = [0, 1].map(() => new Worker(`const {parentPort,workerData}=require('node:worker_threads'); (async()=>{const {Store}=await import(workerData.modules.store);const {Engine}=await import(workerData.modules.engine);const {FakeProvider}=await import(workerData.modules.provider);const store=new Store(workerData.dbPath);const provider=new FakeProvider(workerData.providerPath);const engine=new Engine(store,provider,{artifactDir:workerData.artifactDir});parentPort.postMessage('ready');Atomics.wait(new Int32Array(workerData.shared),0,0);try {parentPort.postMessage(await engine.runReady());}finally{store.close();provider.close();}})().catch(error=>{throw error;});`, { eval: true, workerData: { modules: modulePaths, shared, dbPath: f.dbPath, providerPath: f.providerPath, artifactDir: f.artifactDir } }));
   const ready = workers.map(worker => new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); }));
   await Promise.all(ready); const results = workers.map(worker => new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); }));
   Atomics.store(new Int32Array(shared), 0, 1); Atomics.notify(new Int32Array(shared), 0, 2);
   const completed = await Promise.all(results); await Promise.all(workers.map(worker => worker.terminate()));
-  assert.equal(completed.reduce((sum, result) => sum + result.dispatched, 0), 2); assert.equal(f.provider.acceptedCount(), 2); assert.equal(f.engine.budget(f.projectId).committedMicros, "200");
+  assert.equal(completed.reduce((sum, result) => sum + result.dispatched, 0), 2); assert.equal(f.provider.acceptedCount(), 2); assert.equal(f.engine.committedMicros(f.projectId), "200");
   assert.equal(f.engine.attempts(f.projectId).length, 2);
   for (const attempt of f.engine.attempts(f.projectId)) assert.equal(f.provider.acceptedCount(attempt.id), 1);
 });
 
 test("uncertain pre-send failure never guesses rejection or frees its liability", async t => {
-  const f = setup(t, { count: 1, imagesOnly: true, budgetMicros: "100" });
+  const f = setup(t, { count: 1, imagesOnly: true });
   f.provider.submit = async () => { throw Error("connection lost before any trustworthy acceptance evidence"); };
   // This adapter has no dispatch evidence and cannot prove either acceptance or rejection.
   f.provider.lookup = async () => ({ type: "unknown", diagnostic: "No trustworthy local evidence" });
   await f.engine.runReady(); await f.engine.reconcile(); await f.engine.runReady();
   assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.engine.attempts(f.projectId).length, 1);
-  assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+  assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); assert.equal(f.engine.committedMicros(f.projectId), "100");
   const other = new Store(f.dbPath); const restarted = new Engine(other, f.provider, { artifactDir: f.artifactDir });
-  try { assert.equal(restarted.budget(f.projectId).capMicros, "100"); } finally { other.close(); }
+  try { assert.equal(restarted.committedMicros(f.projectId), "100"); } finally { other.close(); }
 });
 
 test("late completion from a replaced candidate is historical and cannot select itself", async t => {
@@ -172,21 +172,30 @@ test("a Stop-fenced candidate cannot start its first attempt after Continue", as
   assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.engine.attempts(f.projectId).length, 0);
 });
 
+for (const recipeDigest of [undefined, "unsupported-recipe"]) test(`saved capability lock rejects ${recipeDigest === undefined ? 'missing' : 'unsupported'} workflow recipe before dispatch`, async t => {
+  const f = setup(t, { count: 1, imagesOnly: true }), project = f.store.getProject(f.projectId);
+  f.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES, ...(recipeDigest === undefined ? {} : { recipeDigest }) });
+  const result = await f.engine.runReady();
+  assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, "CAPABILITY_LOCK_UNSUPPORTED");
+  assert.equal(f.engine.attempts(project.id).length, 0); assert.equal(f.store.list("reservation", project.id).length, 0);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
 test("restart uses immutable lock prices and profiles instead of changed constructor defaults", async t => {
   const f = setup(t, { count: 1, imagesOnly: true }); const project = f.store.getProject(f.projectId);
-  f.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES });
+  f.store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: DEFAULT_PROFILES });
   const changed = DEFAULT_PROFILES.map(profile => ({ ...profile, revision: "unsupported-new-default", unitCostMicros: "999999", maxConcurrency: 0 }));
   const store = new Store(f.dbPath); const provider = new FakeProvider(f.providerPath); const engine = new Engine(store, provider, { artifactDir: f.artifactDir, profiles: changed });
   try {
     assert.equal((await engine.runReady()).dispatched, 1); await engine.reconcile();
-    assert.equal(engine.attempts(project.id)[0].request.args.profileRevision, "1"); assert.equal(engine.budget(project.id).committedMicros, "100");
+    assert.equal(engine.attempts(project.id)[0].request.args.profileRevision, "1"); assert.equal(engine.committedMicros(project.id), "100");
     assert.equal(store.list("reservation", project.id)[0].micros, "100");
   } finally { store.close(); provider.close(); }
 });
 
 test("changed pinned profile revision blocks the old compiled node without falling back to defaults", async t => {
   const f = setup(t, { count: 1, imagesOnly: true }); const project = f.store.getProject(f.projectId);
-  f.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES.map(profile => ({ ...profile, revision: "2" })) });
+  f.store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: DEFAULT_PROFILES.map(profile => ({ ...profile, revision: "2" })) });
   const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, "PROFILE_INCOMPATIBLE"); assert.equal(f.provider.acceptedCount(), 0);
 });
 
@@ -207,9 +216,11 @@ test("identical finalized local inputs rebind cached derivatives after an explic
   assert.equal(f.provider.acceptedCount(), 3); assert.equal(f.store.readEvents(f.projectId).filter(event => event.kind === "execution.output_reused").length, 2);
 });
 
-test("an application narrated lock blocks video without a cue despite exact keyframe approval", async t => {
+test("video blocks undecided narration despite exact keyframe approval", async t => {
   const f = setup(t, { count: 1 }); const project = f.store.getProject(f.projectId);
-  f.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES, recipeDigest: "narrated-video-fixture" });
+  project.shots[0].narration = { mode: "undecided", text: "", voice: "stock" };
+  f.store.saveProject(project, project.headVersion);
+  f.store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: DEFAULT_PROFILES });
   await f.engine.runReady(); await f.engine.reconcile();
   const snapshot = f.engine.reviewSnapshot(f.projectId); assert.equal(snapshot.members[0].ready, true);
   f.engine.approve(f.projectId, snapshot.id, [snapshot.members[0].videoNodeId], "human-review");
@@ -221,7 +232,7 @@ test('application video accepts explicit no narration from planned frames after 
   const f = setup(t, { count: 1 }), project = f.store.getProject(f.projectId);
   project.shots[0].narration = { mode: 'none', text: '', voice: 'stock' };
   f.store.saveProject(project, project.headVersion);
-  f.store.insert('capability_lock', project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES, recipeDigest: 'narrated-video-fixture' });
+  f.store.insert('capability_lock', project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: DEFAULT_PROFILES });
   assert.equal((await f.engine.runReady()).dispatched, 1); await f.engine.reconcile();
   assert.equal((await f.engine.runReady()).blocked[0].code, 'HUMAN_REVIEW_REQUIRED');
   const snapshot = f.engine.reviewSnapshot(f.projectId); f.engine.approve(f.projectId, snapshot.id, [snapshot.members[0].videoNodeId], 'review-silent-shot');
@@ -238,7 +249,7 @@ test('provider duration rounds up a fractional planned silent shot while preserv
   const plan = compilePlan(source, { project, profiles: DEFAULT_PROFILES, logicalIds: f.logicalIds, allocateId: randomUUID }), planId = randomUUID(), video = plan.nodes.find(x => x.kind === 'video');
   const grant = f.engine.createGrant(f.projectId, shot.id, 'video', 'human-roundup');
   f.store.transaction(() => { f.engine.installPlan(f.projectId, planId, plan, { [video.id]: grant.id }); f.store.saveProject({ ...project, activePlanId: planId }, project.headVersion); });
-  f.store.insert('capability_lock', project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES, recipeDigest: 'narrated-video-fixture' });
+  f.store.insert('capability_lock', project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: DEFAULT_PROFILES });
   await f.engine.runReady(); await f.engine.reconcile();
   const review = f.engine.reviewSnapshot(f.projectId); f.engine.approve(f.projectId, review.id, [video.id], 'human-review-roundup');
   assert.equal((await f.engine.runReady()).dispatched, 1);
@@ -248,9 +259,9 @@ test('provider duration rounds up a fractional planned silent shot while preserv
 
 test("narrated dispatch requires measured cue, shot and requested video durations to agree", async t => {
   const f = setup(t, { count: 1 }); const project = f.store.getProject(f.projectId);
-  f.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES, recipeDigest: "narrated-video-fixture" });
+  f.store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: DEFAULT_PROFILES });
   const cue = { id: "cue-duration", meaning: "Boot", durationFrames: 180, placementFrames: 0, audio: { artifactId: "audio", sha256: "a".repeat(64), kind: "audio" }, accepted: true, measured: true };
-  project.cues = [cue]; project.shots[0].cueId = cue.id; project.shots[0].desiredFrames = 150; refreshIntent(project.shots[0], cue); project.revisionId = randomUUID();
+  project.cues = [cue]; project.shots[0].cueId = cue.id; project.shots[0].narration = { mode: "uploaded", text: "Boot", voice: "stock" }; project.shots[0].desiredFrames = 150; refreshIntent(project.shots[0], cue); project.revisionId = randomUUID();
   const plan = f.compile(project); const video = plan.nodes.find(node => node.kind === "video");
   const grant = f.engine.createGrant(f.projectId, "shot-0", "video", "human-timing"); const planId = randomUUID();
   f.store.transaction(() => { f.engine.installPlan(f.projectId, planId, plan, { [video.id]: grant.id }); f.store.saveProject({ ...project, activePlanId: planId }, project.headVersion); });

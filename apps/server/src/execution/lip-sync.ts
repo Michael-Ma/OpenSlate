@@ -87,12 +87,12 @@ export function lipSyncTransition(state: LipSyncState, outcome: ExecutionOutcome
       // Spooled (version 2) completions belong to the ingestion router, not this seam yet.
       if ("version" in outcome) return { phase: "unknown", taskId: outcome.vendorTaskId ?? known, diagnostic: "Spooled lip-sync output is not supported by this seam" };
       return { phase: "completed", taskId: outcome.taskId, outputs: outcome.outputs };
-    case "rejected": return { phase: "failed", taskId: null, failureId: outcome.failureId, charged: "no", retryAllowed: outcome.retryAllowed ?? outcome.technical };
+    case "rejected": return { phase: "failed", taskId: null, failureId: outcome.failureId, charged: "no", retryAllowed: outcome.retryAllowed };
     case "failed": {
       const taskId = outcome.taskId ?? known;
       // Accepted work that fails is charged unless the provider documents refunds; a lost submission is spent.
       const charged: Charged = taskId === null ? "unknown" : adapter.refundsFailedJobs ? "no" : "unknown";
-      return { phase: "failed", taskId, failureId: outcome.failureId, charged, retryAllowed: outcome.retryAllowed ?? false };
+      return { phase: "failed", taskId, failureId: outcome.failureId, charged, retryAllowed: outcome.retryAllowed };
     }
     case "unknown": return { phase: "unknown", taskId: outcome.taskId ?? known, diagnostic: outcome.diagnostic };
   }

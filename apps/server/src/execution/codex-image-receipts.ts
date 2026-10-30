@@ -1,4 +1,4 @@
-import { configuredProviderUse, providerAdmissionRequest, allowanceMappingMatches } from "./provider-use.js";
+import { providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, invariant, providerProfileArguments } from '@openslate/core';
 import type { NativeDiagnostic,ProviderProfile } from '@openslate/core';
 import { safeNativeDiagnostic } from '../application/native-diagnostics.js';
@@ -11,7 +11,7 @@ import type { OutputReceipt } from './output-store.js';
 interface Identity { id:string;projectId:string;version:1;attemptId:string;requestDigest:string }
 export interface CodexImageExecutionMapping extends Identity {
   profileDigest:string;profileDefinitionDigest:string;profileDefinition:ProviderProfile;capabilityLockId:string;capabilityLockDigest:string;
-  allowanceId:string|null;allowanceDigest:string|null;consumptionDigest:string|null;estimatedMicros:'0';
+  estimatedMicros:'0';
   transport:CodexImageDescription;native:CodexImagePrepared;references:Array<{artifactId:string;artifactDigest:string}>;
 }
 export interface CodexImageExecutionDispatch extends Identity { mappingDigest:string;threadId:string;turnInputDigest:string;createdAt:string }
@@ -66,16 +66,16 @@ export function assertCodexImageExecutionProfile(profile:ProviderProfile,attempt
     && canonical(saved.configuration)===canonical(profile.configuration) && profile.adapter==='codex-image' && profile.executionVersion==='1'
     && profile.kind==='image' && profile.unitCostMicros==='0' && profile.maxConcurrency===1 && profile.maxRetries===0
     && Object.entries(args).every(([key,value])=>canonical(attempt.request.args[key])===canonical(value)),
-  'CODEX_IMAGE_EXECUTION_CONFLICT','Codex image requires the consumed full profile definition');
+  'CODEX_IMAGE_EXECUTION_CONFLICT','Codex image requires the admitted full profile definition');
 }
 export function assertCodexImageExecutionMapping(attempt:Attempt,mapping:CodexImageExecutionMapping):void {
-  base(attempt,mapping,['profileDigest','profileDefinitionDigest','profileDefinition','capabilityLockId','capabilityLockDigest','allowanceId','allowanceDigest','consumptionDigest','estimatedMicros','transport','native','references']);
+  base(attempt,mapping,['profileDigest','profileDefinitionDigest','profileDefinition','capabilityLockId','capabilityLockDigest','estimatedMicros','transport','native','references']);
   assertCodexImageExecutionProfile(mapping.profileDefinition,attempt); assertCodexImageOperationOptions(mapping.profileDefinition,attempt.request.args);
   codexFields(mapping.native,['runtime','session']); codexFields(mapping.native.runtime,['version','runtimeVersion','runtimeDigest','configurationDigest','model','authMode']);
   codexFields(mapping.native.session,['threadId','turnInputDigest']);
   const runtime=mapping.native.runtime, transport=mapping.transport;
   invariant(mapping.profileDigest===attempt.request.profile!.digest && mapping.profileDefinitionDigest===digest(mapping.profileDefinition)
-    && codexId(mapping.capabilityLockId) && codexHash(mapping.capabilityLockDigest) && allowanceMappingMatches(attempt.request,mapping) && mapping.estimatedMicros==='0'
+    && codexId(mapping.capabilityLockId) && codexHash(mapping.capabilityLockDigest) && mapping.estimatedMicros==='0'
     && runtime.version===1 && runtime.runtimeVersion==='0.153.4' && runtime.model==='gpt-6-astra' && runtime.authMode==='chatgpt'
     && codexHash(runtime.runtimeDigest) && codexHash(runtime.configurationDigest) && codexId(mapping.native.session.threadId)
     && Array.isArray(transport.images) && canonical(transport)===canonical(describeCodexImageInput({attemptId:attempt.id,requestDigest:digest(attempt.request),

@@ -95,7 +95,7 @@ test('router captures inputs and forwards the original signal; unsupported inlin
     output: { kind: 'image', port: 'image', fixture: false, sha256: 'a'.repeat(64), storage: { type: 'spool', spoolId: 'b'.repeat(64) } } };
   const pending = router.ingest(input); input.output.sha256 = 'c'.repeat(64); handlers.image = { ingest() { throw Error('mutated route'); } };
   assert.equal((await pending).sentinel, 'a'.repeat(64)); assert.equal(received.signal, signal.signal);
-  const raw = fixtureOutputs({ kind: 'image', args: {}, inputs: [], fingerprint: 'x', nodeId: 'x', attemptId: 'x' })[0];
+  const raw = fixtureOutputs({ kind: 'image', args: {}, inputs: [], fingerprint: 'x', nodeId: 'x', attemptId: 'x', execution: { adapter: 'fake', version: '1' } })[0];
   assert.throws(() => router.ingest({ ...input, output: { ...raw, fixture: false } }), { code: 'OUTPUT_INGESTION_UNSUPPORTED' });
   signal.abort(); assert.throws(() => router.ingest(input), { code: 'OUTPUT_STORE_CANCELLED' });
   assert.throws(() => new ExecutionIngestionRouter({ data: handlers.image }), { code: 'OUTPUT_INGESTION_CONFIGURATION' });

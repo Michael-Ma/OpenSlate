@@ -1,12 +1,10 @@
-import { configuredProviderUse, configuredProfileMatches, providerAdmissionRequest } from "./provider-use.js";
+import { configuredProfileMatches, providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, effectiveNodeDigest, invariant, shotIntentDigest } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import type { ExecutionCallOptions, ExecutionRequest } from "@openslate/providers";
 import type { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import type { ArtifactRecord, Attempt, Candidate, Grant, NodeBinding } from "./engine.js";
-import { assertExternalAllowance, assertExternalAllowanceConsumption } from "./external-allowance-records.js";
-import type { AllowanceHumanRequest, ExternalAllowance, ExternalAllowanceConsumption } from "./external-allowance-records.js";
 import { assertCodexImageExecutionProfile, assertCodexImageExecutionMapping } from "./codex-image-receipts.js";
 import { assertCharacterSheetSelection, isCharacterSheetBinding } from "./character-sheet-execution.js";
 import type { CodexImageExecutionMapping } from "./codex-image-receipts.js";
@@ -15,30 +13,25 @@ export interface CodexImageCapabilityLock { id: string; projectId: string; profi
 export interface CodexImageReservation { id: string; projectId: string; attemptId: string; micros: string; state: string }
 export interface CodexImageAdmission {
   attempt: Attempt; candidate: Candidate; grant: Grant; reservation: CodexImageReservation;
-  allowance: ExternalAllowance | null; consumption: ExternalAllowanceConsumption | null; allowanceRequest: AllowanceHumanRequest | null;
   profile: ProviderProfile; capabilityLock: CodexImageCapabilityLock; references?: ArtifactRecord[];
 }
 export type CodexImageProfilePin = Pick<CodexImageExecutionMapping, "capabilityLockId" | "capabilityLockDigest" | "profileDefinition">;
 export type CodexImageAuthorityStore = Pick<Store, "get" | "getProject" | "db">;
-export const CODEX_IMAGE_PROFILE_LOOKUP_LIMITS = Object.freeze({ locks: 128, lockBytes: 65536, profiles: 64 });
+export const CODEX_IMAGE_PROFILE_LOOKUP_LIMITS = Object.freeze({ lockBytes: 65536, profiles: 64 });
 const fail = (condition: unknown, message: string): void => invariant(condition, "CODEX_IMAGE_EXECUTION_CONFLICT", message);
 
-/** Historical proof only: neither current selection nor current allowance availability is reinterpreted here. */
+/** Retained admission proof; current selection is checked separately before first submit. */
 export function assertCodexImageAdmission(value: CodexImageAdmission): void {
-  const { attempt, candidate, grant, reservation, allowance, consumption, allowanceRequest, profile, capabilityLock } = value;
+  const { attempt, candidate, grant, reservation, profile, capabilityLock } = value;
   fail(attempt && attempt.id === attempt.request.attemptId && attempt.nodeId === attempt.request.nodeId && attempt.fingerprint === attempt.request.fingerprint
     && attempt.request.kind === "image" && attempt.request.execution?.adapter === "codex-image" && attempt.request.execution.version === "1"
     && attempt.taskId === null && candidate?.id === attempt.candidateId && candidate.projectId === attempt.projectId && candidate.nodeId === attempt.nodeId
     && grant?.id === candidate.grantId && grant.projectId === attempt.projectId && grant.kind === "image" && grant.origin === candidate.origin
     && reservation?.id === attempt.reservationId && reservation.projectId === attempt.projectId && reservation.attemptId === attempt.id
     && ["reserved", "charged", "released"].includes(reservation.state), "CodexImage requires its exact admitted candidate, grant and reservation");
-  if (configuredProviderUse(attempt.request)) fail(allowance === null && consumption === null && allowanceRequest === null
-    && configuredProfileMatches(attempt.request, profile, capabilityLock.id, digest(capabilityLock)), "Configured provider proof differs from its exact original profile lock");
-  else { assertExternalAllowance(allowance!, allowanceRequest!); assertExternalAllowanceConsumption(consumption!, allowance!, attempt, reservation); }
+  fail(configuredProfileMatches(attempt.request, profile, capabilityLock.id, digest(capabilityLock)), "Configured provider proof differs from its exact original profile lock");
   assertCodexImageExecutionProfile(profile, attempt);
-  fail((configuredProviderUse(attempt.request) || digest(profile) === consumption!.profileDefinitionDigest && digest(profile) === allowance!.profileDefinitionDigest
-    && profile.unitCostMicros === consumption!.estimatedMicros) && profile.unitCostMicros === reservation.micros,
-  "CodexImage profile estimate differs from its consumed allowance and reservation");
+  fail(profile.unitCostMicros === reservation.micros, "CodexImage profile estimate differs from its reservation");
   fail(capabilityLock?.projectId === attempt.projectId && typeof capabilityLock.id === "string"
     && Array.isArray(capabilityLock.profiles) && capabilityLock.profiles.length > 0 && capabilityLock.profiles.length <= CODEX_IMAGE_PROFILE_LOOKUP_LIMITS.profiles
     && Buffer.byteLength(canonical(capabilityLock)) <= CODEX_IMAGE_PROFILE_LOOKUP_LIMITS.lockBytes
@@ -47,14 +40,13 @@ export function assertCodexImageAdmission(value: CodexImageAdmission): void {
 export function assertCodexImageMappingAdmission(admission: CodexImageAdmission, mapping: CodexImageExecutionMapping): void {
   assertCodexImageAdmission(admission); assertCodexImageExecutionMapping(admission.attempt, mapping);
   fail(mapping.capabilityLockId === admission.capabilityLock.id && mapping.capabilityLockDigest === digest(admission.capabilityLock)
-    && canonical(mapping.profileDefinition) === canonical(admission.profile) && mapping.allowanceId === (admission.allowance?.id ?? null)
-    && mapping.allowanceDigest === (admission.allowance ? (admission.allowance ? digest(admission.allowance) : null) : null) && mapping.consumptionDigest === (admission.consumption ? (admission.consumption ? digest(admission.consumption) : null) : null)
+    && canonical(mapping.profileDefinition) === canonical(admission.profile)
     && mapping.estimatedMicros === admission.reservation.micros, "CodexImage mapping lost its exact retained admission evidence");
   fail(admission.references && canonical(mapping.references) === canonical(admission.references.map(ref => ({artifactId:ref.id,artifactDigest:digest(ref)})))
     && canonical(mapping.transport.images) === canonical(admission.references.map(ref => ({artifactId:ref.id,sha256:ref.artifact.sha256,byteLength:ref.byteLength}))), "Native mapping lost its exact owned references");
 }
 
-/** Resolve by recorded full-definition digest. The initial bounded scan proves a match, not which lock originated admission. */
+/** Resolve the exact original lock and full profile definition recorded at admission. */
 export function resolveCodexImageAdmission(store: CodexImageAuthorityStore, input: Readonly<ExecutionRequest>, pinned?: CodexImageProfilePin & Partial<Pick<CodexImageExecutionMapping, "references">>): CodexImageAdmission {
   const request = structuredClone(input), attempt = store.get<Attempt>("attempt", request.attemptId);
   fail(attempt && canonical(attempt.request) === canonical(request) && attempt.candidateId && attempt.reservationId,
@@ -62,11 +54,7 @@ export function resolveCodexImageAdmission(store: CodexImageAuthorityStore, inpu
   const current = attempt!;
   const candidate = store.get<Candidate>("candidate", current.candidateId!), grant = candidate ? store.get<Grant>("grant", candidate.grantId) : undefined;
   const reservation = store.get<CodexImageReservation>("reservation", current.reservationId!);
-  const allowance = store.get<ExternalAllowance>("external_allowance", request.externalAllowanceId ?? "");
-  const consumption = store.get<ExternalAllowanceConsumption>("external_allowance_consumption", current.id);
-  const allowanceRequest = allowance ? store.get<AllowanceHumanRequest>("message", allowance.requestId) : undefined;
-  fail(providerAdmissionRequest(request) && candidate && grant && reservation
-    && (configuredProviderUse(request) ? !allowance && !consumption && !allowanceRequest : allowance && consumption && allowanceRequest), "Dispatch requires its exact candidate, grant and recorded provider-use evidence");
+  fail(providerAdmissionRequest(request) && candidate && grant && reservation, "Dispatch requires its exact candidate, grant and recorded provider-use evidence");
   const lockAt = (id: string): CodexImageCapabilityLock | undefined => {
     const meta = store.db.prepare("SELECT project_id, length(CAST(body AS BLOB)) bytes FROM entities WHERE kind='capability_lock' AND id=?").get(id) as { project_id: string; bytes: number } | undefined;
     if (!meta) return undefined;
@@ -76,24 +64,17 @@ export function resolveCodexImageAdmission(store: CodexImageAuthorityStore, inpu
       && lock.profiles.length <= CODEX_IMAGE_PROFILE_LOOKUP_LIMITS.profiles, "Invalid retained profile lock"); return lock;
   };
   const matching = (lock: CodexImageCapabilityLock | undefined): ProviderProfile | undefined => lock?.profiles.find(profile => profile
-    && profile.id === request.profile?.id && profile.revision === request.profile?.revision && digest(profile) === (request.providerUse?.profileDefinitionDigest ?? consumption!.profileDefinitionDigest));
+    && profile.id === request.profile?.id && profile.revision === request.profile?.revision && digest(profile) === request.providerUse!.profileDefinitionDigest);
   let capabilityLock: CodexImageCapabilityLock | undefined, profile: ProviderProfile | undefined;
   if (pinned) {
     capabilityLock = lockAt(pinned.capabilityLockId); profile = matching(capabilityLock);
     fail(capabilityLock && digest(capabilityLock) === pinned.capabilityLockDigest && profile && canonical(profile) === canonical(pinned.profileDefinition),
       "Pinned Codex image profile evidence is missing or changed");
   } else {
-    capabilityLock = lockAt(request.providerUse?.capabilityLockId ?? store.getProject(current.projectId).capabilityLockId); profile = matching(capabilityLock);
-    if (!profile) {
-      const rows = store.db.prepare("SELECT id FROM entities WHERE kind='capability_lock' AND project_id=? ORDER BY id LIMIT ?")
-        .all(current.projectId, CODEX_IMAGE_PROFILE_LOOKUP_LIMITS.locks + 1) as { id: string }[];
-      invariant(rows.length <= CODEX_IMAGE_PROFILE_LOOKUP_LIMITS.locks, "CODEX_IMAGE_PROFILE_LOOKUP_LIMIT", "Historical profile lookup exceeds its fixed bound");
-      for (const row of rows) { const lock = lockAt(row.id), found = matching(lock); if (found) { capabilityLock = lock; profile = found; break; } }
-    }
-    fail(profile, "The consumed Codex image profile definition has no retained matching lock");
+    capabilityLock = lockAt(request.providerUse!.capabilityLockId); profile = matching(capabilityLock);
+    fail(profile, "The admitted Codex image profile definition has no retained matching lock");
   }
-  const result = { attempt: current, candidate: candidate!, grant: grant!, reservation: reservation!, allowance: allowance ?? null, consumption: consumption ?? null,
-    allowanceRequest: allowanceRequest ?? null, profile: profile!, capabilityLock: capabilityLock! };
+  const result = { attempt: current, candidate: candidate!, grant: grant!, reservation: reservation!, profile: profile!, capabilityLock: capabilityLock! };
   const admission: CodexImageAdmission = result;
   if (pinned?.references) { admission.references = resolveCodexImageReferences(store, current); fail(canonical(pinned.references) === canonical(admission.references.map(ref => ({artifactId:ref.id,artifactDigest:digest(ref)}))), "Native mapping reference evidence changed"); }
   assertCodexImageAdmission(admission); return structuredClone(admission);

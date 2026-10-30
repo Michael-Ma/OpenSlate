@@ -60,13 +60,13 @@ function hex(seed: string): string {
   return out;
 }
 
-const COUNTS: RecoveryCounts = { projects: 1, knownJobs: 2, unknownJobs: 1, nativeRequests: 1, unusedAllowances: 0, preparingJobs: 1 };
+const COUNTS: RecoveryCounts = { projects: 1, knownJobs: 2, unknownJobs: 1, nativeRequests: 1, preparingJobs: 1 };
 
 /** Make the sample studio look restored (or not); tests call it directly, the page through the `?recovery=` preset. */
 export function setFixtureRecovery(world: FixtureWorld, preset: Preset | null): RecoveryFixture {
   const fixture: RecoveryFixture = {
     state: preset === null ? "ordinary" : preset === "released" ? "released" : "quarantined",
-    counts: preset === null ? { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, unusedAllowances: 0, preparingJobs: 0 } : { ...COUNTS },
+    counts: preset === null ? { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, preparingJobs: 0 } : { ...COUNTS },
     release: null,
     dropsFirstRelease: preset === "lost-reply",
     changesOnce: preset === "stale",
