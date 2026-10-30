@@ -124,6 +124,30 @@ test('code turn pins only code-plan instructions and source, skips fresh graph u
   assert.equal(JSON.parse(b.input.context).film.source, example);
 });
 
+test('each turn carries the recent conversation, so a short reply answers what the Director offered', t => {
+  const f = fixture(t), first = f.turn('Make a film about Tofu');
+  assert.deepEqual(JSON.parse(first.input.context).conversation, [], 'the first turn has nothing earlier');
+  const outputId = 'answer-1';
+  f.store.insert('director_output', outputId, f.project.id, { id: outputId, projectId: f.project.id, requestId: first.input.requestId, turnId: first.turn.id, phase: 'final', text: 'The clip failed. Retry or skip?' });
+  const second = f.turn('yes, retry');
+  assert.equal(second.input.text, 'yes, retry');
+  assert.deepEqual(JSON.parse(second.input.context).conversation, [{ role: 'person', text: 'Make a film about Tofu' }, { role: 'director', text: 'The clip failed. Retry or skip?' }]);
+});
+
+test('a fresh turn re-pins a film whose saved guidance is older than this build, instead of failing', t => {
+  const f = fixture(t), first = f.turn('Plan it');
+  const [saved] = f.store.list('director_skill_lock', f.project.id);
+  // Lock records are immutable: a film from an older build simply has an older lock as its latest.
+  const older = { ...saved.lock, id: 'older-guidance', skills: [{ ...saved.lock.skills[0], packageDigest: '0'.repeat(64) }] };
+  f.store.insert('director_skill_lock', older.id, f.project.id, { id: older.id, projectId: f.project.id, lock: older });
+  assert.ok(first.input);
+  const next = f.turn('Carry on');
+  const locks = f.store.list('director_skill_lock', f.project.id);
+  assert.equal(locks.length, 3);
+  assert.equal(JSON.parse(next.input.context).toolContract.lockId, locks.at(-1).id);
+  assert.equal(locks.at(-1).lock.skills[0].packageDigest, saved.lock.skills[0].packageDigest);
+});
+
 test('graph instructions, lock pins and catalog remain on the shipped identity', t => {
   const f = fixture(t, {mode:'graph'}), {input} = f.turn();
   const context = JSON.parse(input.context), lock = f.store.list('director_skill_lock', f.project.id)[0].lock;

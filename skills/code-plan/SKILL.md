@@ -6,6 +6,7 @@ description: Author and revise replayable TypeScript films through the OpenSlate
 Write the complete program as `export default async function film(ctx: Studio): Promise<void>`.
 Read [the Studio API](references/studio.d.ts) and [the two-shot example](references/example-plan.ts), both supplied in context.
 Call `read_film` first: it contains the current source, version, run state, media results, choices, cost, logs and installed models.
+Each turn is fresh: `conversation` in your context holds the recent messages, oldest first. Read it first, so a short reply such as "yes, retry" answers what you last offered.
 Send the whole program in `submit_plan({source, basedOnVersion, summary})`; use null only before the first plan.
 The application validates and dry-runs it. There is no separate approval gate in code mode.
 Read the returned diff before replying: report reused and new steps, certain cost, and whether later cost depends on choices or pending results.
