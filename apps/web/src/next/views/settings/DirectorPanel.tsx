@@ -1,8 +1,11 @@
-import { useId, useMemo } from "react";
+import { useId, useMemo, useState } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { errorMsg } from "../../i18n/translate.ts";
 import { CODEX_CHECK_TIMEOUT_MS, afterDirectorSave, codexDiagnostic, codexProgram, directorForm, directorFormConflict, directorFormRequest, draftProblems, reviewRequest, reviewSwitch, type DirectorDraft, type DirectorForm, type DirectorReview, type DirectorSetup } from "../../model/settings-director.ts";
+import { CEILING_PRESS } from "../../model/code-plan.ts";
+import { formatMicros, microsFromDollars } from "../../model/price.ts";
 import { msg } from "../../model/types.ts";
+import { useCodePlan } from "../../codeplan/CodePlanContext.tsx";
 import { settingsRequest } from "../../model/settings-ownership.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 import type { Resource } from "../../store/useResource.ts";
@@ -163,6 +166,38 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
           onClick={() => void flip()}
         />
       </div>
+      <FilmLimitRow offline={offline} />
     </Panel>
+  );
+}
+
+/** A code-plan film's own spend limit: higher or lower, never below what it has spent or started (the studio says so). */
+function FilmLimitRow({ offline }: { offline: string | null }) {
+  const { t, locale } = useI18n();
+  const store = useStore();
+  const plan = useCodePlan();
+  const presses = useStudio((s) => s.pending);
+  const [draft, setDraft] = useState<string | null>(null);
+  if (!plan.enabled || !plan.view) return null;
+  const view = plan.view;
+  const shown = draft ?? (Number(view.ceilingMicros) / 1_000_000).toFixed(2);
+  const micros = draft === null ? null : microsFromDollars(draft);
+  const invalid = draft !== null && micros === null;
+  const changed = !!micros && micros !== view.ceilingMicros;
+  const save = async () => {
+    if (!micros) return;
+    await store.setCodePlanCeiling(view, { ceilingMicros: micros });
+    setDraft(null);
+  };
+  return (
+    <div className="srow limit-row" data-row="film-limit">
+      <div className="txt">
+        <b id="set-film-limit">{t("set.limit.film_title")}</b>
+        <span id="set-film-limit-d">{invalid ? t("set.limit.invalid") : t("set.limit.film_note", { spent: formatMicros(view.spentMicros, locale) })}</span>
+      </div>
+      <input className="input limit-input" inputMode="decimal" data-act="film-limit" aria-labelledby="set-film-limit" aria-describedby="set-film-limit-d" aria-invalid={invalid || undefined}
+        value={shown} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && changed) void save(); }} />
+      <button type="button" className="pill sm" data-act="film-limit-save" disabled={!changed || !!offline || !!presses[CEILING_PRESS]} title={offline ?? undefined} onClick={() => void save()}>{t("set.limit.save")}</button>
+    </div>
   );
 }

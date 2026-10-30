@@ -184,7 +184,7 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
   const { stage } = film;
   const steps: CodePlanStepView[] = [];
   const add = (key: string, kind: CodePlanStepKind, label: string, model: string, priceMicros: string, state: CodePlanStepState, reached: boolean, made?: StudioArtifactRef,
-    extra: Pick<CodePlanStepView, "error" | "attempts"> = {}) => {
+    extra: Pick<CodePlanStepView, "error" | "attempts" | "shotId" | "poster"> = {}) => {
     const seen = film.stamps.get(`${key}:${state}`) ?? new Date().toISOString();
     film.stamps.set(`${key}:${state}`, seen);
     steps.push({ key, kind, state, model, label, priceMicros, reached, updatedAt: seen, ...(state === "succeeded" && made ? { artifact: made } : {}), ...extra });
@@ -192,16 +192,16 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
   const started = stage !== "empty";
   // Version 1's terminal frames: made before version 2 moved the opening to the harbour, now history.
   if (started && film.history) FRAMES.terminal.forEach((frame, index) => add(`img-terminal-${index + 1}`, "image", PROMPT_TERMINAL, IMAGE_MODEL, IMAGE_MICROS, "succeeded", false, frame));
-  if (started) FRAMES.open.forEach((frame, index) => add(`img-open-${index + 1}`, "image", PROMPT_OPEN, IMAGE_MODEL, IMAGE_MICROS, stage === "making_open" ? "in_flight" : "succeeded", true, frame));
-  if (ONE_CHOSEN.includes(stage)) add("clip-open", "video", "Slow pan right across the water", VIDEO_MODEL, VIDEO_MICROS, stage === "making_1_2" ? "in_flight" : "succeeded", true, CLIP_OPEN);
+  if (started) FRAMES.open.forEach((frame, index) => add(`img-open-${index + 1}`, "image", PROMPT_OPEN, IMAGE_MODEL, IMAGE_MICROS, stage === "making_open" ? "in_flight" : "succeeded", true, frame, { shotId: "1.1" }));
+  if (ONE_CHOSEN.includes(stage)) add("clip-open", "video", "Slow pan right across the water", VIDEO_MODEL, VIDEO_MICROS, stage === "making_1_2" ? "in_flight" : "succeeded", true, CLIP_OPEN, { shotId: "1.1", ...(stage === "making_1_2" ? {} : { poster: FRAMES.open[film.pickOpen]! }) });
   if (PIER_FRAMES.includes(stage)) {
     const making = stage === "making_1_2" || stage === "fixed_making";
-    FRAMES.pier.forEach((frame, index) => add(`img-pier-${index + 1}`, "image", PROMPT_PIER, IMAGE_MODEL, IMAGE_MICROS, making ? "in_flight" : "succeeded", true, frame));
+    FRAMES.pier.forEach((frame, index) => add(`img-pier-${index + 1}`, "image", PROMPT_PIER, IMAGE_MODEL, IMAGE_MICROS, making ? "in_flight" : "succeeded", true, frame, { shotId: "1.2" }));
   }
   if (PIER_CHOSEN.includes(stage)) add("clip-pier", "video", "Slow push-in on Mara", VIDEO_MODEL, VIDEO_MICROS,
     stage === "budget" ? "absent" : stage === "making_clip" ? "in_flight" : stage === "clip_failed" ? "failed" : "succeeded", true, CLIP_PIER,
-    { attempts: film.pierAttempts, ...(stage === "clip_failed" ? { error: { code: "SUBMISSION_RESPONSE_LOST", mayHaveCharged: true, retry: "consent" as const } } : {}) });
-  if (stage === "rendering" || stage === "done") add("render", "render", "Harbour lights · 2 clips", "ffmpeg", "0", stage === "rendering" ? "in_flight" : "succeeded", true, RENDER);
+    { shotId: "1.2", attempts: film.pierAttempts, ...(stage === "clip_failed" ? { error: { code: "SUBMISSION_RESPONSE_LOST", mayHaveCharged: true, retry: "consent" as const } } : stage === "rendering" || stage === "done" ? { poster: FRAMES.pier[film.pickPier]! } : {}) });
+  if (stage === "rendering" || stage === "done") add("render", "render", "Harbour lights · 2 clips", "ffmpeg", "0", stage === "rendering" ? "in_flight" : "succeeded", true, RENDER, stage === "done" ? { poster: FRAMES.open[film.pickOpen]! } : {});
 
   const choices: CodePlanChoiceView[] = [];
   const choice = (choiceId: string, options: StudioArtifactRef[], pick: number | null, at: [number, number]) => {
@@ -280,6 +280,10 @@ function moveTo(world: FixtureWorld, projectId: string, stage: Stage): void {
 }
 
 const receipt = (world: FixtureWorld, projectId: string): CodePlanReceipt => ({ view: viewOf(filmOf(world, projectId), projectId) });
+
+/** The film list's count of failed steps, as the server reports it. */
+export const codeFilmAttention = (world: FixtureWorld, projectId: string): number =>
+  viewOf(filmOf(world, projectId), projectId).steps.filter((step) => step.reached && (step.state === "failed" || (step.state === "unknown" && !!step.error))).length;
 
 // ---- the Director's messages in a code-plan film ------------------------------------------------
 

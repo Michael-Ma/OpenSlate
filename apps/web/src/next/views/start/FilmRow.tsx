@@ -37,7 +37,7 @@ export function FilmRow({ row, renaming, busy, guard, onOpen, onStartRename, onR
       <div className="film-main">
         {renaming
           ? <RenameForm labelId={nameId} name={row.name} busy={busy} guard={guard} onSave={onRename} onCancel={onCancelRename} />
-          : <h2 id={nameId}>{row.name}</h2>}
+          : <h2 id={nameId}>{row.name}{row.attention ? <i className="film-dot" role="img" data-act="film-attention" aria-label={t("start.film.attention", { count: row.attention })} /> : null}</h2>}
         <div className="meta">{tm(row.meta)}</div>
       </div>
       <div className="prog">

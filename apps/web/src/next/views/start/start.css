@@ -30,6 +30,7 @@
 .start-view .films { display: flex; flex-direction: column; gap: 10px; max-width: 900px; }
 .start-view .film-row { display: grid; grid-template-columns: minmax(0, 1fr) 190px auto; gap: 16px; align-items: center; }
 .start-view .film-row h2 { margin: 0; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.start-view .film-row .film-dot { display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: #e5484d; vertical-align: middle; }
 .start-view .film-row .meta { color: var(--text-2); font-size: 12.5px; margin-top: 3px; }
 .start-view .film-row .prog { font-size: 12px; color: var(--text-2); display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .start-view .film-row .acts { display: flex; gap: 6px; align-items: center; }

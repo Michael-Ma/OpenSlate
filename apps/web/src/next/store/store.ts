@@ -579,8 +579,8 @@ export class StudioStore {
     return this.#press<CodePlanReceipt>(press.pressId, press.logical, async () => ({ path: path(projectId, CODE_PLAN_CHOICES_PATH), body: press.body }));
   }
 
-  /** Raise the spend ceiling (it must be higher than `view`'s); paid work paused at the ceiling goes on. */
-  raiseCodePlanCeiling(view: Pick<CodePlanView, "ceilingMicros">, body: CodePlanCeilingInput): Promise<CodePlanReceipt | undefined> {
+  /** Set the spend limit, higher or lower (never below what is spent or started); work paused at the limit goes on. */
+  setCodePlanCeiling(view: Pick<CodePlanView, "ceilingMicros">, body: CodePlanCeilingInput): Promise<CodePlanReceipt | undefined> {
     const projectId = this.#codePlanFilm();
     if (!projectId) return Promise.resolve(undefined);
     const press = ceilingPress(view, body);

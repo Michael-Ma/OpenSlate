@@ -14,6 +14,14 @@ export function formatMicros(micros: string | number, locale: string): string {
   return new Intl.NumberFormat(locale, { ...base, minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(dollars);
 }
 
+/** Integer micro-dollars from a typed amount ("3", "$3.50"); null unless it is a positive amount in whole cents. */
+export function microsFromDollars(value: string): string | null {
+  const match = /^\$?\s*(\d{1,7})(?:\.(\d{1,2}))?$/.exec(value.trim());
+  if (!match) return null;
+  const micros = BigInt(match[1]!) * 1_000_000n + BigInt((match[2] ?? "").padEnd(2, "0") || "0") * 10_000n;
+  return micros > 0n ? micros.toString() : null;
+}
+
 /** Host estimates and subscription use can coexist (Codex frames plus a per-call voice line). Never "$0.00". */
 export function priceMsg(quote: PriceQuote, locale: string): Msg {
   if (quote.subscription === "codex") {

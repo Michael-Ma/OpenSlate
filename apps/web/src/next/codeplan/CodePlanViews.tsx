@@ -5,7 +5,7 @@ import { numberLocale } from "../i18n/translate.ts";
 import { Picture } from "../keyframes/parts.tsx";
 import { useArtifactUrl } from "../media/useArtifactUrl.ts";
 import { MediaViewer, type ViewerItem } from "../media/Viewer.tsx";
-import { artifactRefOf, declaredPlan, latestRender, stepRow, stepRows, type DeclaredShot, type StepRow } from "../model/code-plan.ts";
+import { artifactRefOf, declaredPlan, latestRender, stepRow, stepRows, type DeclaredPlan, type DeclaredShot, type StepRow } from "../model/code-plan.ts";
 import { CodePlanMedia, useMode } from "../store/react.tsx";
 import { Thumb } from "../views/plan/ShotRow.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
@@ -38,6 +38,10 @@ export function CodePlanPlanView() {
   const { view } = useCodePlan();
   const waiting = useNotReady();
   const plan = useMemo(() => (view ? declaredPlan(view) : null), [view]);
+  // Each shot's frame and clip open in one viewer, in film order.
+  const media = useMemo(() => (plan ? shotMedia(plan) : []), [plan]);
+  const [viewing, setViewing] = useState<number | null>(null);
+  const open = (key: string) => setViewing(Math.max(0, media.findIndex((item) => item.key === key)));
   const line = view && plan && view.planVersion !== null
     ? t("codeplan.plan.line", { scenes: plan.scenes.length, shots: plan.shotCount, version: view.planVersion }) : null;
   return (
@@ -56,28 +60,43 @@ export function CodePlanPlanView() {
                   <h2>{scene.title || t("codeplan.plan.scene", { n: scene.ordinal })}</h2>
                   {scene.purpose ? <span className="meta">{scene.purpose}</span> : null}
                 </div>
-                <ul className="shots">{scene.shots.map((shot) => <DeclaredShotRow key={shot.key} shot={shot} />)}</ul>
+                <ul className="shots">{scene.shots.map((shot) => <DeclaredShotRow key={shot.key} shot={shot} onOpen={open} />)}</ul>
               </section>
             ))}
             {plan.loose.length ? (
               <section className="scene panel" data-scene="loose" aria-label={t("codeplan.plan.loose")}>
                 <div className="scene-top"><h2>{t("codeplan.plan.loose")}</h2></div>
-                <ul className="shots">{plan.loose.map((shot) => <DeclaredShotRow key={shot.key} shot={shot} />)}</ul>
+                <ul className="shots">{plan.loose.map((shot) => <DeclaredShotRow key={shot.key} shot={shot} onOpen={open} />)}</ul>
               </section>
             ) : null}
           </div>
+          {viewing !== null && media.length ? <MediaViewer items={media} start={viewing} onClose={() => setViewing(null)} /> : null}
         </CodePlanMedia>
       ))}
     </main>
   );
 }
 
-function DeclaredShotRow({ shot }: { shot: DeclaredShot }) {
+/** Every shot's keyframe and clip, for the viewer. */
+function shotMedia(plan: DeclaredPlan): ViewerItem[] {
+  const items: ViewerItem[] = [];
+  for (const shot of [...plan.scenes.flatMap((scene) => scene.shots), ...plan.loose]) {
+    const title = shot.purpose || shot.label;
+    if (shot.picture) items.push({ key: `${shot.key}:frame`, artifact: shot.picture, title });
+    if (shot.clip) items.push({ key: `${shot.key}:clip`, artifact: shot.clip.artifact, title });
+  }
+  return items;
+}
+
+function DeclaredShotRow({ shot, onOpen }: { shot: DeclaredShot; onOpen(key: string): void }) {
   const { t } = useI18n();
   const meta = [shot.framing, shot.seconds !== null ? t("codeplan.plan.seconds", { seconds: shot.seconds }) : "", shot.motion ? t("codeplan.plan.motion", { motion: shot.motion }) : ""].filter(Boolean).join(" · ");
   return (
     <li className="shot-row cp-shot-row" data-shot={shot.key}>
-      <Thumb label={shot.label} picture={shot.picture} dimmed={false} empty={{ id: "codeplan.plan.no_keyframe" }} />
+      <div className="cp-shot-media">
+        <Thumb label={shot.label} picture={shot.picture} dimmed={false} empty={{ id: "codeplan.plan.no_keyframe" }} onOpen={shot.picture ? () => onOpen(`${shot.key}:frame`) : undefined} />
+        {shot.clip?.poster ? <Thumb label="▶" picture={shot.clip.poster} dimmed={false} empty={null} onOpen={() => onOpen(`${shot.key}:clip`)} /> : null}
+      </div>
       <div className="shot-main">
         <b>{shot.purpose || <span className="muted">{t("plan.shot.no_purpose")}</span>}</b>
         {meta ? <div className="shot-meta">{meta}</div> : null}
@@ -146,10 +165,14 @@ function StepGroups({ rows, still = true, onOpen }: { rows: { current: StepRow[]
 
 /** Film in a code-plan film: the newest finished render in a player, then the render and clip steps. */
 export function CodePlanFilmView() {
-  const { t, locale } = useI18n();
+  const { t, tm, locale } = useI18n();
   const { view } = useCodePlan();
   const waiting = useNotReady();
   const film = useMemo(() => (view ? filmRows(view, numberLocale(locale)) : null), [view, locale]);
+  // Every made clip and render opens in one viewer.
+  const media = useMemo(() => (film ? viewerItems([...film.renders.current, ...film.renders.history, ...film.clips.current, ...film.clips.history], t, tm) : []), [film, t, tm]);
+  const [viewing, setViewing] = useState<number | null>(null);
+  const open = (key: string) => setViewing(Math.max(0, media.findIndex((item) => item.key === key)));
   return (
     <main className="work plan cp-view cp-film" data-view="film" data-code-plan="true">
       <ViewHead title={t("film.title")} line={film && !waiting ? t("codeplan.film.line", { clips: film.clipCount, renders: film.renderCount }) : null} />
@@ -161,13 +184,14 @@ export function CodePlanFilmView() {
           {film.renders.current.length || film.renders.history.length ? (
             <section className="cp-group" aria-label={t("codeplan.film.renders")}>
               <h2 className="cp-group-title">{t("codeplan.film.renders")}</h2>
-              <StepList rows={[...film.renders.current, ...film.renders.history]} />
+              <StepList rows={[...film.renders.current, ...film.renders.history]} onOpen={open} />
             </section>
           ) : null}
           <section className="cp-group" aria-label={t("codeplan.film.clips")}>
             <h2 className="cp-group-title">{t("codeplan.film.clips")}</h2>
-            {film.clipCount ? <StepList rows={[...film.clips.current, ...film.clips.history]} /> : <p className="cp-hint">{t("codeplan.film.no_clips")}</p>}
+            {film.clipCount ? <StepList rows={[...film.clips.current, ...film.clips.history]} onOpen={open} /> : <p className="cp-hint">{t("codeplan.film.no_clips")}</p>}
           </section>
+          {viewing !== null && media.length ? <MediaViewer items={media} start={viewing} onClose={() => setViewing(null)} /> : null}
         </CodePlanMedia>
       ))}
     </main>
@@ -186,13 +210,18 @@ function filmRows(view: CodePlanView, locale: string) {
   };
 }
 
-/** Steps as rows (clips and renders have no still to show): status, what it is, its model and price. */
-function StepList({ rows }: { rows: StepRow[] }) {
+/** Steps as rows: the clip's still (it opens the clip), status, what it is, its model and price. */
+function StepList({ rows, onOpen }: { rows: StepRow[]; onOpen(key: string): void }) {
   const { t, tm } = useI18n();
   return (
     <ul className="cp-rows">
       {rows.map((row) => (
-        <li key={row.key} className={`cp-row${row.reached ? "" : " history"}`} data-step={row.key} data-state={row.state} data-reached={row.reached ? "true" : "false"}>
+        <li key={row.key} className={`cp-row${row.reached ? "" : " history"}${row.poster ? " with-poster" : ""}`} data-step={row.key} data-state={row.state} data-reached={row.reached ? "true" : "false"}>
+          {row.poster ? (
+            <button type="button" className="cp-row-poster" data-act="step-open" aria-label={t("viewer.open", { label: stepLabel(row, t) })} onClick={() => onOpen(row.key)}>
+              <Picture artifact={row.poster} alt="" />
+            </button>
+          ) : null}
           <StepStatus status={stepStatus(row)} tone={row.tone} title={row.error ?? undefined} />
           <span className="cp-row-label" title={stepLabel(row, t)}>{stepLabel(row, t)}</span>
           {row.model ? <span className="cp-step-model">{row.model}</span> : null}

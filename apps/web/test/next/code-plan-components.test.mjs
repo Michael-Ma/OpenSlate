@@ -30,7 +30,7 @@ function store(pending = {}, unconfirmed = () => false) {
     calls,
     pending,
     answerCodePlanChoice: (choice, answer) => { calls.push(['answer', choice.choiceId, answer]); return Promise.resolve(undefined); },
-    raiseCodePlanCeiling: (current, body) => { calls.push(['raise', current.ceilingMicros, body]); return Promise.resolve(undefined); },
+    setCodePlanCeiling: (current, body) => { calls.push(['raise', current.ceilingMicros, body]); return Promise.resolve(undefined); },
     unconfirmed,
   };
 }
@@ -234,7 +234,7 @@ test('a render step is named "Film render", not "No prompt"; other unlabelled st
 test('Plan before the first pass ends says the plan is running, not that it declares nothing', async () => {
   const parts = await load('parts.tsx', ['ViewHead', 'ViewMessage', 'StepCard', 'StepStatus', 'stepLabel'], { useI18n: () => i18n('en') });
   const plan = async (codePlan) => (await load('CodePlanViews.tsx', ['CodePlanPlanView'], {
-    useI18n: () => i18n('en'), useCodePlan: () => ({ error: null, loading: false, reload() {}, ...codePlan }), declaredPlan, useDeveloperMode: () => false,
+    useI18n: () => i18n('en'), useCodePlan: () => ({ error: null, loading: false, reload() {}, ...codePlan }), declaredPlan, useDeveloperMode: () => false, useState: React.useState, MediaViewer: () => null,
     CodePlanMedia: ({ children }) => React.createElement('div', null, children), ...parts,
   })).CodePlanPlanView;
   const Running = await plan({ view: view({ planVersion: 1, state: 'running', lastPassAt: null }) });

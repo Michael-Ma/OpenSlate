@@ -249,6 +249,8 @@ export interface StepRow {
   problem: StepProblem | null;
   /** Attempts so far, retries included (1 when the studio does not say). */
   attempts: number;
+  /** A still of a made clip or render, for its thumbnail. */
+  poster: StudioArtifactRef | null;
   updatedAt: string;
 }
 
@@ -364,6 +366,7 @@ export function stepRow(step: CodePlanStepView, view: CodePlanView, locale: stri
     error: step.state === "failed" ? text(step.error?.code, 120) || null : null,
     problem: step.reached ? stepProblem(step, locale) : null,
     attempts: Number.isSafeInteger(step.attempts) && step.attempts! > 0 ? step.attempts! : 1,
+    poster: step.state === "succeeded" ? artifactRefOf(step.poster) : null,
     updatedAt: step.updatedAt,
   };
 }
@@ -397,8 +400,10 @@ export interface DeclaredShot {
   prompt: string;
   motion: string;
   narration: string;
-  /** The shot's keyframe: one it names, else the chosen (or newest) image step made from its prompt. */
+  /** The shot's keyframe: one it names, else its chosen (or newest) image step, by shot then by prompt. */
   picture: StudioArtifactRef | null;
+  /** The shot's newest made clip and, once it exists, the clip's still. */
+  clip: { artifact: StudioArtifactRef; poster: StudioArtifactRef | null } | null;
 }
 
 export interface DeclaredScene {
@@ -433,23 +438,36 @@ function secondsOf(row: Record<string, unknown>): number | null {
   return null;
 }
 
-/** Image steps by the prompt they were made from (labels are at most 200 characters). */
-function picturesByPrompt(view: CodePlanView): Map<string, StudioArtifactRef> {
+/** Image steps grouped by `keyOf`, keeping the chosen frame, else the newest. */
+function bestPictures(view: CodePlanView, keyOf: (step: CodePlanStepView) => string | null): Map<string, StudioArtifactRef> {
   const chosen = chosenArtifacts(view);
   const best = new Map<string, { artifact: StudioArtifactRef; chosen: boolean; at: string }>();
   for (const step of view.steps) {
     const artifact = step.kind === "image" && step.state === "succeeded" ? artifactRefOf(step.artifact) : null;
-    if (!artifact) continue;
-    const label = text(step.label, 200);
+    const key = artifact ? keyOf(step) : null;
+    if (!artifact || !key) continue;
     const candidate = { artifact, chosen: chosen.has(artifact.artifactId), at: step.updatedAt };
-    const current = best.get(label);
-    if (!current || (candidate.chosen && !current.chosen) || (candidate.chosen === current.chosen && candidate.at > current.at)) best.set(label, candidate);
+    const current = best.get(key);
+    if (!current || (candidate.chosen && !current.chosen) || (candidate.chosen === current.chosen && candidate.at > current.at)) best.set(key, candidate);
   }
-  return new Map([...best].map(([label, value]) => [label, value.artifact]));
+  return new Map([...best].map(([key, value]) => [key, value.artifact]));
+}
+
+/** Each shot's newest made clip. */
+function clipsByShot(view: CodePlanView): Map<string, NonNullable<DeclaredShot["clip"]>> {
+  const newest = new Map<string, { clip: NonNullable<DeclaredShot["clip"]>; at: string }>();
+  for (const step of view.steps) {
+    const artifact = step.kind === "video" && step.state === "succeeded" && step.shotId ? artifactRefOf(step.artifact) : null;
+    if (!artifact || !step.shotId) continue;
+    const current = newest.get(step.shotId);
+    if (!current || step.updatedAt > current.at) newest.set(step.shotId, { clip: { artifact, poster: artifactRefOf(step.poster) }, at: step.updatedAt });
+  }
+  return new Map([...newest].map(([shot, value]) => [shot, value.clip]));
 }
 
 export function declaredPlan(view: CodePlanView): DeclaredPlan {
-  const pictures = picturesByPrompt(view);
+  // Image steps carry their shot now; the prompt match keeps older plans working.
+  const byShot = bestPictures(view, (step) => step.shotId ?? null), byPrompt = bestPictures(view, (step) => text(step.label, 200)), clips = clipsByShot(view);
   const sceneRows = (Array.isArray(view.declarations?.scenes) ? view.declarations.scenes : []).filter(isObject).slice(0, 200);
   const shotRows = (Array.isArray(view.declarations?.shots) ? view.declarations.shots : []).filter(isObject).slice(0, 200);
   const scenes: DeclaredScene[] = sceneRows.map((row, index) => ({
@@ -467,8 +485,9 @@ export function declaredPlan(view: CodePlanView): DeclaredPlan {
     const scene = byKey.get(sceneKey) ?? null;
     const prompt = pick(row, ["prompt", "imagePrompt", "image"]);
     const own = artifactRefOf(row.keyframe) ?? artifactRefOf(row.picture);
+    const key = idOf(row, ["id", "shotId", "key"]) || `shot-${index + 1}`;
     const shot: DeclaredShot = {
-      key: idOf(row, ["id", "shotId", "key"]) || `shot-${index + 1}`,
+      key,
       label: pick(row, ["label"], 12) || (scene ? `${scene.ordinal}.${scene.shots.length + 1}` : String(loose.length + 1)),
       purpose: pick(row, ["purpose", "title", "description", "action"], 500),
       framing: pick(row, ["framing", "shotSize"], 120),
@@ -476,7 +495,8 @@ export function declaredPlan(view: CodePlanView): DeclaredPlan {
       prompt,
       motion: pick(row, ["motion", "camera", "videoPrompt"], 500),
       narration: typeof row.narration === "string" ? text(row.narration) : isObject(row.narration) ? text(row.narration.text) : "",
-      picture: own ?? (prompt ? pictures.get(clip(prompt, 200)) ?? pictures.get(prompt.slice(0, 200)) ?? null : null),
+      picture: own ?? byShot.get(key) ?? (prompt ? byPrompt.get(clip(prompt, 200)) ?? byPrompt.get(prompt.slice(0, 200)) ?? null : null),
+      clip: clips.get(key) ?? null,
     };
     seconds += shot.seconds ?? 0;
     if (scene) scene.shots.push(shot);

@@ -5,7 +5,7 @@ import { FIXTURE_REPLY_MS } from "../fixture-director.ts";
 import type { FixtureWorld } from "../fixture-port.ts";
 import { FPS, lastFerryOverview, lastFerrySnapshot, PROJECT_ID, sceneId } from "../last-ferry.ts";
 import { catalogDigest, changeCatalogOnce, CODEX_DEFAULTS, computer, startPreset } from "./computer.ts";
-import { addCodeFilm, CODE_FILM_ID, CODE_FILM_NAME, codeFilmData, codeFilmReply, codePlanPreset, holdCodeFilm, isCodeFilm } from "./code-plan.ts";
+import { addCodeFilm, CODE_FILM_ID, CODE_FILM_NAME, codeFilmAttention, codeFilmData, codeFilmReply, codePlanPreset, holdCodeFilm, isCodeFilm } from "./code-plan.ts";
 import type { FixtureRoute } from "./types.ts";
 
 /**
@@ -181,6 +181,7 @@ function listItem(world: FixtureWorld, item: Film): ProjectListItem {
     seconds: shots.reduce((sum, shot) => sum + shot.durationFrames, 0) / overview.fps,
     videosReady: shots.filter((shot) => shot.video.state === "ready").length,
     updatedAt: item.updatedAt,
+    ...(isCodeFilm(world, item.id) ? { planMode: "code" as const, needsAttention: codeFilmAttention(world, item.id) } : {}),
   };
 }
 

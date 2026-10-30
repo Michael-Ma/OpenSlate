@@ -86,7 +86,7 @@ dialog.cp-compare::backdrop{background:rgba(8,9,10,.62)}
 .cp-price{color:var(--text-2);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
 
 /* Plan rows: the Plan view's rows, read only (no editor or menu columns) */
-.plan .shot-row.cp-shot-row{grid-template-columns:112px minmax(0,1.4fr) minmax(0,1fr)}
+.plan .shot-row.cp-shot-row{grid-template-columns:auto minmax(0,1.4fr) minmax(0,1fr)}
 
 /* Keyframes: image steps as cards */
 .cp-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
@@ -177,7 +177,7 @@ button.cp-step-pic:hover .pic-img{filter:brightness(1.06)}
   .cp-row{grid-template-columns:auto minmax(0,1fr);row-gap:2px}
   .cp-row .cp-step-model{grid-column:2}
   .cp-row .cp-price{grid-column:2;justify-self:start}
-  .plan .shot-row.cp-shot-row{grid-template-columns:96px minmax(0,1fr)}
+  .plan .shot-row.cp-shot-row{grid-template-columns:auto minmax(0,1fr)}
   .plan .shot-row.cp-shot-row .shot-say{grid-column:2}
   .cp-steps{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
 }
@@ -192,3 +192,10 @@ button.cp-step-pic:hover .pic-img{filter:brightness(1.06)}
 .cp-problem .pill{margin-top:4px}
 .cp-row .cp-problem{grid-column:1 / -1}
 dialog.cp-retry-dialog .foot{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap}
+
+/* Plan rows: the shot's frame beside its clip's still. Film rows: the clip's still opens the clip. */
+.cp-shot-media{display:flex;gap:6px;flex:none}
+.cp-row.with-poster{grid-template-columns:auto auto minmax(0,1fr) auto auto}
+.cp-row-poster{position:relative;display:block;width:96px;aspect-ratio:16/9;padding:0;border:1px solid var(--hairline);border-radius:6px;overflow:hidden;background:#0b0c0d;cursor:zoom-in}
+.cp-row-poster .pic-img,.cp-row-poster .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.cp-row-poster:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
