@@ -11,6 +11,9 @@ import {
   sourcePress, stepProblem, stepRows, threadChoices, versionRows,
 } from '../../src/next/model/code-plan.ts';
 import { DEVELOPER_STORAGE_KEY, readDeveloperMode, setDeveloperMode } from '../../src/next/app/useDeveloperMode.ts';
+import { DEFAULT_LIMIT_STORAGE_KEY, readDefaultLimit, setDefaultLimit } from '../../src/next/app/useDefaultLimit.ts';
+import { microsFromDollars } from '../../src/next/model/price.ts';
+import { filmsView } from '../../src/next/model/start.ts';
 import { createBody, planningStep, stepFits } from '../../src/next/model/start-new.ts';
 import { runCreation } from '../../src/next/model/start-commands.ts';
 import { searchWithView, shownView, viewFromSearch, viewTabs } from '../../src/next/model/shell.ts';
@@ -330,7 +333,7 @@ test('a graph film never calls a code-plan route', async (t) => {
   const { store, client } = await studio(t);
   assert.equal(store.getState().projectId, 'last-ferry');
   assert.equal(await store.answerCodePlanChoice({ choiceId: 'c', optionsDigest: 'd' }, 'x'), undefined);
-  assert.equal(await store.raiseCodePlanCeiling({ ceilingMicros: '1000000' }, { ceilingMicros: '2000000' }), undefined);
+  assert.equal(await store.setCodePlanCeiling({ ceilingMicros: '1000000' }, { ceilingMicros: '2000000' }), undefined);
   assert.equal(await store.submitCodePlanSource({ source: 'x', basedOnVersion: null }), undefined);
   await assert.rejects(store.readCodePlan(), (error) => error.code === 'CODE_PLAN_MODE');
   await assert.rejects(store.readCodePlanSource(1), (error) => error.code === 'CODE_PLAN_MODE');
@@ -402,7 +405,7 @@ test('paused at the ceiling, raising it by a dollar lets the clip and the render
   assert.equal(plan.state, 'paused_budget');
   assert.equal(en(strip.spend), 'Spent $0.81 of $1.00');
   assert.equal(stepRows(plan, ['video'], 'en-US').current.find((row) => row.state === 'absent').status.id, 'codeplan.step.budget');
-  const receipt = await store.raiseCodePlanCeiling(plan, strip.raise.body);
+  const receipt = await store.setCodePlanCeiling(plan, strip.raise.body);
   const sent = client.sent.find((request) => request.path.endsWith('/code-plan/ceiling'));
   assert.deepEqual([sent.body, !!sent.key], [{ ceilingMicros: '2000000' }, true]);
   assert.deepEqual([receipt.view.state, receipt.view.ceilingMicros], ['running', '2000000']);
@@ -413,7 +416,7 @@ test('paused at the ceiling, raising it by a dollar lets the clip and the render
   assert.equal(latestRender(done).key, 'render');
   assert.equal(done.spentMicros, '1260000');
   // Lower or equal is refused.
-  assert.equal(await store.raiseCodePlanCeiling(done, { ceilingMicros: '2000000' }), undefined);
+  assert.equal(await store.setCodePlanCeiling(done, { ceilingMicros: '2000000' }), undefined);
 });
 
 test('an error stops the run and is said plainly; a message to the Director writes a fixed version', async (t) => {
@@ -537,4 +540,49 @@ test('?codeplan=failed: a lost clip stops the run; Retry (with consent) makes it
   assert.equal(done.steps.find((s) => s.key === 'clip-pier').attempts, 2);
   // Nothing left to retry.
   assert.equal(await store.retryCodePlanStep({ key: 'clip-pier', attempts: 2 }), undefined);
+});
+
+test('Plan shows a shot\'s chosen frame and its clip by the step\'s shot, whatever the prompt said', () => {
+  const frame = (key, id, extra = {}) => step(key, 'image', 'succeeded', { artifact: ref(id), label: `built prompt ${key}`, ...extra });
+  const plan = view({
+    declarations: { scenes: [{ id: 's' }], shots: [{ id: 'tofu-01', sceneId: 's', title: 'Wakes' }, { id: 'tofu-02', sceneId: 's', title: 'Bowl' }] },
+    steps: [
+      frame('a', 'a1', { shotId: 'tofu-01', updatedAt: '2026-10-30T10:00:01.000Z' }),
+      frame('b', 'a2', { shotId: 'tofu-01', updatedAt: '2026-10-30T10:00:02.000Z' }),
+      frame('c', 'c1', { shotId: 'tofu-02' }),
+      step('clip', 'video', 'succeeded', { artifact: ref('v1', 'video'), poster: ref('p1'), shotId: 'tofu-01' }),
+    ],
+    choices: [{ choiceId: 'tofu-01-keyframe', optionsDigest: 'd', question: 'q', options: [ref('a1'), ref('a2')], answer: ref('a1'), answeredAt: '2026-10-30T10:00:03.000Z' }],
+  });
+  const [first, second] = declaredPlan(plan).scenes[0].shots;
+  assert.equal(first.picture.artifactId, 'a1', 'the chosen frame beats a newer one');
+  assert.deepEqual([first.clip.artifact.artifactId, first.clip.poster.artifactId], ['v1', 'p1']);
+  assert.equal(second.picture.artifactId, 'c1');
+  assert.equal(second.clip, null);
+  assert.equal(stepRows(plan, ['video'], 'en-US').current[0].poster.artifactId, 'p1');
+});
+
+test('typed amounts become micro-dollars; the default limit is a browser preference sent only for code films', () => {
+  assert.deepEqual(['3', '$3.50', ' 0.10 ', '12.5'].map(microsFromDollars), ['3000000', '3500000', '100000', '12500000']);
+  assert.deepEqual(['', '0', 'abc', '1.234', '-1', '0.00'].map(microsFromDollars), [null, null, null, null, null, null]);
+  const saved = new Map();
+  const storage = { getItem: (k) => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v), removeItem: (k) => saved.delete(k) };
+  assert.equal(readDefaultLimit(storage), null);
+  setDefaultLimit('5000000', storage);
+  assert.equal(saved.get(DEFAULT_LIMIT_STORAGE_KEY), '5000000');
+  assert.equal(readDefaultLimit(storage), '5000000');
+  saved.set(DEFAULT_LIMIT_STORAGE_KEY, 'nonsense');
+  assert.equal(readDefaultLimit(storage), null);
+  setDefaultLimit(null, null);
+  assert.deepEqual(createBody('N', null, 'U', 'code', '5000000'), { name: 'N', planMode: 'code', ceilingMicros: '5000000' });
+  assert.deepEqual(createBody('N', null, 'U', 'code'), { name: 'N', planMode: 'code' });
+  assert.deepEqual(createBody('N', null, 'U', 'graph', '5000000'), { name: 'N' });
+});
+
+test('the film list counts a code film\'s failed steps', async (t) => {
+  const { store } = await studio(t, '?codeplan=failed');
+  const list = await store.read('/api/projects?includeArchived=false');
+  const film = (list.projects ?? list).find((item) => item.id === CODE_FILM_ID);
+  assert.deepEqual([film.planMode, film.needsAttention], ['code', 1]);
+  assert.equal(filmsView([film], CODE_FILM_ID, new Date(), 'en').live[0].attention, 1);
 });

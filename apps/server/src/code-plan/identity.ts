@@ -2,7 +2,7 @@ import { canonical, digest, invariant } from "@openslate/core";
 import type { JsonObject, JsonValue, ProviderProfile } from "@openslate/core";
 
 export type CodePlanMediaKind = "image" | "video" | "speech" | "music" | "render";
-export interface CodePlanModel { kind: CodePlanMediaKind; defaults?: JsonObject; priceMicros?: string; priceUnit?: "call"; profile?: ProviderProfile; profileDefinitionDigest?: string }
+export interface CodePlanModel { kind: CodePlanMediaKind; defaults?: JsonObject; priceMicros?: string; priceUnit?: "call" | "input"; profile?: ProviderProfile; profileDefinitionDigest?: string }
 export const CODE_PLAN_MODELS: Readonly<Record<string, CodePlanModel>> = Object.freeze({
   "fake-image": { kind: "image" },
   "fake-video": { kind: "video", defaults: { durationSeconds: 6 } },
@@ -18,10 +18,13 @@ export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
   const input = kind === "render" && Array.isArray(value) ? { timeline: value } : value;
   invariant(input && typeof input === "object" && !Array.isArray(input), "CODE_PLAN_INPUT", "Media input must be an object");
   const source = input as Record<string, unknown>;
-  if (kind === "music") invariant(typeof source.prompt === "string" && source.prompt.trim().length > 0 && Buffer.byteLength(source.prompt) <= 32768
-    && typeof source.durationSeconds === "number" && Number.isFinite(source.durationSeconds) && source.durationSeconds > 0 && source.durationSeconds <= 360
-    && (source.instrumental === undefined || typeof source.instrumental === "boolean")
-    && Object.keys(source).every(key => ["model", "prompt", "durationSeconds", "instrumental", "variant", "profileDefinitionDigest"].includes(key)),
+  if (kind !== "render" && Object.hasOwn(source, "shot")) invariant(typeof source.shot === "string" && source.shot.length > 0 && source.shot.length <= 120,
+    "CODE_PLAN_INPUT", "Use a shot annotation of 1 to 120 characters");
+  const { shot: _shot, ...media } = source;
+  if (kind === "music") invariant(typeof media.prompt === "string" && media.prompt.trim().length > 0 && Buffer.byteLength(media.prompt as string) <= 32768
+    && typeof media.durationSeconds === "number" && Number.isFinite(media.durationSeconds) && media.durationSeconds > 0 && media.durationSeconds <= 360
+    && (media.instrumental === undefined || typeof media.instrumental === "boolean")
+    && Object.keys(media).every(key => ["model", "prompt", "durationSeconds", "instrumental", "variant", "profileDefinitionDigest"].includes(key)),
   "CODE_PLAN_INPUT", "Music requires a prompt, a duration within 360 seconds and optional instrumental/variant settings");
   const model = source.model ?? (models[defaultModel[kind]] ? defaultModel[kind] : Object.keys(models).find(id => models[id]?.kind === kind));
   invariant(typeof model === "string" && Object.hasOwn(models, model) && models[model]?.kind === kind,
@@ -40,7 +43,7 @@ export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
     }
     return Object.fromEntries(Object.keys(object).sort().map(key => [key, normalize(object[key], depth + 1)]));
   };
-  const result = normalize({ ...models[model]?.defaults, ...source, model, ...(models[model]?.profileDefinitionDigest ? { profileDefinitionDigest: models[model]!.profileDefinitionDigest! } : {}) }, 0) as JsonObject;
+  const result = normalize({ ...models[model]?.defaults, ...(kind === "render" ? source : media), model, ...(models[model]?.profileDefinitionDigest ? { profileDefinitionDigest: models[model]!.profileDefinitionDigest! } : {}) }, 0) as JsonObject;
   invariant(Buffer.byteLength(canonical(result)) <= 256 * 1024, "CODE_PLAN_INPUT", "Media input exceeds its byte limit");
   return result;
 }

@@ -758,7 +758,7 @@ export class Store {
       if (!old) return this.insert(kind, id, projectId, body);
       invariant(old.project_id === projectId, "SCOPE_DENIED", "Cannot move records between projects");
       const encoded = this.checkedBody(kind, id, projectId, body);
-      if (["h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation"].includes(kind))
+      if (["video_i2v_mapping", "video_i2v_dispatch", "video_i2v_submit", "video_i2v_terminal", "h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "H3 execution receipts are immutable");
       if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Viggle execution receipts are immutable");

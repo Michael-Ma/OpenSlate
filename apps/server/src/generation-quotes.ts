@@ -1,3 +1,4 @@
+import { codeOnlyVideoAdapter } from "./execution/video-i2v-options.js";
 import { moneyMicros } from "@openslate/core";
 import type { ProviderProfile, PriceQuote } from "@openslate/core";
 import { falH3LipSyncPriceMicros } from "@openslate/providers";
@@ -45,7 +46,7 @@ function videoUnit(profile: ProviderProfile | undefined, row: QuoteRow): Unit {
 /** Remake prices remain available after every pending unit has completed. */
 export function unitQuote(lock: QuoteLock, kind: "video" | "speech"): PriceQuote | undefined {
   const profile = selectedProfile(lock, kind);
-  return profile ? quoteUnits([profile]) : undefined;
+  return profile && !codeOnlyVideoAdapter(profile.adapter) ? quoteUnits([profile]) : undefined;
 }
 
 /**
@@ -59,7 +60,13 @@ export function characterSheetQuote(lock: QuoteLock, sheets: number): PriceQuote
 }
 
 /** Flat host-configured estimates, taken exclusively from the project's pinned lock. */
-export function quote(lock: QuoteLock, rows: readonly QuoteRow[], kind: QuoteKind): PriceQuote {
+export function quote(lock: QuoteLock, rows: readonly QuoteRow[], kind: "regenerateKeyframe" | "makeKeyframes" | "voice"): PriceQuote;
+export function quote(lock: QuoteLock, rows: readonly QuoteRow[], kind: QuoteKind): PriceQuote | undefined;
+export function quote(lock: QuoteLock, rows: readonly QuoteRow[], kind: QuoteKind): PriceQuote | undefined {
+  if ((kind === "remakeClip" || kind === "confirmVideo") && rows.some(row => {
+    const profile = selectedProfile(lock, "video", row.videoProfileLabel);
+    return profile && codeOnlyVideoAdapter(profile.adapter);
+  })) return undefined;
   const units: Unit[] = [];
   const profile = (kind: ProviderProfile["kind"], id?: string | null) => selectedProfile(lock, kind, id);
   if (kind === "regenerateKeyframe") units.push(profile("image"));

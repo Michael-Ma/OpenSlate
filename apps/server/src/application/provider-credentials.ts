@@ -1,12 +1,13 @@
 import { DomainError, invariant } from "@openslate/core";
 
-export type MediaCredentialId = "openai-media" | "minimax-video" | "viggle-video" | "fal-video" | "gemini-audio" | "gemini-music";
+export type MediaCredentialId = "openai-media" | "minimax-video" | "viggle-video" | "fal-video" | "modelark-video" | "gemini-audio" | "gemini-music";
 const VARIABLES: Readonly<Record<MediaCredentialId, string>> = Object.freeze({
   "openai-media": "OPENSLATE_OPENAI_API_KEY",
   "minimax-video": "OPENSLATE_MINIMAX_API_KEY",
   "viggle-video": "OPENSLATE_VIGGLE_API_KEY",
   /** fal.ai key ("id:secret") for MiniMax H3 Max lip sync. */
   "fal-video": "OPENSLATE_FAL_API_KEY",
+  "modelark-video": "OPENSLATE_MODELARK_API_KEY",
   /** Google Gemini API key for song analysis (sections, lyrics, mood); used only after the person presses Analyze song. */
   "gemini-audio": "OPENSLATE_GEMINI_API_KEY",
   "gemini-music": "OPENSLATE_GEMINI_API_KEY",

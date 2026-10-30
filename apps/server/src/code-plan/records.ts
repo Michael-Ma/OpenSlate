@@ -12,11 +12,14 @@ export type CodePlanResult = { ok: true; artifact: ArtifactRef; artifacts: Artif
   | { ok: false; error: { code: string; message: string; retry: "safe" | "consent" | "none"; mayHaveCharged: boolean } };
 export interface CodePlanStep {
   id: string; projectId: string; key: string; kind: CodePlanMediaKind; input: JsonObject;
+  /** Display metadata from the latest pass that reached this step; never provider input. */
+  shotId?: string;
   state: "absent" | "in_flight" | "unknown" | "succeeded" | "failed" | "cancelled";
   attemptId: string | null; result: CodePlanResult | null; priceMicros: string; createdAt: string; updatedAt: string;
   retryAt?: number;
   automaticRetries?: number;
 }
+export interface CodePlanSettings { ceilingMicros: string }
 export interface CodePlanChoice {
   id: string; projectId: string; choiceId: string; optionsDigest: string; question: string; options: JsonValue[];
   answer?: JsonValue; answeredAt?: string;

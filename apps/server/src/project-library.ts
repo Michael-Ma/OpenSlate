@@ -6,6 +6,8 @@ import type { NodeBinding } from "./execution/engine.js";
 import { requiredCommandKey } from "./application/command-key.js";
 import { assertPersonalVoiceCurrent } from "./narration/personal-voices.js";
 import { OPENAI_SPEECH_VOICES } from "@openslate/providers";
+import { codePlanNeedsAttention } from "./code-plan/projection.js";
+import type { CodePlanRun, CodePlanStep } from "./code-plan/records.js";
 
 /** All unresolved paid work counts, including human-released unknown submissions. */
 export function assertNoRunningAttempts(service: ProductionService, projectId: string, shotIds?: Set<string>) {
@@ -40,6 +42,8 @@ export function registerProjectLibrary(app: FastifyInstance, service: () => Prod
       const videos = new Set(s.store.list<NodeBinding>("node_binding", p.id).filter(b => b.state === "active" && b.planId === p.activePlanId
         && b.node.kind === "video" && Object.values(b.outputs).some(x => x.kind === "video")).map(b => b.node.shotId));
       return { id: p.id, name: p.name, archived: p.archived ?? false, scenes: p.scenes.length, shots: p.shots.length,
+        ...(p.planMode === "code" ? { planMode: "code" as const, needsAttention: codePlanNeedsAttention(
+          s.store.get<CodePlanRun>("code_plan_run", p.id), s.store.list<CodePlanStep>("code_plan_step", p.id)) } : {}),
         seconds: p.shots.reduce((n, x) => n + x.desiredFrames, 0) / 30, videosReady: p.shots.filter(x => videos.has(x.id)).length,
         updatedAt: p.updatedAt ?? s.store.readEvents(p.id).at(-1)?.occurredAt ?? new Date(0).toISOString() };
     });

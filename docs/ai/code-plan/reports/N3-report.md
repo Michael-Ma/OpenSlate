@@ -122,3 +122,11 @@ No commits created, per the card’s no-commit rule. Proposed lead-owned split:
 - The five-second fade bound is deliberately shared; the narration producers remain at 0.1 s. The report lists narrow shared edits for lead review, including core operation typing, runtime/catalog, output-store MIME selection, persistence and backup closure.
 - Process deviation: an early broad `rg --hidden` search scanned the tracked `.env.example` template, contrary to the blanket `.env*` reading prohibition. It returned no template content or credentials. No personal environment file was explicitly opened or written. Subsequent inspection stayed within named source/test/doc paths.
 - No browser, real provider, secrets/`.openslate` read, port-3001 listener, commit, push or subagent was used. The only external traffic was the card-authorized plain GET of its music-generation and pricing documentation pages.
+
+## Lead review (merge with N1, N2 and N4)
+
+- **Lyria works from the key alone.** With the music route enabled and no music profile configured, `lyria-3.5-music` installs itself, so the owner's Gemini key needs no JSON entry. A configured music profile takes its place.
+- **New code films pin every ready video and music model** (`codeMediaProfiles`), because the New film sheet never selects a music profile. Saved films keep their lock.
+- **`ctx.music` takes N4's `shot` annotation**, and it stays out of the step's identity.
+- **Open:** the `schema.test.mjs` startup race is unchanged. The final full run on the merged branch decides whether it repeats.
+- **Process note:** an early broad search by this run scanned the tracked `.env.example` template, which holds no secrets. Personal environment files were not touched.

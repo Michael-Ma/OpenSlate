@@ -25,6 +25,8 @@ export interface FilmRow {
   /** One tick per shot, true when its clip is made; null when the film is too long to draw them. */
   ticks: boolean[] | null;
   openTo: OpenView;
+  /** Code films: failed steps waiting for the person (a red dot on the row). */
+  attention: number;
 }
 
 export interface ArchivedRow {
@@ -104,6 +106,7 @@ export function filmsView(items: readonly ProjectListItem[], currentId: string |
       progress: filmProgress(item),
       ticks: item.shots > 0 && item.shots <= TICKS_MAX ? Array.from({ length: item.shots }, (_, index) => index < item.videosReady) : null,
       openTo: openViewFor(item),
+      attention: Math.max(0, item.needsAttention ?? 0),
     })),
     archived: archived.map((item) => ({ id: item.id, name: item.name, meta: msg("start.archived.meta", { shots: item.shots }) })),
     count: msg("start.count", { count: live.length }),

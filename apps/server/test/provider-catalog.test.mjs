@@ -402,3 +402,12 @@ test("Codex image catalog pins the supported worker without claiming a media API
     assert.throws(() => new InstalledProviderCatalog({ configuration: configuration(invalid) }), error => error.code === "PROVIDER_CATALOG_INVALID");
   }
 });
+
+test("with the music route enabled and no music profile, Lyria installs itself; a configured profile or a disabled route does not", () => {
+  const enabledExecutions = [{ adapter: "gemini-lyria", version: "1" }];
+  const ids = (catalog) => catalog.view().profiles.filter(row => row.profile.kind === "music").map(row => row.profile.id);
+  assert.deepEqual(ids(new InstalledProviderCatalog({ enabledExecutions })), ["lyria-3.5-music"]);
+  assert.deepEqual(ids(new InstalledProviderCatalog({})), []);
+  const own = { id: "my-lyria", revision: "1", kind: "music", adapter: "gemini-lyria", executionVersion: "1", configuration: { model: "lyria-3.5", settings: {} }, maxConcurrency: 1, unitCostMicros: "80000", maxRetries: 0 };
+  assert.deepEqual(ids(new InstalledProviderCatalog({ enabledExecutions, configuration: { version: 1, profiles: [{ label: "Mine", profile: own }] } })), ["my-lyria"]);
+});

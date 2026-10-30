@@ -141,7 +141,8 @@ test("explicit routes and credential presence do not call networks or create gen
   configuration.image = false; configuration.h3 = false; configuration.h3DownloadHosts[0] = "changed.example.test";
   assert.ok(runtime.engine.registry.resolve({ adapter: "openai-image", version: "1" })); assert.ok(runtime.engine.registry.resolve({ adapter: "minimax-h3", version: "1" }));
   assert.equal(runtime.providerCatalog.view().realExecutionEnabled, true);
-  assert.deepEqual(runtime.productionOptions, { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video" });
+  assert.deepEqual(runtime.productionOptions, { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video",
+    newCodeProjectMediaProfiles: [videoProfile] });
   const demo = f.production.createProject("Default still fake"), selected = runtime.providerCatalog.select(runtime.providerCatalog.digest, [videoProfile.id]);
   const production = f.production.createProject("Pinned production", selected);
   assert.equal(Object.hasOwn(f.store.get("capability_lock", demo.capabilityLockId), "localExecution"), false);

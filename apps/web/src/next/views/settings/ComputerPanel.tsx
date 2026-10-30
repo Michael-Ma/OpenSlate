@@ -10,6 +10,8 @@ import { useStore } from "../../store/react.tsx";
 import type { Resource } from "../../store/useResource.ts";
 import { CodeText, Panel, ReadState } from "./parts.tsx";
 import { setDeveloperMode, useDeveloperMode } from "../../app/useDeveloperMode.ts";
+import { setDefaultLimit, useDefaultLimit } from "../../app/useDefaultLimit.ts";
+import { formatMicros, microsFromDollars } from "../../model/price.ts";
 
 const codeOf = (error: unknown): string => (error instanceof ApiError ? error.code : "NETWORK_ERROR");
 
@@ -78,6 +80,7 @@ export function ComputerPanel({ providers, setup, hasFilm, offline }: { provider
           <div className="impact keys-note"><span className="ic" aria-hidden="true">i</span><span><CodeText text={t("set.computer.keys_note")} /></span></div>
         </>
       ) : <ReadState error={providers.error} onRetry={providers.reload} />}
+      <DefaultLimitRow />
       <DeveloperRow />
     </Panel>
   );
@@ -95,6 +98,30 @@ function DeveloperRow() {
       </div>
       <button type="button" className="switch" role="switch" data-act="developer-toggle" aria-checked={on}
         aria-labelledby="set-developer" aria-describedby="set-developer-d" onClick={() => setDeveloperMode(!on)} />
+    </div>
+  );
+}
+
+/** The limit a new code-plan film starts with. Saved in this browser when the field is left; a film's own limit is under Director. */
+function DefaultLimitRow() {
+  const { t, locale } = useI18n();
+  const limit = useDefaultLimit();
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? (Number(limit) / 1_000_000).toFixed(2);
+  const invalid = draft !== null && microsFromDollars(draft) === null;
+  const commit = () => {
+    if (draft === null) return;
+    const micros = microsFromDollars(draft);
+    if (micros) { setDefaultLimit(micros); setDraft(null); }
+  };
+  return (
+    <div className="srow limit-row" data-row="default-limit">
+      <div className="txt">
+        <b id="set-default-limit">{t("set.limit.default_title")}</b>
+        <span id="set-default-limit-d">{invalid ? t("set.limit.invalid") : t("set.limit.default_note", { limit: formatMicros(limit, locale) })}</span>
+      </div>
+      <input className="input limit-input" inputMode="decimal" data-act="default-limit" aria-labelledby="set-default-limit" aria-describedby="set-default-limit-d" aria-invalid={invalid || undefined}
+        value={shown} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") commit(); }} />
     </div>
   );
 }

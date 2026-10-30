@@ -188,3 +188,7 @@
 @media (prefers-reduced-motion: reduce){
   .set-view .switch::after{transition:none}
 }
+
+/* Spend limits: a small dollar field at the row's end */
+.set-view .limit-row .limit-input{width:92px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+.set-view .limit-row{gap:10px}

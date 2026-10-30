@@ -417,6 +417,7 @@ export async function generateScene(production: ProductionService, projectId: st
   if (placeholderIds.length) throw new DomainError("DIRECTION_REQUIRED", "Write direction for these shots before generating", { shotIds: placeholderIds });
   const quotedRows = targets.map(row => ({ ...row, imageComplete: selected.includes(row) ? false : row.imageComplete }));
   const estimate = quote(captured.lock, quotedRows, input.kind === "image" ? "makeKeyframes" : input.regenerate ? "remakeClip" : "confirmVideo");
+  invariant(estimate, "VIDEO_I2V_CODE_ONLY", "This video model is available only in code-plan films");
   invariant(input.expectedEstimateMicros === undefined || input.expectedEstimateMicros === estimate.micros,
     "ESTIMATE_CHANGED", "The estimate changed. Review the current price before generating.");
   invariant(

@@ -178,3 +178,11 @@ test('installation backup preserves owned music and rejects missing music proven
  await f.store.db.backup(join(f.root,'openslate.sqlite'));rmSync(destination,{recursive:true,force:true});
  await assert.rejects(createInstallationBackup({sourceRoot:f.root,destination}));assert.equal(f.musicCalls.length,1);
 });
+
+test("a shot annotation on music stays out of its identity", () => {
+  const models = { "fake-music": { kind: "music", defaults: { instrumental: true } } };
+  const input = { model: "fake-music", prompt: "Warm piano", durationSeconds: 30 };
+  assert.equal(stepKey("music", normalizeStepInput("music", { ...input, shot: "tofu-05" }, models)), stepKey("music", normalizeStepInput("music", input, models)));
+  assert.throws(() => normalizeStepInput("music", { ...input, shot: "" }, models), { code: "CODE_PLAN_INPUT" });
+  assert.throws(() => normalizeStepInput("music", { ...input, tempo: 90 }, models), { code: "CODE_PLAN_INPUT" });
+});

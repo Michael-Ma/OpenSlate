@@ -1,3 +1,4 @@
+import { videoI2vFailure } from "../execution/video-i2v-execution.js";
 import { createHash } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open } from "node:fs/promises";
@@ -13,7 +14,7 @@ import type { Store } from "../persistence/store.js";
 
 import type { InstalledProviderCatalog } from "../application/provider-catalog.js";
 import type { LocalMediaExecutor } from "../execution/local-media-executor.js";
-import { projectModels, modelPrice, type CodePlanCapabilityLock } from "./models.js";
+import { projectModels, modelPrice, codePlanPriceFrame, type CodePlanCapabilityLock } from "./models.js";
 import { codePlanProviderArgs, videoAspect } from "./provider-input.js";
 import type { CodePlanModel } from "./identity.js";
 import { VIDEO_DERIVATION_LIMITS, assertNormalizedVideoIngestion, type NormalizedVideoIngestion, type VideoDerivationIntent } from "../execution/video-derivation.js";
@@ -21,6 +22,8 @@ import { AUDIO_DERIVATION_LIMITS, assertNormalizedAudioIngestion, type Normalize
 import type { MusicReceipt } from "../execution/spool-music-ingester.js";
 import { assertMusicArtifact } from "../execution/spool-music-ingester.js";
 import { assertCodePlanFirstDispatch } from "./provider-authority.js";
+import { makeCodePlanPoster } from "./posters.js";
+import type { CodePlanStep } from "./records.js";
 import type { CodePlanMediaKind } from "./identity.js";
 export type { CodePlanMediaKind } from "./identity.js";
 export type CodePlanLiability = "reserved" | "charged" | "released";
@@ -164,7 +167,7 @@ export class CodePlanExecution {
       this.store.insert("code_plan_execution", id, projectId, { requestDigest: digest(attempt.request), liability: "reserved",
         outcome: null, outcomeDigest: null, createdAt: at, updatedAt: at,
         ...(this.store.get<{ planVersion: number }>("code_plan_run", projectId) ? { planVersion: this.store.get<{ planVersion: number }>("code_plan_run", projectId)!.planVersion } : {}),
-        normalizedInput: input, priceMicros: options.priceMicros ?? modelPrice(model) });
+        normalizedInput: input, priceMicros: options.priceMicros ?? modelPrice(model, input, codePlanPriceFrame(this.store, projectId, input)) });
       this.store.insert("attempt", id, projectId, attempt);
       return { attempt, created: true };
     });
@@ -210,6 +213,22 @@ export class CodePlanExecution {
     })));
     const rejected = results.find(result => result.status === "rejected"); if (rejected?.status === "rejected") throw rejected.reason;
     return before !== canonical(this.attempts(projectId));
+  }
+
+  /** At most one historical clip per tick, including history from older plan versions. */
+  async backfillPoster(projectId: string): Promise<boolean> {
+    if (this.stopping || !this.localExecutor) return false;
+    const step = this.store.list<CodePlanStep>("code_plan_step", projectId).find(step => step.state === "succeeded"
+      && step.result?.ok && step.result.artifact.kind === "video" && !this.store.get("code_plan_poster", step.result.artifact.artifactId));
+    if (!step?.result?.ok) return false;
+    await this.poster(projectId, step.result.artifact); return true;
+  }
+
+  private async poster(projectId: string, ref: ArtifactRef): Promise<void> {
+    if (this.stopping || !this.localExecutor || ref.kind !== "video") return;
+    const controller = new AbortController(); this.controllers.add(controller);
+    try { await makeCodePlanPoster(this.store, this.localExecutor.media, this.artifactDir, projectId, ref, controller.signal); }
+    finally { this.controllers.delete(controller); }
   }
 
   /** Await already-started work before a replay or before closing the shared store. */
@@ -297,10 +316,13 @@ export class CodePlanExecution {
         { attemptId: id, outcome, outcomeDigest: evidenceDigest, recordedAt: new Date().toISOString() });
       const phase = outcome.type === "completed" ? "ingesting" : outcome.type === "accepted" ? "remote_pending"
         : outcome.type === "unknown" ? "submission_unknown" : "failed";
+      const freeFailure = outcome.type === "failed" ? (() => { const row = videoI2vFailure(this.store, attempt); return row?.free ? row : null; })() : null;
       const failure = outcome.type === "failed" || outcome.type === "rejected" ? { id: outcome.failureId, technical: outcome.technical,
-        retryAllowed: outcome.type === "rejected" && outcome.retryAllowed, source: `${attempt.request.execution.adapter}_provider` } : null;
-      // Rejection is the sole positive evidence that the request cannot be charged.
-      const liability: CodePlanLiability = outcome.type === "rejected" ? "released"
+        // A free vendor failure (not a content refusal) cannot charge twice, so it may retry as safely as a rejection.
+        retryAllowed: outcome.type === "rejected" ? outcome.retryAllowed : !!freeFailure && !/FACE|MODERATION/.test(freeFailure.code),
+        source: `${attempt.request.execution.adapter}_provider` } : null;
+      // Rejections and request-bound Seedance free-task failures positively release liability.
+      const liability: CodePlanLiability = outcome.type === "rejected" || freeFailure ? "released"
         : outcome.type === "completed" || outcome.type === "failed" ? "charged" : record.liability;
       this.store.put("code_plan_execution", id, attempt.projectId, { ...record, liability, outcome, outcomeDigest: digest(outcome), updatedAt: new Date().toISOString() });
       this.store.put("attempt", id, attempt.projectId, { ...attempt, phase, failure, taskId: executionTaskId(outcome) ?? attempt.taskId });
@@ -322,6 +344,7 @@ export class CodePlanExecution {
         this.store.put("code_plan_execution", attempt.id, attempt.projectId, { ...record, liability: "charged", updatedAt: new Date().toISOString() });
         this.store.put("attempt", attempt.id, attempt.projectId, { ...current, phase: "succeeded", outputs: { video: artifact.artifact } });
       });
+      await this.poster(attempt.projectId, artifact.artifact);
     } finally { this.controllers.delete(controller); }
   }
 
@@ -363,6 +386,10 @@ export class CodePlanExecution {
       await this.validateArtifact(attempt, output, artifact, music || derived.some(item => item.artifact === artifact));
       artifacts.push(artifact); outputs[output.port] = artifact.artifact;
     }
+    if (attempt.request.execution.adapter === "seedance") {
+      const lastFrame = this.store.get<ArtifactRecord>("artifact", digest({attemptId:attempt.id,port:"lastFrame"}));
+      if (lastFrame?.projectId === attempt.projectId && lastFrame.attemptId === attempt.id && lastFrame.artifact.kind === "image") outputs.lastFrame = lastFrame.artifact;
+    }
     this.store.transaction(() => {
       const current = this.attempt(id);
       if (current.phase === "succeeded") return;
@@ -380,6 +407,7 @@ export class CodePlanExecution {
       }
       this.store.put("attempt", id, attempt.projectId, { ...current, phase: "succeeded", outputs });
     });
+    for (const ref of Object.values(outputs)) if (ref.kind === "video") await this.poster(attempt.projectId, ref);
   }
 
   private async validateArtifact(attempt: Attempt, output: IngestibleExecutionOutput, artifact: ArtifactRecord, derived = false): Promise<void> {

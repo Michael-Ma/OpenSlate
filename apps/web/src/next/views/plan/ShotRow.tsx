@@ -12,7 +12,7 @@ import { useShrinkWrap } from "./useShrinkWrap.ts";
 export const rowId = (shotId: string) => `plan-row-${shotId}`;
 
 /** The 16:9 thumbnail with its label: the keyframe, the earlier one dimmed, or a dashed box saying what is missing. */
-export function Thumb({ label, picture, dimmed, empty }: { label: string; picture: StudioArtifactRef | null; dimmed: boolean; empty: Msg | null }) {
+export function Thumb({ label, picture, dimmed, empty, onOpen }: { label: string; picture: StudioArtifactRef | null; dimmed: boolean; empty: Msg | null; onOpen?: (() => void) | undefined }) {
   const { t, tm } = useI18n();
   if (!picture)
     return (
@@ -21,12 +21,14 @@ export function Thumb({ label, picture, dimmed, empty }: { label: string; pictur
         {empty ? tm(empty) : null}
       </div>
     );
-  return (
-    <div className={`thumb${dimmed ? " dim" : ""}`}>
+  const body = (
+    <>
       <Picture artifact={picture} alt={t(dimmed ? "plan.thumb.alt_earlier" : "plan.thumb.alt", { shot: label })} />
       <span className="badge">{label}</span>
-    </div>
+    </>
   );
+  if (onOpen) return <button type="button" className={`thumb open${dimmed ? " dim" : ""}`} data-act="thumb-open" aria-label={t("viewer.open", { label })} onClick={onOpen}>{body}</button>;
+  return <div className={`thumb${dimmed ? " dim" : ""}`}>{body}</div>;
 }
 
 export function Pill({ pill }: { pill: StatusPillView }) {

@@ -638,6 +638,10 @@ export interface ProjectListItem {
   seconds: number;
   videosReady: number;
   updatedAt: string;
+  /** Absent means graph. */
+  planMode?: PlanMode;
+  /** Code films: steps the current plan reached that failed or stopped waiting for an answer. */
+  needsAttention?: number;
 }
 
 /** character_sheet: one four-view character reference image (front, side, back, face), bound into that character's keyframes once approved. */
@@ -774,6 +778,10 @@ export interface CodePlanStepView {
   error?: { code: string; mayHaveCharged?: boolean; retry?: "safe" | "consent" | "none" };
   /** Attempts made for this step so far, retries included. */
   attempts?: number;
+  /** The declared shot this step belongs to: the plan's `shot` annotation, or its `<shot>-keyframe` choice. */
+  shotId?: string;
+  /** A still of a finished clip or render (its first frame), for thumbnails. */
+  poster?: StudioArtifactRef;
   priceMicros: Micros;
   /** Whether the latest pass reached this step. Unreached steps stay listed as history. */
   reached: boolean;

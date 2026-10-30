@@ -2,6 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type Key
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
 import { numberLocale } from "../../i18n/translate.ts";
+import { readDefaultLimit, useDefaultLimit } from "../../app/useDefaultLimit.ts";
+import { formatMicros } from "../../model/price.ts";
 import { FILM_NAME_MAX } from "../../model/start.ts";
 import { runCreation, setUpDirector, type CreationResult, type Film } from "../../model/start-commands.ts";
 import {
@@ -65,6 +67,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   onModelsChanged(): void;
 }) {
   const { t, tm, locale } = useI18n();
+  const defaultLimit = useDefaultLimit();
   const store = useStore();
   const titleId = useId();
   const formId = useId();
@@ -128,7 +131,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
     const first = step;
     const filmName = failed?.film.name ?? (name.trim() || untitled);
     const input = {
-      body: createBody(name, plan, untitled, planning),
+      body: createBody(name, plan, untitled, planning, readDefaultLimit()),
       steps: creationSteps(first, codex, planText),
       plan: first === "plan" && planText.trim() ? { fileName: planFileName(filmName, planFile), text: planText } : null,
       codex,
@@ -238,7 +241,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
                 onClick={() => choosePlanning(option)}
               >
                 <b>{t(PLANNING_TEXT[option].title)}</b>
-                <span>{t(PLANNING_TEXT[option].body)}</span>
+                <span>{option === "code" ? t("start.planning.code.body", { limit: formatMicros(defaultLimit, locale) }) : t(PLANNING_TEXT[option].body)}</span>
               </button>
             ))}
           </div>

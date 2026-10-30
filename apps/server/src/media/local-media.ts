@@ -5,6 +5,8 @@ import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import { runMediaProcess } from "./process.js";
+import { LocalImageStore } from "./local-images.js";
+import type { StoredImage } from "./local-images.js";
 import { inspectPcmWave } from "./pcm-wave.js";
 import { assertTranscriptionAudioCapacity, assertTranscriptionAudioMeasurement, assertTranscriptionAudioRecipe, TRANSCRIPTION_AUDIO_LIMITS } from "./transcription-audio-types.js";
 import type { MeasuredTranscriptionAudio, TranscriptionAudioOptions, TranscriptionAudioRecipe } from "./transcription-audio-types.js";
@@ -211,6 +213,37 @@ export class LocalMediaService {
       const input = join(dir, "input");
       await this.snapshot(path, input, options.signal);
       return this.inspect(input, options.signal);
+    }));
+  }
+
+  /** Free first-frame derivation from an exact owned clip, published through the probed PNG store. */
+  async poster(input: { path: string; sha256: string; artifactDir: string }, options: { signal?: AbortSignal } = {}): Promise<StoredImage> {
+    input = structuredClone(input);
+    const { signal } = options, timeoutMs = Math.min(this.limits.timeoutMs, 30000), maxBytes = 32 * 1024 * 1024;
+    return this.exclusive(async () => this.temporary(async dir => {
+      invariant(HASH.test(input.sha256) && isAbsolute(input.artifactDir) && input.artifactDir !== "/", "MEDIA_INVALID_INPUT", "A poster requires an owned clip identity and artifact root");
+      const root = await realpath(input.artifactDir), source = join(dir, "clip"), target = join(dir, "poster.png");
+      await this.snapshot(input.path, source, signal, [root]);
+      invariant((await this.hashFile(source, this.limits.maxInputBytes, signal)).sha256 === input.sha256,
+        "MEDIA_INTEGRITY_ERROR", "Poster source differs from the owned clip");
+      const description = JSON.parse(await this.run(this.ffprobe, ["-v", "error", ...INPUT_OPTIONS, "-show_entries", "stream=codec_type,width,height", "-of", "json", source], signal, timeoutMs)) as { streams?: { codec_type?: string; width?: number; height?: number }[] };
+      const video = description.streams?.find(stream => stream.codec_type === "video");
+      invariant(video && Number.isSafeInteger(video.width) && Number.isSafeInteger(video.height) && video.width! > 0 && video.height! > 0
+        && video.width! <= 4096 && video.height! <= 4096 && video.width! * video.height! <= 8_294_400,
+      "MEDIA_INVALID_INPUT", "Poster dimensions exceed the image bounds");
+      await this.run(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...INPUT_OPTIONS, "-noautorotate", "-i", source,
+        "-map", "0:v:0", "-map_metadata", "-1", "-frames:v", "1", "-threads", "1", "-c:v", "png", "-fs", String(maxBytes), "-f", "image2", target], signal, timeoutMs);
+      const file = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+      let bytes: Buffer;
+      try {
+        const stat = await file.stat();
+        invariant(stat.isFile() && stat.size > 32 && stat.size <= maxBytes, "MEDIA_OUTPUT_LIMIT", "Poster exceeds the PNG byte bound");
+        bytes = await file.readFile();
+        invariant(bytes.length === stat.size, "MEDIA_INTEGRITY_ERROR", "Poster changed during publication");
+      } finally { await file.close(); }
+      aborted(signal);
+      const images = new LocalImageStore({ rootDir: join(root, "posters"), ffmpegPath: this.ffmpeg, ffprobePath: this.ffprobe, timeoutMs });
+      return images.ingest({ bytes, sha256: createHash("sha256").update(bytes).digest("hex"), mimeType: "image/png", width: video.width!, height: video.height! }, options);
     }));
   }
 
@@ -587,11 +620,11 @@ export class LocalMediaService {
     }
     return this.toolchain;
   }
-  private async snapshot(path: string, destination: string, signal?: AbortSignal): Promise<void> {
+  private async snapshot(path: string, destination: string, signal?: AbortSignal, roots = this.roots): Promise<void> {
     invariant(typeof path === "string" && isAbsolute(path) && !path.includes("\0"), "MEDIA_PATH_REJECTED", "Only explicitly allowed local file paths are accepted");
     invariant(!(await lstat(path)).isSymbolicLink(), "MEDIA_PATH_REJECTED", "Input symlinks are not accepted");
     const resolved = await realpath(path);
-    invariant(this.roots.some(root => within(resolved, root)), "MEDIA_PATH_REJECTED", "Input is outside configured local roots");
+    invariant(roots.some(root => within(resolved, root)), "MEDIA_PATH_REJECTED", "Input is outside configured local roots");
     const source = await open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
     let target;
     try {

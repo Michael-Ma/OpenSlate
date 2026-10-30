@@ -8,7 +8,7 @@ import { contextToolVersion } from "./audio-operation-context.js";
 import { requestScopesIntersect } from "./request-scopes.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
-  applyCreativePatch, compilePlanIsolated, DEFAULT_PROFILES, digest, diffPlans, invariant, newId,
+  applyCreativePatch, compilePlanIsolated, DEFAULT_PROFILES, digest, diffPlans, invariant, moneyMicros, newId,
   parseChangeProposal, RECIPE_DIGEST, requiredStages, shotIntentDigest, snapshotLocalExecution, stageInputDigest,
   validateStageRequirements, validateStageScope, workflowReadiness,
   STAGE_CONTRACTS, STAGE_CONTRACTS_DIGEST, TOOL_NAMES,
@@ -61,6 +61,8 @@ export interface ProductionServiceOptions {
   newProjectLocalExecutionFor?: "all" | "external-video";
   /** Ready lip-sync profiles pinned beside a real video model on new projects; they make only singing shots. */
   newProjectLipSyncProfiles?: readonly ProviderProfile[];
+  /** Ready video and music models a new code film may also use; its plan picks one per shot. */
+  newCodeProjectMediaProfiles?: readonly ProviderProfile[];
 }
 interface ProjectCapabilityLock {
   projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string;
@@ -82,6 +84,7 @@ export class ProductionService {
   private readonly newProjectLocalExecution: Readonly<LocalExecutionIdentity> | undefined;
   private readonly newProjectLocalExecutionFor: "all" | "external-video";
   private readonly newProjectLipSyncProfiles: readonly ProviderProfile[];
+  private readonly newCodeProjectMediaProfiles: readonly ProviderProfile[];
   constructor(readonly store: Store, readonly engine: Engine, readonly profiles: ProviderProfile[] = DEFAULT_PROFILES,
     options: ProductionServiceOptions = {}) {
     const selected = options.newProjectLocalExecution;
@@ -91,22 +94,27 @@ export class ProductionService {
     invariant(scope !== "external-video" || this.newProjectLocalExecution, "LOCAL_EXECUTION_UNSUPPORTED", "External-video scope requires an exact local execution identity");
     this.newProjectLocalExecutionFor = scope;
     this.newProjectLipSyncProfiles = structuredClone([...(options.newProjectLipSyncProfiles ?? [])]);
+    this.newCodeProjectMediaProfiles = structuredClone([...(options.newCodeProjectMediaProfiles ?? [])]);
     invariant(this.newProjectLipSyncProfiles.length <= 1 && this.newProjectLipSyncProfiles.every(profile => profile.kind === "video" && profile.adapter === "fal-h3-lipsync"),
       "PROVIDER_SELECTION_INVALID", "Pin at most one lip-sync profile");
     migrateLegacyRequestSources(this.store);
   }
 
-  createProject(name: string, selection?: InstalledProviderSelection, planMode?: "graph" | "code"): ProjectRecord {
+  createProject(name: string, selection?: InstalledProviderSelection, planMode?: "graph" | "code", ceilingMicros?: string): ProjectRecord {
     this.recovery.assertWritable();
     invariant(typeof name === "string" && name.trim().length > 0 && name.length <= 160, "VALIDATION_ERROR", "Provide a short project name");
     invariant(planMode === undefined || planMode === "graph" || planMode === "code", "VALIDATION_ERROR", "Use graph or code plan mode");
+    invariant(ceilingMicros === undefined || planMode === "code", "CODE_PLAN_MODE", "A spend limit at creation requires a code film");
+    if (ceilingMicros !== undefined) moneyMicros(ceilingMicros);
     const selected = selection === undefined ? undefined : selectedProviderProfiles(selection);
     const chosen = selected?.profiles ?? this.profiles;
     const pinLocalExecution = this.newProjectLocalExecution && (this.newProjectLocalExecutionFor === "all"
       || chosen.some(profile => profile.kind === "video" && profile.adapter !== "fake"));
     // Appended after the chosen profiles, so every "first video profile" lookup still finds the chosen one.
-    const profiles = pinLocalExecution && selected && chosen.some(profile => profile.kind === "video" && profile.adapter !== "fake")
-      ? [...chosen, ...structuredClone(this.newProjectLipSyncProfiles).filter(profile => !chosen.some(row => row.id === profile.id))] : chosen;
+    const realVideo = pinLocalExecution && !!selected && chosen.some(profile => profile.kind === "video" && profile.adapter !== "fake");
+    const beside = [...(realVideo ? this.newProjectLipSyncProfiles : []), ...(realVideo && planMode === "code" ? this.newCodeProjectMediaProfiles : [])];
+    const profiles = [...chosen, ...structuredClone(beside).filter((profile, index) => !chosen.some(row => row.id === profile.id)
+      && beside.findIndex(row => row.id === profile.id) === index)];
     return this.store.transaction(() => {
       const project: ProjectRecord = {
         id: newId(), revisionId: newId(), headVersion: 0, name, brief: "", story: "", scenes: [],
@@ -115,6 +123,7 @@ export class ProductionService {
         ...(planMode === "code" ? { planMode } : {}),
       };
       this.store.createProject(project);
+      if (ceilingMicros !== undefined) this.store.put("code_plan_settings", project.id, project.id, { ceilingMicros });
       this.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles,
         recipeDigest: RECIPE_DIGEST, stageContractsDigest: STAGE_CONTRACTS_DIGEST, tools: TOOL_NAMES,
         ...(selected ? { providerSelection: selected.provenance } : {}),

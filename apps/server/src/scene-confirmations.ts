@@ -156,6 +156,7 @@ export class SceneConfirmationRunner {
       invariant(confirmationFramesCurrent(this.store, this.store.getProject(projectId), framePins), "SCENE_REVIEW_STALE", "The reviewed frame must be a current output of its image binding");
       if (remake) invariant(targets.every(row => row.narration.ready), "NARRATION_SPEECH_STALE", "Keep the saved voice line ready before remaking its clip");
       const estimate = quote(captured.lock, targets, remake ? "remakeClip" : "confirmVideo");
+      invariant(estimate, "VIDEO_I2V_CODE_ONLY", "This video model is available only in code-plan films");
       invariant(input.expectedEstimateMicros === undefined || input.expectedEstimateMicros === estimate.micros, "ESTIMATE_CHANGED", "Review the scene's current estimate");
       this.assertNoVoiceInFlight(projectId, targets.map(r => r.shotId));
       const actor = this.production.beginRequest(projectId, "local-user", remake ? "Remake only the selected saved clips, keeping their approved keyframes and saved voice lines." : "Confirm the reviewed scene frames, narration and video recipe.",

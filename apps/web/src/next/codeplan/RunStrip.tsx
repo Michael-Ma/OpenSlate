@@ -63,7 +63,7 @@ export function CodePlanRunStrip() {
             {...guard}
             disabled={guard.disabled || raising}
             aria-busy={raising || undefined}
-            onClick={() => { if (strip.raise) void store.raiseCodePlanCeiling(view, strip.raise.body); }}
+            onClick={() => { if (strip.raise) void store.setCodePlanCeiling(view, strip.raise.body); }}
           >
             {tm(strip.raise.label)}
           </button>
