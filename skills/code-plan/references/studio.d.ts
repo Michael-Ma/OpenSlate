@@ -7,7 +7,7 @@ interface Studio {
   scene<T extends { [key: string]: Json }>(declaration: T): Promise<T>;
   shot<T extends { [key: string]: Json }>(declaration: T): Promise<T>;
   image(input: MediaInput & { prompt: string }): Promise<MediaResult>;
-  video(input: MediaInput & { firstFrame: Artifact; prompt: string; durationSeconds?: number }): Promise<MediaResult>;
+  video(input: MediaInput & { firstFrame: Artifact; prompt: string; durationSeconds?: number; lastFrame?: Artifact; resolution?: string; aspectRatio?: string; generateAudio?: boolean; seed?: number }): Promise<MediaResult>;
   /** Use an installed read_film.models id. Real speech defaults to stock voice coral. */
   speech(input: MediaInput & { text: string; voice?: string; instructions?: string }): Promise<MediaResult>;
   /** Real projects: owned video refs or {artifact,startFrame?,durationFrames?,fit?};

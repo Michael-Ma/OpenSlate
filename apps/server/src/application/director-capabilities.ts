@@ -5,7 +5,7 @@ import type { SkillCapabilityLock, SkillEnvironment } from "@openslate/director"
 import { join } from "node:path";
 
 /** Immutable code-mode instructions; independent of shipped graph releases. */
-export const CODE_PLAN_GUIDANCE_DIGEST = "d3811c72395713445f2167bb281273de28b058098189f9d8bec441d7b3d0052e";
+export const CODE_PLAN_GUIDANCE_DIGEST = "4c686d648999cfed0d64b7d347f2c6fff01a37db492f45e2a30f955da81eba8b";
 
 export interface DirectorSkillConfiguration { repositoryRoot: string; snapshotRoot: string; runtimeId?: string }
 
