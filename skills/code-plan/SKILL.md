@@ -16,8 +16,9 @@ All effects go through ctx. Await every ctx call, including declarations and log
 `scene(declaration)` and `shot(declaration)` accept bounded JSON objects, return those objects, and declare storyboard rows for this pass.
 `image({model?, prompt, variant?, ...parameters})` returns a media result. `video({model?, firstFrame, prompt, durationSeconds?, aspectRatio?, variant?, ...parameters})` does the same for clips.
 `speech({model?, text, voice?, instructions?, variant?})` returns a media result for a spoken line; real speech defaults to the stock voice coral and empty instructions.
+`music({model?, prompt, durationSeconds, instrumental?, variant?})` returns owned 48 kHz audio with measured `leadInSamples` and `durationSamples`. Lyria costs $0.08 per call and requires billing on the Gemini key’s Google project.
 `render(timeline)` or `render({model?: "local-render", timeline, audio?, width?, height?})` returns local assembly.
-For real projects, timeline contains video artifacts or `{artifact, startFrame?, durationFrames?, fit?: "contain" | "cover"}` rows; audio contains `{artifact, startSample?, durationSamples?, atSample?, gainMilliDb?}` placements.
+For real projects, timeline contains video artifacts or `{artifact, startFrame?, durationFrames?, fit?: "contain" | "cover"}` rows; audio contains `{artifact, startSample?, durationSamples?, atSample?, gainMilliDb?, fadeOutSamples?}` placements.
 Only cuts, 30 fps, 48 kHz, up to 64 clips, 65 audio placements, eight simultaneous audio lanes and 360 seconds are supported. Frames/samples are integers. An audio placement must fit inside the picture; trim it explicitly when needed.
 Real assembly uses measured owned media and returns a probed MP4. Demo projects retain the labeled fixture renderer.
 A media result is `{ok:true, artifact, artifacts}` or `{ok:false, error:{code,message,retry,mayHaveCharged}}`. Branch on ok before using an artifact. Provider failure is data; programming errors throw.
@@ -27,7 +28,7 @@ Give each shot its own pipeline (frames, choose, clip) and start all shots toget
 Use the exact ids in `read_film.models`: they come from the film's saved profiles and installed catalog. Explicit model names are recommended; never invent availability.
 Each row gives kind, defaults, unitCostMicros, priceUnit and priceUnknown. Every price is per call, clips included, the same basis as the storyboard quotes. These are host estimates, not verified vendor bills. Unknown prices stay unknown and contribute zero known dollars; they still consume the 200-step limit. Codex images use the ChatGPT subscription and count as $0; native authentication is checked before starting a turn.
 Disabled, missing or uncredentialed models cannot dispatch. A real profile never falls back to a fake or a different vendor. Inputs must match the installed settings; video takes a whole number of seconds within minFrames/maxFrames.
-The supplied two-shot example is an offline demo using fake-image, fake-video and local-render. Adapt its model ids and durations from read_film before using a real installation. Fake models remain available on demo projects.
+The supplied two-shot example is an offline demo using fake-image, fake-video, fake-music and local-render. Adapt its model ids and durations from read_film before using a real installation. Fake models remain available on demo projects.
 
 Replay starts at the top and reuses media by normalized input content, independent of code location.
 Use variant for deliberate duplicates of one prompt; otherwise identical inputs reuse the same step.
@@ -46,3 +47,9 @@ Failures and consent:
 - Programs cannot call retry_step. For an in-program retry after a result with retry other than "none", ask `ctx.choose("<shot>-retry", {question, options:["retry","skip"]})` with an honest cost line, then repeat ctx.video with a new variant only if the person chose retry. Include whether the earlier attempt may have charged, plus the new call's price from read_film.models. Keep this choice and variant stable on replay; never retry endlessly or silently.
 
 Vertical films: pass `aspectRatio: "9:16"` to ctx.video. Viggle also supports 16:9, 1:1, 4:3, 3:4 and 21:9. Without an override, the measured first frame selects the nearest supported Viggle ratio, and both crop and request use it. The ratio is part of step identity. MiniMax follows its first frame's aspect without a separate wire ratio; any explicit ratio must match that frame. Render vertical output with width:1080,height:1920.
+
+Background music:
+- Generate it once the cut’s length is known. Describe mood, instruments and tempo in words; instrumental defaults to true (no vocals).
+- Lyria length is approximate: a 20-second request returned 68 seconds. Always trim and fade at the cut. Place at `atSample: 0`, skip the measured `leadInSamples` using `startSample`, set `durationSamples` to the film’s samples and `fadeOutSamples: Math.min(96000, filmSamples)` for the last two seconds (five seconds maximum).
+- First check `music.durationSamples - music.leadInSamples >= filmSamples`. If shorter, tell the person and generate another track with an explicit stable `variant`; do not stretch or silently reuse an unusable track. Use a variant for any deliberate regeneration.
+- Mix at about `gainMilliDb: -14000` under speech or `-6000` when the film has no speech. Tell the person the generated file carries an inaudible SynthID audio watermark.

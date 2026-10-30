@@ -274,7 +274,7 @@ test("quotes price lip sync per second of audio by resolution, with the long-cli
 });
 
 test("a fal key enables lip sync with the default fal CDN hosts and disabling it returns explicit empty configuration", () => {
-  assert.deepEqual(readMediaExecutionConfiguration({}), { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
+  assert.deepEqual(readMediaExecutionConfiguration({}), { image: false, music: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
   const configured = readMediaExecutionConfiguration({ OPENSLATE_FAL_API_KEY: "id:secret" });
   assert.equal(configured.falLipSync, true); assert.deepEqual(configured.falLipSyncDownloadHosts, ["v3.fal.media", "v3b.fal.media", "fal.media"]);
   const disabled = readMediaExecutionConfiguration({ OPENSLATE_FAL_API_KEY: "id:secret", OPENSLATE_ENABLE_FAL_LIPSYNC: "0" });

@@ -28,6 +28,8 @@ import { ViggleH3Execution } from "../execution/viggle-h3-execution.js";
 import { FalH3LipSyncExecution } from "../execution/fal-lipsync-execution.js";
 import { assertFalLipSyncOperationOptions } from "../execution/fal-lipsync-receipts.js";
 import type { NarrationAudio } from "../narration/types.js";
+import { GeminiLyriaExecution } from "../execution/gemini-lyria-execution.js";
+import { SpoolMusicIngestor } from "../execution/spool-music-ingester.js";
 import { OpenAISpeechExecution } from "../execution/openai-speech-execution.js";
 import { OpenAITranscriptionExecution } from "../execution/openai-transcription-execution.js";
 import { ProtectedVideoDownloader } from "../execution/video-download.js";
@@ -47,7 +49,7 @@ export interface MediaExecutionRuntimeOptions {
   startupTimeoutMs?: number;
   /** Trusted host/test dependencies only; never populated from a browser or model request. */
   transport?: { codexImage?: CodexImageTransport; imageFetch?: typeof globalThis.fetch; h3Fetch?: typeof globalThis.fetch; viggleFetch?: typeof globalThis.fetch;
-    speechFetch?: typeof globalThis.fetch; transcriptionFetch?: typeof globalThis.fetch; falFetch?: typeof globalThis.fetch;
+    musicFetch?: typeof globalThis.fetch; speechFetch?: typeof globalThis.fetch; transcriptionFetch?: typeof globalThis.fetch; falFetch?: typeof globalThis.fetch;
     download?: Pick<VideoDownloadOptions, "lookup" | "request">;
     viggleDownload?: Pick<VideoDownloadOptions, "lookup" | "request">;
     falDownload?: Pick<VideoDownloadOptions, "lookup" | "request"> };
@@ -62,12 +64,12 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   const startupTimeoutMs = readCodexStartupTimeout(options.startupTimeoutMs === undefined ? {} : { OPENSLATE_CODEX_STARTUP_TIMEOUT_MS: String(options.startupTimeoutMs) });
   const { store, fakeProvider, ffmpegPath, ffprobePath } = options;
   const configuration = structuredClone(options.configuration);
-  invariant(typeof configuration.image === "boolean" && typeof configuration.codexImage === "boolean" && typeof configuration.h3 === "boolean"
+  invariant((configuration.music === undefined || typeof configuration.music === "boolean") && typeof configuration.image === "boolean" && typeof configuration.codexImage === "boolean" && typeof configuration.h3 === "boolean"
     && typeof configuration.speech === "boolean" && typeof configuration.transcription === "boolean" && typeof configuration.viggleH3 === "boolean"
     && typeof configuration.falLipSync === "boolean" && Array.isArray(configuration.h3DownloadHosts)
     && Array.isArray(configuration.viggleH3DownloadHosts) && Array.isArray(configuration.falLipSyncDownloadHosts),
     "MEDIA_EXECUTION_CONFIGURATION", "Use validated local generation configuration");
-  const enabled = configuration.image || configuration.codexImage || configuration.h3 || configuration.viggleH3 || configuration.falLipSync || configuration.speech || configuration.transcription,
+  const enabled = configuration.music || configuration.image || configuration.codexImage || configuration.h3 || configuration.viggleH3 || configuration.falLipSync || configuration.speech || configuration.transcription,
     haveTools = executable(ffmpegPath) && executable(ffprobePath);
   invariant(!enabled || haveTools, "MEDIA_EXECUTION_TOOLS_REQUIRED", "Enabled media generation requires executable FFmpeg and ffprobe on this computer");
   invariant([configuration.codexImageBinary, configuration.codexImageHome].every(path => path === undefined
@@ -148,6 +150,10 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
       ...(options.transport?.falFetch ? { fetch: options.transport.falFetch } : {}) }));
     enabledExecutions.push({ adapter: "fal-h3-lipsync", version: "1" });
   }
+  if (configuration.music) {
+    providers.push(new GeminiLyriaExecution(store, outputStore, credentials, options.transport?.musicFetch ? { fetch: options.transport.musicFetch } : {}));
+    enabledExecutions.push({ adapter: "gemini-lyria", version: "1" });
+  }
   if (configuration.speech) {
     providers.push(new OpenAISpeechExecution({ store, outputStore, credentials,
       ...(options.transport?.speechFetch ? { fetch: options.transport.speechFetch } : {}) }));
@@ -211,9 +217,11 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
       return configured.authorize(input);
     },
   };
+  const musicIngestor = localMedia ? new SpoolMusicIngestor(outputStore, localMedia) : undefined;
+  const speechIngestor = localMedia ? new SpoolAudioIngestor(outputStore, localMedia, { rootDir: join(directory, "audio-derivations") }) : undefined;
   const outputIngestor = new ExecutionIngestionRouter({ ...(imageStore ? { image: new SpoolImageIngestor(outputStore, imageStore) } : {}),
       ...(localMedia ? { video: new SpoolVideoIngestor(outputStore, localMedia, { rootDir: join(directory, "video-derivations") }),
-        audio: new SpoolAudioIngestor(outputStore, localMedia, { rootDir: join(directory, "audio-derivations") }),
+        audio: { ingest: input => input.attempt.request.kind === "music" ? musicIngestor!.ingest(input) : speechIngestor!.ingest(input) },
         transcription: new SpoolTranscriptIngestor(outputStore, localMedia, transcriptionFiles!, { artifactDir }) } : {}) });
   const localExecutor = localMedia ? new LocalMediaExecutor(store, localMedia, { artifactDir }) : undefined;
   const engine = new Engine(store, registry, { artifactDir, outputStore, outputIngestor,

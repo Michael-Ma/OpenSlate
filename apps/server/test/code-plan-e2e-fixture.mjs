@@ -162,13 +162,13 @@ export async function runCodePlanOfflineFlow(f) {
     view = await f.until(id, view => view.state === "done" || view.choices.some(choice => !Object.hasOwn(choice, "answer")), "next choice or completed film");
     eventCount = f.changed(id, eventCount, "choice continuation");
   }
-  assert.equal(answers, 2); assert.equal(view.steps.length, 9);
+  assert.equal(answers, 2); assert.equal(view.steps.length, 10);
   assert.ok(view.steps.some(step => step.kind === "render" && step.state === "succeeded"));
-  assert.equal(view.spentMicros, "260000"); assert.equal(view.reservedMicros, "0");
+  assert.equal(view.spentMicros, "340000"); assert.equal(view.reservedMicros, "0");
   assert.equal(f.store.getProject(id).artifacts.length, 0, "Code outputs need no graph artifact selection");
   assert.equal(f.store.list("node_binding", id).length, 0); assert.equal(f.store.list("candidate", id).length, 0);
   const initialKeys = new Set(view.steps.map(step => step.key)), beforeEdit = f.calls.submit.length;
-  assert.equal(beforeEdit, 9);
+  assert.equal(beforeEdit, 10);
 
   const editInput = { source: editedSource, basedOnVersion: 1 };
   const receipt = await f.ok("POST", `${base}/source`, editInput, "motion-edit");
@@ -202,9 +202,9 @@ export async function runCodePlanOfflineFlow(f) {
   assert.deepEqual(newSteps.map(step => step.kind).sort(), ["render", "video"]);
   assert.ok(newSteps.every(step => step.state === "succeeded"));
   const reusedSteps = view.steps.filter(step => initialKeys.has(step.key) && step.reached).length;
-  assert.equal(reusedSteps, 7);
+  assert.equal(reusedSteps, 8);
   assert.deepEqual(newCalls[1].args.timeline.map(row => row.motion), ["Slow lateral pan", "Locked camera, subtle steam"]);
-  assert.equal(view.spentMicros, "360000"); assert.equal(view.reservedMicros, "0");
+  assert.equal(view.spentMicros, "440000"); assert.equal(view.reservedMicros, "0");
   assert.ok(BigInt(view.spentMicros) <= BigInt(view.ceilingMicros));
   const render = newSteps.find(step => step.kind === "render").artifact;
   const film = await f.http("GET", `/api/projects/${id}/artifacts/${render.artifactId}/content`);
@@ -212,7 +212,7 @@ export async function runCodePlanOfflineFlow(f) {
   assert.equal(createHash("sha256").update(film.rawPayload).digest("hex"), render.sha256);
   for (let idle = 0; idle < 3; idle++) await f.tick();
   assert.equal(f.events(id).length, eventCount, "Idle ticks must not append events");
-  assert.equal(f.calls.submit.length, 11);
+  assert.equal(f.calls.submit.length, 12);
   const events = f.events(id); assert.ok(events.every((event, index) => index === 0 || event.sequence > events[index - 1].sequence));
 
   const graphBase = `/api/projects/${graph.id}`;

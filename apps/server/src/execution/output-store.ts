@@ -116,7 +116,7 @@ export function assertOutputReceiptIdentity(receipt: OutputReceipt, attempt: Pic
   invariant(digest(body) === id, "OUTPUT_STORE_CORRUPT", "Stored output receipt identity differs");
   const role = assertObservation(receipt);
   invariant(receipt.version === 1 && receipt.projectId === attempt.projectId && receipt.attemptId === attempt.id
-    && receipt.requestDigest === digest(attempt.request) && role === executionSpoolRole(attempt.request.kind)
+    && receipt.requestDigest === digest(attempt.request) && role === executionSpoolRole(attempt.request.kind, receipt.mimeType)
     && canonical(receipt.execution) === canonical(attempt.request.execution),
   "OUTPUT_RECEIPT_CONFLICT", "Stored output role or execution differs from its admitted request");
 }
@@ -167,7 +167,7 @@ export class ExecutionOutputStore {
     const role = assertObservation(value);
     return this.store.transaction(() => {
       const attempt = this.attempt(projectId, value.attemptId, value.expectedRequestDigest);
-      invariant(executionSpoolRole(attempt.request.kind) === role && (!attempt.taskId || value.vendorTaskId === attempt.taskId),
+      invariant(executionSpoolRole(attempt.request.kind, value.mimeType) === role && (!attempt.taskId || value.vendorTaskId === attempt.taskId),
         "OUTPUT_RECEIPT_CONFLICT", "Output does not match the admitted operation or accepted task");
       const { expectedRequestDigest, ...observation } = value;
       const body = { ...observation, version: 1 as const, projectId, requestDigest: expectedRequestDigest,
@@ -336,7 +336,7 @@ export class ExecutionOutputStore {
 
   private completion(projectId: string, attemptId: string, receiptId: string): ExecutionSpoolCompletion {
     const receipt = this.receipt(projectId, receiptId), attempt = this.attempt(projectId, attemptId, receipt.requestDigest);
-    const role = executionSpoolRole(attempt.request.kind);
+    const role = executionSpoolRole(attempt.request.kind, receipt.mimeType);
     invariant(role && receipt.attemptId === attemptId && receipt.kind === role.kind && receipt.port === role.port && receipt.mimeType === role.mimeType
       && canonical(receipt.execution) === canonical(attempt.request.execution)
       && (!attempt.taskId || receipt.vendorTaskId === attempt.taskId), "OUTPUT_RECEIPT_CONFLICT", "Completion receipt does not match its admitted operation or accepted task");

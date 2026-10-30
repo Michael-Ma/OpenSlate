@@ -5,6 +5,7 @@ import { EnvironmentMediaCredentials } from "./provider-credentials.js";
 
 export interface MediaExecutionConfiguration {
   image: boolean;
+  music?: boolean;
   codexImage: boolean;
   codexImageBinary?: string;
   codexImageHome?: string;
@@ -24,13 +25,14 @@ export const FAL_DEFAULT_DOWNLOAD_HOSTS: readonly string[] = Object.freeze(["v3.
 /** Trusted local startup settings. A configured API key enables its routes; explicit zero keeps a host route disabled. */
 export function readMediaExecutionConfiguration(environment: Readonly<Record<string, string | undefined>>): Readonly<MediaExecutionConfiguration> {
   const credentials = new EnvironmentMediaCredentials(name => environment[name]).status().credentials;
-  const configured = (id: "openai-media" | "minimax-video" | "viggle-video" | "fal-video") => credentials.some(credential => credential.id === id && credential.configured);
+  const configured = (id: "openai-media" | "minimax-video" | "viggle-video" | "fal-video" | "gemini-music") => credentials.some(credential => credential.id === id && credential.configured);
   const enabled = (name: string, defaultEnabled = false): boolean => {
     const value = environment[name];
     invariant(value === undefined || value === "" || value === "0" || value === "1", "MEDIA_EXECUTION_CONFIGURATION", "Generation switches must be explicitly 0 or 1");
     return value === "1" || (value === undefined || value === "") && defaultEnabled;
   };
   const image = enabled("OPENSLATE_ENABLE_IMAGE_GENERATION", configured("openai-media")), h3 = enabled("OPENSLATE_ENABLE_H3_GENERATION", configured("minimax-video"));
+  const music = enabled("OPENSLATE_ENABLE_MUSIC_GENERATION", configured("gemini-music"));
   const speech = enabled("OPENSLATE_ENABLE_SPEECH_GENERATION", configured("openai-media")), transcription = enabled("OPENSLATE_ENABLE_TRANSCRIPTION", configured("openai-media"));
   const viggleH3 = enabled("OPENSLATE_ENABLE_VIGGLE_H3_GENERATION", configured("viggle-video"));
   const nativePath = (name: string): string | undefined => {
@@ -55,6 +57,6 @@ export function readMediaExecutionConfiguration(environment: Readonly<Record<str
   const viggleH3DownloadHosts = downloadHosts(environment.OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS, viggleH3);
   const falLipSync = enabled("OPENSLATE_ENABLE_FAL_LIPSYNC", configured("fal-video"));
   const falLipSyncDownloadHosts = falLipSync ? downloadHosts(environment.OPENSLATE_FAL_DOWNLOAD_HOSTS || FAL_DEFAULT_DOWNLOAD_HOSTS.join(","), true) : Object.freeze([]);
-  return Object.freeze({ image, codexImage, ...(codexImageBinary ? { codexImageBinary } : {}), ...(codexImageHome ? { codexImageHome } : {}), h3, speech, transcription, viggleH3, h3DownloadHosts, viggleH3DownloadHosts,
+  return Object.freeze({ image, music, codexImage, ...(codexImageBinary ? { codexImageBinary } : {}), ...(codexImageHome ? { codexImageHome } : {}), h3, speech, transcription, viggleH3, h3DownloadHosts, viggleH3DownloadHosts,
     falLipSync, falLipSyncDownloadHosts });
 }

@@ -102,13 +102,14 @@ export function fixtureOutputs(request: FakeRequest): FakeOutput[] {
   if (request.kind === "image") {
     bytes = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#26364b"/><text x="16" y="80" fill="white" font-size="18">OpenSlate FAKE FIXTURE</text><text x="16" y="110" fill="white" font-size="12">${request.fingerprint.slice(0, 20)}</text></svg>`);
     kind = "image"; mimeType = "image/svg+xml"; extension = "svg"; port = "image";
-  } else if (request.kind === "speech") {
-    // A real, silent, one-second WAV fixture; it is not synthesized narration.
-    bytes = Buffer.alloc(44 + 48000 * 2);
+  } else if (request.kind === "speech" || request.kind === "music") {
+    // Silent placeholder WAV: speech is one second; music follows the request up to the fixture byte bound.
+    const samples = 48000 * (request.kind === "music" ? Math.min(20, Math.max(1, Math.ceil(Number(request.args.durationSeconds) || 1))) : 1);
+    bytes = Buffer.alloc(44 + samples * 2);
     bytes.write("RIFF", 0); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.write("WAVEfmt ", 8);
     bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
     bytes.writeUInt32LE(48000, 24); bytes.writeUInt32LE(96000, 28); bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34);
-    bytes.write("data", 36); bytes.writeUInt32LE(96000, 40);
+    bytes.write("data", 36); bytes.writeUInt32LE(samples * 2, 40);
     kind = "audio"; mimeType = "audio/wav"; extension = "wav"; port = "audio";
   } else if (request.kind === "video" || request.kind === "render") {
     bytes = Buffer.from(VIDEO_FIXTURE_BASE64, "base64");

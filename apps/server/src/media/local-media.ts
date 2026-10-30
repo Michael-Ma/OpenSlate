@@ -397,7 +397,7 @@ export class LocalMediaService {
       integer(placement.gainMilliDb ?? 0, -60000, 12000, "audio gain");
       invariant(placement.startSample + placement.durationSamples <= source.probe.audio.samples, "MEDIA_SOURCE_TOO_SHORT", "Audio range exceeds measured samples");
       invariant(placement.atSample + placement.durationSamples <= totalSamples, "MEDIA_AUDIO_OUTSIDE_TIMELINE", "Audio cannot be silently cut at the timeline boundary");
-      if (placement.fadeOutSamples !== undefined) integer(placement.fadeOutSamples, 1, Math.min(4800, placement.durationSamples), "audio fade");
+      if (placement.fadeOutSamples !== undefined) integer(placement.fadeOutSamples, 1, Math.min(240000, placement.durationSamples), "audio fade");
       audio.push({ ...(placement.fadeOutSamples !== undefined ? { fadeOutSamples: placement.fadeOutSamples } : {}), source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb: placement.gainMilliDb ?? 0 });
     }
     invariant(audioLanes(audio).length <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Too many simultaneous audio placements");

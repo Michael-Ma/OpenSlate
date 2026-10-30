@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { GeminiJsonClient, GeminiAudioValidationError } from "./gemini-http.js";
+export { GEMINI_API_ORIGIN, GeminiAudioValidationError } from "./gemini-http.js";
 
 /**
  * Gemini audio understanding over `models.generateContent` with inline audio and a JSON response schema. Wire
@@ -7,7 +9,6 @@ import { createHash } from "node:crypto";
  * used because its request and response shapes are fully documented. One call per method; nothing here retries.
  */
 export const GEMINI_AUDIO_ADAPTER_VERSION = "1";
-export const GEMINI_API_ORIGIN = "https://generativelanguage.googleapis.com";
 export type GeminiAudioModel = "gemini-3.8-flash" | "gemini-3.5-flash-lite";
 export const GEMINI_AUDIO_MODELS: readonly GeminiAudioModel[] = Object.freeze(["gemini-3.8-flash", "gemini-3.5-flash-lite"]);
 /** "Our most intelligent Flash model"; stable; audio input, structured output, thinking low/medium/high. */
@@ -83,9 +84,6 @@ export interface GeminiAudioTransport {
   generate(request: GeminiAudioRequest, options?: { signal?: AbortSignal }): Promise<GeminiAudioResult>;
 }
 
-export class GeminiAudioValidationError extends Error {
-  constructor(readonly code: string) { super(code); this.name = "GeminiAudioValidationError"; }
-}
 function ensure(condition: unknown, code = "GEMINI_AUDIO_REQUEST_INVALID"): asserts condition {
   if (!condition) throw new GeminiAudioValidationError(code);
 }
@@ -117,10 +115,6 @@ function usage(value: unknown): GeminiUsage {
   const audio = details.find(item => object(item) && item.modality === "AUDIO");
   return { inputTokens: count(meta.promptTokenCount), audioTokens: object(audio) ? count(audio.tokenCount) : null,
     outputTokens: count(meta.candidatesTokenCount), thoughtTokens: count(meta.thoughtsTokenCount) };
-}
-function retryAfter(value: string | null): number | undefined {
-  if (!value || !/^\d{1,6}$/.test(value)) return;
-  return Number(value) * 1000;
 }
 function classify(status: number, retryAfterMs?: number): GeminiDiagnostic {
   const extra = { httpStatus: status, ...(retryAfterMs === undefined ? {} : { retryAfterMs }) };
@@ -155,13 +149,9 @@ export interface GeminiHttpTransportOptions { apiKey: string; fetch?: typeof glo
 
 /** The real transport. The key travels only in the `x-goog-api-key` header and never appears in a result. */
 export class GeminiHttpTransport implements GeminiAudioTransport {
-  readonly #key: string; readonly #fetch: typeof globalThis.fetch; readonly #timeout: number;
+  readonly #client: GeminiJsonClient;
   constructor(options: GeminiHttpTransportOptions) {
-    ensure(object(options) && typeof options.apiKey === "string" && /^[\x21-\x7e]{1,4096}$/.test(options.apiKey), "GEMINI_CREDENTIAL_INVALID");
-    ensure(options.fetch === undefined || typeof options.fetch === "function", "GEMINI_OPTIONS_INVALID");
-    const timeout = options.timeoutMs ?? GEMINI_AUDIO_LIMITS.timeoutMs;
-    ensure(Number.isSafeInteger(timeout) && timeout >= 1 && timeout <= 600_000, "GEMINI_OPTIONS_INVALID");
-    this.#key = options.apiKey; this.#fetch = options.fetch ?? globalThis.fetch; this.#timeout = timeout;
+    this.#client = new GeminiJsonClient({ ...options, defaultTimeoutMs: GEMINI_AUDIO_LIMITS.timeoutMs });
   }
 
   async generate(request: GeminiAudioRequest, options: { signal?: AbortSignal } = {}): Promise<GeminiAudioResult> {
@@ -169,36 +159,15 @@ export class GeminiHttpTransport implements GeminiAudioTransport {
     try { body = geminiAudioBody(request); }
     catch (error) { return { kind: "failed", error: { code: error instanceof GeminiAudioValidationError ? error.code : "GEMINI_AUDIO_REQUEST_INVALID", category: "invalid_input", charged: "no", httpStatus: null } }; }
     if (options.signal?.aborted) return { kind: "failed", error: { code: "GEMINI_ABORTED_BEFORE_DISPATCH", category: "aborted", charged: "no", httpStatus: null } };
-    const controller = new AbortController(); let timedOut = false;
-    const stop = (): void => controller.abort(); options.signal?.addEventListener("abort", stop, { once: true });
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, this.#timeout);
-    let status: number | null = null;
     try {
-      const response = await this.#fetch(`${GEMINI_API_ORIGIN}/v1beta/models/${request.model}:generateContent`, {
-        method: "POST", redirect: "manual", signal: controller.signal, body,
-        headers: { "x-goog-api-key": this.#key, "Content-Type": "application/json", Accept: "application/json" } });
-      status = response.status;
-      ensure(status >= 200 && status < 600 && !(status >= 300 && status < 400), "GEMINI_RESPONSE_REDIRECT");
-      const size = response.headers.get("content-length");
-      ensure(size === null || /^\d+$/.test(size) && Number(size) <= GEMINI_AUDIO_LIMITS.responseBytes, "GEMINI_RESPONSE_TOO_LARGE");
-      const chunks: Buffer[] = []; let total = 0;
-      if (response.body) {
-        const reader = response.body.getReader();
-        try {
-          for (;;) {
-            const part = await reader.read(); if (part.done) break;
-            total += part.value.byteLength; ensure(total <= GEMINI_AUDIO_LIMITS.responseBytes, "GEMINI_RESPONSE_TOO_LARGE"); chunks.push(Buffer.from(part.value));
-          }
-        } finally { await reader.cancel().catch(() => undefined); }
-      }
-      const raw = Buffer.concat(chunks, total), mime = (response.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
-      let parsed: unknown = null;
-      if (raw.length && mime === "application/json") { try { parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw)); } catch { parsed = null; } }
-      return parseGeminiAudioResponse(status, parsed, retryAfter(response.headers.get("retry-after")));
+      const response = await this.#client.post(`/v1beta/models/${request.model}:generateContent`, body,
+        GEMINI_AUDIO_LIMITS.responseBytes, options.signal);
+      return parseGeminiAudioResponse(response.status, response.body, response.retryAfterMs);
     } catch (error) {
-      // Once the body may have been sent, the call may have been billed.
-      const code = error instanceof GeminiAudioValidationError ? error.code : controller.signal.aborted ? timedOut ? "GEMINI_CALL_TIMEOUT" : "GEMINI_CALL_ABORTED" : "GEMINI_TRANSPORT_OR_RESPONSE_LOSS";
-      return { kind: "failed", error: { code, category: error instanceof GeminiAudioValidationError ? "protocol" : controller.signal.aborted && !timedOut ? "aborted" : "transport", charged: "maybe", httpStatus: status } };
-    } finally { clearTimeout(timer); options.signal?.removeEventListener("abort", stop); }
+      const code = error instanceof GeminiAudioValidationError ? error.code : "GEMINI_TRANSPORT_OR_RESPONSE_LOSS";
+      return { kind: "failed", error: { code, category: code === "GEMINI_CALL_ABORTED" ? "aborted"
+        : error instanceof GeminiAudioValidationError && !code.startsWith("GEMINI_CALL_") ? "protocol" : "transport",
+        charged: "maybe", httpStatus: error instanceof GeminiAudioValidationError ? error.httpStatus : null } };
+    }
   }
 }

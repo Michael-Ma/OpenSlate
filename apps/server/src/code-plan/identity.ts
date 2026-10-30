@@ -1,15 +1,16 @@
 import { canonical, digest, invariant } from "@openslate/core";
 import type { JsonObject, JsonValue, ProviderProfile } from "@openslate/core";
 
-export type CodePlanMediaKind = "image" | "video" | "speech" | "render";
+export type CodePlanMediaKind = "image" | "video" | "speech" | "music" | "render";
 export interface CodePlanModel { kind: CodePlanMediaKind; defaults?: JsonObject; priceMicros?: string; priceUnit?: "call"; profile?: ProviderProfile; profileDefinitionDigest?: string }
 export const CODE_PLAN_MODELS: Readonly<Record<string, CodePlanModel>> = Object.freeze({
   "fake-image": { kind: "image" },
   "fake-video": { kind: "video", defaults: { durationSeconds: 6 } },
   "fake-speech": { kind: "speech", defaults: { voice: "fixture" }, priceMicros: "10000" },
+  "fake-music": { kind: "music", defaults: { instrumental: true }, priceMicros: "80000" },
   "local-render": { kind: "render", priceMicros: "0" },
 });
-const defaultModel = { image: "fake-image", video: "fake-video", speech: "fake-speech", render: "local-render" };
+const defaultModel = { image: "fake-image", video: "fake-video", speech: "fake-speech", music: "fake-music", render: "local-render" };
 
 /** Whitespace in creative strings is significant. Only object order, defaults and artifact identities normalize. */
 export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
@@ -17,6 +18,11 @@ export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
   const input = kind === "render" && Array.isArray(value) ? { timeline: value } : value;
   invariant(input && typeof input === "object" && !Array.isArray(input), "CODE_PLAN_INPUT", "Media input must be an object");
   const source = input as Record<string, unknown>;
+  if (kind === "music") invariant(typeof source.prompt === "string" && source.prompt.trim().length > 0 && Buffer.byteLength(source.prompt) <= 32768
+    && typeof source.durationSeconds === "number" && Number.isFinite(source.durationSeconds) && source.durationSeconds > 0 && source.durationSeconds <= 360
+    && (source.instrumental === undefined || typeof source.instrumental === "boolean")
+    && Object.keys(source).every(key => ["model", "prompt", "durationSeconds", "instrumental", "variant", "profileDefinitionDigest"].includes(key)),
+  "CODE_PLAN_INPUT", "Music requires a prompt, a duration within 360 seconds and optional instrumental/variant settings");
   const model = source.model ?? (models[defaultModel[kind]] ? defaultModel[kind] : Object.keys(models).find(id => models[id]?.kind === kind));
   invariant(typeof model === "string" && Object.hasOwn(models, model) && models[model]?.kind === kind,
     "CODE_PLAN_MODEL", "Use a configured model for this operation");

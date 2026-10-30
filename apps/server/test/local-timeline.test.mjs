@@ -226,7 +226,9 @@ test('explicit cut fade is bounded, persisted in the recipe and preserved by the
   assert.deepEqual(parseLocalTimelineDocument(JSON.parse(canonical(document))), document);
   const manifest = await media.freezeManifest({ projectId: document.projectId, targetRevisionId: 'fade-render', width: 160, height: 90, clips: document.clips, audio: document.audio });
   assert.equal(manifest.audio[0].fadeOutSamples, 3840);
-  for (const samples of [0, -1, 4801, 8001, 1.5]) {
+  const longerFade = input(); longerFade.audio[0].fadeOutSamples = 4801;
+  assert.equal(createLocalTimelineDocument(longerFade).audio[0].fadeOutSamples, 4801);
+  for (const samples of [0, -1, 8001, 1.5]) {
     const invalidFade = input(); invalidFade.audio[0].fadeOutSamples = samples;
     assert.throws(() => createLocalTimelineDocument(invalidFade), invalid);
   }

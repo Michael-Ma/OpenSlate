@@ -480,12 +480,13 @@ export function captureCodePlanRender(store: Store, projectId: string, args: Rec
       "MEDIA_DURATION_MISMATCH", "Render exceeds the film duration bound");
     const audio = ((args.audio ?? []) as Record<string, unknown>[]).map(row => {
       invariant(row && typeof row === "object" && !Array.isArray(row)
-        && Object.keys(row).every(key => ["artifact", "startSample", "durationSamples", "atSample", "gainMilliDb"].includes(key)),
+        && Object.keys(row).every(key => ["artifact", "startSample", "durationSamples", "atSample", "gainMilliDb", "fadeOutSamples"].includes(key)),
       "CODE_PLAN_RENDER_INPUT", "Unsupported audio placement parameters");
       const descriptor = source(row.artifact, "audio");
       return { source: descriptor, startSample: (row.startSample ?? 0) as number,
         durationSamples: (row.durationSamples ?? descriptor.probe.audio!.samples) as number,
-        atSample: (row.atSample ?? 0) as number, gainMilliDb: (row.gainMilliDb ?? 0) as number };
+        atSample: (row.atSample ?? 0) as number, gainMilliDb: (row.gainMilliDb ?? 0) as number,
+        ...(row.fadeOutSamples === undefined ? {} : { fadeOutSamples: row.fadeOutSamples as number }) };
     });
     const dimensions = EXPORT_SIZE[projectAspect(project)];
     return { projectId, targetRevisionId: project.revisionId, width: (args.width ?? dimensions.width) as number,

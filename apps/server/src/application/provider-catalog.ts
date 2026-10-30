@@ -12,7 +12,7 @@ import type { MediaCredentialId } from "./provider-credentials.js";
 const MAX_BYTES = 64 * 1024;
 const BUILT_IN_PROFILES: ProviderProfile[] = structuredClone(DEFAULT_PROFILES);
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
-const generatedKinds = ["image", "video", "speech", "transcription"] as const;
+const generatedKinds = ["image", "video", "speech", "transcription", "music"] as const;
 interface Definition { label: string; profile: ProviderProfile }
 interface Configuration { version: 1; profiles: Definition[] }
 export interface InstalledProviderSelection { readonly catalogDigest: string; readonly profileIds: readonly string[] }
@@ -43,6 +43,12 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
   invariant(profile.executionVersion === "1", "PROVIDER_CATALOG_INVALID", "Unsupported execution mapping version");
   exact(profile.configuration, ["model", "settings"]);
   const configuration = profile.configuration;
+  if (profile.adapter === "gemini-lyria") {
+    invariant(profile.kind === "music" && configuration.model === "lyria-3.5" && profile.unitCostMicros === "80000" && profile.maxRetries === 0
+      && profile.minFrames === undefined && profile.maxFrames === undefined, "PROVIDER_CATALOG_INVALID", "Lyria requires a music profile priced at $0.08 per song with no automatic vendor retries");
+    exact(configuration.settings, []);
+    return { credential: "gemini-music", media: "audio", fixture: false };
+  }
   if (profile.adapter === "codex-image") {
     invariant(profile.kind === "image" && profile.configuration?.model === "codex-image-generation"
       && profile.maxConcurrency === 1 && profile.maxRetries === 0 && profile.unitCostMicros === "0"
@@ -157,8 +163,8 @@ export class InstalledProviderCatalog {
     this.#mediaTools = Object.freeze({ image: options.mediaTools?.image === true, video: options.mediaTools?.video === true, audio: options.mediaTools?.audio === true });
     this.#codexImageConfigured = options.codexImageConfigured === true;
     const enabled = options.enabledExecutions ?? [];
-    invariant(Array.isArray(enabled) && enabled.length <= 7 && enabled.every(value => object(value)
-      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription", "fal-h3-lipsync"].includes(value.adapter) && value.version === "1"),
+    invariant(Array.isArray(enabled) && enabled.length <= 8 && enabled.every(value => object(value)
+      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription", "fal-h3-lipsync", "gemini-lyria"].includes(value.adapter) && value.version === "1"),
     "PROVIDER_CATALOG_INVALID", "Only explicit supported external execution identities can be enabled");
     this.#enabledExecutions = new Set(enabled.map(value => canonical(value)));
     invariant(this.#enabledExecutions.size === enabled.length, "PROVIDER_CATALOG_INVALID", "Enabled execution identities must be distinct");
@@ -200,6 +206,7 @@ export class InstalledProviderCatalog {
     invariant(new Set(selected.map(profile => profile.kind)).size === selected.length,
       "PROVIDER_SELECTION_INVALID", "Select only one profile for each operation");
     const profiles = BUILT_IN_PROFILES.map(fallback => structuredClone(selected.find(profile => profile.kind === fallback.kind) ?? fallback));
+    profiles.push(...selected.filter(profile => profile.kind === "music").map(profile => structuredClone(profile)));
     const value = Object.freeze({ catalogDigest: this.digest, profileIds: Object.freeze([...profileIds]) });
     selections.set(value, { profiles, provenance: { catalogDigest: this.digest, profileIds: profiles.map(profile => profile.id) } }); return value;
   }

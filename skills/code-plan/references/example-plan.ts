@@ -29,6 +29,16 @@ export default async function film(ctx: Studio): Promise<void> {
   }));
   const ready = clips.filter((clip): clip is { artifact: Artifact; motion: string } => clip !== null);
   if (ready.length !== shots.length) return;
-  const rendered = await ctx.render(ready);
+  // Make the score once the final cut length is known; adapt fake-music to an installed model from read_film.
+  const filmSamples = ready.length * 6 * 48000;
+  const music = await ctx.music({ model: "fake-music", prompt: "Warm, reflective piano and soft strings at a slow tempo", durationSeconds: filmSamples / 48000 });
+  if (!music.ok) { await ctx.log("Music failed; choose how to continue before rendering."); return; }
+  const leadIn = music.leadInSamples ?? 0;
+  if ((music.durationSamples ?? 0) - leadIn < filmSamples) {
+    await ctx.log("The music is shorter than the film. Tell the person and make another track with a stable variant."); return;
+  }
+  await ctx.log("Generated music carries an inaudible SynthID watermark (this demo uses placeholder audio).");
+  const rendered = await ctx.render({ timeline: ready, audio: [{ artifact: music.artifact, atSample: 0, startSample: leadIn,
+    durationSamples: filmSamples, gainMilliDb: -6000, fadeOutSamples: Math.min(96000, filmSamples) }] });
   await ctx.log(rendered.ok ? "Film rendered" : `Render failed: ${rendered.error.code}`);
 }

@@ -1,3 +1,4 @@
+import { lyriaFailureMessage } from "../execution/gemini-lyria-execution.js";
 import { modelPrice, modelDescriptions } from "./models.js";
 import { createHash, randomInt } from "node:crypto";
 import { canonical, digest, DomainError, invariant, moneyMicros } from "@openslate/core";
@@ -40,7 +41,7 @@ export class CodePlanRuntime implements CodePlanPort {
     this.recovery = new InstallationRecoveryGuard(store);
     this.models = options.models ? structuredClone(options.models) : undefined;
     for (const model of Object.values(this.models ?? CODE_PLAN_MODELS)) {
-      invariant(["image", "video", "speech", "render"].includes(model.kind), "CODE_PLAN_MODEL", "Invalid model operation");
+      invariant(["image", "video", "speech", "music", "render"].includes(model.kind), "CODE_PLAN_MODEL", "Invalid model operation");
       moneyMicros(model.priceMicros ?? "0");
       invariant(model.kind !== "render" || moneyMicros(model.priceMicros ?? "0") === 0n, "CODE_PLAN_MODEL", "Local renders are free");
     }
@@ -273,8 +274,11 @@ export class CodePlanRuntime implements CodePlanPort {
       const artifacts = Object.values(attempt.outputs);
       invariant(state !== "succeeded" || artifacts.length > 0, "CODE_PLAN_JOURNAL", "A successful step requires ingested output");
       const failure = this.options.execution.failure(attempt.id), retry = failure.retry;
-      const result: CodePlanStep["result"] = state === "succeeded" ? { ok: true, artifact: artifacts[0]!, artifacts }
-        : state === "failed" ? { ok: false, error: { ...failure, message: "Provider execution failed" } } : null;
+      const musicArtifact = state === "succeeded" && step.kind === "music"
+        ? this.store.get<import("../execution/engine.js").ArtifactRecord & { leadInSamples?: number }>("artifact", artifacts[0]!.artifactId) : undefined;
+      const result: CodePlanStep["result"] = state === "succeeded" ? { ok: true, artifact: artifacts[0]!, artifacts,
+        ...(musicArtifact ? { leadInSamples: musicArtifact.leadInSamples ?? 0, durationSamples: Math.round((musicArtifact.physicalDurationSeconds ?? 0) * 48000) } : {}) }
+        : state === "failed" ? { ok: false, error: { ...failure, message: step.kind === "music" ? lyriaFailureMessage(failure.code) : "Provider execution failed" } } : null;
       const automaticRetries = step.automaticRetries ?? 0;
       this.store.put("code_plan_step", step.id, projectId, { ...step, state, result, updatedAt: stamp(),
         ...(state === "failed" && retry === "safe" && automaticRetries < 2
@@ -325,7 +329,7 @@ export class CodePlanRuntime implements CodePlanPort {
       if (method === "log") { invariant(typeof args[0] === "string" && args[0].length <= 4096 && logs.length < 200,
         "CODE_PLAN_LOG", "Use at most 200 bounded log lines"); logs.push(args[0]); return null; }
       if (method === "choose") return this.choose(projectId, args, dry);
-      invariant(method === "image" || method === "video" || method === "speech" || method === "render", "CODE_PLAN_METHOD", "Unknown Studio operation");
+      invariant(method === "image" || method === "video" || method === "speech" || method === "music" || method === "render", "CODE_PLAN_METHOD", "Unknown Studio operation");
       const kind: CodePlanMediaKind = method;
       const normalized = normalizeStepInput(kind, args[0], models);
       // Previously journaled defaults are immutable: installing new aspect inference

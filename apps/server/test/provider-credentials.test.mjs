@@ -5,7 +5,7 @@ import { EnvironmentMediaCredentials } from '../dist/application/provider-creden
 test('credential metadata reports readiness without revealing keys or arbitrary environment contents', () => {
   const values = { OPENSLATE_OPENAI_API_KEY: 'synthetic-openai-secret', OPENSLATE_MINIMAX_API_KEY: 'synthetic-minimax-secret', OPENSLATE_VIGGLE_API_KEY: 'synthetic-viggle-secret', OPENSLATE_FAL_API_KEY: 'synthetic-fal-id:synthetic-fal-secret', OPENSLATE_GEMINI_API_KEY: 'synthetic-gemini-secret', PRIVATE_OTHER_KEY: 'unrelated' }, reads = [];
   const credentials = new EnvironmentMediaCredentials(name => { reads.push(name); return values[name]; });
-  assert.deepEqual(credentials.status(), { backend: 'environment', credentials: [{ id: 'openai-media', configured: true }, { id: 'minimax-video', configured: true }, { id: 'viggle-video', configured: true }, { id: 'fal-video', configured: true }, { id: 'gemini-audio', configured: true }] });
+  assert.deepEqual(credentials.status(), { backend: 'environment', credentials: [{ id: 'openai-media', configured: true }, { id: 'minimax-video', configured: true }, { id: 'viggle-video', configured: true }, { id: 'fal-video', configured: true }, { id: 'gemini-audio', configured: true }, { id: 'gemini-music', configured: true }] });
   assert.equal(credentials.resolve('openai-media'), values.OPENSLATE_OPENAI_API_KEY);
   assert.equal(credentials.resolve('minimax-video'), values.OPENSLATE_MINIMAX_API_KEY);
   assert.equal(credentials.resolve('viggle-video'), values.OPENSLATE_VIGGLE_API_KEY);
@@ -40,13 +40,13 @@ test('rotation is resolved at use time without caching an old secret', () => {
 
 
 test('each fixed provider alias is isolated and a missing Viggle key cannot borrow another provider credential', () => {
-  const aliases = [['openai-media', 'OPENSLATE_OPENAI_API_KEY'], ['minimax-video', 'OPENSLATE_MINIMAX_API_KEY'], ['viggle-video', 'OPENSLATE_VIGGLE_API_KEY'], ['fal-video', 'OPENSLATE_FAL_API_KEY'], ['gemini-audio', 'OPENSLATE_GEMINI_API_KEY']];
+  const aliases = [['openai-media', 'OPENSLATE_OPENAI_API_KEY'], ['minimax-video', 'OPENSLATE_MINIMAX_API_KEY'], ['viggle-video', 'OPENSLATE_VIGGLE_API_KEY'], ['fal-video', 'OPENSLATE_FAL_API_KEY'], ['gemini-audio', 'OPENSLATE_GEMINI_API_KEY'], ['gemini-music', 'OPENSLATE_GEMINI_API_KEY']];
   for (const [selectedId, selectedName] of aliases) {
     const reads = [], credentials = new EnvironmentMediaCredentials(name => { reads.push(name); return name === selectedName ? 'synthetic-selected-secret' : undefined; });
-    assert.deepEqual(credentials.status().credentials, aliases.map(([id]) => ({ id, configured: id === selectedId })));
+    assert.deepEqual(credentials.status().credentials, aliases.map(([id, name]) => ({ id, configured: name === selectedName })));
     for (const [id, name] of aliases) {
       reads.length = 0;
-      if (id === selectedId) assert.equal(credentials.resolve(id), 'synthetic-selected-secret');
+      if (name === selectedName) assert.equal(credentials.resolve(id), 'synthetic-selected-secret');
       else assert.throws(() => credentials.resolve(id), error => error.code === 'MEDIA_CREDENTIAL_MISSING');
       assert.deepEqual(reads, [name]);
     }
