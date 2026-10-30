@@ -388,7 +388,7 @@ test('a lost answer is resent with the same key and body; a stale choice is refu
   assert.equal(store.unconfirmed('codeplan:choice:frame-1.1'), false);
   // The same choice again, now answered: the studio refuses it and nothing is resent under the old key.
   assert.equal(await store.answerCodePlanChoice(choice, choice.options[1]), undefined);
-  assert.equal(store.getState().toast.message.id, 'error.CODE_PLAN_CHOICE_STALE');
+  assert.equal(store.getState().toast.message.id, 'error.CODE_PLAN_CHOICE');
   assert.notEqual(client.sent.filter((request) => request.path.endsWith('/choices')).at(-1).key, answers[0].key);
 });
 

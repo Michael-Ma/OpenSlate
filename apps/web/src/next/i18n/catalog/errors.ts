@@ -39,8 +39,10 @@ export const errors = {
   "error.RECOMMENDATION_OPEN": { en: "Settle the Director's blocking note first.", zh: "请先处理导演标为必须处理的建议。" },
   "error.CODE_PLAN_MODE": { en: "This film does not use a code plan.", zh: "这部影片没有使用代码计划。" },
   "error.CODE_PLAN_REJECTED": { en: "The program did not pass its dry run, so nothing was changed.", zh: "程序没有通过试运行，因此没有任何改动。" },
-  // Fixture-assumed: the contract does not name the refusal of an answer to a choice that was answered or changed.
-  "error.CODE_PLAN_CHOICE_STALE": { en: "This choice was already answered or has changed. Look at the cards again.", zh: "这个选择已经回答过或已变化，请再看一下卡片。" },
+  // The runtime's refusals (apps/server/src/code-plan/index.ts answerChoice / raiseCeiling).
+  "error.CODE_PLAN_CHOICE": { en: "This choice has changed. Look at the cards again.", zh: "这个选择已经变化，请再看一下卡片。" },
+  "error.CODE_PLAN_CHOICE_ANSWERED": { en: "This choice already has another answer.", zh: "这个选择已经有了另一个答案。" },
+  "error.CODE_PLAN_CEILING": { en: "The new spending limit must be higher than the current one.", zh: "新的花费上限必须高于当前上限。" },
   "error.CODE_PLAN_MISSING": { en: "This film has no plan yet.", zh: "这部影片还没有计划。" },
   "error.CONFIRMATION_RUNNING": { en: "This scene's video is already being made.", zh: "这一场的视频已经在生成。" },
   "error.FRAME_NOT_OPENED": { en: "Open every frame before making video.", zh: "生成视频前请先查看每张画面。" },

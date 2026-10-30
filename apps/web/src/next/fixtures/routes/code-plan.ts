@@ -348,7 +348,7 @@ export const codePlanRoutes: FixtureRoute[] = [
       const film = filmOf(world, id);
       const input = asObject(body);
       const pending = viewOf(film, id!).choices.find((choice) => choice.answer === undefined && choice.choiceId === input.choiceId);
-      if (!pending || pending.optionsDigest !== input.optionsDigest) throw new ApiError("CODE_PLAN_CHOICE_STALE", 409);
+      if (!pending || pending.optionsDigest !== input.optionsDigest) throw new ApiError("CODE_PLAN_CHOICE", 409);
       const index = pending.options.findIndex((option) => canonicalJson(option) === canonicalJson(input.answer));
       if (index < 0) throw new ApiError("VALIDATION_ERROR", 400);
       if (pending.choiceId === "frame-1.1") { film.pickOpen = index; moveTo(world, id!, "making_1_2"); }
@@ -366,7 +366,7 @@ export const codePlanRoutes: FixtureRoute[] = [
     handle(world, [id], body) {
       const film = filmOf(world, id);
       const next = asObject(body).ceilingMicros;
-      if (typeof next !== "string" || !/^\d{1,18}$/.test(next) || BigInt(next) <= BigInt(film.ceilingMicros)) throw new ApiError("VALIDATION_ERROR", 400);
+      if (typeof next !== "string" || !/^\d{1,18}$/.test(next) || BigInt(next) <= BigInt(film.ceilingMicros)) throw new ApiError("CODE_PLAN_CEILING", 409);
       film.ceilingMicros = next;
       if (film.stage === "budget" && BigInt(next) >= NEEDED_FOR_PIER_CLIP) moveTo(world, id!, "making_clip");
       else bumpFilmCursor(world, id!);
