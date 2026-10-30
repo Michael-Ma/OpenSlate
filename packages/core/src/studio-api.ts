@@ -744,3 +744,106 @@ export interface InstallationStatus {
   /** Whether real providers are configured at all; false means only the demo path works. */
   providersConfigured: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Code-plan projects (experiment; docs/ai/code-plan/DESIGN.md)
+// ---------------------------------------------------------------------------
+
+/** Chosen at project creation. Absent means graph. */
+export type PlanMode = "graph" | "code";
+export type CodePlanRunState = "empty" | "running" | "waiting" | "error" | "paused_budget" | "done";
+export type CodePlanStepKind = "image" | "video" | "speech" | "render";
+export type CodePlanStepState = "absent" | "in_flight" | "unknown" | "succeeded" | "failed" | "cancelled";
+
+/** One content-addressed effect the plan has reached at least once. */
+export interface CodePlanStepView {
+  key: string;
+  kind: CodePlanStepKind;
+  state: CodePlanStepState;
+  model: string;
+  /** The input's prompt or motion text, at most 200 characters, for display only. */
+  label: string;
+  /** Present once the step succeeded. */
+  artifact?: StudioArtifactRef;
+  error?: { code: string };
+  priceMicros: Micros;
+  /** Whether the latest pass reached this step. Unreached steps stay listed as history. */
+  reached: boolean;
+  updatedAt: string;
+}
+
+export interface CodePlanChoiceView {
+  choiceId: string;
+  optionsDigest: string;
+  question: string;
+  /** JSON values exactly as the plan passed them. Media options carry a StudioArtifactRef. */
+  options: unknown[];
+  answer?: unknown;
+  answeredAt?: string;
+}
+
+/** The dry run recorded for a version: what replaying it against the journal would do. */
+export interface CodePlanDiff {
+  reusedSteps: number;
+  newSteps: { kind: CodePlanStepKind; model: string; label: string; priceMicros: Micros }[];
+  /** Unsent steps the new code no longer reaches. */
+  cancelledSteps: number;
+  /** Cost certain to be spent before the plan needs a choice or a pending result. */
+  certainMicros: Micros;
+  /** True when the dry run stopped at a choice or a pending result, so later cost depends on them. */
+  dependsOnPending: boolean;
+  /** Codes only: SOURCE_SYNTAX, RUNTIME_ERROR, UNAWAITED_CALL, STEP_LIMIT, CEILING. */
+  findings: { code: string; detail?: string }[];
+}
+
+export interface CodePlanVersionItem {
+  version: number;
+  author: "director" | "user";
+  sha256: string;
+  createdAt: string;
+  diff: CodePlanDiff;
+}
+
+/** GET /api/projects/:projectId/code-plan */
+export interface CodePlanView {
+  projectId: string;
+  /** null before the first plan is submitted. */
+  planVersion: number | null;
+  state: CodePlanRunState;
+  error?: { message: string };
+  /** True while a Director turn holds new paid dispatch; in-flight work continues. */
+  held: boolean;
+  ceilingMicros: Micros;
+  /** Charged plus possibly charged. */
+  spentMicros: Micros;
+  /** Dispatched and not yet known. */
+  reservedMicros: Micros;
+  declarations: { scenes: unknown[]; shots: unknown[] };
+  steps: CodePlanStepView[];
+  /** Unanswered first, then answered, each in first-seen order. */
+  choices: CodePlanChoiceView[];
+  /** Newest first, at most 50. */
+  versions: CodePlanVersionItem[];
+  logs: string[];
+  lastPassAt: string | null;
+}
+
+/** GET /api/projects/:projectId/code-plan/versions/:version */
+export interface CodePlanSourceView {
+  version: number;
+  author: "director" | "user";
+  sha256: string;
+  source: string;
+  createdAt: string;
+}
+
+/** POST .../code-plan/choices (Idempotency-Key required). */
+export interface CodePlanAnswerInput { choiceId: string; optionsDigest: string; answer: unknown }
+/** POST .../code-plan/ceiling (Idempotency-Key required). Must be higher than the current ceiling. */
+export interface CodePlanCeilingInput { ceilingMicros: Micros }
+/** POST .../code-plan/source (Idempotency-Key required): a person submits code directly. */
+export interface CodePlanSourceInput { source: string; basedOnVersion: number | null }
+export interface CodePlanReceipt { view: CodePlanView; diff?: CodePlanDiff }
+
+/** Project event kind appended whenever the code-plan view changes. Payload: { planVersion, state }. */
+export type CodePlanChangedEventKind = "code_plan.changed";
