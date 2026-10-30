@@ -15,7 +15,9 @@ export type CodePlanAuthorityStore = Pick<Store, "get" | "getProject" | "db">;
 export interface CodePlanProviderAdmission {
   attempt: Attempt; candidate: null; grant: null; codePlan: CodePlanExecutionRecord;
   profile: ProviderProfile; capabilityLock: CodePlanCapabilityLock;
-  /** Adapter receipt projection of the step's reservation, never a graph reservation row. */
+  /** Measured owned PNG dimensions, resolved by the host from the first-frame reference. */
+  priceFrame?: { width: number; height: number };
+  /** Adapter receipt projection of the step reservation, never a graph reservation row. */
   reservation: { id: string; projectId: string; attemptId: string; micros: string; state: string };
 }
 export const isCodePlanAttempt = (attempt: Pick<Attempt, "workKey">): boolean => attempt.workKey?.startsWith("code-plan:") === true;
@@ -40,10 +42,10 @@ export function assertCodePlanProviderAdmission(value: CodePlanProviderAdmission
     && Object.entries(args).every(([key, item]) => canonical(request.args[key]) === canonical(item))
     && canonical(request.args) === canonical(codePlanProviderArgs(profile, record.normalizedInput))
     && record.normalizedInput.profileDefinitionDigest === digest(profile)
-    && record.priceMicros === modelPrice({ kind: request.kind as "image" | "video" | "speech", priceMicros: profile.unitCostMicros })
+    && record.priceMicros === modelPrice({ kind: request.kind as "image" | "video" | "speech", priceMicros: profile.unitCostMicros, profile }, record.normalizedInput, value.priceFrame)
     && ["reserved", "charged", "released"].includes(record.liability)
     && value.reservation.id === attempt.id && value.reservation.attemptId === attempt.id && value.reservation.projectId === attempt.projectId
-    && value.reservation.micros === profile.unitCostMicros && value.reservation.state === record.liability);
+    && value.reservation.micros === record.priceMicros && value.reservation.state === record.liability);
 }
 
 /** Historical verification does not depend on current version, installation readiness, Stop or human holds. */
@@ -66,7 +68,10 @@ export function codePlanAdmissionFromAttempt(store: Pick<Store, "get">, attempt:
   const profile = lock?.profiles.find(row => digest(row) === use?.profileDefinitionDigest);
   check(record && lock && profile);
   const result: CodePlanProviderAdmission = { attempt, candidate: null, grant: null, codePlan: record!, profile: profile!, capabilityLock: lock!,
-    reservation: { id: attempt.id, projectId: attempt.projectId, attemptId: attempt.id, micros: profile!.unitCostMicros, state: record!.liability } };
+    reservation: { id: attempt.id, projectId: attempt.projectId, attemptId: attempt.id, micros: record!.priceMicros!, state: record!.liability } };
+  const frame = attempt.request.inputs.find(row => row.kind === "image" && row.sha256 === attempt.request.args.firstFrameSha256);
+  const artifact = frame ? store.get<{ projectId: string; width: number; height: number; artifact: { sha256: string } }>("artifact", frame.artifactId) : undefined;
+  if (artifact?.projectId === attempt.projectId && artifact.artifact.sha256 === frame?.sha256) result.priceFrame = { width: artifact.width, height: artifact.height };
   assertCodePlanProviderAdmission(result);
   return result;
 }

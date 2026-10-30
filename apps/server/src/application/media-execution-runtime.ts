@@ -1,3 +1,5 @@
+import { VideoI2vExecution } from "../execution/video-i2v-execution.js";
+import { codeOnlyVideoAdapter } from "../execution/video-i2v-options.js";
 import { accessSync, constants, mkdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -47,9 +49,10 @@ export interface MediaExecutionRuntimeOptions {
   startupTimeoutMs?: number;
   /** Trusted host/test dependencies only; never populated from a browser or model request. */
   transport?: { codexImage?: CodexImageTransport; imageFetch?: typeof globalThis.fetch; h3Fetch?: typeof globalThis.fetch; viggleFetch?: typeof globalThis.fetch;
-    speechFetch?: typeof globalThis.fetch; transcriptionFetch?: typeof globalThis.fetch; falFetch?: typeof globalThis.fetch;
+    speechFetch?: typeof globalThis.fetch; transcriptionFetch?: typeof globalThis.fetch; falFetch?: typeof globalThis.fetch; seedanceFetch?: typeof globalThis.fetch;
     download?: Pick<VideoDownloadOptions, "lookup" | "request">;
     viggleDownload?: Pick<VideoDownloadOptions, "lookup" | "request">;
+    seedanceDownload?: Pick<VideoDownloadOptions, "lookup" | "request">;
     falDownload?: Pick<VideoDownloadOptions, "lookup" | "request"> };
 }
 function executable(path: string | null): path is string {
@@ -67,7 +70,12 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
     && typeof configuration.falLipSync === "boolean" && Array.isArray(configuration.h3DownloadHosts)
     && Array.isArray(configuration.viggleH3DownloadHosts) && Array.isArray(configuration.falLipSyncDownloadHosts),
     "MEDIA_EXECUTION_CONFIGURATION", "Use validated local generation configuration");
-  const enabled = configuration.image || configuration.codexImage || configuration.h3 || configuration.viggleH3 || configuration.falLipSync || configuration.speech || configuration.transcription,
+  invariant((configuration.seedance === undefined || typeof configuration.seedance === "boolean")
+    && (configuration.falVideo === undefined || typeof configuration.falVideo === "boolean")
+    && (configuration.seedanceDownloadHosts === undefined || Array.isArray(configuration.seedanceDownloadHosts))
+    && (configuration.falVideoDownloadHosts === undefined || Array.isArray(configuration.falVideoDownloadHosts)),
+    "MEDIA_EXECUTION_CONFIGURATION", "Use boolean N2 switches and exact download host arrays");
+  const enabled = configuration.seedance || configuration.falVideo || configuration.image || configuration.codexImage || configuration.h3 || configuration.viggleH3 || configuration.falLipSync || configuration.speech || configuration.transcription,
     haveTools = executable(ffmpegPath) && executable(ffprobePath);
   invariant(!enabled || haveTools, "MEDIA_EXECUTION_TOOLS_REQUIRED", "Enabled media generation requires executable FFmpeg and ffprobe on this computer");
   invariant([configuration.codexImageBinary, configuration.codexImageHome].every(path => path === undefined
@@ -133,6 +141,15 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
       ...(viggleFetch === undefined ? {} : { fetch: viggleFetch }) }));
     enabledExecutions.push({ adapter: "viggle-h3", version: "1" });
   }
+  for (const adapter of ["seedance", "fal-video-i2v"] as const) {
+    if (!(adapter === "seedance" ? configuration.seedance : configuration.falVideo)) continue;
+    const dependency = adapter === "seedance" ? options.transport?.seedanceDownload : options.transport?.falDownload;
+    const fetch = adapter === "seedance" ? options.transport?.seedanceFetch : options.transport?.falFetch;
+    const hosts = adapter === "seedance" ? configuration.seedanceDownloadHosts : configuration.falVideoDownloadHosts;
+    const downloader = new ProtectedVideoDownloader({ allowedHosts: hosts ?? [], ...(dependency?.lookup ? {lookup:dependency.lookup} : {}), ...(dependency?.request ? {request:dependency.request} : {}) });
+    providers.push(new VideoI2vExecution(adapter, {store,outputStore,artifactRoot:artifactDir,credentials,downloader,images:imageStore!,...(fetch ? {fetch} : {})}));
+    enabledExecutions.push({adapter,version:"1"});
+  }
   if (configuration.falLipSync) {
     const falDownload = options.transport?.falDownload;
     const downloader = new ProtectedVideoDownloader({ allowedHosts: configuration.falLipSyncDownloadHosts,
@@ -174,6 +191,7 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   });
   const externalAdmission: ExternalExecutionAdmission = {
     authorize(input) {
+      invariant(!codeOnlyVideoAdapter(input.profile.adapter), "VIDEO_I2V_CODE_ONLY", "Choose this video model in a code-plan film");
       if (input.profile.adapter === "codex-image") {
         const binding = store.get<NodeBinding>("node_binding", input.nodeId);
         invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId && binding.node.kind === "image",
@@ -223,7 +241,7 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   const providerCatalog = new InstalledProviderCatalog({ ...(options.providerConfiguration === undefined ? {} : { configuration: options.providerConfiguration }),
     registry, credentials, enabledExecutions, codexImageConfigured, mediaTools: { image: !!imageStore, video: !!localMedia, audio: !!localMedia } });
   const lipSyncProfiles = providerCatalog.lipSyncProfiles();
-  const productionOptions: ProductionServiceOptions = configuration.h3 || configuration.viggleH3
+  const productionOptions: ProductionServiceOptions = configuration.h3 || configuration.viggleH3 || configuration.seedance || configuration.falVideo
     ? { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video",
       ...(lipSyncProfiles.length ? { newProjectLipSyncProfiles: lipSyncProfiles } : {}) } : {};
   return { close: () => closing ??= nativeWorker?.close() ?? Promise.resolve(), engine, registry, outputIngestor, localExecutor, localMedia, imageStore, outputStore, providerCatalog, uploadDirectory, productionOptions };

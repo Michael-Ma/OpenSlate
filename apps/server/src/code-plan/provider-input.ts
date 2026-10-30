@@ -1,3 +1,4 @@
+import { codeOnlyVideoAdapter, videoI2vOptions } from "../execution/video-i2v-options.js";
 import { invariant, providerProfileArguments } from "@openslate/core";
 import type { JsonObject, ProviderProfile } from "@openslate/core";
 import { assertCodexImageOperationOptions } from "../execution/codex-image-receipts.js";
@@ -24,6 +25,21 @@ export function codePlanProviderArgs(profile: ProviderProfile, input: JsonObject
       && Number(input.durationSeconds) * 30 <= (profile.maxFrames ?? 450), "CODE_PLAN_INPUT", "Video duration must fit the installed profile");
     invariant(input.firstFrame && typeof input.firstFrame === "object" && !Array.isArray(input.firstFrame)
       && input.firstFrame.kind === "image", "CODE_PLAN_INPUT", "Video requires a first-frame artifact");
+    if (codeOnlyVideoAdapter(profile.adapter)) {
+      allowed.push("lastFrame", "aspectRatio", "resolution", "generateAudio", "seed");
+      const options = videoI2vOptions(profile, input);
+      const frameHash = (frame: unknown): string => {
+        invariant(frame && typeof frame === "object" && !Array.isArray(frame) && "sha256" in frame && "kind" in frame
+          && frame.kind === "image" && typeof frame.sha256 === "string" && /^[a-f0-9]{64}$/.test(frame.sha256), "CODE_PLAN_INPUT", "Use an owned image artifact");
+        return frame.sha256;
+      };
+      operation = { ...base, prompt: input.prompt, durationFrames: options.seconds * 30, frameRate: { numerator: 30, denominator: 1 },
+        firstFrameSha256: frameHash(input.firstFrame), ...(input.lastFrame ? { lastFrameSha256: frameHash(input.lastFrame) } : {}),
+        settings: { resolution: options.resolution, [profile.adapter === "seedance" ? "ratio" : "aspectRatio"]: options.aspectRatio, generateAudio: options.generateAudio },
+        ...(options.seed === undefined ? {} : { seed: options.seed }) };
+      invariant(Object.keys(input).every(key => allowed.includes(key)), "CODE_PLAN_INPUT", "Unsupported provider parameters");
+      return operation;
+    }
     operation = { ...base, prompt: input.prompt, durationFrames: Number(input.durationSeconds) * 30,
       frameRate: { numerator: 30, denominator: 1 }, settings: {} };
     if (profile.adapter === "viggle-h3") assertViggleH3OperationOptions(profile, operation);

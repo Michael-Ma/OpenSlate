@@ -1,3 +1,4 @@
+import { videoI2vFailure } from "../execution/video-i2v-execution.js";
 import { createHash } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open } from "node:fs/promises";
@@ -13,7 +14,7 @@ import type { Store } from "../persistence/store.js";
 
 import type { InstalledProviderCatalog } from "../application/provider-catalog.js";
 import type { LocalMediaExecutor } from "../execution/local-media-executor.js";
-import { projectModels, modelPrice, type CodePlanCapabilityLock } from "./models.js";
+import { projectModels, modelPrice, codePlanPriceFrame, type CodePlanCapabilityLock } from "./models.js";
 import { codePlanProviderArgs } from "./provider-input.js";
 import type { CodePlanModel } from "./identity.js";
 import { VIDEO_DERIVATION_LIMITS, assertNormalizedVideoIngestion, type NormalizedVideoIngestion, type VideoDerivationIntent } from "../execution/video-derivation.js";
@@ -124,7 +125,7 @@ export class CodePlanExecution {
       this.store.insert("code_plan_execution", id, projectId, { requestDigest: digest(attempt.request), liability: "reserved",
         outcome: null, outcomeDigest: null, createdAt: at, updatedAt: at,
         ...(profile || realRender ? { planVersion: this.store.get<{ planVersion: number }>("code_plan_run", projectId)!.planVersion,
-          normalizedInput: input, priceMicros: modelPrice(model) } : {}) });
+          normalizedInput: input, priceMicros: modelPrice(model, input, codePlanPriceFrame(this.store, projectId, input)) } : {}) });
       this.store.insert("attempt", id, projectId, attempt);
       return { attempt, created: true };
     });
@@ -259,8 +260,8 @@ export class CodePlanExecution {
         : outcome.type === "unknown" ? "submission_unknown" : "failed";
       const failure = outcome.type === "failed" || outcome.type === "rejected" ? { id: outcome.failureId, technical: outcome.technical,
         retryAllowed: false, source: `${attempt.request.execution.adapter}_provider` } : null;
-      // Rejection is the sole positive evidence that the request cannot be charged.
-      const liability: CodePlanLiability = outcome.type === "rejected" ? "released"
+      // Rejections and request-bound Seedance free-task failures positively release liability.
+      const liability: CodePlanLiability = outcome.type === "rejected" || outcome.type === "failed" && videoI2vFailure(this.store, attempt)?.free ? "released"
         : outcome.type === "completed" || outcome.type === "failed" ? "charged" : record.liability;
       this.store.put("code_plan_execution", id, attempt.projectId, { ...record, liability, outcome, outcomeDigest: digest(outcome), updatedAt: new Date().toISOString() });
       this.store.put("attempt", id, attempt.projectId, { ...attempt, phase, failure, taskId: executionTaskId(outcome) ?? attempt.taskId });
@@ -320,6 +321,10 @@ export class CodePlanExecution {
       }
       await this.validateArtifact(attempt, output, artifact, derived.some(item => item.artifact === artifact));
       artifacts.push(artifact); outputs[output.port] = artifact.artifact;
+    }
+    if (attempt.request.execution.adapter === "seedance") {
+      const lastFrame = this.store.get<ArtifactRecord>("artifact", digest({attemptId:attempt.id,port:"lastFrame"}));
+      if (lastFrame?.projectId === attempt.projectId && lastFrame.attemptId === attempt.id && lastFrame.artifact.kind === "image") outputs.lastFrame = lastFrame.artifact;
     }
     this.store.transaction(() => {
       const current = this.attempt(id);
