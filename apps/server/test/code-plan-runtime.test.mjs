@@ -212,11 +212,16 @@ test("programming errors end the pass with a capped message and stack", async t 
   assert.equal(f.calls.submit.length, 0);
 });
 
-test("speech explicitly returns NOT_IMPLEMENTED without dispatch or journal admission", async t => {
+test("speech returns a priced fake audio artifact and reuses it on replay", async t => {
   const f = fixture(t);
-  submit(f, film(`const speech = await ctx.speech({ text: "hello" }); if (!speech.ok) ctx.log(speech.error.code);`));
-  assert.deepEqual((await settle(f)).logs, ["NOT_IMPLEMENTED"]);
-  assert.equal(f.calls.submit.length, 0); assert.equal(f.runtime.steps(f.projectId).length, 0);
+  submit(f, film(`const speech = await ctx.speech({ text: "hello", voice: "fixture", model: "fake-speech" });
+    if (!speech.ok) throw new Error(speech.error.code); ctx.log(speech.artifact.kind);`));
+  assert.deepEqual((await settle(f)).logs, ["audio"]);
+  assert.equal(f.calls.submit.length, 1);
+  const step = f.runtime.steps(f.projectId)[0];
+  assert.equal(step.kind, "speech"); assert.equal(step.priceMicros, "10000");
+  assert.deepEqual(step.input, { text: "hello", voice: "fixture", model: "fake-speech" });
+  await replay(f); assert.equal(f.calls.submit.length, 1);
 });
 
 test("paid parallel steps reserve against the $1 ceiling and a raised ceiling wakes remaining work", async t => {

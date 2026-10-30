@@ -179,3 +179,22 @@ test("sandbox validates per-pass limits and the default export", async () => {
   assert.equal((await runSandbox(options("export default async function film() {}", { limits: { memoryMb: 0 } }))).state, "error");
   assert.equal((await runSandbox(options("export default async function film() {}", { limits: { cpuMs: 0 } }))).state, "error");
 });
+
+test("sandbox tracks unawaited ctx promises even if the plan mutates promise properties and array intrinsics", async () => {
+  const result = await runSandbox(options(`export default async function film(ctx) {
+    const pending = ctx.image({}); pending.observed = true; pending.method = "hidden";
+    Array.prototype.filter = () => []; Array.prototype.map = () => [];
+  }`, { call: () => SANDBOX_PENDING }));
+  assert.equal(result.state, "done"); assert.deepEqual(result.unawaitedCalls, ["image"]);
+});
+
+test("upstream QuickJS still lacks detached rejection tracking; ctx tracking remains available", async () => {
+  for (const source of [
+    'export default async function film() { Promise.resolve().then(() => { throw new Error("detached bug"); }); }',
+    'export default async function film() { (async () => { throw new Error("lost"); })(); }',
+  ]) {
+    // Document the observed upstream limitation explicitly, rather than claiming
+    // that ctx-promise observation catches unrelated native async branches.
+    const result = await runSandbox(options(source)); assert.equal(result.state, "done");
+  }
+});

@@ -1,14 +1,15 @@
 import { canonical, digest, invariant } from "@openslate/core";
 import type { JsonObject, JsonValue } from "@openslate/core";
 
-export type CodePlanMediaKind = "image" | "video" | "render";
+export type CodePlanMediaKind = "image" | "video" | "speech" | "render";
 export interface CodePlanModel { kind: CodePlanMediaKind; defaults?: JsonObject; priceMicros?: string }
 export const CODE_PLAN_MODELS: Readonly<Record<string, CodePlanModel>> = Object.freeze({
   "fake-image": { kind: "image" },
   "fake-video": { kind: "video", defaults: { durationSeconds: 6 } },
+  "fake-speech": { kind: "speech", defaults: { voice: "fixture" }, priceMicros: "10000" },
   "local-render": { kind: "render", priceMicros: "0" },
 });
-const defaultModel = { image: "fake-image", video: "fake-video", render: "local-render" };
+const defaultModel = { image: "fake-image", video: "fake-video", speech: "fake-speech", render: "local-render" };
 
 /** Whitespace in creative strings is significant. Only object order, defaults and artifact identities normalize. */
 export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
