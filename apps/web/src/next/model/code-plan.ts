@@ -351,15 +351,20 @@ export function chosenArtifacts(view: CodePlanView): Set<string> {
   return ids;
 }
 
-export function stepRow(step: CodePlanStepView, view: CodePlanView, locale: string, chosen = chosenArtifacts(view)): StepRow {
+/** Past this, a step that is still "making" is called out: vendors can sit on a task with no sign of failure. */
+export const SLOW_STEP_MS = 10 * 60 * 1000;
+
+export function stepRow(step: CodePlanStepView, view: CodePlanView, locale: string, chosen = chosenArtifacts(view), now = Date.now()): StepRow {
   const artifact = step.state === "succeeded" ? artifactRefOf(step.artifact) : null;
+  const waited = step.state === "in_flight" ? now - new Date(step.updatedAt).getTime() : 0;
   // A reached step that was never sent while the run is paused at the ceiling is waiting for the limit.
   const budget = step.state === "absent" && step.reached && view.state === "paused_budget";
   const price = micros(step.priceMicros);
   return {
     key: step.key, kind: step.kind, state: step.state,
-    status: budget ? msg("codeplan.step.budget") : STEP_STATUS[step.state] ?? msg("codeplan.state.unknown", { state: String(step.state) }),
-    tone: step.state === "in_flight" ? "busy" : step.state === "failed" || step.state === "unknown" || budget ? "attention" : "plain",
+    status: budget ? msg("codeplan.step.budget") : waited >= SLOW_STEP_MS ? msg("codeplan.step.slow", { minutes: Math.floor(waited / 60000) })
+      : STEP_STATUS[step.state] ?? msg("codeplan.state.unknown", { state: String(step.state) }),
+    tone: step.state === "in_flight" ? waited >= SLOW_STEP_MS ? "attention" : "busy" : step.state === "failed" || step.state === "unknown" || budget ? "attention" : "plain",
     label: text(step.label, 200), model: text(step.model, 120),
     price: price > 0n ? msg("codeplan.step.price", { price: formatMicros(String(price), locale) }) : null,
     artifact, reached: step.reached, chosen: !!artifact && chosen.has(artifact.artifactId),

@@ -40,6 +40,7 @@ async function choiceCards({ locale = 'en', guard = { disabled: false, title: un
   return load('ChoiceCards.tsx', ['CodePlanChoiceCard', 'CodePlanChoiceGroup', 'useCodePlanChoices', 'ChoiceCompare'], {
     useState: (initial) => [comparing ?? initial, (value) => s.calls.push(['comparing', value])],
     useDeveloperMode: () => developer,
+    useNaturalAspect: () => ({ aspect: null, onDecoded() {}, style: undefined }),
     Modal: ({ className, labelledBy, children }) => React.createElement('dialog', { className, 'aria-labelledby': labelledBy, open: true }, children),
     useI18n: () => i18n(locale),
     Picture: ({ artifact, alt }) => React.createElement('img', { 'data-artifact': artifact.artifactId, alt }),

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { Picture } from "../keyframes/parts.tsx";
+import { useNaturalAspect } from "../media/Viewer.tsx";
 import { answerPress, threadChoices, type ChoiceCard, type ChoiceOption } from "../model/code-plan.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { Modal } from "../views/plan/Modal.tsx";
@@ -127,7 +128,7 @@ function ChoiceCompare({ card, focus, off, offTitle, onChoose, onClose }: {
           const name = optionName(option, t);
           return (
             <figure key={option.index} className={`cp-compare-item${option.chosen ? " chosen" : ""}`} data-option={option.index}>
-              <div className="cp-compare-pic">{option.artifact ? <Picture artifact={option.artifact} alt={name} /> : null}</div>
+              {option.artifact ? <ComparePicture artifact={option.artifact} name={name} /> : null}
               <figcaption>
                 <span className="cp-compare-name">{name}</span>
                 {option.chosen ? <span className="cp-chosen-mark static">✓ {t("codeplan.choice.chosen")}</span>
@@ -144,4 +145,10 @@ function ChoiceCompare({ card, focus, off, offTitle, onChoose, onClose }: {
       </div>
     </Modal>
   );
+}
+
+/** The box takes the picture's own shape, up to the dialog's height, so a portrait frame fills it instead of sitting between bars. */
+function ComparePicture({ artifact, name }: { artifact: NonNullable<ChoiceOption["artifact"]>; name: string }) {
+  const shape = useNaturalAspect();
+  return <div className="cp-compare-pic" style={shape.style}><Picture artifact={artifact} alt={name} onDecoded={shape.onDecoded} /></div>;
 }

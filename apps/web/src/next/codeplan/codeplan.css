@@ -66,7 +66,7 @@ dialog.cp-compare::backdrop{background:rgba(8,9,10,.62)}
 .cp-compare-head h2{margin:0;font-size:16px;font-weight:700;letter-spacing:-.01em;line-height:1.35}
 .cp-compare-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:14px}
 .cp-compare-item{margin:0;display:flex;flex-direction:column;gap:8px;min-width:0}
-.cp-compare-pic{position:relative;aspect-ratio:16/9;max-height:70vh;border-radius:10px;overflow:hidden;background:var(--track);border:1px solid var(--hairline)}
+.cp-compare-pic{position:relative;aspect-ratio:16/9;max-height:62vh;width:100%;margin-inline:auto;border-radius:10px;overflow:hidden;background:var(--track);border:1px solid var(--hairline)}
 .cp-compare-pic .pic-img,.cp-compare-pic .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
 .cp-compare-item.chosen .cp-compare-pic{border:2px solid var(--select)}
 .cp-compare-item figcaption{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:30px}

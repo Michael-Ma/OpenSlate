@@ -34,6 +34,13 @@ export function CodePlanProvider({ children }: { children: ReactNode }) {
   const read = useResource<CodePlanView>(enabled ? CODE_PLAN_PATH : null);
   // A read that answered for another film (never expected) is not shown as this film's.
   const view = read.data && read.data.projectId === projectId ? read.data : null;
+  // A stuck vendor task sends no events, so read again now and then while work is out: its wait keeps growing.
+  const working = !!view?.steps.some((step) => step.state === "in_flight");
+  useEffect(() => {
+    if (!working) return;
+    const timer = setInterval(read.reload, 60_000);
+    return () => clearInterval(timer);
+  }, [working, read.reload]);
   const value = useMemo<CodePlanRead>(() => (enabled ? { enabled, view, error: read.error, loading: read.loading, reload: read.reload } : OFF),
     [enabled, view, read.error, read.loading, read.reload]);
   return <CodePlanContext.Provider value={value}>{children}</CodePlanContext.Provider>;

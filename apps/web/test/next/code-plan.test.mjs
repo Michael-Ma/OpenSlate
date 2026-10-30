@@ -8,7 +8,7 @@ import { artifactContentPath, codePlanArtifactContentPath, codePlanVersionPath, 
 import {
   answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
   findingMsg, isCodeProject, latestRender, lineDiff, needsAttention, optionArtifact, optionLabel, placeByTime, previousVersion, problemCause, retryPress, runStrip,
-  sourcePress, stepProblem, stepRows, threadChoices, versionRows,
+  sourcePress, stepProblem, stepRow, stepRows, threadChoices, versionRows,
 } from '../../src/next/model/code-plan.ts';
 import { DEVELOPER_STORAGE_KEY, readDeveloperMode, setDeveloperMode } from '../../src/next/app/useDeveloperMode.ts';
 import { DEFAULT_LIMIT_STORAGE_KEY, readDefaultLimit, setDefaultLimit } from '../../src/next/app/useDefaultLimit.ts';
@@ -157,7 +157,7 @@ test('steps split into the current plan and history, with budget waits and chose
   const steps = [
     step('img-old', 'image', 'succeeded', { artifact: ref('old'), reached: false, updatedAt: '2026-10-29T09:00:00.000Z' }),
     step('img-1', 'image', 'succeeded', { artifact: ref('a1') }),
-    step('img-2', 'image', 'in_flight'),
+    step('img-2', 'image', 'in_flight', { updatedAt: new Date().toISOString() }),
     step('img-cancel', 'image', 'cancelled', { reached: false, updatedAt: '2026-10-29T09:30:00.000Z' }),
     step('clip', 'video', 'absent', { priceMicros: '450000' }),
     step('img-bad', 'image', 'failed', { error: { code: 'PROVIDER_REFUSED' } }),
@@ -585,4 +585,15 @@ test('the film list counts a code film\'s failed steps', async (t) => {
   const film = (list.projects ?? list).find((item) => item.id === CODE_FILM_ID);
   assert.deepEqual([film.planMode, film.needsAttention], ['code', 1]);
   assert.equal(filmsView([film], CODE_FILM_ID, new Date(), 'en').live[0].attention, 1);
+});
+
+test('a step still making after ten minutes says how long it has waited, in the attention tone', () => {
+  const at = new Date('2026-10-30T10:30:00.000Z').getTime();
+  const step_ = step('clip', 'video', 'in_flight', { updatedAt: '2026-10-30T10:09:00.000Z' });
+  const plan = view({ steps: [step_] });
+  const slow = stepRow(step_, plan, 'en-US', undefined, at);
+  assert.equal(en(slow.status), 'Still waiting for the service (21 min)');
+  assert.equal(slow.tone, 'attention');
+  const fresh = stepRow(step_, plan, 'en-US', undefined, new Date('2026-10-30T10:12:00.000Z').getTime());
+  assert.deepEqual([fresh.status.id, fresh.tone], ['codeplan.step.in_flight', 'busy']);
 });

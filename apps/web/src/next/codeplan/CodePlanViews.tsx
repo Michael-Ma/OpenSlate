@@ -175,7 +175,7 @@ export function CodePlanFilmView() {
   const open = (key: string) => setViewing(Math.max(0, media.findIndex((item) => item.key === key)));
   return (
     <main className="work plan cp-view cp-film" data-view="film" data-code-plan="true">
-      <ViewHead title={t("film.title")} line={film && !waiting ? t("codeplan.film.line", { clips: film.clipCount, renders: film.renderCount }) : null} />
+      <ViewHead title={t("film.title")} line={film && !waiting ? t("codeplan.film.line", { clips: film.videoCount, renders: film.renderCount }) : null} />
       {waiting ?? (film && (
         <CodePlanMedia>
           <section className="cp-player" aria-label={t("codeplan.film.player")}>
@@ -207,6 +207,8 @@ function filmRows(view: CodePlanView, locale: string) {
     latest: latest ? stepRow(latest, view, locale) : null,
     renderCount: renders.current.length + renders.history.length,
     clipCount: clips.current.length + clips.history.length,
+    // The heading counts pictures; speech and music are listed with the clips but are not clips.
+    videoCount: [...clips.current, ...clips.history].filter((row) => row.kind === "video").length,
   };
 }
 

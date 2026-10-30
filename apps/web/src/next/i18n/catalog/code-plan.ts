@@ -54,6 +54,7 @@ export const codePlanMessages = {
   // ---- steps ----
   "codeplan.step.absent": { en: "Not sent yet", zh: "还未发出" },
   "codeplan.step.in_flight": { en: "Making…", zh: "生成中…" },
+  "codeplan.step.slow": { en: "Still waiting for the service ({minutes} min)", zh: "仍在等服务返回（{minutes} 分钟）" },
   "codeplan.step.unknown": { en: "No answer yet", zh: "还没有回应" },
   "codeplan.step.succeeded": { en: "Made", zh: "已生成" },
   "codeplan.step.failed": { en: "Failed", zh: "失败" },
@@ -133,7 +134,7 @@ export const codePlanMessages = {
   "codeplan.film.player": { en: "The latest render of the film", zh: "最新渲染的成片" },
   "codeplan.film.sample": { en: "The sample studio has no video files: the render’s first frame stands in.", zh: "示例工作室没有视频文件，用渲染的第一帧代替。" },
   "codeplan.film.renders": { en: "Renders", zh: "渲染" },
-  "codeplan.film.clips": { en: "Clips", zh: "视频" },
+  "codeplan.film.clips": { en: "Clips and sound", zh: "片段和声音" },
   "codeplan.film.no_clips": { en: "No clip steps yet.", zh: "还没有视频步骤。" },
 
   // ---- Code ----
