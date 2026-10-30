@@ -751,7 +751,8 @@ export interface InstallationStatus {
 
 /** Chosen at project creation. Absent means graph. */
 export type PlanMode = "graph" | "code";
-export type CodePlanRunState = "empty" | "running" | "waiting" | "error" | "paused_budget" | "done";
+/** `done_with_failures`: the program returned, but at least one step it reached failed or stayed unknown. */
+export type CodePlanRunState = "empty" | "running" | "waiting" | "error" | "paused_budget" | "done" | "done_with_failures";
 export type CodePlanStepKind = "image" | "video" | "speech" | "render";
 export type CodePlanStepState = "absent" | "in_flight" | "unknown" | "succeeded" | "failed" | "cancelled";
 
@@ -765,7 +766,14 @@ export interface CodePlanStepView {
   label: string;
   /** Present once the step succeeded. */
   artifact?: StudioArtifactRef;
-  error?: { code: string };
+  /**
+   * Present once the step failed or its outcome stayed unknown. `retry`: "safe" when the request certainly never reached
+   * the vendor (a retry cannot charge twice), "consent" when it may have (a retry needs the person's yes and may charge
+   * again), "none" when retrying cannot help (invalid input, refused content).
+   */
+  error?: { code: string; mayHaveCharged?: boolean; retry?: "safe" | "consent" | "none" };
+  /** Attempts made for this step so far, retries included. */
+  attempts?: number;
   priceMicros: Micros;
   /** Whether the latest pass reached this step. Unreached steps stay listed as history. */
   reached: boolean;

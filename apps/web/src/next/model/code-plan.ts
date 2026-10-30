@@ -100,6 +100,7 @@ const STATUS: Record<CodePlanRunState, Msg> = {
   error: msg("codeplan.state.error"),
   paused_budget: msg("codeplan.state.paused_budget"),
   done: msg("codeplan.state.done"),
+  done_with_failures: msg("codeplan.state.done_with_failures"),
 };
 
 const share = (part: bigint, whole: bigint) => (whole <= 0n ? 0 : Math.max(0, Math.min(1, Number((part * 10000n) / whole) / 10000)));
@@ -117,7 +118,7 @@ export function runStrip(view: CodePlanView, locale: string): RunStrip {
   return {
     state,
     status,
-    tone: state === "running" ? "busy" : state === "error" || state === "paused_budget" || (state === "waiting" && waiting > 0) ? "attention" : "plain",
+    tone: state === "running" ? "busy" : state === "error" || state === "paused_budget" || state === "done_with_failures" || (state === "waiting" && waiting > 0) ? "attention" : "plain",
     held: view.held,
     spend,
     meter: { spent: share(spent, ceiling), reserved: share(reserved, ceiling) },

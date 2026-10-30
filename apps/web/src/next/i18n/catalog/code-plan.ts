@@ -16,6 +16,7 @@ export const codePlanMessages = {
   "codeplan.state.error": { en: "Stopped by an error", zh: "因错误停止" },
   "codeplan.state.paused_budget": { en: "Paused at the spend limit", zh: "已到花费上限，暂停" },
   "codeplan.state.done": { en: "Done", zh: "已完成" },
+  "codeplan.state.done_with_failures": { en: "Stopped: a step failed", zh: "已停止：有步骤失败" },
   "codeplan.state.unknown": { en: "State {state}", zh: "状态 {state}" },
 
   // ---- the run strip ----
