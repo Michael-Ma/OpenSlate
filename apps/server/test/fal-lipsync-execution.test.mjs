@@ -1,3 +1,4 @@
+import { ConfiguredExternalAdmission } from "../dist/execution/configured-external-admission.js";
 import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
@@ -9,7 +10,7 @@ import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { compilePlan, composeScenePlan, digest } from "../../../packages/core/dist/index.js";
+import { RECIPE_DIGEST, compilePlan, composeScenePlan, digest } from "../../../packages/core/dist/index.js";
 import { FalH3LipSyncProvider, falH3LipSyncPriceMicros } from "../../../packages/providers/dist/index.js";
 import { FalH3LipSyncExecution } from "../dist/execution/fal-lipsync-execution.js";
 import { lipSyncSettings, LIP_SYNC_TAIL_SAMPLES } from "../dist/execution/lip-sync.js";
@@ -89,6 +90,7 @@ function fixture(t, options = {}) {
   store.insert("artifact", reference.artifactId, project.id, { artifact: reference, path: imagePath, mimeType: "image/png", fixture: false,
     origin: "supplied_image", attemptId: null, physicalDurationSeconds: null, byteLength: png.length, width: 320, height: 320,
     validationDigest: digest({ sha256: reference.sha256, syntheticDecode: true }) });
+  store.insert("capability_lock", project.capabilityLockId, project.id, { recipeDigest: RECIPE_DIGEST, profiles: [profile] });
   const outputs = new ExecutionOutputStore(store, { rootDir: join(directory, "outputs") }), clock = { value: Date.now() };
   const calls = { initiate: 0, put: 0, post: 0, status: 0, result: 0, download: 0, credentials: 0, log: [], bodies: [], uploads: [] };
   const credentials = new EnvironmentMediaCredentials(name => { calls.credentials++; assert.equal(name, "OPENSLATE_FAL_API_KEY"); return options.credential ? options.credential() : key; });
@@ -108,7 +110,7 @@ function fixture(t, options = {}) {
   const media = options.ingest ? new LocalMediaService({ rootDir: join(directory, "normalized"), allowedInputRoots: [outputs.rootDir], ffmpegPath, ffprobePath }) : undefined;
   const engine = new Engine(store, bridge, { artifactDir: artifactRoot, profiles: [profile], outputStore: outputs,
     ...(media ? { outputIngestor: new SpoolVideoIngestor(outputs, media, { rootDir: join(directory, "derivations") }) } : {}),
-    externalAdmission: { authorize: claim => { const id = randomUUID(); store.insert("offline_fal_allowance", id, claim.projectId, { attemptId: claim.attemptId }); return { allowanceId: id }; } } });
+    externalAdmission: new ConfiguredExternalAdmission(store, () => {}) });
   const shot = project.shots[0], settings = { lipSync: lipSyncSettings(project, shot.id, { audioId, sha256: songSha, samples: SONG_SAMPLES }, 180) };
   const q = JSON.stringify;
   const source = `definePlan({baseRevision:${q(project.revisionId)}},p=>{const shot=p.shot(${q(shot.id)});const frame=p.asset(${q(reference.artifactId)});const review=p.humanReview("review",{shots:[{intent:shot,keyframe:frame,videoProfile:${q(profile.id)},motionPrompt:${q(shot.videoPrompt)},seconds:6,settings:${q(settings)}}]});return p.video("video",{intent:shot,profile:${q(profile.id)},firstFrame:p.approvedImage(frame,review),prompt:${q(shot.videoPrompt)},seconds:6,settings:${q(settings)}});});`;
@@ -181,7 +183,7 @@ test("a fal refusal before any request id is not charged; a failed free upload n
       : { put: () => new Response("denied", { status: 403 }) } });
     await f.engine.runReady(); const current = attempt(f);
     assert.equal(current.phase, "failed"); assert.equal(f.store.get("reservation", current.reservationId).state, "released");
-    assert.equal(f.engine.budget(f.project.id).committedMicros, "0");
+    assert.equal(f.engine.committedMicros(f.project.id), "0");
     const submit = rows(f, "fal_lipsync_execution_submit")[0];
     if (mode === "refused") { assert.equal(f.calls.post, 1); assert.equal(submit.observation.kind, "rejected"); assert.equal(submit.observation.error.errorType, "face_detection_error"); }
     else { assert.equal(f.calls.post, 0); assert.equal(rows(f, "fal_lipsync_execution_dispatch").length, 0); assert.equal(submit.observation.code, "LOCAL_UPLOAD_FAILED"); }

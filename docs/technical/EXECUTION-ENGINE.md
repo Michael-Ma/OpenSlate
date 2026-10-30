@@ -31,12 +31,12 @@ Files are outside short database transactions. [Output storage](../implementatio
 ## Source and checks
 
 - [Engine](../../apps/server/src/execution/engine.ts)
-- Configured external admission in `apps/server/src/execution/`, [current selection guard](../../apps/server/src/execution/current-generated-selection.ts); earlier durable accounting remains available for historical records
+- [Configured external admission](../../apps/server/src/execution/configured-external-admission.ts), [current selection guard](../../apps/server/src/execution/current-generated-selection.ts)
 - [Submission preparation](../../apps/server/src/execution/submission-preparation.ts), [output store](../../apps/server/src/execution/output-store.ts), [ingestion router](../../apps/server/src/execution/ingestion-router.ts)
 - Provider-specific execution/authority/receipt modules in `apps/server/src/execution/`.
 - Tests: execution/recovery/routing/spool suites, competing admission, lease loss, Stop/selection races, rejected-versus-unknown outcome and provider bridges.
 
-The engine executes the user's requested scoped work using configured providers. Historical accounting is retained; the active flow has no project spending-cap or usage-allowance prompt. Offline tests do not establish undocumented provider idempotency.
+The engine executes the user's requested scoped work using configured providers, with no project spending cap or usage allowance. `committedMicros(projectId)` sums reserved and charged `reservation` liabilities, excluding released records; reservations remain authoritative for unknown outcomes and undispatched transcription preparation. Every external v1 attempt requires a `providerUse` pin to the exact saved profile. Offline tests do not establish undocumented provider idempotency.
 
 ## Code plans (experimental)
 

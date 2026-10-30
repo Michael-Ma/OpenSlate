@@ -26,11 +26,11 @@ export function sourceFor(project, imagesOnly = false) {
   }
   return source + `return [${project.shots.map((_, index) => `${imagesOnly ? "image" : "video"}${index}`).join(",")}];});`;
 }
-export function setup(t, { count = 2, budgetMicros = "100000", profiles = DEFAULT_PROFILES, imagesOnly = false, leaseMs = 30000 } = {}) {
+export function setup(t, { count = 2, profiles = DEFAULT_PROFILES, imagesOnly = false, leaseMs = 30000 } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "openslate-execution-"));
   const dbPath = join(directory, "store.sqlite"); const providerPath = join(directory, "provider.sqlite"); const artifactDir = join(directory, "artifacts");
   const store = new Store(dbPath); const provider = new FakeProvider(providerPath);
-  const engine = new Engine(store, provider, { artifactDir, budgetMicros, profiles, leaseMs });
+  const engine = new Engine(store, provider, { artifactDir, profiles, leaseMs });
   const project = projectFixture(randomUUID(), count); store.createProject(project);
   const logicalIds = {};
   const compile = current => compilePlan(sourceFor(current, imagesOnly), { project: current, profiles, logicalIds, allocateId: randomUUID });

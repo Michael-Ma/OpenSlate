@@ -20,7 +20,7 @@ import { projectFixture } from './execution-fixture.mjs';
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'openslate-characters-'));
   const store = new Store(join(directory, 'store.sqlite')), provider = new FakeProvider(join(directory, 'provider.sqlite'));
-  const engine = new Engine(store, provider, { artifactDir: join(directory, 'artifacts'), budgetMicros: '0' });
+  const engine = new Engine(store, provider, { artifactDir: join(directory, 'artifacts') });
   const service = new ProductionService(store, engine);
   let project = service.createProject('Character fixture');
   const shape = projectFixture(project.id, 2);

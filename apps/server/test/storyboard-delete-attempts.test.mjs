@@ -153,7 +153,6 @@ test('deleteShot refuses unresolved section speech for every mapped shot without
     ...(shot.narration ? { intentDigest: digest(shot.narration) } : {}),
   });
   const proposal = await f.prepare(), applied = await f.review(proposal);
-  f.issue(applied);
   const attempt = f.admit(applied);
   assert.equal(attempt.request.kind, 'speech');
   assert.equal(f.store.get('node_binding', attempt.nodeId).node.shotId, null);

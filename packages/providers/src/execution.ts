@@ -10,9 +10,7 @@ export interface ExecutionRequest {
   execution: ExecutionIdentity;
   /** Configured profiles are pinned; fake/v1 demo requests have no profile snapshot. */
   profile?: ExecutionProfileSnapshot;
-  /** Application-issued spending correlation, never a credential. */
-  externalAllowanceId?: string;
-  /** Host-created readiness proof; retains the exact original profile lock without a spending allowance. */
+  /** Host-created readiness proof retaining the exact original profile lock. */
   providerUse?: { kind: "configured"; capabilityLockId: string; capabilityLockDigest: string; profileDefinitionDigest: string };
 }
 export interface ExecutionOutput {

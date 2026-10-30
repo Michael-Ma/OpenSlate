@@ -62,7 +62,7 @@ test("technical classification alone never grants an automatic retry", async t =
     const result = await engine.runReady(), [attempt] = engine.attempts(f.projectId);
     assert.equal(attempt.phase, "failed"); assert.equal(attempt.failure.retryAllowed, false);
     assert.equal(result.blocked[0].code, "RETRY_NOT_AUTHORIZED"); assert.equal(calls, 1);
-    assert.equal(engine.budget(f.projectId).committedMicros, "100");
+    assert.equal(engine.committedMicros(f.projectId), "100");
   }
 });
 
@@ -73,7 +73,7 @@ test("malformed provider failures remain unknown and keep their reservation", as
     await f.engine.runReady(); await f.engine.runReady();
     const [attempt] = f.engine.attempts(f.projectId);
     assert.equal(attempt.phase, "submission_unknown"); assert.equal(attempt.failure, null);
-    assert.equal(f.engine.attempts(f.projectId).length, 1); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+    assert.equal(f.engine.attempts(f.projectId).length, 1); assert.equal(f.engine.committedMicros(f.projectId), "100");
     assert.equal(submissions, 1);
   }
 });
@@ -90,7 +90,7 @@ test("contradictory task receipts are retained without replacing the accepted ta
   assert.ok(f.store.list("execution_evidence", f.projectId).some(row => row.outcome.taskId === "wrong-task"));
   f.provider.poll = async () => ({ type: "rejected", certainty: "not_accepted", technical: true, retryAllowed: true, failureId: "contradiction" });
   await f.engine.reconcile();
-  assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+  assert.equal(f.engine.committedMicros(f.projectId), "100");
   assert.equal(f.engine.attempts(f.projectId)[0].taskId, accepted.taskId);
   f.provider.poll = originalPoll; f.provider.complete(accepted.taskId);
   elapseUnknownBackoff(f.store, accepted.id);
@@ -105,7 +105,7 @@ test("default fixture ingestion cannot silently materialize nonfixture outputs",
   await assert.rejects(f.engine.runReady(), { code: "INVALID_PROVIDER_OUTPUT" });
   assert.equal(f.engine.attempts(f.projectId)[0].phase, "ingesting");
   assert.equal(f.store.list("artifact", f.projectId).length, 0);
-  assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+  assert.equal(f.engine.committedMicros(f.projectId), "100");
 });
 
 test("an explicit trusted ingestion hook preserves stored fixture flags in outputs and publication events", async t => {

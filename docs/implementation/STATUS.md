@@ -2,11 +2,13 @@
 
 Reconciled October 16, 2026 (feature branch after the B18 merge, including B1–B18). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
-## October 29 L1–L2 — legacy compatibility removal (persistence, execution)
+## October 29 L1–L3 — legacy compatibility removal (persistence, execution)
 
 L1 replaces the migration chain with one current schema (v4); data directories from earlier prototype builds need a new `OPENSLATE_DATA_DIR`.
 
 October 29 L2 removes provider/execution compatibility for requests without execution identity, capability locks without the current recipe digest, partial runtime configurations, failure outcomes without explicit retry authority, and Viggle pre-crop preparations. Demo execution remains explicit fake/v1; current exact-aspect frames still need no crop. Submission intent, unknown-outcome reconciliation, reservations and exact receipts remain authoritative. Offline build, **855/855 focused tests**, **4,576 passed / zero failed / one optional skip (4,577 total)** and all five typechecks passed; self-review and independent review found no remaining actionable issue. [L2 scope and file inventory](../ai/uiux-plan/codex/reports/L2-report.md).
+
+October 29 L3 removes historical external allowances, engine project-budget accounting and their unused wire fields. Configured admission requires the exact `providerUse` lock/profile; `committedMicros(projectId)` retains reservation liabilities. Submission/preparation intents, unknown-outcome reconciliation, reviews, candidate/attempt isolation and restore fencing remain enforced. The separate P1 code-plan ceiling is unchanged. Build, **4,616 passed / zero failed / one optional skip (4,617 total)**, all five typechecks and self/independent reviews passed. [L3 scope, test counts and review](../ai/uiux-plan/codex/reports/L3-report.md).
 
 ## October 29 P1 — experimental code-plan replay runtime
 

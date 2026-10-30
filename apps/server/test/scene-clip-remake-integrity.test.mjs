@@ -39,7 +39,7 @@ test('a remake publication lost before checkpoint replays after restart without 
   assert.equal(f.engine.attempts(f.project.id).filter(a => a.request.kind === 'video').length, 3);
   assert.equal(f.provider.acceptedCount(), 5, 'two original frames, two original clips and one replacement');
   assert.equal(f.calls.speech, 1);
-  assert.equal(f.engine.budget(f.project.id).committedMicros, '3300');
+  assert.equal(f.engine.committedMicros(f.project.id), '3300');
 });
 
 test('Stop before remake dispatch preserves the selected clip and never resumes unsent work on restart', async t => {
@@ -68,7 +68,7 @@ test('an edit during remake composition fences the old request before a candidat
 });
 
 test('a changed remake quote refuses atomically before buying a clip or another voice line', async t => {
-  const f = await saved(t), before = await f.overview(), budget = f.engine.budget(f.project.id), accepted = f.provider.acceptedCount();
+  const f = await saved(t), before = await f.overview(), liability = f.engine.committedMicros(f.project.id), accepted = f.provider.acceptedCount();
   const candidates = f.store.list('candidate', f.project.id), grants = f.store.list('grant', f.project.id);
   const response = await f.call('POST', '/scenes/scene-0/remake-clips', { ...await body(f), expectedEstimateMicros: '999999' });
   assert.equal(response.json().error.code, 'ESTIMATE_CHANGED', response.body);
@@ -76,7 +76,7 @@ test('a changed remake quote refuses atomically before buying a clip or another 
   assert.equal(f.provider.acceptedCount(), accepted);
   assert.deepEqual(f.store.list('candidate', f.project.id), candidates);
   assert.deepEqual(f.store.list('grant', f.project.id), grants);
-  assert.equal(f.engine.budget(f.project.id).committedMicros, budget.committedMicros);
+  assert.equal(f.engine.committedMicros(f.project.id), liability);
   assert.deepEqual((await f.overview()).shots['shot-0'].video.artifact, before.shots['shot-0'].video.artifact);
   assert.equal(f.calls.speech, 1);
 });

@@ -10,7 +10,7 @@ const profile=(kind='speech',patch={})=>({id:`offline-${kind}`,revision:'fixture
  configuration:{model:kind==='speech'?OPENAI_SPEECH_MODEL:'whisper-1',settings:{}},maxConcurrency:2,unitCostMicros:'100',maxRetries:0,...patch});
 const args=(p=profile(),patch={})=>({...providerProfileArguments(p),...(p.kind==='speech'?{text:'Leather boots.\n手工缝制 👞',voice:'coral',instructions:'Warm, measured delivery.'}:{language:'auto',timing:'word'}),settings:{},...patch});
 const request=(p=profile(),a=args(p))=>({attemptId:'attempt-1',nodeId:'node-1',kind:p.kind,fingerprint:'a'.repeat(64),args:a,
- inputs:p.kind==='speech'?[]:[{artifactId:'owned-audio',sha256:'b'.repeat(64),kind:'audio'}],execution:{adapter:p.adapter,version:p.executionVersion},profile:executionProfileSnapshot(p),externalAllowanceId:'human-allowance-1'});
+ inputs:p.kind==='speech'?[]:[{artifactId:'owned-audio',sha256:'b'.repeat(64),kind:'audio'}],execution:{adapter:p.adapter,version:p.executionVersion},profile:executionProfileSnapshot(p),providerUse:{kind:'configured',capabilityLockId:'profile-lock-1',capabilityLockDigest:'c'.repeat(64),profileDefinitionDigest:digest(p)}});
 const invalid=fn=>assert.throws(fn,{code:'AUDIO_PREFLIGHT_INVALID'});
 
 test('pure profile preflight exposes exact definition and configured estimate without host capability claims',()=>{

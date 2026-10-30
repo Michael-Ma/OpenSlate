@@ -4,7 +4,7 @@ Accepted September 12, 2026: v0 supports one user on one computer. The browser, 
 
 ## Trust boundary
 
-OpenSlate trusts the exact pinned installed Codex runtime and its built-in sandbox as local infrastructure. `LocalCodexPolicy` uses mode `local` and exact version/configuration identity. It checks supported runtime configuration, locked skills/tool catalogs, loopback bridge/credentials and request epochs; application services enforce canonical mutations, grants, reviews, allowances and provider submissions.
+OpenSlate trusts the exact pinned installed Codex runtime and its built-in sandbox as local infrastructure. `LocalCodexPolicy` uses mode `local` and exact version/configuration identity. It checks supported runtime configuration, locked skills/tool catalogs, loopback bridge/credentials and request epochs; application services enforce canonical mutations, grants, reviews and provider submissions.
 
 Independent code-host/authentication isolation is unverified. Model refusal in a prompt is not enforcement evidence. This accepted local assumption does not authorize arbitrary native operations or weaken application generation/recovery checks.
 

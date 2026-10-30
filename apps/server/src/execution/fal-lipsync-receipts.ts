@@ -1,4 +1,4 @@
-import { externalAllowanceMatches, providerAdmissionRequest } from "./provider-use.js";
+import { providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, invariant } from "@openslate/core";
 import { FAL_H3_LIPSYNC_ADAPTER_VERSION, FAL_H3_LIPSYNC_MODEL, FAL_H3_LIPSYNC_RESOLUTIONS, falH3LipSyncMetadataDigest } from "@openslate/providers";
 import type { FalDiagnostic, FalH3LipSyncDescription, FalH3LipSyncPollResult, FalH3LipSyncSubmitResult, FalReceipt } from "@openslate/providers";
@@ -12,10 +12,10 @@ export const FAL_LIPSYNC_KINDS = Object.freeze(["fal_lipsync_execution_mapping",
   "fal_lipsync_execution_observation", "fal_lipsync_poll_schedule"] as const);
 interface Identity { id: string; version: 1; projectId: string; attemptId: string; requestDigest: string }
 export interface FalLipSyncMapping extends Identity {
-  profileDigest: string; externalAllowanceId: string | null; firstFrameArtifactId: string; lipSync: LipSyncSettings; transport: FalH3LipSyncDescription;
+  profileDigest: string; firstFrameArtifactId: string; lipSync: LipSyncSettings; transport: FalH3LipSyncDescription;
 }
 /** Written before the queue POST. Its presence means the POST may have reached fal. */
-export interface FalLipSyncDispatch extends Identity { mappingDigest: string; bodySha256: string; externalAllowanceId: string | null; createdAt: number }
+export interface FalLipSyncDispatch extends Identity { mappingDigest: string; bodySha256: string; createdAt: number }
 export type FalLipSyncSubmitObservation = FalH3LipSyncSubmitResult
   | { kind: "not_dispatched"; code: "LOCAL_INPUT_INVALID" | "LOCAL_CREDENTIAL_UNAVAILABLE" | "LOCAL_CANCELLED" | "LOCAL_UPLOAD_FAILED"; error?: FalDiagnostic };
 export interface FalLipSyncSubmit extends Identity {
@@ -62,7 +62,7 @@ function base(attempt: Attempt, value: Identity, extras: string[], observation =
     && Buffer.byteLength(canonical(value)) <= 16384, "fal receipt differs from its exact admitted request");
 }
 export function assertFalLipSyncMapping(attempt: Attempt, mapping: FalLipSyncMapping): void {
-  base(attempt, mapping, ["profileDigest", "externalAllowanceId", "firstFrameArtifactId", "lipSync", "transport"]);
+  base(attempt, mapping, ["profileDigest", "firstFrameArtifactId", "lipSync", "transport"]);
   const request = attempt.request, config = request.profile!.configuration, description = mapping.transport;
   falFields(request.args, ["profileIdentity", "profileRevision", "adapter", "executionVersion", "profileConfiguration", "profileDigest", "prompt", "durationFrames", "frameRate", "settings"]);
   assertLipSyncSettings(request.args.settings);
@@ -71,14 +71,14 @@ export function assertFalLipSyncMapping(attempt: Attempt, mapping: FalLipSyncMap
     && description.resolution === (config.settings as Record<string, unknown>).resolution && description.enableTranscription === false
     && canonical(mapping.lipSync) === canonical(request.args.settings.lipSync) && description.audio.samples === mapping.lipSync.clipSamples
     && description.audioSeconds === mapping.lipSync.clipSamples / 48000
-    && mapping.profileDigest === request.profile!.digest && externalAllowanceMatches(request, mapping.externalAllowanceId)
+    && mapping.profileDigest === request.profile!.digest
     && request.inputs.length === 1 && request.inputs[0]!.kind === "image" && mapping.firstFrameArtifactId === request.inputs[0]!.artifactId
     && description.image.sha256 === request.inputs[0]!.sha256 && description.requestDigest === falH3LipSyncMetadataDigest(description),
   "fal mapping must preserve the pinned model, the reviewed keyframe and the exact song window");
 }
 export function assertFalLipSyncDispatch(attempt: Attempt, mapping: FalLipSyncMapping, dispatch: FalLipSyncDispatch): void {
-  base(attempt, dispatch, ["mappingDigest", "bodySha256", "externalAllowanceId", "createdAt"]); assertFalLipSyncMapping(attempt, mapping);
-  fail(dispatch.mappingDigest === digest(mapping) && falHash(dispatch.bodySha256) && dispatch.externalAllowanceId === mapping.externalAllowanceId
+  base(attempt, dispatch, ["mappingDigest", "bodySha256", "createdAt"]); assertFalLipSyncMapping(attempt, mapping);
+  fail(dispatch.mappingDigest === digest(mapping) && falHash(dispatch.bodySha256)
     && integer(dispatch.createdAt, 0, Number.MAX_SAFE_INTEGER), "fal dispatch marker differs from its prepared mapping");
 }
 function diagnostic(value: FalDiagnostic): void {

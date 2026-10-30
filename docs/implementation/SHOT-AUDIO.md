@@ -6,7 +6,7 @@ Compact shot audio accepts a script first or an owned recording first. Listening
 
 A compact session owns one shot and an immutable section pin. Human session, project head and narration-version guards remain required. Cross-section/collection/shared-section changes require the proper explicit mapping; the session cannot borrow another request's hold.
 
-Writing/listening/importing do not create generation permission or spending. Generated speech uses an exact script/voice/instructions proposal and finite usage review. A completed take is not automatically accepted. Final shot acceptance freezes script revision, audio hash and source sample range; durable command replay recovers a lost result without accepting different bytes.
+Writing/listening/importing do not create generation permission or spending. Generated speech uses the exact requested script, voice and instructions through configured admission, without a separate usage allowance. A completed take is not automatically accepted. Final shot acceptance freezes script revision, audio hash and source sample range; durable command replay recovers a lost result without accepting different bytes.
 
 Within-shot voiceover fits inside a planned 3–15 second shot. A shorter nonempty range ends naturally while picture continues. Explicit Match recording duration can change picture to an eligible 3–15 second recording; overlong audio otherwise needs trimming or deliberate duration change. No source is padded or described as covering picture it does not cover.
 

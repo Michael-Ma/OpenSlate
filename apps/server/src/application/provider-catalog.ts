@@ -234,7 +234,7 @@ export class InstalledProviderCatalog {
         mediaTools: { required: !!policy?.media, available: policy?.media ? this.#mediaTools[policy.media] : valid },
         credential: { required: !!policy?.credential, present: credentialPresent, backendUnavailable: credentialUnavailable, apiValidated: false as const },
         ...(codexImage ? { nativeAccess: { configured: this.#codexImageConfigured, authentication: "checked_before_dispatch" as const, quota: "unverified" as const } } : {}),
-        spendingPermissionRequired: false, enabledByHost, realExecutionEnabled } };
+        enabledByHost, realExecutionEnabled } };
   }
 }
 

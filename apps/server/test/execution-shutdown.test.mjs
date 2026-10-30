@@ -28,7 +28,7 @@ for (const receipt of ["accepted", "unknown"]) test(`host shutdown aborts the pr
   assert.equal(signal.aborted, true); assert.equal(calls, 1); assert.equal(f.provider.acceptedCount(), 1);
   const original = f.engine.attempts(f.projectId)[0];
   assert.equal(original.phase, receipt === "accepted" ? "remote_pending" : "submission_unknown");
-  assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+  assert.equal(f.engine.committedMicros(f.projectId), "100");
   await f.engine.runReady(); await f.engine.reconcile(); assert.equal(calls, 1);
   f.provider.complete(taskId);
   const replacement = new Engine(f.store, f.provider, { artifactDir: f.artifactDir });

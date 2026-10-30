@@ -1,4 +1,4 @@
-import { providerAdmissionRequest, externalAllowanceMatches } from "./provider-use.js";
+import { providerAdmissionRequest } from "./provider-use.js";
 import { createHash } from "node:crypto";
 import { canonical, digest, invariant } from "@openslate/core";
 import { OPENAI_IMAGE_MODEL } from "@openslate/providers";
@@ -8,10 +8,10 @@ import type { OutputReceipt } from "./output-store.js";
 
 interface Identity { id: string; projectId: string; version: 1; attemptId: string; requestDigest: string }
 export interface ImageExecutionMapping extends Identity {
-  profileDigest: string; externalAllowanceId: string | null; transport: OpenAIImageDescription;
+  profileDigest: string; transport: OpenAIImageDescription;
 }
 export interface ImageExecutionDispatch extends Identity {
-  mappingDigest: string; transportDigest: string; externalAllowanceId: string | null; createdAt: string;
+  mappingDigest: string; transportDigest: string; createdAt: string;
 }
 type Completed = Extract<OpenAIImageOutcome, { kind: "completed" }>;
 export type ImageExecutionObservation = Exclude<OpenAIImageOutcome, Completed>
@@ -22,7 +22,6 @@ export interface ImageExecutionResult extends Identity {
 }
 const hash = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value);
-const allowance = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
 const integer = (value: unknown, min: number, max: number) => Number.isSafeInteger(value) && Number(value) >= min && Number(value) <= max;
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 function fields(value: unknown, keys: string[]): void {
@@ -40,10 +39,10 @@ function base(attempt: Attempt, value: Identity, extra: string[]): void {
 
 /** V1 transport envelope is pinned here as well as in the transport; conformance is tested. */
 export function assertImageExecutionMapping(attempt: Attempt, value: ImageExecutionMapping): void {
-  base(attempt, value, ["profileDigest", "externalAllowanceId", "transport"]);
+  base(attempt, value, ["profileDigest", "transport"]);
   const description = value.transport, request = attempt.request, settings = request.profile!.configuration.settings;
   fields(description, ["adapter", "requestDigest", "model", "mode", "width", "height", "quality", "inputs"]);
-  invariant(value.profileDigest === request.profile!.digest && externalAllowanceMatches(request, value.externalAllowanceId)
+  invariant(value.profileDigest === request.profile!.digest
     && description.adapter === "openai-image-v1" && description.model === request.profile!.configuration.model
     && (description.model === OPENAI_IMAGE_MODEL || description.model === "gpt-image-2")
     && description.width === settings?.width && description.height === settings?.height && description.quality === settings?.quality
@@ -66,10 +65,10 @@ export function assertImageExecutionMapping(attempt: Attempt, value: ImageExecut
 }
 
 export function assertImageExecutionDispatch(attempt: Attempt, mapping: ImageExecutionMapping, value: ImageExecutionDispatch): void {
-  base(attempt, value, ["mappingDigest", "transportDigest", "externalAllowanceId", "createdAt"]);
+  base(attempt, value, ["mappingDigest", "transportDigest", "createdAt"]);
   assertImageExecutionMapping(attempt, mapping);
   invariant(value.mappingDigest === digest(mapping) && value.transportDigest === mapping.transport.requestDigest
-    && value.externalAllowanceId === mapping.externalAllowanceId && typeof value.createdAt === "string"
+    && typeof value.createdAt === "string"
     && value.createdAt.length <= 40 && Number.isFinite(Date.parse(value.createdAt)),
   "IMAGE_EXECUTION_CONFLICT", "Dispatch intent must bind the exact prepared transport");
 }

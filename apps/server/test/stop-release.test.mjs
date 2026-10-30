@@ -125,7 +125,7 @@ test('released unknown work frees capacity; a lost reply stays charged behind th
   expectError(await f.release(old), 'ATTEMPT_NOT_RELEASABLE');
   expectError(await f.release(old, { acknowledgeDoubleCharge: false }, key), 'IDEMPOTENCY_CONFLICT');
   assert.equal(reservation(f, old).state, 'reserved');
-  assert.equal(f.engine.budget(f.projectId).committedMicros, reservation(f, old).micros);
+  assert.equal(f.engine.committedMicros(f.projectId), reservation(f, old).micros);
   assert.deepEqual(f.engine.currentAttemptIds(f.projectId), []);
   assert.equal(f.store.get('node_binding', node.id).candidateId, null);
   const generated = await f.generate();
@@ -250,7 +250,7 @@ test('release persists across reopen and a late definitive rejection never refun
     await engine.reconcile();
     assert.equal(reopened.get('attempt', attempt.id).phase, 'failed');
     assert.equal(reopened.get('reservation', attempt.reservationId).state, 'reserved');
-    assert.equal(engine.budget(f.projectId).committedMicros, reservation(f, attempt).micros);
+    assert.equal(engine.committedMicros(f.projectId), reservation(f, attempt).micros);
     assert.equal((await engine.runReady()).dispatched, 0);
   } finally { reopened.close(); }
 });

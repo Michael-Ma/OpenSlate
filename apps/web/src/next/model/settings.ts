@@ -24,7 +24,6 @@ export interface ProviderOption {
     mediaTools: { required: boolean; available: boolean };
     credential: { required: boolean; present: boolean | null; backendUnavailable: boolean; apiValidated: boolean };
     nativeAccess?: { configured: boolean; authentication: string; quota: string };
-    spendingPermissionRequired: boolean;
     enabledByHost: boolean;
     realExecutionEnabled: boolean;
   };
@@ -89,7 +88,6 @@ export interface ModelPreview {
   preserved: (WorkNode & { reason: PreservedReason })[];
   counts: { changed: number; preserved: number };
   generationApprovalRequired: boolean;
-  allowanceRequired: boolean;
 }
 
 /** POST /settings/models/apply */

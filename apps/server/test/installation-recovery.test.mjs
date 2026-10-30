@@ -11,7 +11,6 @@ import { Engine } from "../dist/execution/engine.js";
 import { ProductionService } from "../dist/application/service.js";
 import { DirectorSupervisor } from "../dist/application/director-supervisor.js";
 import { ToolInvocationService } from "../dist/application/tool-invocations.js";
-import { historicalBudget } from "./project-budget-fixture.mjs";
 import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from "../dist/application/installation-recovery.js";
 import { recoveryBodyHash } from "../dist/persistence/recovery-records.js";
 import { setup, sourceFor } from "./execution-fixture.mjs";
@@ -134,7 +133,7 @@ test("released restoration recovers known tasks and charges lost replies after r
     assert.equal(store.get("reservation", lost.reservationId).state, "charged");
     for (let i = 0; i < 3; i++) { await engine.reconcile(); await engine.runReady(); }
     assert.equal(provider.acceptedCount(), 2);
-    assert.equal(engine.budget(f.projectId).committedMicros, "200");
+    assert.equal(engine.committedMicros(f.projectId), "200");
     assert.equal(store.get("execution_control", f.projectId).paused, true);
     for (const attempt of attempts) assert.throws(() => engine.recovery.assertFirstSubmit(f.projectId, attempt.id), { code: "RESTORED_AUTHORITY_REQUIRES_NEW" });
     assert.equal(engine.outputs(f.projectId).length, 1); // only the known task remains recoverable while paused
@@ -187,15 +186,6 @@ test("imported waiting questions cannot revive authority; explicit fresh continu
   assert.ok(f.store.list("hold", f.projectId).some(hold => hold.ownerId === fresh.requestId && hold.active));
   f.supervisor.enqueue(f.projectId, fresh); f.supervisor.tick(); assert.equal(f.calls(), 0);
   f.service.control(f.projectId, fresh, "resume"); f.supervisor.tick(); await f.supervisor.settle(); assert.equal(f.calls(), 1);
-});
-
-test("historical budget receipt survives restoration without granting new authority", t => {
-  const f = fixture(t), audit = historicalBudget(f.service, f.projectId);
-  installRecoveryQuarantine(f.store, origin(f.root));
-  assert.equal(f.service.recovery.isImported(f.projectId, 'message', audit.requestId), true);
-  release(f.store);
-  assert.deepEqual(f.store.get('project_budget_revision', audit.id), audit);
-  assert.throws(()=>f.service.recovery.assertFreshAuthority(f.projectId, 'message', audit.requestId),{code:'RESTORED_AUTHORITY_REQUIRES_NEW'});
 });
 
 test("fresh continuation selects its new generation grant rather than an unused imported ancestor grant", async t => {

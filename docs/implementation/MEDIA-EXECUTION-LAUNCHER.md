@@ -1,6 +1,6 @@
 # Provider activation
 
-Host enablement chooses which compiled-in routes the local service can execute. A key, catalog row or browser model selection cannot enable a route. Enablement itself starts no generation; current in-app operation permission and finite usage/spending remain required.
+Host enablement chooses which compiled-in routes the local service can execute. A key, catalog row or browser model selection cannot enable a route. Enablement itself starts no generation. The human starts scoped work in the app, and current request authority, pause/hold controls and the applicable exact returned-frame/video review remain enforced; there is no separate usage allowance or spending approval.
 
 | Route | Enable variable | Credentials/setup |
 |---|---|---|
@@ -13,7 +13,7 @@ Host enablement chooses which compiled-in routes the local service can execute. 
 
 Switches accept only `0`/`1` (unset is off). FFmpeg/ffprobe are required for enabled media execution. Download allowlists contain exact trusted HTTPS hostnames separated by commas, without scheme/path/wildcards. An output-host error after video creation should recover the known job after correcting the allowlist and restarting; do not create a replacement.
 
-Use [local setup](LOCAL-SETUP.md), choose an explicit [provider catalog](PROVIDER-CATALOG.md), then restart with `./start.sh --restart`. The server composes registered adapters, durable receipts/spooling, media ingestion, exact external allowances and local assembly. A catalog readiness view reports local prerequisites; it never verifies media access/quota or starts an API request.
+Use [local setup](LOCAL-SETUP.md), choose an explicit [provider catalog](PROVIDER-CATALOG.md), then restart with `./start.sh --restart`. The server composes registered adapters, durable receipts/spooling, media ingestion, configured external admission and local assembly. A catalog readiness view reports local prerequisites; it never verifies media access/quota or starts an API request.
 
 ## Existing projects
 

@@ -53,14 +53,14 @@ export function changeCatalogOnce(world: FixtureWorld): void {
 
 // ---- the installed catalog -----------------------------------------------------------------
 
-const STAND_IN = { configurationValid: true, registered: true, mediaTools: { required: false, available: true }, credential: { required: false, present: null, backendUnavailable: false, apiValidated: false }, spendingPermissionRequired: false, enabledByHost: false, realExecutionEnabled: false };
+const STAND_IN = { configurationValid: true, registered: true, mediaTools: { required: false, available: true }, credential: { required: false, present: null, backendUnavailable: false, apiValidated: false }, enabledByHost: false, realExecutionEnabled: false };
 
 function option(id: string, label: string, kind: MediaKind, adapter: string, micros: string, keys: boolean, extra: Partial<ProviderOption> = {}): ProviderOption {
   const standIn = adapter === "fake";
   const readiness = standIn ? structuredClone(STAND_IN) : {
     configurationValid: true, registered: true, mediaTools: { required: true, available: true },
     credential: { required: true, present: keys, backendUnavailable: false, apiValidated: false },
-    spendingPermissionRequired: false, enabledByHost: true, realExecutionEnabled: keys,
+    enabledByHost: true, realExecutionEnabled: keys,
   };
   return {
     id, label,

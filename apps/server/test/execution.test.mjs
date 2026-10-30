@@ -34,7 +34,7 @@ test("owned scoped holds and user pauses compose without stopping accepted-job m
 test("lost submission acknowledgment is charged after restart and never automatically resubmitted", async t => {
   const f = setup(t, { count: 1, imagesOnly: true }); const image = f.plan.nodes.find(node => node.kind === "image");
   f.provider.setMode(image.id, "unknown_after_accept"); await f.engine.runReady();
-  assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+  assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); assert.equal(f.engine.committedMicros(f.projectId), "100");
   await f.engine.runReady(); assert.equal(f.provider.acceptedCount(), 1);
   f.store.close(); f.provider.close();
   const store = new Store(f.dbPath); const provider = new FakeProvider(f.providerPath); const engine = new Engine(store, provider, { artifactDir: f.artifactDir });
@@ -57,7 +57,7 @@ test("trusted technical failure retries the same candidate under a new attempt o
   f.provider.setMode(image.id, ["technical_failure", "complete"]);
   await f.engine.runReady(); await f.engine.reconcile(); await f.engine.runReady(); await f.engine.reconcile();
   const attempts = f.engine.attempts(f.projectId); assert.equal(attempts.length, 2); assert.equal(attempts[0].candidateId, attempts[1].candidateId);
-  assert.deepEqual(attempts.map(attempt => attempt.ordinal), [1, 2]); assert.equal(attempts[1].phase, "succeeded"); assert.equal(f.engine.budget(f.projectId).committedMicros, "200");
+  assert.deepEqual(attempts.map(attempt => attempt.ordinal), [1, 2]); assert.equal(attempts[1].phase, "succeeded"); assert.equal(f.engine.committedMicros(f.projectId), "200");
   await f.engine.runReady(); assert.equal(f.provider.acceptedCount(), 2);
 });
 test("a scoped replacement preserves the other branch and rejects old review while retaining old artifacts", async t => {
@@ -112,29 +112,29 @@ test("late stale-lease evidence is retained and cannot overwrite the active fenc
     assert.equal(provider.acceptedCount(), 1); assert.equal(second.list("execution_evidence", f.projectId).length, 3); assert.equal(engine.outputs(f.projectId).length, 1);
   } finally { second.close(); provider.close(); }
 });
-test("two real worker connections admit each covered submission once while an old project cap does not block them", async t => {
-  const f = setup(t, { imagesOnly: true, budgetMicros: "100" }); const shared = new SharedArrayBuffer(4);
+test("two real worker connections admit each covered submission once without a project spending cap", async t => {
+  const f = setup(t, { imagesOnly: true }); const shared = new SharedArrayBuffer(4);
   const modulePaths = { store: new URL("../dist/persistence/index.js", import.meta.url).href, engine: new URL("../dist/execution/index.js", import.meta.url).href, provider: new URL("../../../packages/providers/dist/index.js", import.meta.url).href };
-  const workers = [0, 1].map(() => new Worker(`const {parentPort,workerData}=require('node:worker_threads'); (async()=>{const {Store}=await import(workerData.modules.store);const {Engine}=await import(workerData.modules.engine);const {FakeProvider}=await import(workerData.modules.provider);const store=new Store(workerData.dbPath);const provider=new FakeProvider(workerData.providerPath);const engine=new Engine(store,provider,{artifactDir:workerData.artifactDir,budgetMicros:'100'});parentPort.postMessage('ready');Atomics.wait(new Int32Array(workerData.shared),0,0);try {parentPort.postMessage(await engine.runReady());}finally{store.close();provider.close();}})().catch(error=>{throw error;});`, { eval: true, workerData: { modules: modulePaths, shared, dbPath: f.dbPath, providerPath: f.providerPath, artifactDir: f.artifactDir } }));
+  const workers = [0, 1].map(() => new Worker(`const {parentPort,workerData}=require('node:worker_threads'); (async()=>{const {Store}=await import(workerData.modules.store);const {Engine}=await import(workerData.modules.engine);const {FakeProvider}=await import(workerData.modules.provider);const store=new Store(workerData.dbPath);const provider=new FakeProvider(workerData.providerPath);const engine=new Engine(store,provider,{artifactDir:workerData.artifactDir});parentPort.postMessage('ready');Atomics.wait(new Int32Array(workerData.shared),0,0);try {parentPort.postMessage(await engine.runReady());}finally{store.close();provider.close();}})().catch(error=>{throw error;});`, { eval: true, workerData: { modules: modulePaths, shared, dbPath: f.dbPath, providerPath: f.providerPath, artifactDir: f.artifactDir } }));
   const ready = workers.map(worker => new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); }));
   await Promise.all(ready); const results = workers.map(worker => new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); }));
   Atomics.store(new Int32Array(shared), 0, 1); Atomics.notify(new Int32Array(shared), 0, 2);
   const completed = await Promise.all(results); await Promise.all(workers.map(worker => worker.terminate()));
-  assert.equal(completed.reduce((sum, result) => sum + result.dispatched, 0), 2); assert.equal(f.provider.acceptedCount(), 2); assert.equal(f.engine.budget(f.projectId).committedMicros, "200");
+  assert.equal(completed.reduce((sum, result) => sum + result.dispatched, 0), 2); assert.equal(f.provider.acceptedCount(), 2); assert.equal(f.engine.committedMicros(f.projectId), "200");
   assert.equal(f.engine.attempts(f.projectId).length, 2);
   for (const attempt of f.engine.attempts(f.projectId)) assert.equal(f.provider.acceptedCount(attempt.id), 1);
 });
 
 test("uncertain pre-send failure never guesses rejection or frees its liability", async t => {
-  const f = setup(t, { count: 1, imagesOnly: true, budgetMicros: "100" });
+  const f = setup(t, { count: 1, imagesOnly: true });
   f.provider.submit = async () => { throw Error("connection lost before any trustworthy acceptance evidence"); };
   // This adapter has no dispatch evidence and cannot prove either acceptance or rejection.
   f.provider.lookup = async () => ({ type: "unknown", diagnostic: "No trustworthy local evidence" });
   await f.engine.runReady(); await f.engine.reconcile(); await f.engine.runReady();
   assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.engine.attempts(f.projectId).length, 1);
-  assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+  assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); assert.equal(f.engine.committedMicros(f.projectId), "100");
   const other = new Store(f.dbPath); const restarted = new Engine(other, f.provider, { artifactDir: f.artifactDir });
-  try { assert.equal(restarted.budget(f.projectId).capMicros, "100"); } finally { other.close(); }
+  try { assert.equal(restarted.committedMicros(f.projectId), "100"); } finally { other.close(); }
 });
 
 test("late completion from a replaced candidate is historical and cannot select itself", async t => {
@@ -188,7 +188,7 @@ test("restart uses immutable lock prices and profiles instead of changed constru
   const store = new Store(f.dbPath); const provider = new FakeProvider(f.providerPath); const engine = new Engine(store, provider, { artifactDir: f.artifactDir, profiles: changed });
   try {
     assert.equal((await engine.runReady()).dispatched, 1); await engine.reconcile();
-    assert.equal(engine.attempts(project.id)[0].request.args.profileRevision, "1"); assert.equal(engine.budget(project.id).committedMicros, "100");
+    assert.equal(engine.attempts(project.id)[0].request.args.profileRevision, "1"); assert.equal(engine.committedMicros(project.id), "100");
     assert.equal(store.list("reservation", project.id)[0].micros, "100");
   } finally { store.close(); provider.close(); }
 });

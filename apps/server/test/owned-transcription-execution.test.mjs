@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonical, digest, DomainError, providerProfileArguments } from '@openslate/core';
+import { canonical, digest, DomainError } from '@openslate/core';
 import { registerExecutionProvider } from '@openslate/providers';
 import { Engine } from '../dist/execution/engine.js';
 import { Store } from '../dist/persistence/store.js';
@@ -13,9 +13,8 @@ import { TranscriptionAudioStore } from '../dist/media/transcription-audio-store
 import { LocalMediaService } from '../dist/media/local-media.js';
 import { SpoolTranscriptIngestor } from '../dist/execution/spool-transcript-ingestor.js';
 import { ExecutionIngestionRouter } from '../dist/execution/ingestion-router.js';
-import { DurableExternalAdmission } from '../dist/execution/durable-external-admission.js';
+import { ConfiguredExternalAdmission } from '../dist/execution/configured-external-admission.js';
 import { EnvironmentMediaCredentials } from '../dist/application/provider-credentials.js';
-import { ExternalAllowanceService, allowanceIssueContextDigest } from '../dist/application/external-allowances.js';
 import { resolveOwnedTranscriptionAttempt } from '../dist/execution/owned-transcription-execution.js';
 import { ownedTranscriptionFixture, key, rows, draft } from './owned-transcription-fixture.mjs';
 
@@ -59,19 +58,11 @@ async function fixture(t, options = {}) {
   const port = { identity: { adapter: 'openai-transcription', version: '1' },
     async start(...args) { if (f.control.beforeStart) await f.control.beforeStart(); return f.bridge.start(...args); },
     resume: f.bridge.resume.bind(f.bridge) };
+  f.ready = options.ready !== false;
   f.engine = new Engine(f.store, f.bridge, { artifactDir: f.artifactDir, profiles: f.profiles, outputStore: f.outputs,
     outputIngestor: new ExecutionIngestionRouter({ transcription: new SpoolTranscriptIngestor(f.outputs, f.media, f.files, { artifactDir: f.artifactDir }) }),
-    externalAdmission: new DurableExternalAdmission(f.store, () => {}), submissionPreparation: port });
+    externalAdmission: new ConfiguredExternalAdmission(f.store, () => { if (!f.ready) throw new DomainError("MEDIA_CREDENTIAL_MISSING", "Controlled readiness unavailable"); }), submissionPreparation: port });
   releaseHolds(f);
-  f.approve = () => {
-    const input = { profileDigest: String(providerProfileArguments(f.profile).profileDigest), profileDefinitionDigest: digest(f.profile),
-      selections: [{ candidateId: f.applied.candidateId, nodeId: f.node.id, specDigest: f.node.specDigest }], maxAttempts: 1,
-      maxEstimatedMicros: '100', expiresAt: new Date(Date.now() + 3600000).toISOString() };
-    const actor = f.production.beginRequest(f.project.id, 'human', 'Approve one synthetic transcription attempt.',
-      { editing: false, scopeIds: [f.project.id], contextDigest: allowanceIssueContextDigest(f.project.id, input) });
-    return new ExternalAllowanceService(f.store).issue(f.project.id, actor, input);
-  };
-  if (options.allowance !== false) f.allowance = f.approve();
   return f;
 }
 function reopen(t, f) {
@@ -87,12 +78,12 @@ function reopen(t, f) {
   return { ...f, store, engine, outputs, media, files, bridge };
 }
 
-test('uploaded recording without script executes only after review and separate finite allowance, with exact request and source identity', async t => {
-  const f = await fixture(t, { allowance: false }), before = unchangedNarration(f);
+test('uploaded recording without script executes only after review and configured readiness, with exact request and source identity', async t => {
+  const f = await fixture(t, { ready: false }), before = unchangedNarration(f);
   assert.equal(rows(f, 'narration_segment').length, 0); assert.equal(rows(f, 'narration_acceptance').length, 0);
   assert.equal(f.store.getProject(f.project.id).artifacts.length, 0, 'owned source is not canonical project audio');
   const blocked = await f.engine.runReady(); assert.equal(blocked.dispatched, 0); assert.equal(rows(f, 'attempt').length, 0);
-  assert.equal(f.calls.http, 0); f.approve();
+  assert.equal(f.calls.http, 0); f.ready = true;
   let wire;
   f.control.fetch = async (url, options) => { wire = await new Request(url, options).formData(); return new Response(raw, { headers: { 'content-type': 'application/json' } }); };
   const result = await f.engine.runReady(); assert.equal(result.dispatched, 1); assert.deepEqual(result.blocked, []);
@@ -106,7 +97,7 @@ test('uploaded recording without script executes only after review and separate 
   for (const kind of ['transcription_preparation_intent', 'transcription_audio_intent']) assert.deepEqual(rows(f, kind)[0].sourceRecord, f.sourceBinding.sourceRecord);
   assert.equal(candidate.status, 'unreviewed'); assert.deepEqual(candidate.source.record, f.sourceBinding.sourceRecord);
   assert.deepEqual(attempt.outputs.cues, artifact.artifact); assert.deepEqual(readFileSync(artifact.path), raw);
-  assert.equal(f.store.get('reservation', attempt.reservationId).state, 'charged'); assert.equal(rows(f, 'external_allowance_consumption').length, 1);
+  assert.equal(f.store.get('reservation', attempt.reservationId).state, 'charged'); assert.equal(rows(f, 'reservation').length, 1);
   assert.equal(f.calls.http, 1); assert.equal(f.calls.derive, 1); assert.equal(unchangedNarration(f), before);
   const calls = { ...f.calls }; await f.engine.reconcile(); await f.engine.runReady(); assert.deepEqual(f.calls, calls);
 });
@@ -131,13 +122,14 @@ test('candidate publication rollback reopens saved result with exact owned histo
   assert.equal(unchangedNarration(g), afterEdit); assert.deepEqual(f.calls, calls); assert.equal(f.calls.http, 1); assert.equal(f.calls.derive, 1);
 });
 
-test('busy preparation resumes its same attempt, allowance and reviewed source', async t => {
+test('busy preparation resumes its same attempt, reservation and reviewed source', async t => {
   const f = await fixture(t); f.control.busy = true; await f.engine.runReady();
-  const first = current(f), consumption = rows(f, 'external_allowance_consumption'); assert.equal(first.phase, 'preparing');
+  const first = current(f), candidates = rows(f, 'candidate'); assert.equal(first.phase, 'preparing');
   assert.equal(f.calls.http, 0); assert.equal(f.calls.derive, 0); assert.equal(rows(f, 'transcription_preparation_intent').length, 1);
   f.control.busy = false; due(f); await f.engine.reconcile(); const final = current(f);
   assert.equal(final.id, first.id); assert.equal(final.phase, 'succeeded'); assert.equal(final.reservationId, first.reservationId);
-  assert.deepEqual(rows(f, 'external_allowance_consumption'), consumption); assert.equal(f.calls.http, 1); assert.equal(f.calls.derive, 1);
+  assert.deepEqual(rows(f, 'candidate'), candidates); assert.deepEqual(final.request.providerUse, first.request.providerUse);
+  assert.equal(rows(f, 'attempt').length, 1); assert.equal(rows(f, 'reservation').length, 1); assert.equal(f.calls.http, 1); assert.equal(f.calls.derive, 1);
 });
 
 for (const boundary of ['before admission', 'after admission before proof', 'waiting', 'after upload'])
@@ -148,12 +140,12 @@ test(`selected section change ${boundary} cannot authorize the first POST`, asyn
   if (boundary === 'after upload') f.control.afterUpload = () => { f.control.afterUpload = undefined; editSection(f); };
   if (boundary === 'waiting') f.control.busy = true;
   const result = await f.engine.runReady();
-  if (boundary === 'before admission') { assert.equal(result.dispatched, 0); assert.equal(rows(f, 'attempt').length, 0); assert.equal(rows(f, 'external_allowance_consumption').length, 0); }
+  if (boundary === 'before admission') { assert.equal(result.dispatched, 0); assert.equal(rows(f, 'attempt').length, 0); assert.equal(rows(f, 'reservation').length, 0); }
   else {
     if (boundary === 'waiting') { editSection(f); f.control.busy = false; due(f); await f.engine.reconcile(); }
     assert.equal(current(f).phase, 'failed'); assert.equal(current(f).failure.id, 'PREPARATION_OBSOLETE');
     assert.equal(rows(f, 'transcription_preparation_intent').length, 1, 'positive no-dispatch proof retained');
-    assert.equal(rows(f, 'external_allowance_consumption').length, 1); assert.equal(rows(f, 'reservation')[0].state, 'released');
+    assert.equal(rows(f, 'reservation').length, 1); assert.equal(rows(f, 'reservation')[0].state, 'released');
   }
   assert.equal(f.calls.http, 0); assert.equal(rows(f, 'transcription_execution_dispatch').length, 0); assert.equal(rows(f, 'transcription_execution_result').length, 0);
 });
@@ -172,11 +164,11 @@ test('actual late provider completion retains original history after a selected-
   assert.equal(unchangedNarration(f), before); assert.ok(resolveOwnedTranscriptionAttempt(f.store, current(f)));
 });
 
-test('missing immutable artifact bytes stop admission before allowance consumption', async t => {
+test('missing immutable artifact bytes stop admission before attempts or reservations', async t => {
   const f = await fixture(t), artifact = f.store.get('artifact', f.audio.id);
   chmodSync(artifact.path, 0o600); writeFileSync(artifact.path, Buffer.from('changed source bytes')); const before = data(f);
   const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, 'ARTIFACT_CORRUPT');
-  assert.equal(rows(f, 'attempt').length, 0); assert.equal(rows(f, 'external_allowance_consumption').length, 0); assert.deepEqual(data(f), before);
+  assert.equal(rows(f, 'attempt').length, 0); assert.equal(rows(f, 'reservation').length, 0); assert.deepEqual(data(f), before);
 });
 
 test('direct plan replay rejects unknown grant keys and purpose-bound grant with removed or changed link', async t => {
@@ -222,7 +214,7 @@ test('ordinary ProductionService shot edit retains and resumes unchanged owned t
   assert.equal(f.store.get('plan', applied.activePlanId).compiled.nodes.length, f.proposal.compiled.nodes.length);
   releaseHolds(f); f.control.busy = false; due(f); await f.engine.reconcile();
   assert.equal(current(f).id, waiting.id); assert.equal(current(f).phase, 'succeeded'); assert.equal(f.calls.http, 1);
-  assert.equal(rows(f, 'external_allowance_consumption').length, 1); assert.equal(rows(f, 'owned_transcription_application').length, 1);
+  assert.equal(rows(f, 'reservation').length, 1); assert.equal(rows(f, 'owned_transcription_application').length, 1);
 });
 
 test('L1 reviewed owned transcription propagates in-flight, charged lost reply and fenced no-dispatch outcomes', async t => {

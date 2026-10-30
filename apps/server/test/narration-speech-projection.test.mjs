@@ -36,7 +36,7 @@ test('applied speech before admission reflects the current selected section with
 });
 
 test('admitted pre-marker speech displays pause, hold and obsolete section blockers without any POST',async t=>{
- const f=await ready(t);f.issue(f.applied);const attempt=f.admit(f.applied);
+ const f=await ready(t);const attempt=f.admit(f.applied);
  assert.equal(read(f).execution.attemptId,attempt.id);assert.equal(read(f).execution.code,null);
  f.store.put('execution_control',f.project.id,f.project.id,{id:f.project.id,projectId:f.project.id,paused:true});assert.equal(read(f).execution.code,'EXECUTION_PAUSED');
  f.store.put('execution_control',f.project.id,f.project.id,{id:f.project.id,projectId:f.project.id,paused:false});
@@ -45,20 +45,20 @@ test('admitted pre-marker speech displays pause, hold and obsolete section block
 });
 
 for (const admitted of [false,true]) test(`restoration retains its first-generation fence ${admitted?'with a pre-marker attempt':'before admission'} despite pause and later release`,async t=>{
- const f=await ready(t);if(admitted){f.issue(f.applied);f.admit(f.applied);}restore(f);
+ const f=await ready(t);if(admitted){f.admit(f.applied);}restore(f);
  let before=data(f),view=read(f);assert.equal(view.execution.code,'INSTALLATION_QUARANTINED');assert.equal(view.eligibility.code,'INSTALLATION_QUARANTINED');assert.equal(data(f),before);
  release(f);before=data(f);view=read(f);assert.equal(view.execution.code,'RESTORED_AUTHORITY_REQUIRES_NEW');assert.equal(view.eligibility.code,'RESTORED_AUTHORITY_REQUIRES_NEW');assert.equal(data(f),before);assert.deepEqual(f.calls,{http:0,credentials:0});
 });
 
 test('actual post-marker unknown history survives selected-section edits and restoration without a fresh currentness claim',async t=>{
- const f=await ready(t,{realSpeech:true,fetch:async()=>{throw Error('offline ambiguous reply');}});f.issue(f.applied);const attempt=f.admit(f.applied);
+ const f=await ready(t,{realSpeech:true,fetch:async()=>{throw Error('offline ambiguous reply');}});const attempt=f.admit(f.applied);
  const result=await f.bridge.submit(attempt.request,{expectedLease:{owner:attempt.leaseOwner,epoch:attempt.leaseEpoch}});assert.equal(result.type,'unknown');
  f.store.put('attempt',attempt.id,f.project.id,{...f.store.get('attempt',attempt.id),phase:'submission_unknown'});edit(f);restore(f);const before=data(f),view=read(f);
  assert.equal(view.execution.state,'submission_unknown');assert.equal(view.execution.code,null);assert.equal(view.eligibility.code,'INSTALLATION_QUARANTINED');assert.equal(data(f),before);assert.equal(f.calls.http,1);
 });
 
 test('mismatched attempt metadata, body identity, fingerprint and phase never become trusted execution status',async t=>{
- const f=await ready(t);f.issue(f.applied);const attempt=f.admit(f.applied);
+ const f=await ready(t);const attempt=f.admit(f.applied);
  for(const change of [value=>{delete value.narrationSpeech;},value=>{value.id='another';},value=>{value.request.args.voice='onyx';},value=>{value.phase='private-untrusted-status';}]) {
   const corrupted=structuredClone(attempt);change(corrupted);update(f,'attempt',attempt.id,corrupted);const before=data(f),view=read(f);
   assert.equal(view.execution.state,'unavailable');assert.equal(view.execution.code,'PROPOSAL_UNAVAILABLE');assert.equal(view.execution.attemptId,null);assert.deepEqual(view.application,f.applied);assert.equal(data(f),before);
@@ -67,7 +67,7 @@ test('mismatched attempt metadata, body identity, fingerprint and phase never be
 });
 
 for(const kind of ['narration_speech_review','candidate','attempt']) test(`oversized ${kind} SQL IDs stay unavailable before keyed body hydration`,async t=>{
- const f=await ready(t);let id=kind==='narration_speech_review'?f.applied.reviewId:f.applied.candidateId;if(kind==='attempt'){f.issue(f.applied);id=f.admit(f.applied).id;}
+ const f=await ready(t);let id=kind==='narration_speech_review'?f.applied.reviewId:f.applied.candidateId;if(kind==='attempt'){id=f.admit(f.applied).id;}
  const huge='x'.repeat(1024*1024);f.store.db.prepare('UPDATE entities SET id=? WHERE kind=? AND id=?').run(huge,kind,id);
  const view=read(f);assert.equal(view.execution.state,'unavailable');assert.equal(view.execution.code,'PROPOSAL_UNAVAILABLE');assert.equal(JSON.stringify(view).includes(huge),false);
 });

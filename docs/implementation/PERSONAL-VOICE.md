@@ -10,7 +10,7 @@ Existing OpenAI custom voice IDs can be selected for exact synthesis if the acco
 
 ## Enrollment still required
 
-In-app sample capture/upload, provider enrollment, consent evidence and a returned voice identity need provider/account confirmation and implementation. Do not mark the feature complete by asking a user to create a voice elsewhere. Human sample consent is distinct from ordinary narration writing and from finite speech usage/spending.
+In-app sample capture/upload, provider enrollment, consent evidence and a returned voice identity need provider/account confirmation and implementation. Do not mark the feature complete by asking a user to create a voice elsewhere. Human sample consent is distinct from ordinary narration writing and from a request to generate speech.
 
 The October 2 read-only consent-phrase probe returned 404. That result did not identify a particular eligibility failure or establish custom-voice access. No biometric upload or live personal-voice synthesis was performed in that checkpoint.
 

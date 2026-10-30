@@ -45,10 +45,6 @@ import { assertImageExecutionDispatch, assertImageExecutionMapping, assertImageE
 import type { ImageExecutionDispatch, ImageExecutionMapping, ImageExecutionResult } from "../execution/openai-image-receipts.js";
 import { assertH3ExecutionMapping, assertH3ExecutionDispatch, assertH3ExecutionSubmit, assertH3ExecutionObservation, assertH3PollSchedule } from "../execution/minimax-h3-receipts.js";
 import type { H3ExecutionMapping, H3ExecutionDispatch, H3ExecutionSubmit, H3ExecutionObservation, H3PollSchedule } from "../execution/minimax-h3-receipts.js";
-import { assertExternalAllowance, assertExternalAllowanceConsumption, assertExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
-import type { AllowanceHumanRequest, ExternalAllowance, ExternalAllowanceConsumption, ExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
-import { assertProjectBudgetRevision } from "../application/project-budget.js";
-import type { ProjectBudgetRevision } from "../application/project-budget.js";
 import { assertLocalExecutionDispatch, assertLocalExecutionIntent, assertLocalExecutionResult, assertPreparedLocalExecution } from "../execution/local-execution.js";
 import type { LocalExecutionBinding, LocalExecutionCompletion, LocalExecutionDispatch, LocalExecutionIntent } from "../execution/local-execution.js";
 import { assertRecoveryFence, assertRecoveryReceipt, assertRecoveryRelease, recoveryBodyHash } from "./recovery-records.js";
@@ -285,34 +281,6 @@ export class Store {
         && selection.prepared.nodeId === intent.prepared.nodeId && selection.prepared.kind === intent.prepared.kind
         && selection.prepared.specDigest === intent.prepared.specDigest && selection.prepared.contentDigest === intent.prepared.contentDigest,
       "LOCAL_EXECUTION_CONFLICT", "Local selection differs from the verified completed work");
-    }
-    if (kind === "project_budget_revision") {
-      reference("message", body.requestId);
-      assertProjectBudgetRevision({ ...body, id, projectId } as unknown as ProjectBudgetRevision,
-        this.get<AllowanceHumanRequest & { editing: boolean }>("message", String(body.requestId))!);
-    }
-    if (kind === "external_allowance") {
-      reference("message", body.requestId);
-      const allowance = { ...body, id, projectId } as unknown as ExternalAllowance;
-      assertExternalAllowance(allowance, this.get<AllowanceHumanRequest>("message", String(body.requestId))!);
-      for (const selected of allowance.selections) {
-        reference("candidate", selected.candidateId);
-        const candidate = this.get<{ nodeId: string }>("candidate", selected.candidateId)!;
-        invariant(candidate.nodeId === selected.nodeId, "ALLOWANCE_INVALID", "Allowance candidate must belong to its selected node");
-      }
-    }
-    if (kind === "external_allowance_revocation") {
-      reference("message", body.requestId); reference("external_allowance", body.allowanceId);
-      assertExternalAllowanceRevocation({ ...body, id, projectId } as unknown as ExternalAllowanceRevocation,
-        this.get<ExternalAllowance>("external_allowance", String(body.allowanceId))!, this.get<AllowanceHumanRequest>("message", String(body.requestId))!);
-    }
-    if (kind === "external_allowance_consumption") {
-      reference("attempt", id); reference("external_allowance", body.allowanceId);
-      const attempt = this.get<Attempt>("attempt", id)!;
-      reference("reservation", attempt.reservationId);
-      assertExternalAllowanceConsumption({ ...body, id, projectId } as unknown as ExternalAllowanceConsumption,
-        this.get<ExternalAllowance>("external_allowance", String(body.allowanceId))!, attempt,
-        this.get("reservation", attempt.reservationId!)!);
     }
     if (kind === "request_image_selection") {
       reference("message", id);
@@ -809,8 +777,6 @@ export class Store {
           invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "H3 poll identity and host policy are immutable");
         invariant(Number(next.count) >= Number(previous.count), "H3_EXECUTION_CONFLICT", "H3 poll backoff cannot rewind");
       }
-      if (["external_allowance", "external_allowance_revocation", "external_allowance_consumption", "project_budget_revision"].includes(kind))
-        invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (["local_execution_intent", "local_execution_dispatch", "local_execution_completion", "installation_recovery_fence"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
       if (["audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",

@@ -24,7 +24,7 @@ async function fixture(t,options={}){
   f.transport.prepare=async input=>options.prepare?options.prepare(input,f):prepare(input);
   f.transport.start=async(prepared,input,context)=>{f.calls.start++;assert.equal(rows(f,'codex_image_execution_dispatch').length,1);return options.start?options.start(prepared,input,context,f):complete(prepared);};
   f.transport.lookup=async(prepared,context)=>{f.calls.lookup++;return options.lookup?options.lookup(prepared,context,f):{kind:'unknown',code:'UNAVAILABLE'};};
-  f.build();f.selected=await f.seed({},{filmKind:options.filmKind});f.allowance=f.issue(f.selected);f.engine=f.runtime.engine;f.outputs=f.runtime.outputStore;
+  f.build();f.selected=await f.seed({},{filmKind:options.filmKind});f.engine=f.runtime.engine;f.outputs=f.runtime.outputStore;
   f.bridge=f.engine.registry.resolve({adapter:'codex-image',version:'1'});
   f.attempt=f.engine.admit(f.selected.projectId,f.selected.binding.id,f.engine.resolveInputs(f.selected.projectId,f.selected.binding.node).fingerprint);
   f.request=f.attempt.request;f.context={expectedLease:{owner:f.attempt.leaseOwner,epoch:f.attempt.leaseEpoch}};
@@ -38,8 +38,7 @@ function restarted(t,f){const store=new Store(join(f.directory,'openslate.sqlite
 test('exact native configured-provider proof, marker and result precede real PNG publication',async t=>{
   const f=await fixture(t,{start:async(prepared,input,context)=>{assert.equal(prepared.session.turnInputDigest,describeCodexImageInput(input).turnInputDigest);await context.observeTurn('turn-exact');return complete(prepared);}});
   const result=await f.bridge.submit(f.request,f.context);assert.equal(result.type,'completed');assert.equal(result.vendorTaskId,null);
-  assert.equal(rows(f,'external_allowance_consumption').length,0);assert.equal(f.request.externalAllowanceId,undefined);
-  assert.equal(f.request.providerUse.kind,'configured');assert.equal(rows(f,'codex_image_execution_mapping')[0].allowanceId,null);
+  assert.equal(f.request.providerUse.kind,'configured');assert.equal(rows(f,'codex_image_execution_mapping')[0].profileDefinitionDigest,f.request.providerUse.profileDefinitionDigest);
   const saved=rows(f,'codex_image_execution_result')[0];assert.equal(saved.observation.outputReceiptId,result.outputs[0].storage.spoolId);
   assert.equal(saved.observation.output.width,inspectCodexImagePng(bytes).width);assert.notEqual(saved.observation.output.width,1024,'native size is a bounded observed value, not a claimed knob');
   f.expire();await f.engine.reconcile();const a=f.store.get('attempt',f.attempt.id);assert.equal(a.phase,'succeeded');assert.equal(f.store.get('reservation',a.reservationId).state,'charged');

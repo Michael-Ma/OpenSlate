@@ -20,7 +20,7 @@ const MAX_SUBMIT_TIMEOUT_MS = 180000;
 const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false });
 const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "TRANSCRIPTION_EXECUTION_CANCELLED", "Transcription preparation was cancelled");
 
-/** Explicit host bridge: registration is availability, never a spending allowance or default activation. */
+/** Explicit host bridge: registration exposes availability; execution still requires configured admission. */
 export class OpenAITranscriptionExecution implements ExecutionProvider, SubmissionPreparationPort {
   readonly identity = Object.freeze({ adapter: "openai-transcription", version: "1" } as const);
   readonly #store: Store;
@@ -142,7 +142,7 @@ export class OpenAITranscriptionExecution implements ExecutionProvider, Submissi
         assertTranscriptionMappingAdmission(admission, mapping, resolveTranscriptionPreparation(this.#store, attempt, mapping));
         const marker: TranscriptionExecutionDispatch = { ...this.recordIdentity(attempt), mappingDigest: digest(mapping),
           transportDigest: mapping.transport.requestDigest, bodySha256: mapping.transport.bodySha256,
-          allowanceId: admission.allowance?.id ?? null, createdAt: new Date().toISOString() };
+          createdAt: new Date().toISOString() };
         this.#store.insert("transcription_execution_dispatch", attempt.id, attempt.projectId, marker);
         if (context) {
           const current = this.#store.get<Attempt>("attempt", attempt.id)!;

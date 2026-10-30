@@ -1,3 +1,4 @@
+import { ConfiguredExternalAdmission } from "../dist/execution/configured-external-admission.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -16,12 +17,8 @@ const profile = (adapter, id = "shared") => ({ id, revision: "profile-2026-09", 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "openslate-routing-")), store = new Store(join(directory, "state.sqlite")), fake = new FakeProvider(join(directory, "fake.sqlite"));
   t.after(() => { store.close(); fake.close(); rmSync(directory, { recursive: true, force: true }); });
-  const authorize = input => {
-    const id = randomUUID(); store.insert("offline_test_allowance", id, input.projectId, { attemptId: input.attemptId, micros: input.estimatedMicros });
-    return { allowanceId: id };
-  };
   return { store, fake, engine: (providers, options = {}) => new Engine(store, new ExecutionRegistry(providers), {
-    artifactDir: join(directory, "artifacts"), externalAdmission: { authorize }, ...options }) };
+    artifactDir: join(directory, "artifacts"), externalAdmission: new ConfiguredExternalAdmission(store, () => {}), ...options }) };
 }
 function project(f, engine, profiles, selected = profiles) {
   const value = projectFixture(randomUUID(), 1); f.store.createProject(value);
@@ -49,10 +46,10 @@ test("registered external routes require explicit admission; missing readiness a
   const denied = f.engine([a.port], { externalAdmission: undefined }), id = project(f, denied, [p]);
   assert.equal((await denied.runReady()).blocked[0].code, "EXTERNAL_EXECUTION_NOT_AUTHORIZED");
   assert.equal(denied.attempts(id).length, 0); assert.equal(f.store.list("reservation", id).length, 0); assert.equal(a.calls.length, 0);
-  const missing = f.engine([a.port], { externalAdmission: { authorize(input) { f.store.insert("offline_test_allowance", "rolled-back", id, { attemptId: input.attemptId }); throw new DomainError("MEDIA_CREDENTIAL_MISSING", "offline missing key"); } } });
+  const missing = f.engine([a.port], { externalAdmission: new ConfiguredExternalAdmission(f.store, () => { throw new DomainError("MEDIA_CREDENTIAL_MISSING", "offline missing key"); }) });
   assert.equal((await missing.runReady()).blocked[0].code, "MEDIA_CREDENTIAL_MISSING");
-  assert.equal(f.store.list("offline_test_allowance", id).length, 0); assert.equal(missing.attempts(id).length, 0);
-  assert.throws(() => f.engine([a.port], { externalAdmission: { async authorize() { return { allowanceId: "invalid" }; } } }), { code: "ASYNC_TRANSACTION" });
+  assert.equal(f.store.list("reservation", id).length, 0); assert.equal(missing.attempts(id).length, 0);
+  assert.throws(() => f.engine([a.port], { externalAdmission: { async authorize() { return {}; } } }), { code: "ASYNC_TRANSACTION" });
 });
 
 test("colliding vendor task IDs route by frozen adapter and configuration across restart and default changes", async t => {
@@ -64,7 +61,7 @@ test("colliding vendor task IDs route by frozen adapter and configuration across
   assert.equal((await restarted.reconcile()).reconciled, 2);
   for (const [i, id] of [first, second].entries()) {
     const attempt = restarted.attempts(id)[0]; assert.equal(attempt.phase, "succeeded"); assert.equal(attempt.taskId, "same-vendor-task");
-    assert.deepEqual(attempt.request, original[i].request); assert.ok(attempt.request.externalAllowanceId);
+    assert.deepEqual(attempt.request, original[i].request); assert.equal(attempt.request.providerUse.kind, "configured");
     assert.equal(attempt.request.profile.configuration.model, i === 0 ? "image-a-model" : "image-b-model");
   }
   assert.deepEqual(a.calls.map(call => call.method), ["submit", "poll"]); assert.deepEqual(b.calls.map(call => call.method), ["submit", "poll"]);
@@ -81,10 +78,10 @@ test("colliding vendor task IDs route by frozen adapter and configuration across
 test("missing adapters isolate selected admission and recovery without claiming a pending lease or changing liability", async t => {
   const f = fixture(t), a = adapter("image-a"), b = adapter("image-b"), both = f.engine([a.port, b.port]);
   const first = project(f, both, [profile("image-a")]), second = project(f, both, [profile("image-b")]);
-  await both.runReady(); const original = structuredClone(both.attempts(first)[0]), budget = both.budget(first);
+  await both.runReady(); const original = structuredClone(both.attempts(first)[0]), liability = both.committedMicros(first);
   const available = f.engine([b.port]), result = await available.reconcile();
   assert.deepEqual(result.blocked, [{ attemptId: original.id, code: "PROVIDER_NOT_REGISTERED" }]);
-  assert.deepEqual(available.attempts(first)[0], original); assert.deepEqual(available.budget(first), budget);
+  assert.deepEqual(available.attempts(first)[0], original); assert.deepEqual(available.committedMicros(first), liability);
   assert.equal(available.attempts(second)[0].phase, "succeeded"); assert.equal(a.calls.length, 1);
   const third = project(f, available, [profile("image-a", "missing"), profile("image-b", "available")], [profile("image-b", "available")]);
   assert.equal((await available.runReady()).dispatched, 1); assert.equal(available.attempts(third).length, 1);
@@ -136,7 +133,7 @@ test("ownership loss aborts the original signal but preserves a late accepted ob
   gate.resolve({ type: "accepted", taskId: "late-accepted-task" }); await running;
   assert.deepEqual(engine.attempts(id)[0], moved); assert.equal(f.store.list("artifact", id).length, 0);
   const evidence = f.store.list("execution_evidence", id); assert.equal(evidence.length, 1); assert.equal(evidence[0].outcome.taskId, "late-accepted-task");
-  assert.equal(evidence[0].outcomeDigest, digest(evidence[0].outcome)); assert.equal(engine.budget(id).committedMicros, "100");
+  assert.equal(evidence[0].outcomeDigest, digest(evidence[0].outcome)); assert.equal(engine.committedMicros(id), "100");
   f.store.put("attempt", old.id, id, { ...moved, leaseExpiresAt: 0 });
   const restarted = f.engine([port]); await restarted.reconcile();
   assert.equal(restarted.attempts(id)[0].taskId, "late-accepted-task"); assert.equal(lookups, 0); assert.deepEqual(polls, []);
@@ -151,7 +148,7 @@ test("provider deadline aborts cooperative I/O and retains uncertainty without r
   }, async poll() { throw Error("unexpected"); }, async lookup() { return { type: "unknown", diagnostic: "unsettled" }; } }, { adapter: "fake", version: "1" });
   const engine = f.engine([port], { leaseMs: 150, providerTimeoutMs: 50 }), id = project(f, engine, [DEFAULT_PROFILES[0]]);
   await engine.runReady(); assert.equal(signal.aborted, true); assert.equal(engine.attempts(id)[0].phase, "submission_unknown");
-  await engine.runReady(); assert.equal(submitted, 1); assert.equal(engine.budget(id).committedMicros, "100");
+  await engine.runReady(); assert.equal(submitted, 1); assert.equal(engine.committedMicros(id), "100");
 });
 
 test("accepted recovery ignores corrupted digests and cannot choose among conflicting task IDs", async t => {
@@ -168,7 +165,7 @@ test("accepted recovery ignores corrupted digests and cannot choose among confli
       f.store.insert("execution_evidence", randomUUID(), id, { attemptId: attempt.id, outcome, outcomeDigest: digest(outcome), recordedAt: new Date().toISOString() });
     }
     await engine.reconcile(); assert.equal(engine.attempts(id)[0].taskId, null); assert.equal(engine.attempts(id)[0].phase, "submission_unknown");
-    assert.equal(f.store.list("artifact", id).length, 0); assert.equal(engine.budget(id).committedMicros, "100");
+    assert.equal(f.store.list("artifact", id).length, 0); assert.equal(engine.committedMicros(id), "100");
     assert.deepEqual(port.calls.map(call => call.method), mode === "corrupt" ? ["submit", "lookup"] : ["submit"]);
   }
 });

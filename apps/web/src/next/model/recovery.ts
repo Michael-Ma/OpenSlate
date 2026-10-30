@@ -25,7 +25,6 @@ export interface RecoveryCounts {
   unknownJobs: number;
   /** Director turns saved in the backup: they never run again. */
   nativeRequests: number;
-  unusedAllowances: number;
   /** Local preparations that never reached a provider: they stay stopped. */
   preparingJobs: number;
 }
@@ -99,7 +98,7 @@ export function parseRecoveryStatus(value: unknown): RecoveryStatus | null {
     summaryDigest: digest(raw.summaryDigest),
     counts: {
       projects: count(counts.projects), knownJobs: count(counts.knownJobs), unknownJobs: count(counts.unknownJobs),
-      nativeRequests: count(counts.nativeRequests), unusedAllowances: count(counts.unusedAllowances), preparingJobs: count(counts.preparingJobs),
+      nativeRequests: count(counts.nativeRequests), preparingJobs: count(counts.preparingJobs),
     },
   };
 }

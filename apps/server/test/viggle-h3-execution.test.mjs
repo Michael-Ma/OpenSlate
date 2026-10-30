@@ -38,19 +38,22 @@ test('Viggle submits exact reviewed PNG multipart only after immutable full-admi
     assert.deepEqual(Buffer.from(await form.get('first_frame_image').arrayBuffer()), readFileSync(f.image.path)); return accepted();
   } });
   assert.deepEqual(await f.bridge.submit(f.request, context(f)), { type: 'accepted', taskId });
-  const mapping = rows(f, 'viggle_h3_execution_mapping')[0], consumption = rows(f, 'external_allowance_consumption')[0];
+  const mapping = rows(f, 'viggle_h3_execution_mapping')[0];
   assert.equal(mapping.transport.bodySha256, hash(body)); assert.equal(mapping.transport.bodyByteLength, body.length);
-  assert.equal(mapping.profileDefinitionDigest, digest(f.profile)); assert.equal(mapping.consumptionDigest, digest(consumption));
-  assert.equal(mapping.allowanceDigest, digest(f.allowance)); assert.equal(mapping.firstFrame.artifactDigest, digest(f.image));
+  assert.equal(mapping.profileDefinitionDigest, digest(f.profile));
+  assert.equal(mapping.firstFrame.artifactDigest, digest(f.image));
   assert.equal(mapping.firstFrame.approvalDigest, digest(f.approval)); assert.equal(mapping.firstFrame.snapshotDigest, digest(f.review));
   assert.equal(JSON.stringify(rows(f, 'viggle_h3_execution_mapping')).includes(key), false);
   assertViggleRecords(f.store, f.attempt.id); assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 0);
 });
 
-test('missing actual consumption or forged full profile cannot substitute a nominal allowance ID', async t => {
-  for (const mode of ['missing-consumption', 'profile-cost']) {
+test('forged providerUse or a profile cannot substitute exact Viggle admission evidence', async t => {
+  for (const mode of ['provider-use', 'profile-cost']) {
     const f = await fixture(t);
-    if (mode === 'missing-consumption') f.store.db.prepare("DELETE FROM entities WHERE kind='external_allowance_consumption' AND id=?").run(f.attempt.id);
+    if (mode === 'provider-use') {
+      f.request = { ...f.request, providerUse: { ...f.request.providerUse, profileDefinitionDigest: 'f'.repeat(64) } };
+      tamper(f, 'attempt', { ...f.attempt, request: f.request });
+    }
     else { const lock = f.store.get('capability_lock', f.project.capabilityLockId); tamper(f, 'capability_lock', { ...lock, profiles: [{ ...f.profile, unitCostMicros: '1' }] }); }
     await assert.rejects(f.bridge.submit(f.request, context(f)), { code: 'VIGGLE_H3_EXECUTION_CONFLICT' }); assert.equal(f.calls.post, 0);
     assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0);
@@ -66,7 +69,9 @@ test('current Viggle selection requires the supported recipe lock and explicit n
       f.store.saveProject({ ...project, shots: [shot] }, project.headVersion);
     } else {
       const lock = f.store.get('capability_lock', f.project.capabilityLockId), { recipeDigest: _recipe, ...withoutRecipe } = lock;
-      tamper(f, 'capability_lock', mode === 'missing-recipe' ? withoutRecipe : { ...lock, recipeDigest: 'unsupported-recipe' });
+      const id = randomUUID(), current = f.store.getProject(f.project.id);
+      f.store.insert('capability_lock', id, f.project.id, mode === 'missing-recipe' ? { ...withoutRecipe, id } : { ...lock, id, recipeDigest: 'unsupported-recipe' });
+      f.store.saveProject({ ...current, capabilityLockId: id }, current.headVersion);
     }
     assert.throws(() => assertViggleCurrentSelection(f.store, f.attempt), { code: 'VIGGLE_H3_SELECTION_CHANGED' });
     assert.equal((await f.bridge.submit(f.request, context(f))).type, 'rejected');
@@ -112,7 +117,7 @@ for(const action of ['Stop','edit'])test(`Viggle ${action} before POST releases 
  if(action==='Stop')f.engine.setPaused(f.project.id,true,'stop-before-post');else f.engine.setHold(f.project.id,{scopeId:f.project.shots[0].id,ownerId:'edit-before-post'});
  b.release();await running;
  const attempt=f.engine.attempts(f.project.id)[0];assert.equal(attempt.phase,'failed');assert.equal(f.calls.post,0);assert.equal(rows(f,'viggle_h3_execution_dispatch').length,0);
- assert.equal(rows(f,'viggle_h3_execution_submit')[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.budget(f.project.id).committedMicros,'0');
+ assert.equal(rows(f,'viggle_h3_execution_submit')[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.committedMicros(f.project.id),'0');
  await f.engine.reconcile();await f.engine.runReady();assert.equal(f.calls.post,0);assert.equal(f.engine.attempts(f.project.id).length,1);
 });
 

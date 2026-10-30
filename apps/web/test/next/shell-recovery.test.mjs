@@ -9,7 +9,7 @@ import { translateMsg } from '../../src/next/i18n/translate.ts';
 
 const en = m => translateMsg('en', m), zh = m => translateMsg('zh-CN', m);
 const A = 'a'.repeat(64), B = 'b'.repeat(64), C = 'c'.repeat(64);
-const counts = { projects: 2, knownJobs: 2, unknownJobs: 1, nativeRequests: 1, unusedAllowances: 0, preparingJobs: 1 };
+const counts = { projects: 2, knownJobs: 2, unknownJobs: 1, nativeRequests: 1, preparingJobs: 1 };
 const receipt = { restoreId: 'restore-1', backupId: 'b1', backupCreatedAt: '2026-10-14T18:20:00.000Z', restoredAt: '2026-10-15T08:05:00.000Z', generation: 1, projectIds: ['p1', 'p2'] };
 /** The server's snapshot (installation-recovery.ts), as it comes over the wire. */
 const wire = (extra = {}) => ({ state: 'quarantined', receipt, receiptDigest: A, summaryDigest: B, counts, ...extra });
@@ -22,7 +22,7 @@ test('the server snapshot is read as it is; an ordinary studio has no receipt', 
     state: 'quarantined', receipt: { restoreId: 'restore-1', backupCreatedAt: '2026-10-14T18:20:00.000Z', restoredAt: '2026-10-15T08:05:00.000Z' },
     receiptDigest: A, summaryDigest: B, counts,
   });
-  const ordinary = parseRecoveryStatus({ state: 'ordinary', receipt: null, receiptDigest: null, summaryDigest: null, counts: { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, unusedAllowances: 0, preparingJobs: 0 } });
+  const ordinary = parseRecoveryStatus({ state: 'ordinary', receipt: null, receiptDigest: null, summaryDigest: null, counts: { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, preparingJobs: 0 } });
   assert.equal(ordinary.state, 'ordinary');
   assert.equal(isQuarantined(ordinary), false);
   for (const value of [null, undefined, 'quarantined', 42, {}, { state: 'paused' }]) assert.equal(parseRecoveryStatus(value), null, JSON.stringify(value));
@@ -33,7 +33,7 @@ test('a damaged quarantine stays a quarantine (writes stay off) but cannot be re
   assert.equal(isQuarantined(damaged), true);
   assert.equal(damaged.receipt, null);
   assert.equal(damaged.receiptDigest, null);
-  assert.deepEqual(damaged.counts, { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, unusedAllowances: 0, preparingJobs: 0 });
+  assert.deepEqual(damaged.counts, { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, preparingJobs: 0 });
   assert.equal(releaseBody(damaged), null);
   assert.equal(decisionPhase({ ...NO_RECOVERY, status: damaged }, false), 'unavailable');
   // An older server without preparingJobs reads as none.

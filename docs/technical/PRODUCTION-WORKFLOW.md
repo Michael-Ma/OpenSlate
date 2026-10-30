@@ -38,4 +38,4 @@ Completion of a director turn is not creative acceptance. A valid stage proposal
 - [Scene generation](../../apps/server/src/scene-generation.ts), [confirmation](../../apps/server/src/scene-confirmations.ts), [storyboard commands](../../apps/server/src/storyboard.ts)
 - Tests: core workflow/video-timing suites; server service, continuation, scene-generation/confirmation, alongside-request and shot-narration scope suites.
 
-See [current studio](../design/STORYBOARD-STUDIO.md) for the human flow. [Spending review](../implementation/SPENDING-REVIEW.md) describes the retained historical accounting implementation rather than current scene controls.
+See [current studio](../design/STORYBOARD-STUDIO.md) for the human flow and [configured admission](EXECUTION-ENGINE.md) for execution authority and retained liabilities.

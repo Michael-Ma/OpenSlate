@@ -148,12 +148,7 @@ export function projectNarrationSpeechProposal(store: Store, projectId: string, 
           result.execution = { state: attempt.phase, candidateId: application.id, attemptId: attempt.id, code: attempt.phase === 'failed' ? 'EXECUTION_FAILED' : ingestionIssue?.code ?? null };
           if (attempt.phase === 'succeeded') {
             invariant(attempt.outputs.audio, 'PROPOSAL_UNAVAILABLE', 'Completed speech lost its exact recording');
-            // The historical admission helper probes an empty legacy allowance key for
-            // configured operations. Preserve Store's missing-key semantics without
-            // allowing an empty identity through the bounded projection reader.
-            const reader = { ...view.reader, get: <T>(kind: string, id: string): T | undefined =>
-              kind === 'external_allowance' && id === '' ? undefined : view.get<T>(kind, id) };
-            const recording = resolveGeneratedNarrationAudio(reader, projectId, attempt.outputs.audio.artifactId);
+            const recording = resolveGeneratedNarrationAudio(view.reader, projectId, attempt.outputs.audio.artifactId);
             invariant(recording.attempt.id === attempt.id && recording.attempt.candidateId === application.id && recording.attempt.nodeId === resolved.review.nodeId,
               'PROPOSAL_UNAVAILABLE', 'Completed recording belongs to another speech operation');
             result.recording = summarizeGeneratedNarrationAudio(recording);

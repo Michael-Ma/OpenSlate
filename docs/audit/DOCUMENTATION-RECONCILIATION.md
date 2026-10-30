@@ -32,7 +32,7 @@ The following tracked Markdown files are removed from the working tree and recov
 | `docs/design/EXECUTION-AND-EDITING.md` | [README](../design/README.md) | Superseded architecture/layout proposal |
 | `docs/design/SIMPLIFIED-VIDEO-FLOW.md` | [STORYBOARD-STUDIO](../design/STORYBOARD-STUDIO.md) | Superseded architecture/layout proposal |
 | `docs/design/SKILLS-AND-TOOLS.md` | [README](../design/README.md) | Superseded architecture/layout proposal |
-| `docs/implementation/ALLOWANCE-HTTP.md` | [SPENDING-REVIEW](../implementation/SPENDING-REVIEW.md) | Component milestone/contract consolidated against current source |
+| `docs/implementation/ALLOWANCE-HTTP.md` | [EXECUTION-ENGINE](../technical/EXECUTION-ENGINE.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/AUDIO-ACTIVATION.md` | [NARRATION](../technical/NARRATION.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/AUDIO-APPLICATION-BRIDGES.md` | [NARRATION](../technical/NARRATION.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/AUDIO-LIBRARY.md` | [NARRATION](../technical/NARRATION.md) | Component milestone/contract consolidated against current source |
@@ -56,7 +56,7 @@ The following tracked Markdown files are removed from the working tree and recov
 | `docs/implementation/CONVERSATION-WORKSPACE.md` | [DIRECTOR-RUNTIME](../technical/DIRECTOR-RUNTIME.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/CONVERSATIONAL-AUDIO.md` | [NARRATION](../technical/NARRATION.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/DIRECTOR-IMAGE-ATTACHMENTS.md` | [DIRECTOR-RUNTIME](../technical/DIRECTOR-RUNTIME.md) | Component milestone/contract consolidated against current source |
-| `docs/implementation/EXTERNAL-SPENDING-ALLOWANCES.md` | [SPENDING-REVIEW](../implementation/SPENDING-REVIEW.md) | Component milestone/contract consolidated against current source |
+| `docs/implementation/EXTERNAL-SPENDING-ALLOWANCES.md` | [EXECUTION-ENGINE](../technical/EXECUTION-ENGINE.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/GENERATED-AUDIO-INGESTION.md` | [NARRATION](../technical/NARRATION.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/GENERATED-NARRATION-ATTACHMENT.md` | [NARRATION](../technical/NARRATION.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/GENERATED-VIDEO-DERIVATION.md` | [OUTPUT-SPOOL](../implementation/OUTPUT-SPOOL.md) | Component milestone/contract consolidated against current source |
@@ -84,7 +84,7 @@ The following tracked Markdown files are removed from the working tree and recov
 | `docs/implementation/OWNED-TRANSCRIPTION-WORKSPACE.md` | [NARRATION](../technical/NARRATION.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/PNG-REFERENCE-IMPORT.md` | [PROVIDERS-ARTIFACTS](../technical/PROVIDERS-ARTIFACTS.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/PRECISION-UI.md` | [VALIDATION-EVIDENCE](../implementation/VALIDATION-EVIDENCE.md) | Component milestone/contract consolidated against current source |
-| `docs/implementation/PROJECT-BUDGET.md` | [SPENDING-REVIEW](../implementation/SPENDING-REVIEW.md) | Component milestone/contract consolidated against current source |
+| `docs/implementation/PROJECT-BUDGET.md` | [EXECUTION-ENGINE](../technical/EXECUTION-ENGINE.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/PROJECT-LOCAL-EXECUTION.md` | [TIMELINE-RENDERING](../technical/TIMELINE-RENDERING.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/PROVIDER-EXECUTION.md` | [PROVIDERS-ARTIFACTS](../technical/PROVIDERS-ARTIFACTS.md) | Component milestone/contract consolidated against current source |
 | `docs/implementation/PROVIDER-ROUTING.md` | [PROVIDERS-ARTIFACTS](../technical/PROVIDERS-ARTIFACTS.md) | Component milestone/contract consolidated against current source |

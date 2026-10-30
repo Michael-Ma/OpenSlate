@@ -96,8 +96,7 @@ export class ViggleH3Execution implements ExecutionProvider {
       prepared = preparation.request;
       const proposed: ViggleH3ExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
         profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile, capabilityLockId: admission.capabilityLock.id,
-        capabilityLockDigest: digest(admission.capabilityLock), allowanceId: (admission.allowance?.id ?? null), allowanceDigest: (admission.allowance ? digest(admission.allowance) : null),
-        consumptionDigest: (admission.consumption ? digest(admission.consumption) : null), estimatedMicros: admission.reservation.micros, firstFrame: viggleFramePin(frame),
+        capabilityLockDigest: digest(admission.capabilityLock), estimatedMicros: admission.reservation.micros, firstFrame: viggleFramePin(frame),
         ...(preparation.crop ? { firstFrameCrop: preparation.crop } : {}), transport: describeViggleH3Request(prepared) };
       assertViggleH3ExecutionMapping(attempt, proposed);
       mapping = this.#store.transaction(() => {
@@ -120,7 +119,7 @@ export class ViggleH3Execution implements ExecutionProvider {
         stopped(signal); this.dispatchable(attempt, expected);
         assertViggleMappingAdmission(resolveViggleAdmission(this.#store, request, mapping), mapping);
         const dispatch: ViggleH3ExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping), bodySha256: mapping.transport.bodySha256,
-          allowanceId: (request.externalAllowanceId ?? null), createdAt: this.now() };
+          createdAt: this.now() };
         this.#store.insert("viggle_h3_execution_dispatch", attempt.id, attempt.projectId, dispatch); return true;
       });
     } catch { return this.notDispatched(attempt, expected, 'LOCAL_CANCELLED', signal); }

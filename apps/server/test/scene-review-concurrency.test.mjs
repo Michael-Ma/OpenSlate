@@ -20,7 +20,6 @@ function fixture(t, { sharedScene = false } = {}) {
     provider = new FakeProvider(join(directory, "provider.sqlite"));
   const engine = new Engine(store, provider, {
       artifactDir: join(directory, "artifacts"),
-      budgetMicros: "0",
     }),
     production = new ProductionService(store, engine);
   let project = production.createProject("Scene concurrency fixture");

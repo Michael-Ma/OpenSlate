@@ -41,7 +41,6 @@ async function savePreparedMapping(f) {
   const value = { id: f.attempt.id, version: 1, projectId: f.project.id, attemptId: f.attempt.id, requestDigest: digest(f.request),
     profileDigest: f.request.profile.digest, profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile,
     capabilityLockId: admission.capabilityLock.id, capabilityLockDigest: digest(admission.capabilityLock),
-    allowanceId: admission.allowance.id, allowanceDigest: digest(admission.allowance), consumptionDigest: digest(admission.consumption),
     estimatedMicros: admission.reservation.micros, firstFrame: viggleFramePin(frame),
     ...(prepared.crop ? { firstFrameCrop: prepared.crop } : {}), transport: describeViggleH3Request(prepared.request) };
   assertViggleH3ExecutionMapping(f.attempt, value);

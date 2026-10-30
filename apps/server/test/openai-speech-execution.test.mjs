@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { RECIPE_DIGEST, digest, DomainError } from "../../../packages/core/dist/index.js";
+import { RECIPE_DIGEST, canonical, digest, DomainError } from "../../../packages/core/dist/index.js";
 import { Store } from "../dist/persistence/store.js";
 import { OpenAISpeechExecution } from "../dist/execution/openai-speech-execution.js";
 import { ExecutionOutputStore } from "../dist/execution/output-store.js";
-import { speechFixture, context, rows, key, bytes, wave, hash, response, restart, restoreSpeechFixture, revoke } from "./speech-execution-fixture.mjs";
+import { speechFixture, context, rows, key, bytes, wave, hash, response, restart, restoreSpeechFixture } from "./speech-execution-fixture.mjs";
 import { narrationSpeechFixture } from "./narration-speech-fixture.mjs";
 
 function replaceLease(f) {
@@ -17,13 +17,13 @@ function replaceLease(f) {
 }
 const replacementContext = attempt => ({ expectedLease: { owner: attempt.leaseOwner, epoch: attempt.leaseEpoch } });
 
-test("real consumed admission precedes exact single speech POST, then raw owned completion is recoverable", async t => {
+test("real configured admission precedes exact single speech POST, then raw owned completion is recoverable", async t => {
   const large = wave(1200000), f = speechFixture(t, { fetch: async (url, init) => {
     assert.equal(url, "https://api.openai.com/v1/audio/speech"); assert.equal(init.method, "POST");
-    const mapping = rows(f, "speech_execution_mapping")[0], marker = rows(f, "speech_execution_dispatch")[0], consumed = rows(f, "external_allowance_consumption")[0];
+    const mapping = rows(f, "speech_execution_mapping")[0], marker = rows(f, "speech_execution_dispatch")[0];
     assert.equal(mapping.requestDigest, digest(f.request)); assert.notEqual(mapping.requestDigest, mapping.transport.requestDigest);
-    assert.equal(mapping.profileDefinitionDigest, digest(f.profile)); assert.equal(mapping.consumptionDigest, digest(consumed));
-    assert.equal(mapping.allowanceDigest, digest(f.allowance)); assert.equal(mapping.estimatedMicros, "100");
+    assert.equal(mapping.profileDefinitionDigest, digest(f.profile));
+    assert.equal(mapping.estimatedMicros, "100");
     assert.equal(mapping.capabilityLockDigest, digest(f.store.get("capability_lock", mapping.capabilityLockId)));
     assert.equal(marker.mappingDigest, digest(mapping)); assert.equal(marker.bodySha256, hash(init.body));
     assert.equal(marker.transportDigest, mapping.transport.requestDigest); assert.equal(mapping.bodyByteLength, init.body.byteLength);
@@ -85,9 +85,16 @@ for (const code of ["OUTPUT_STORE_BUSY", "ENOSPC", "EMFILE", "ENFILE"]) test(`lo
   assert.deepEqual(readFileSync((await f.outputs.resolveOwned(f.project.id, completed.receiptId)).path), bytes); assert.equal(f.calls.http, 1);
 });
 
-test("registered speech does not substitute an allowance correlation for actual consumption", async t => {
-  for (const kind of ["external_allowance_consumption", "external_allowance", "candidate", "grant", "reservation"]) {
-    const f = speechFixture(t); f.store.db.prepare("DELETE FROM entities WHERE kind=?").run(kind);
+test("forged providerUse or a profile cannot substitute exact speech admission evidence", async t => {
+  for (const kind of ["provider-use", "profile-definition", "candidate", "grant", "reservation"]) {
+    const f = speechFixture(t);
+    if (kind === "provider-use") {
+      f.request = { ...f.request, providerUse: { ...f.request.providerUse, profileDefinitionDigest: "f".repeat(64) } };
+      f.store.db.prepare("UPDATE entities SET body=? WHERE kind='attempt' AND id=?").run(canonical({ ...f.attempt, request: f.request }), f.attempt.id);
+    } else if (kind === "profile-definition") {
+      const lock = f.store.get("capability_lock", f.project.capabilityLockId);
+      f.store.db.prepare("UPDATE entities SET body=? WHERE kind='capability_lock' AND id=?").run(canonical({ ...lock, profiles: [{ ...f.profile, unitCostMicros: "101" }] }), lock.id);
+    } else f.store.db.prepare("DELETE FROM entities WHERE kind=?").run(kind);
     await assert.rejects(f.bridge.submit(f.request, context(f)), { code: "SPEECH_EXECUTION_CONFLICT" });
     assert.deepEqual(f.calls, { http: 0, credentials: 0 }); assert.equal(rows(f, "speech_execution_result").length, 0);
   }
@@ -287,16 +294,6 @@ test("a released restoration recovers completed speech with unavailable credenti
   assert.deepEqual(await restart(f).bridge.lookup(f.attempt.id), completed); assert.deepEqual(f.calls, { http: 1, credentials: 1 });
 });
 
-test("revocation and expiry stop new admissions without retroactively cancelling consumed speech", async t => {
-  const f = speechFixture(t); revoke(f);
-  const expires = Date.parse(f.allowance.expiresAt) + 1;
-  f.store.put("attempt", f.attempt.id, f.project.id, { ...f.attempt, leaseExpiresAt: expires + 30000 });
-  t.mock.timers.enable({ apis: ["Date"], now: expires });
-  assert.equal((await f.bridge.submit(f.request, context(f))).type, "completed"); assert.equal(f.calls.http, 1);
-  const g = speechFixture(t, { deferAdmission: true }); revoke(g); const result = await g.engine.runReady();
-  assert.equal(result.dispatched, 0); assert.ok(result.blocked.some(item => item.code === "EXTERNAL_ALLOWANCE_UNAVAILABLE")); assert.equal(g.calls.http, 0);
-});
-
 test("historical matching lock is pinned for replay and cannot be replaced by a later equivalent lock", async t => {
   const f = speechFixture(t), oldLock = f.store.get("capability_lock", f.project.capabilityLockId), current = f.store.getProject(f.project.id), nextLockId = randomUUID();
   f.store.insert("capability_lock", nextLockId, f.project.id, { recipeDigest: RECIPE_DIGEST, profiles: [{ ...f.profile, unitCostMicros: "200" }] });
@@ -310,7 +307,7 @@ test("historical matching lock is pinned for replay and cannot be replaced by a 
 
 test("changed admitted request, profile estimate and foreign request cannot reuse speech authorization", async t => {
   const f = speechFixture(t);
-  for (const mutate of [r => { r.args.text += "changed"; }, r => { r.profile.revision = "other"; }, r => { r.externalAllowanceId = randomUUID(); },
+  for (const mutate of [r => { r.args.text += "changed"; }, r => { r.profile.revision = "other"; }, r => { r.providerUse.profileDefinitionDigest = "f".repeat(64); },
     r => { r.inputs.push({ artifactId: "foreign", kind: "audio", sha256: "a".repeat(64) }); }]) {
     const request = structuredClone(f.request); mutate(request); await assert.rejects(f.bridge.submit(request, context(f)));
   }
@@ -371,7 +368,7 @@ test("L1 speech absent dispatch requires a live fenced reconciliation lease and 
 test("L1 human-reviewed narration keeps its paid lost reply terminal and its fenced no-dispatch uncharged", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const f = await narrationSpeechFixture(t, { realSpeech: true, fetch: async () => { throw Error("offline narration response lost"); } });
-  const proposal = await f.prepare(), application = await f.review(proposal); f.issue(application); f.attempt = f.admit(application); f.request = f.attempt.request;
+  const proposal = await f.prepare(), application = await f.review(proposal); f.attempt = f.admit(application); f.request = f.attempt.request;
   for (const hold of rows(f, "hold")) if (hold.active) f.engine.releaseHold(f.project.id, hold.id, hold.ownerId);
   assert.equal((await f.bridge.submit(f.request, context(f))).type, "unknown");
   expireSpeechDispatch(f, 119000, t); dueSpeech(f); await f.engine.reconcile();
@@ -385,7 +382,7 @@ test("L1 human-reviewed narration keeps its paid lost reply terminal and its fen
   assert.equal(rows(f, "attempt").filter(item => item.phase !== "failed" && item.phase !== "succeeded").length, 0);
 
   const g = await narrationSpeechFixture(t, { realSpeech: true });
-  const nextProposal = await g.prepare(), nextApplication = await g.review(nextProposal); g.issue(nextApplication); g.attempt = g.admit(nextApplication);
+  const nextProposal = await g.prepare(), nextApplication = await g.review(nextProposal); g.attempt = g.admit(nextApplication);
   dueSpeech(g); await g.engine.reconcile();
   const rejected = g.store.get("attempt", g.attempt.id);
   assert.equal(rejected.phase, "failed"); assert.equal(g.store.get("reservation", rejected.reservationId).state, "released");
@@ -393,7 +390,7 @@ test("L1 human-reviewed narration keeps its paid lost reply terminal and its fen
   assert.equal((await g.bridge.submit(g.attempt.request)).type, "rejected");
 
   const saved = await narrationSpeechFixture(t, { realSpeech: true });
-  const savedProposal = await saved.prepare(), savedApplication = await saved.review(savedProposal); saved.issue(savedApplication); saved.attempt = saved.admit(savedApplication);
+  const savedProposal = await saved.prepare(), savedApplication = await saved.review(savedProposal); saved.attempt = saved.admit(savedApplication);
   for (const hold of rows(saved, "hold")) if (hold.active) saved.engine.releaseHold(saved.project.id, hold.id, hold.ownerId);
   assert.equal((await saved.bridge.submit(saved.attempt.request, context(saved))).type, "completed");
   expireSpeechDispatch(saved, 120001, t);

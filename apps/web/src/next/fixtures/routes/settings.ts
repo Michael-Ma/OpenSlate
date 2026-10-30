@@ -125,7 +125,6 @@ function preview(world: FixtureWorld, body: unknown): ModelPreview {
     selected, scope: { kind: "unfinished" }, changes, preserved,
     counts: { changed: changes.length, preserved: preserved.length },
     generationApprovalRequired: changes.some((change) => change.kind === "image" || change.kind === "video"),
-    allowanceRequired: false,
   };
   s.previews.set(id, result);
   s.previewWork.set(id, workOf(world));
