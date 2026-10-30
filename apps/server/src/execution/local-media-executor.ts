@@ -3,12 +3,12 @@ import { canonical, digest, invariant, snapshotLocalExecution } from "@openslate
 import type { ArtifactRef, JsonObject, LocalExecutionIdentity } from "@openslate/core";
 import type { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
-import { captureRender, captureTimeline } from "../media/timeline-capture.js";
+import { captureRender, captureTimeline, captureCodePlanRender } from "../media/timeline-capture.js";
 import { createLocalTimelineDocument, LocalTimelineStore, parseLocalTimelineDocument } from "../media/local-timeline.js";
 import type { LocalTimelineDocument, StoredLocalTimeline } from "../media/local-timeline.js";
 import type { LocalMediaService } from "../media/local-media.js";
 import { installManagedVideo } from "../media/managed-video.js";
-import type { RenderCompletion } from "../media/types.js";
+import type { RenderCompletion, FrozenRenderManifest } from "../media/types.js";
 import type { ArtifactRecord, Attempt, NodeBinding } from "./engine.js";
 import { assertLocalExecutionDispatch, assertLocalExecutionIntent, assertLocalExecutionResult, assertPreparedLocalExecution, localContentDigest } from "./local-execution.js";
 import type { LocalExecutionCompletion, LocalExecutionDispatch, LocalExecutionIntent, LocalExecutionOptions, LocalExecutionPort, LocalExecutionResult, PreparedLocalExecution } from "./local-execution.js";
@@ -126,6 +126,55 @@ export class LocalMediaExecutor implements LocalExecutionPort {
     return freeze(result);
   }
 
+  /** Alternate caller authority; shares timeline storage, frozen manifests, FFmpeg and owned publication. */
+  async executeCodePlan(previous: Attempt, options: { signal: AbortSignal }): Promise<ArtifactRecord> {
+    const { signal } = options;
+    const owned = () => {
+      check(signal); this.recovery.assertWritable(previous.projectId);
+      const current = this.store.get<Attempt>("attempt", previous.id);
+      invariant(current && current.projectId === previous.projectId && current.workKey?.startsWith("code-plan:")
+        && current.candidateId === null && current.request.execution.adapter === "local-media" && current.request.execution.version === "1"
+        && this.store.getProject(current.projectId).planMode === "code" && canonical(current.request) === canonical(previous.request)
+        && current.leaseOwner === previous.leaseOwner && current.leaseEpoch === previous.leaseEpoch && current.leaseExpiresAt > Date.now(),
+      "LOCAL_EXECUTION_LEASE_LOST", "Code-plan render lost its exact local intent or lease");
+      return current;
+    };
+    type Intent = { id: string; projectId: string; requestDigest: string; timeline: LocalTimelineDocument; recipe: FrozenRenderManifest; outputArtifactId: string };
+    owned();
+    const lock = this.store.get<{ projectId: string; localExecution?: unknown }>("capability_lock", this.store.getProject(previous.projectId).capabilityLockId);
+    invariant(lock?.projectId === previous.projectId, "LOCAL_EXECUTION_UNSUPPORTED", "Code-plan rendering requires its owned local runtime lock");
+    snapshotLocalExecution(lock.localExecution);
+    let intent = this.store.get<Intent>("code_plan_render_intent", previous.id);
+    if (!intent) {
+      this.recovery.assertFirstSubmit(previous.projectId, previous.id);
+      const record = this.store.get<{ planVersion: number }>("code_plan_execution", previous.id);
+      invariant(record?.planVersion === this.store.get<{ planVersion: number }>("code_plan_run", previous.projectId)?.planVersion,
+        "CODE_PLAN_SELECTION_CHANGED", "A newer plan fenced local render preparation");
+      const input = captureCodePlanRender(this.store, previous.projectId, previous.request.args);
+      const timeline = createLocalTimelineDocument({ projectId: previous.projectId, clips: input.clips, audio: input.audio ?? [] });
+      await this.timelines.put(timeline, { signal });
+      const recipe = await this.media.freezeManifest(input, { signal });
+      owned();
+      invariant(record!.planVersion === this.store.get<{ planVersion: number }>("code_plan_run", previous.projectId)?.planVersion,
+        "CODE_PLAN_SELECTION_CHANGED", "A newer plan fenced the prepared local render");
+      intent = this.store.insert("code_plan_render_intent", previous.id, previous.projectId, { id: previous.id, projectId: previous.projectId,
+        requestDigest: digest(previous.request), timeline, recipe, outputArtifactId: digest({ codePlanRender: previous.id }) });
+    }
+    invariant(intent.requestDigest === digest(previous.request) && intent.projectId === previous.projectId
+      && canonical(intent.timeline) === canonical(createLocalTimelineDocument({ projectId: intent.projectId, clips: intent.recipe.clips, audio: intent.recipe.audio })),
+    "LOCAL_EXECUTION_CONFLICT", "Code-plan render lost its exact frozen timeline");
+    owned();
+    // Manifest completions are durable filesystem receipts. Recovery never calls an external submitter.
+    let completion = (await this.media.findCompletions(intent.recipe.digest, { signal }))[0];
+    if (!completion) {
+      this.recovery.assertFreshAuthority(previous.projectId, "attempt", previous.id);
+      completion = await this.media.render(intent.recipe, { signal });
+    }
+    owned();
+    const artifact = await this.renderArtifact(previous.projectId, previous.id, intent.outputArtifactId, intent.recipe, completion, signal);
+    owned(); return artifact;
+  }
+
   private binding(projectId: string, nodeId: string): NodeBinding {
     const project = this.store.getProject(projectId), lock = this.store.get<{ projectId: string; localExecution?: LocalExecutionIdentity }>("capability_lock", project.capabilityLockId);
     invariant(lock?.projectId === projectId && Object.hasOwn(lock, "localExecution"), "LOCAL_EXECUTION_UNSUPPORTED", "Project has no pinned local assembly runtime");
@@ -166,19 +215,23 @@ export class LocalMediaExecutor implements LocalExecutionPort {
   }
   private async renderResult(intent: LocalExecutionIntent, completion: RenderCompletion, signal: AbortSignal): Promise<LocalExecutionResult> {
     invariant(intent.prepared.kind === "render" && canonical(completion.manifest) === canonical(intent.prepared.recipe), "LOCAL_EXECUTION_CONFLICT", "Rendered bytes belong to another manifest");
-    const recipe = intent.prepared.recipe, probe = completion.artifact.probe;
+    return { version: 1, intentDigest: digest(intent), requestDigest: intent.requestDigest, port: "video",
+      artifact: await this.renderArtifact(intent.projectId, intent.id, intent.outputArtifactId, intent.prepared.recipe, completion, signal),
+      completion: { kind: "render", manifestDigest: intent.prepared.recipe.digest, sha256: completion.artifact.sha256 } };
+  }
+  private async renderArtifact(projectId: string, attemptId: string, outputArtifactId: string, recipe: FrozenRenderManifest, completion: RenderCompletion, signal: AbortSignal): Promise<ArtifactRecord> {
+    invariant(canonical(completion.manifest) === canonical(recipe), "LOCAL_EXECUTION_CONFLICT", "Rendered bytes belong to another manifest");
+    const probe = completion.artifact.probe;
     invariant(probe.video?.frames === recipe.totalFrames && probe.video.width === recipe.width && probe.video.height === recipe.height
       && probe.video.frameRate === "30/1" && probe.video.codec === "h264", "LOCAL_EXECUTION_CONFLICT", "Recovered video measurement differs from the frozen recipe");
     invariant(recipe.audio.length ? probe.audio?.codec === "aac" && probe.audio.sampleRate === 48000 && probe.audio.channels === 2
       && probe.audio.samples !== null && Math.abs(probe.audio.samples - recipe.totalFrames * 1600) <= 2048 : !probe.audio,
     "LOCAL_EXECUTION_CONFLICT", "Recovered audio measurement differs from the frozen recipe");
-    const path = await installManagedVideo(this.artifactDir, intent.projectId, completion.artifact, this.maxOutputBytes, { signal });
+    const path = await installManagedVideo(this.artifactDir, projectId, completion.artifact, this.maxOutputBytes, { signal });
     check(signal);
-    return { version: 1, intentDigest: digest(intent), requestDigest: intent.requestDigest, port: "video",
-      artifact: { id: intent.outputArtifactId, projectId: intent.projectId, attemptId: intent.id,
-        artifact: { artifactId: intent.outputArtifactId, sha256: completion.artifact.sha256, kind: "video" }, path,
-        mimeType: "video/mp4", fixture: false, origin: "local_render", byteLength: completion.artifact.byteLength,
-        physicalDurationSeconds: recipe.totalFrames / 30, width: recipe.width, height: recipe.height },
-      completion: { kind: "render", manifestDigest: recipe.digest, sha256: completion.artifact.sha256 } };
+    return { id: outputArtifactId, projectId, attemptId,
+      artifact: { artifactId: outputArtifactId, sha256: completion.artifact.sha256, kind: "video" }, path,
+      mimeType: "video/mp4", fixture: false, origin: "local_render", byteLength: completion.artifact.byteLength,
+      physicalDurationSeconds: recipe.totalFrames / 30, width: recipe.width, height: recipe.height };
   }
 }
