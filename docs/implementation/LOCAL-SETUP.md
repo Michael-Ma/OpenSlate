@@ -33,4 +33,6 @@ Native Director turns have a **180,000 ms** total deadline, including startup. F
 
 Set one explicit `OPENSLATE_DATA_DIR` when changing launch modes. Root `pnpm start` defaults to repository `.openslate`; filtered/development server commands can otherwise point to a different directory. Keep data outside the public `apps/web/dist` bundle. The normal launcher reads `.env.live.local`, with exported variables taking precedence.
 
+Data directories from earlier prototype builds cannot be opened; set a new `OPENSLATE_DATA_DIR`.
+
 After changing code, keys, catalog or enable switches, run `./start.sh --restart`; it authenticates and verifies the existing process before graceful shutdown/rebuild. `--status` only inspects. See [launcher details](LOCAL-LAUNCHER.md), [human live testing](MANUAL-LIVE-PRODUCTION.md) and [backup/recovery](INSTALLATION-RECOVERY.md).

@@ -28,7 +28,7 @@ The exporter acquires installation ownership, snapshots the application/fixture 
 
 Manifest paths are derived bundle-relative paths. Regular-file/no-symlink checks, hashes, source/reference closure, schema/integrity verification and sync precede final manifest publication. Bounds are 256 GiB total, 100,000 files, 8 GiB/file, 32 MiB manifest and depth 16, with bounded streaming/copy concurrency. Those are supported limits, not measured performance guarantees. Hashes detect byte corruption; they do not authenticate who created a bundle.
 
-Restore must match `originalDataRoot` because retained receipts/descriptors include immutable absolute identities. It stages on the destination filesystem under retained ownership, verifies all files/databases, applies supported staged migrations and installs recovery quarantine/fences before publication. Existing/changed published content, different retry bundles and path escapes fail safely. The filesystem progress marker blocks partial launch; SQL owns quarantine/release authority.
+Restore must match `originalDataRoot` because retained receipts/descriptors include immutable absolute identities. A backup restores only into the same current schema version; inspection rejects older or unsupported schemas before restore begins. It stages on the destination filesystem under retained ownership, verifies all files/databases and installs recovery quarantine/fences before publication. Existing/changed published content, different retry bundles and path escapes fail safely. The filesystem progress marker blocks partial launch; SQL owns quarantine/release authority.
 
 ## Human recovery review
 
@@ -42,4 +42,4 @@ The backup excludes changes made after its snapshot. Unknown provider submission
 - [Recovery application](../../apps/server/src/application/installation-recovery.ts), [routes](../../apps/server/src/application/recovery-routes.ts), web `RecoveryPanel.tsx`
 - [Dated campaign](INSTALLATION-RECOVERY-VALIDATION.md) and [audit JSON](INSTALLATION-RECOVERY-VALIDATION.json)
 
-Automated and disposable browser checks cover interrupted copy/publication, same-bundle retry, hash/path rejection, staged migration, unchanged historical IDs, quarantine/release/replay and zero imported first POST. They do not prove relocation, online backup, arbitrary independent file writers, physical power loss or performance at maximum capacity.
+Automated and disposable browser checks cover interrupted copy/publication, same-bundle retry, hash/path rejection, unchanged historical IDs, quarantine/release/replay and zero imported first POST. They do not prove relocation, online backup, arbitrary independent file writers, physical power loss or performance at maximum capacity.

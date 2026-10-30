@@ -8,13 +8,11 @@ import { assertNarrationSpeechProposal } from "../narration/narration-speech-rec
 import { assertNarrationSpeechReview, assertNarrationSpeechApplication, assertNarrationSpeechAttemptInput } from "../narration/narration-speech-authorization.js";
 import type { NarrationSpeechReview } from "../narration/narration-speech-types.js";
 import Database from "better-sqlite3";
-import { mkdirSync, existsSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { canonical, digest, DomainError, invariant, newId, normalizeStoredFilmKind } from "@openslate/core";
 import type { JsonObject, ProjectEvent, ProjectRecord } from "@openslate/core";
-import { verifySchema } from "./schema.js";
-import { initializeDatabase } from "./migrations.js";
-import { flushSnapshot, prepareSnapshotDirectory, snapshotDatabase, verifyDatabase } from "./database-snapshot.js";
+import { initializeDatabase, verifySchema } from "./schema.js";
 import { assertVideoDerivationIntent, assertVideoDerivationReceipt } from "../execution/video-derivation.js";
 import type { VideoDerivationIntent, VideoDerivationReceipt } from "../execution/video-derivation.js";
 import { assertAudioDerivationIntent, assertAudioDerivationReceipt, assertNormalizedAudioIngestion } from "../execution/audio-derivation.js";
@@ -73,7 +71,7 @@ export class Store {
   constructor(readonly path: string) {
     invariant(typeof path === "string" && path.length > 0, "DATABASE_PATH_INVALID", "Use a database path or :memory:");
     if (path !== ":memory:") mkdirSync(dirname(resolve(path)), { recursive: true });
-    // Reject newer or unrecognized databases through a read-only connection before
+    // Reject non-current or unrecognized databases through a read-only connection before
     // opening a writer or applying persistent journal/schema configuration.
     if (path !== ":memory:" && existsSync(path)) {
       const existing = new Database(path, { readonly: true, fileMustExist: true });
@@ -84,7 +82,7 @@ export class Store {
       this.db.pragma("foreign_keys = ON");
       this.db.pragma("synchronous = FULL");
       this.db.pragma("busy_timeout = 5000");
-      initializeDatabase(this.db, path);
+      initializeDatabase(this.db);
       this.db.pragma("journal_mode = WAL");
     } catch (error) { this.db.close(); throw error; }
   }
@@ -985,27 +983,6 @@ export class Store {
         .run(canonical(snapshot), snapshot.restoreId);
       invariant(result.changes === 1, "RECOVERY_CONFLICT", "Recovery release changed"); return snapshot;
     });
-  }
-
-  async backup(destination: string): Promise<void> {
-    invariant(!this.db.inTransaction, "TRANSACTION_ACTIVE", "Backup must run outside a write transaction");
-    invariant(typeof destination === "string" && destination.length > 0 && destination !== ":memory:" && destination === destination.trim() && resolve(destination) !== resolve(this.path)
-      && !existsSync(destination) && !existsSync(`${destination}-wal`) && !existsSync(`${destination}-shm`), "BACKUP_EXISTS", "Use a new backup destination");
-    verifySchema(this.db, { integrity: true });
-    prepareSnapshotDirectory(destination);
-    const fd = openSync(destination, "wx", 0o600); closeSync(fd);
-    try { await this.db.backup(destination); Store.checkDatabase(destination); flushSnapshot(destination); }
-    catch (error) { try { unlinkSync(destination); } catch { /* Do not replace the original backup error. */ } throw error; }
-  }
-
-  static checkDatabase(path: string): void {
-    verifyDatabase(path);
-  }
-
-  static restore(source: string, destination: string): void {
-    invariant(!existsSync(destination) && !existsSync(`${destination}-wal`) && !existsSync(`${destination}-shm`), "RESTORE_DESTINATION_EXISTS", "Restore requires a new closed database path");
-    const reader = new Database(source, { readonly: true, fileMustExist: true });
-    try { snapshotDatabase(reader, destination); } finally { reader.close(); }
   }
 
   close(): void { this.db.close(); }

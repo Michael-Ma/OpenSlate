@@ -11,7 +11,7 @@ import { FakeProvider } from "@openslate/providers";
 import { verifySkillReleaseSnapshot, verifySkillSnapshot } from "@openslate/director";
 import { contractSevenRepository } from "./helpers/contract-seven-fixture.mjs";
 import { Store } from "../dist/persistence/store.js";
-import { CURRENT_SCHEMA_VERSION, MIGRATIONS } from "../dist/persistence/schema.js";
+import { CURRENT_SCHEMA_VERSION } from "../dist/persistence/schema.js";
 import { createInstallationBackup, inspectInstallationBackup } from "../dist/persistence/installation-backup.js";
 import { verifyFixtureDatabase } from "../dist/persistence/fixture-database.js";
 import { acquireInstallationOwner } from "../dist/persistence/installation-owner.js";
@@ -76,16 +76,6 @@ test("offline export snapshots committed WAL in both databases and preserves pri
   assert.equal(result.manifest.files.some(file => /(?:-wal|-shm|installation-owner)/.test(file.path)), false);
 });
 
-test("historical V1 and missing later indexes remain V1 without a migration or source rewrite", async t => {
-  const dir = root(t), source = join(dir, "installation"), destination = join(dir, "backup"); mkdirSync(source);
-  const path = join(source, "openslate.sqlite"), db = new Database(path);
-  db.exec(readFileSync(new URL("schema-v1.sql.fixture", import.meta.url), "utf8")); db.pragma("user_version=1"); db.exec("DROP INDEX director_request_once; DROP INDEX director_running_once"); db.close();
-  new FakeProvider(join(source, "fake-provider.sqlite")).close(); const before = sha(readFileSync(path));
-  const result = await createInstallationBackup({ sourceRoot: source, destination }); assert.equal(result.manifest.applicationSchemaVersion, 1);
-  assert.equal(sha(readFileSync(path)), before); assert.equal(existsSync(`${path}.migration-backups`), false);
-  assert.equal((await inspectInstallationBackup({ directory: destination })).manifest.applicationSchemaVersion, 1);
-});
-
 test("owned artifact/demo files and fake execution remain usable after complete namespace copying", async t => {
   const dir = root(t), source = join(dir, "installation"), destination = join(dir, "backup");
   const demo = await runDemo(source), result = await createInstallationBackup({ sourceRoot: source, destination });
@@ -98,13 +88,13 @@ test("owned artifact/demo files and fake execution remain usable after complete 
 test("published render/source completions survive without SQL publication and temporary/private roots stay out", async t => {
   const f = fixture(t), media = mediaFixture(f);
   for (const path of ["local-session.token", "uploads/private.wav", "media/tmp/job-x/private.wav", "execution-output/tmp/unfinished",
-    "video-derivations/tmp/unfinished", "openslate.sqlite.migration-backups/old.sqlite", `native/${f.project.id}/runtime/native-state/auth.json`,
+    "video-derivations/tmp/unfinished", `native/${f.project.id}/runtime/native-state/auth.json`,
     `native/${f.project.id}/runtime/logs/session.log`, `native/${f.project.id}/workspace/arbitrary.txt`, "artifacts/images/tmp/validate-x/private.png"])
     write(f.source, path, "private data must be excluded");
   const result = await f.backup();
   assert.ok(result.manifest.files.some(file => file.path === media.completionPath));
   assert.ok(result.manifest.files.some(file => file.path.endsWith(".source")));
-  assert.equal(result.manifest.files.some(file => /private|runtime|uploads|tmp|migration-backups|token|arbitrary/.test(file.path)), false);
+  assert.equal(result.manifest.files.some(file => /private|runtime|uploads|tmp|token|arbitrary/.test(file.path)), false);
   await inspectInstallationBackup({ directory: f.destination });
 });
 
@@ -229,13 +219,12 @@ test("missing or corrupt owned artifacts and metadata closures fail rather than 
   await assert.rejects(f.backup(), { code: "BACKUP_REFERENCE_INVALID" });
 });
 
-test("schema/checksum incompatibility is rejected before creating a bundle or mutating the source", async t => {
-  for (const problem of ["newer", "checksum", "fixture"]) {
+test("older schema export and incompatible databases are rejected before creating a bundle or mutating the source", async t => {
+  for (const problem of [1, 2, 3, 999, "fixture"]) {
     const f = fixture(t); f.close(); const path = join(f.source, problem === "fixture" ? "fake-provider.sqlite" : "openslate.sqlite"), db = new Database(path);
-    if (problem === "newer") db.pragma("user_version=999");
-    else if (problem === "checksum") db.exec("UPDATE schema_migrations SET checksum='" + "0".repeat(64) + "' WHERE version=1");
-    else db.exec("CREATE TABLE unexpected(value TEXT)"); db.close(); const before = sha(readFileSync(path));
-    await assert.rejects(f.backup(), { code: problem === "newer" ? "DATABASE_VERSION_UNSUPPORTED" : problem === "checksum" ? "DATABASE_MIGRATION_MISMATCH" : "FIXTURE_DATABASE_SCHEMA_MISMATCH" });
+    if (problem === "fixture") db.exec("CREATE TABLE unexpected(value TEXT)"); else db.pragma(`user_version=${problem}`);
+    db.close(); const before = sha(readFileSync(path));
+    await assert.rejects(f.backup(), { code: problem === "fixture" ? "FIXTURE_DATABASE_SCHEMA_MISMATCH" : "DATABASE_VERSION_UNSUPPORTED" });
     assert.equal(sha(readFileSync(path)), before); assert.equal(existsSync(f.destination), false);
   }
 });
@@ -295,16 +284,6 @@ test("generated-video derivation retains distinct exact raw and normalized ident
   assert.notEqual(derived.source.originalSha256, derived.source.sha256); await inspectInstallationBackup({ directory: f.destination });
   cleanup(f.destination); write(f.source, relative, canonical({ ...derived, intentDigest: "0".repeat(64) }));
   await assert.rejects(f.backup(), { code: "VIDEO_DERIVATION_CONFLICT" });
-});
-
-test("historical V2 remains V2 even when the running application supports a later schema", async t => {
-  const dir = root(t), source = join(dir, "installation"), destination = join(dir, "backup"); mkdirSync(source);
-  const path = join(source, "openslate.sqlite"), db = new Database(path);
-  for (const migration of MIGRATIONS.filter(m => m.version <= 2)) db.exec(migration.sql);
-  for (const migration of MIGRATIONS.filter(m => m.version <= 2)) db.prepare("INSERT INTO schema_migrations VALUES(?,?,?,?,?)").run(migration.version, migration.name, migration.checksum, new Date().toISOString(), "applied");
-  db.pragma("user_version=2"); db.close(); new FakeProvider(join(source, "fake-provider.sqlite")).close(); const before = sha(readFileSync(path));
-  const result = await createInstallationBackup({ sourceRoot: source, destination }); assert.equal(result.manifest.applicationSchemaVersion, 2);
-  assert.equal(sha(readFileSync(path)), before); await inspectInstallationBackup({ directory: destination });
 });
 
 test("a published hardlink surviving temporary cleanup is copied as independent exact bytes", async t => {

@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { canonical, digest } from "@openslate/core";
+import { canonical } from "@openslate/core";
 import { FakeProvider } from "@openslate/providers";
 import { Store } from "../dist/persistence/store.js";
 import { Engine } from "../dist/execution/engine.js";
@@ -24,25 +24,20 @@ import { installationCommand } from "../dist/installation-cli.js";
 const sha = bytes => createHash("sha256").update(bytes).digest("hex");
 function cleanup(path) { if (!existsSync(path)) return; const info = lstatSync(path); if (info.isDirectory()) {
   chmodSync(path, 0o700); for (const name of readdirSync(path)) cleanup(join(path, name)); } rmSync(path, { recursive: true, force: true }); }
-async function fixture(t, { legacy = false } = {}) {
+async function fixture(t) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "openslate-restore-"))), source = join(dir, "installation"), backup = join(dir, "backup"), archive = join(dir, "original");
   mkdirSync(source); t.after(() => cleanup(dir)); let projectId, requestId, turnId, originalTurn;
-  if (legacy) {
-    const db = new Database(join(source, "openslate.sqlite")); db.exec(readFileSync(new URL("schema-v1.sql.fixture", import.meta.url), "utf8")); db.pragma("user_version=1"); db.close();
-    new FakeProvider(join(source, "fake-provider.sqlite")).close();
-  } else {
-    const store = new Store(join(source, "openslate.sqlite")), fake = new FakeProvider(join(source, "fake-provider.sqlite")), engine = new Engine(store, fake, { artifactDir: join(source, "artifacts") });
-    const service = new ProductionService(store, engine), project = service.createProject("Restored browser demo"); projectId = project.id;
-    seedFixture(service, join(engine.artifactDir, project.id), project.id);
-    const actor = service.beginRequest(projectId, "human", "Original private conversation"); requestId = actor.requestId;
-    const bridge = service.openEpoch(projectId, actor);
-    const supervisor = new DirectorSupervisor(service, { id: "offline-fixture", start() { throw Error("A restore must never start a runtime"); } }, { mode: "native" });
-    const turn = supervisor.enqueue(projectId, actor); turnId = turn.id;
-    store.put("director_turn", turn.id, projectId, { ...turn, state: "running", owner: "previous-owner", leaseExpiresAt: Date.now() + 100000,
-      epochId: bridge.actor.epochId, nativeThreadId: "saved-native-thread", nativeTurnId: "saved-native-turn", dispatched: true });
-    originalTurn = store.db.prepare("SELECT body FROM entities WHERE kind='director_turn' AND id=?").get(turn.id).body;
-    await supervisor.close(); store.close(); fake.close();
-  }
+  const store = new Store(join(source, "openslate.sqlite")), fake = new FakeProvider(join(source, "fake-provider.sqlite")), engine = new Engine(store, fake, { artifactDir: join(source, "artifacts") });
+  const service = new ProductionService(store, engine), project = service.createProject("Restored browser demo"); projectId = project.id;
+  seedFixture(service, join(engine.artifactDir, project.id), project.id);
+  const actor = service.beginRequest(projectId, "human", "Original private conversation"); requestId = actor.requestId;
+  const bridge = service.openEpoch(projectId, actor);
+  const supervisor = new DirectorSupervisor(service, { id: "offline-fixture", start() { throw Error("A restore must never start a runtime"); } }, { mode: "native" });
+  const turn = supervisor.enqueue(projectId, actor); turnId = turn.id;
+  store.put("director_turn", turn.id, projectId, { ...turn, state: "running", owner: "previous-owner", leaseExpiresAt: Date.now() + 100000,
+    epochId: bridge.actor.epochId, nativeThreadId: "saved-native-thread", nativeTurnId: "saved-native-turn", dispatched: true });
+  originalTurn = store.db.prepare("SELECT body FROM entities WHERE kind='director_turn' AND id=?").get(turn.id).body;
+  await supervisor.close(); store.close(); fake.close();
   writeFileSync(join(source, "local-session.token"), "synthetic-old-token-do-not-copy");
   const verified = await createInstallationBackup({ sourceRoot: source, destination: backup }); renameSync(source, archive);
   return { dir, source, backup, archive, verified, projectId, requestId, turnId, originalTurn,
@@ -85,13 +80,24 @@ test("same-root restore preserves media/history, creates durable quarantine and 
   await inspectInstallationBackup({ directory: exportedAgain.directory });
 });
 
-test("migration runs only in staged restore and its verified original snapshot remains available", async t => {
-  const f = await fixture(t, { legacy: true }), before = sha(readFileSync(join(f.backup, "openslate.sqlite")));
-  await f.restore(); assert.equal(sha(readFileSync(join(f.backup, "openslate.sqlite"))), before);
-  const backups = readdirSync(join(f.source, "openslate.sqlite.migration-backups")); assert.equal(backups.length, 1);
-  const db = new Database(join(f.source, "openslate.sqlite.migration-backups", backups[0]), { readonly: true });
-  try { assert.equal(db.pragma("user_version", { simple: true }), 1); } finally { db.close(); }
-  assert.doesNotThrow(() => assertInstallationRestoreComplete(f.source));
+test("older manifest or database schemas are rejected at inspection before any restore marker", async t => {
+  for (const older of ["manifest", "database", "both"]) {
+    const f = await fixture(t), manifestPath = join(f.backup, "manifest.json"), databasePath = join(f.backup, "openslate.sqlite");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (older !== "manifest") {
+      const db = new Database(databasePath); db.pragma("user_version=3"); db.close();
+      const bytes = readFileSync(databasePath), file = manifest.files.find(file => file.path === "openslate.sqlite");
+      file.sha256 = sha(bytes); file.byteLength = bytes.length;
+    }
+    if (older !== "database") manifest.applicationSchemaVersion = 3;
+    writeFileSync(manifestPath, canonical(manifest));
+    const before = sha(readFileSync(databasePath)), code = older === "database" ? "DATABASE_VERSION_UNSUPPORTED" : "BACKUP_MANIFEST_INVALID";
+    await assert.rejects(inspectInstallationBackup({ directory: f.backup }), { code });
+    await assert.rejects(f.restore(), { code });
+    assert.equal(sha(readFileSync(databasePath)), before);
+    assert.equal(existsSync(join(f.source, INSTALLATION_RESTORE_STATE)), false);
+    assert.equal(existsSync(f.source), false);
+  }
 });
 
 test("restore refuses a running or populated destination and retains its existing owner inode", async t => {

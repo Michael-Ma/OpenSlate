@@ -15,7 +15,7 @@ export function prepareSnapshotDirectory(path: string): void {
   const parent = dirname(resolve(path)), firstCreated = mkdirSync(parent, { recursive: true, mode: 0o700 });
   if (!firstCreated) return;
   // Persist newly created directory entries too, including their link from the
-  // first existing parent, before relying on a snapshot during schema changes.
+  // first existing parent, before relying on the published snapshot.
   const existingParent = dirname(firstCreated);
   for (let current = parent; ; current = dirname(current)) {
     flushDirectory(current); if (current === existingParent) break;

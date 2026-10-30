@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join, dirname } from 'node:path';
 import { Store } from '../dist/persistence/store.js';
+import { snapshotDatabase } from '../dist/persistence/database-snapshot.js';
 import { fixture } from './request-fixture.mjs';
 
 function context(f, projectId = f.project.id) {
@@ -72,8 +73,8 @@ test('database backup and restore preserve generation blocks and effects as immu
     keyframes: 1, voiceLines: 0, quote: { micros: '0', units: 1, unitMicros: '0', priceUnknown: true }, at: saved.block.at } };
   putBlock(f.store, saved); f.store.insert('director_generation_effect', effect.id, original.projectId, effect);
   context(f);
-  const backup = join(dirname(f.store.path), 'generation-history-backup.sqlite'), destination = join(dirname(f.store.path), 'generation-history-restored.sqlite');
-  await f.store.backup(backup); Store.restore(backup, destination);
+  const destination = join(dirname(f.store.path), 'generation-history-restored.sqlite');
+  snapshotDatabase(f.store.db, destination);
   const restored = new Store(destination);
   try {
     for (const [kind, value] of [['director_generation_block', saved], ['director_generation_effect', effect]]) {
