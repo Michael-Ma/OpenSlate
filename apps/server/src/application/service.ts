@@ -8,7 +8,7 @@ import { contextToolVersion } from "./audio-operation-context.js";
 import { requestScopesIntersect } from "./request-scopes.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
-  applyCreativePatch, compilePlanIsolated, DEFAULT_PROFILES, digest, diffPlans, invariant, newId,
+  applyCreativePatch, compilePlanIsolated, DEFAULT_PROFILES, digest, diffPlans, invariant, moneyMicros, newId,
   parseChangeProposal, RECIPE_DIGEST, requiredStages, shotIntentDigest, snapshotLocalExecution, stageInputDigest,
   validateStageRequirements, validateStageScope, workflowReadiness,
   STAGE_CONTRACTS, STAGE_CONTRACTS_DIGEST, TOOL_NAMES,
@@ -100,10 +100,12 @@ export class ProductionService {
     migrateLegacyRequestSources(this.store);
   }
 
-  createProject(name: string, selection?: InstalledProviderSelection, planMode?: "graph" | "code"): ProjectRecord {
+  createProject(name: string, selection?: InstalledProviderSelection, planMode?: "graph" | "code", ceilingMicros?: string): ProjectRecord {
     this.recovery.assertWritable();
     invariant(typeof name === "string" && name.trim().length > 0 && name.length <= 160, "VALIDATION_ERROR", "Provide a short project name");
     invariant(planMode === undefined || planMode === "graph" || planMode === "code", "VALIDATION_ERROR", "Use graph or code plan mode");
+    invariant(ceilingMicros === undefined || planMode === "code", "CODE_PLAN_MODE", "A spend limit at creation requires a code film");
+    if (ceilingMicros !== undefined) moneyMicros(ceilingMicros);
     const selected = selection === undefined ? undefined : selectedProviderProfiles(selection);
     const chosen = selected?.profiles ?? this.profiles;
     const pinLocalExecution = this.newProjectLocalExecution && (this.newProjectLocalExecutionFor === "all"
@@ -121,6 +123,7 @@ export class ProductionService {
         ...(planMode === "code" ? { planMode } : {}),
       };
       this.store.createProject(project);
+      if (ceilingMicros !== undefined) this.store.put("code_plan_settings", project.id, project.id, { ceilingMicros });
       this.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles,
         recipeDigest: RECIPE_DIGEST, stageContractsDigest: STAGE_CONTRACTS_DIGEST, tools: TOOL_NAMES,
         ...(selected ? { providerSelection: selected.provenance } : {}),

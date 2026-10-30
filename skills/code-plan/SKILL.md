@@ -14,8 +14,9 @@ If no edit is needed, reply without submitting. The turn's terminal state releas
 
 All effects go through ctx. Await every ctx call, including declarations and logging; await Promise.all when running media concurrently.
 `scene(declaration)` and `shot(declaration)` accept bounded JSON objects, return those objects, and declare storyboard rows for this pass.
-`image({model?, prompt, variant?, ...parameters})` returns a media result. `video({model?, firstFrame, prompt, durationSeconds?, aspectRatio?, variant?, ...parameters})` does the same for clips.
-`speech({model?, text, voice?, instructions?, variant?})` returns a media result for a spoken line; real speech defaults to the stock voice coral and empty instructions.
+`image({model?, prompt, shot?, variant?, ...parameters})` returns a media result. `video({model?, firstFrame, prompt, durationSeconds?, aspectRatio?, shot?, variant?, ...parameters})` does the same for clips.
+`speech({model?, text, voice?, instructions?, shot?, variant?})` returns a media result for a spoken line; real speech defaults to the stock voice coral and empty instructions.
+Always pass `shot: id` on media calls belonging to a declared shot, including retries and every keyframe option. The annotation is a string of 1–120 characters, exposed as `shotId` in read_film. It is display metadata, stripped before step identity, pricing and provider input: adding or changing it in an existing plan is free and reuses the same media. It records the latest pass that reached that step. Older unannotated plans can link their frames and clips through a stable `<shotId>-keyframe` choice. Finished clips/renders may include a locally derived first-frame `poster` in read_film; poster work is free and consumes no media step.
 `render(timeline)` or `render({model?: "local-render", timeline, audio?, width?, height?})` returns local assembly.
 For real projects, timeline contains video artifacts or `{artifact, startFrame?, durationFrames?, fit?: "contain" | "cover"}` rows; audio contains `{artifact, startSample?, durationSamples?, atSample?, gainMilliDb?}` placements.
 Only cuts, 30 fps, 48 kHz, up to 64 clips, 65 audio placements, eight simultaneous audio lanes and 360 seconds are supported. Frames/samples are integers. An audio placement must fit inside the picture; trim it explicitly when needed.
@@ -38,7 +39,7 @@ Keep choice IDs stable, including across refactors. A changed options digest ask
 Leave prompts byte-identical when not changing them: every byte change is a new paid step.
 Keep input objects JSON-only. Never put secrets or file paths in code. No imports, files, environment, network, shell or process access is available.
 The native Director workspace is read-only: author source in the tool argument, never by writing files.
-New paid work pauses during human turns; in-flight work continues. The $1 ceiling and 200-step bound are circuit breakers, not approval requests.
+New paid work pauses during human turns; in-flight work continues. The film's stored ceiling (default $1, visible in read_film even before its first plan) and 200-step bound are circuit breakers, not approval requests.
 For repair turns, use the supplied failed version, message and stack, read the current film again, and submit only against its current version.
 
 Failures and consent:
