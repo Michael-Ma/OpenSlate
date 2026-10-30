@@ -13,6 +13,9 @@ export const CODE_PLAN_CEILING_PATH = "/code-plan/ceiling";
 /** POST CodePlanSourceInput → CodePlanReceipt with the diff (Idempotency-Key). */
 export const CODE_PLAN_SOURCE_PATH = "/code-plan/source";
 
+/** POST {} → CodePlanReceipt (Idempotency-Key): a new attempt for a failed step, with the person's consent (card N1). */
+export const codePlanStepRetryPath = (stepKey: string): string => `/code-plan/steps/${encodeURIComponent(stepKey)}/retry`;
+
 /** GET → CodePlanSourceView. */
 export const codePlanVersionPath = (version: number): string => `/code-plan/versions/${encodeURIComponent(String(version))}`;
 

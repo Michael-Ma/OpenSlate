@@ -13,6 +13,7 @@ import { RecoveryReview } from "./RecoveryReview.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { Toast } from "./Toast.tsx";
 import { useNarrow } from "./useNarrow.ts";
+import { useDeveloperMode } from "./useDeveloperMode.ts";
 import { useOffline } from "./useOffline.ts";
 import { WriteGuardContext } from "./useWriteGuard.ts";
 import { DirectorColumn } from "../director/DirectorColumn.tsx";
@@ -83,6 +84,9 @@ export function NextApp({ onReconnect, onDisconnected, carried = null, onCarried
   const directorOpen = useStudio((s) => s.directorOpen);
   const overview = useStudio((s) => s.overview);
   const codePlan = useStudio(codePlanOpen);
+  // Without developer mode a code film has no Code tab; a remembered or linked ?view=code shows Plan.
+  const developer = useDeveloperMode();
+  useEffect(() => { if (codePlan && view === "code" && !developer) store.setView("plan"); }, [codePlan, view, developer, store]);
   const narrow = useNarrow();
   const drawer = narrow && directorOpen;
   const { offline, check } = useOffline(store, connection === "reconnecting");
@@ -224,7 +228,7 @@ export function NextApp({ onReconnect, onDisconnected, carried = null, onCarried
 
   // A code-plan film shows its run in Plan, Keyframes and Film, and its program in Code; every other view is shared.
   const workspace = showReview ? <RecoveryReview onPutAway={lookAround} />
-    : codePlan && view === "plan" ? <CodePlanPlanView />
+    : codePlan && (view === "plan" || (view === "code" && !developer)) ? <CodePlanPlanView />
     : codePlan && view === "keyframes" ? <CodePlanKeyframesView />
     : codePlan && view === "film" ? <CodePlanFilmView />
     : codePlan && view === "code" ? <CodePlanCodeView />

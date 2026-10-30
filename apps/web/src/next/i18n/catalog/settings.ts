@@ -238,6 +238,8 @@ export const settingsMessages = {
   "set.computer.ffmpeg_unchecked": { en: "Checked once a video or audio model that needs it is installed. Importing media and exporting the film use it.", zh: "安装了需要它的视频或音频模型后才会检查。导入素材和导出影片会用到它。" },
   "set.computer.used_for": { en: "Used by {jobs}", zh: "用于{jobs}" },
   "set.computer.keys_note": { en: "Keys stay on this computer and are read when OpenSlate starts. To add one, put it in `.env.live.local` and run `./start.sh --restart`. `./start.sh --doctor` explains what is missing without calling any provider.", zh: "密钥只保存在本机，OpenSlate 启动时读取。要添加密钥，请写进 `.env.live.local` 并运行 `./start.sh --restart`。`./start.sh --doctor` 会说明缺什么，不会调用任何服务商。" },
+  "set.developer.title": { en: "Developer mode", zh: "开发者模式" },
+  "set.developer.note": { en: "Show the program behind code-plan films (the Code tab). Saved in this browser.", zh: "显示代码计划影片背后的程序（“代码”标签页）。保存在这个浏览器里。" },
   "set.computer.demo_only": { en: "No paid models are installed on this computer, so only the free stand-ins run.", zh: "本机没有安装付费模型，只能使用免费替身。" },
   "set.toast.checked": { en: "Checked this computer.", zh: "已检查本机。" },
   "set.toast.check_busy": { en: "Checked the keys. Codex wasn't checked because the Director is busy; check again when its turn ends.", zh: "已检查密钥。导演正在忙，没有检查 Codex；等它这一轮结束后再检查。" },

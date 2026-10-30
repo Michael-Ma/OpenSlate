@@ -1,14 +1,16 @@
 import type { CodePlanView } from "@openslate/core/public";
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { numberLocale } from "../i18n/translate.ts";
 import { Picture } from "../keyframes/parts.tsx";
 import { useArtifactUrl } from "../media/useArtifactUrl.ts";
+import { MediaViewer, type ViewerItem } from "../media/Viewer.tsx";
 import { artifactRefOf, declaredPlan, latestRender, stepRow, stepRows, type DeclaredShot, type StepRow } from "../model/code-plan.ts";
 import { CodePlanMedia, useMode } from "../store/react.tsx";
 import { Thumb } from "../views/plan/ShotRow.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
-import { StepCard, StepStatus, ViewHead, ViewMessage, stepLabel } from "./parts.tsx";
+import { useDeveloperMode } from "../app/useDeveloperMode.ts";
+import { StepCard, StepProblemNote, StepStatus, ViewHead, ViewMessage, stepLabel, stepStatus } from "./parts.tsx";
 import "../views/plan/plan.css";
 import "./codeplan.css";
 
@@ -32,6 +34,7 @@ function useNotReady(): ReactNode | null {
 /** Plan in a code-plan film: the scenes and shots the latest pass declared (`ctx.scene`, `ctx.shot`), read only. */
 export function CodePlanPlanView() {
   const { t } = useI18n();
+  const developer = useDeveloperMode();
   const { view } = useCodePlan();
   const waiting = useNotReady();
   const plan = useMemo(() => (view ? declaredPlan(view) : null), [view]);
@@ -42,7 +45,7 @@ export function CodePlanPlanView() {
       <ViewHead title={t("plan.title")} line={line} />
       {waiting ?? (plan && (
         <CodePlanMedia>
-          <p className="cp-lead">{t("codeplan.plan.note")}</p>
+          <p className="cp-lead">{t(developer ? "codeplan.plan.note" : "codeplan.plan.note_plain")}</p>
           {/* Before the first pass ends, an empty list only means the run has not reached the declarations yet. */}
           {!plan.scenes.length && !plan.loose.length ? <ViewMessage title={t(view?.lastPassAt ? "codeplan.plan.no_rows" : "codeplan.plan.first_pass")} /> : null}
           <div className="scenes">
@@ -91,39 +94,48 @@ function DeclaredShotRow({ shot }: { shot: DeclaredShot }) {
 
 /** Keyframes in a code-plan film: every image step, the ones the current plan reaches first; the rest as history. */
 export function CodePlanKeyframesView() {
-  const { t, locale } = useI18n();
+  const { t, tm, locale } = useI18n();
   const { view } = useCodePlan();
   const waiting = useNotReady();
   const rows = useMemo(() => (view ? stepRows(view, ["image"], numberLocale(locale)) : null), [view, locale]);
   const count = rows ? rows.current.length + rows.history.length : 0;
   const made = rows ? [...rows.current, ...rows.history].filter((row) => row.state === "succeeded").length : 0;
+  // Every made frame, current then history, opens in one viewer that steps through them.
+  const pictures = useMemo(() => (rows ? viewerItems([...rows.current, ...rows.history], t, tm) : []), [rows, t, tm]);
+  const [viewing, setViewing] = useState<number | null>(null);
   return (
     <main className="work plan cp-view cp-keyframes" data-view="keyframes" data-code-plan="true">
       <ViewHead title={t("shell.tab.keyframes")} line={rows && !waiting ? t("codeplan.keyframes.line", { count, made }) : null} />
       {waiting ?? (rows && (
         <CodePlanMedia>
           {!count ? <ViewMessage title={t("codeplan.keyframes.empty")} /> : null}
-          <StepGroups rows={rows} />
+          <StepGroups rows={rows} onOpen={(key) => setViewing(Math.max(0, pictures.findIndex((item) => item.key === key)))} />
+          {viewing !== null && pictures.length ? <MediaViewer items={pictures} start={viewing} onClose={() => setViewing(null)} /> : null}
         </CodePlanMedia>
       ))}
     </main>
   );
 }
 
-function StepGroups({ rows, still = true }: { rows: { current: StepRow[]; history: StepRow[] }; still?: boolean }) {
+/** Made steps with media, for the viewer: the label as its title, its model and status underneath. */
+export function viewerItems(rows: StepRow[], t: ReturnType<typeof useI18n>["t"], tm: ReturnType<typeof useI18n>["tm"]): ViewerItem[] {
+  return rows.flatMap((row) => (row.artifact ? [{ key: row.key, artifact: row.artifact, title: stepLabel(row, t), detail: [row.model, tm(row.status)].filter(Boolean).join(" · ") }] : []));
+}
+
+function StepGroups({ rows, still = true, onOpen }: { rows: { current: StepRow[]; history: StepRow[] }; still?: boolean; onOpen?: ((key: string) => void) | undefined }) {
   const { t } = useI18n();
   return (
     <>
       {rows.current.length ? (
         <section className="cp-group" aria-label={t("codeplan.steps.current")}>
-          <ul className="cp-steps">{rows.current.map((row) => <StepCard key={row.key} row={row} still={still} />)}</ul>
+          <ul className="cp-steps">{rows.current.map((row) => <StepCard key={row.key} row={row} still={still} onOpen={onOpen && row.artifact ? () => onOpen(row.key) : undefined} />)}</ul>
         </section>
       ) : null}
       {rows.history.length ? (
         <section className="cp-group history" aria-label={t("codeplan.steps.history")}>
           <h2 className="cp-group-title">{t("codeplan.steps.history")}</h2>
           <p className="cp-hint">{t("codeplan.steps.history_hint")}</p>
-          <ul className="cp-steps">{rows.history.map((row) => <StepCard key={row.key} row={row} still={still} />)}</ul>
+          <ul className="cp-steps">{rows.history.map((row) => <StepCard key={row.key} row={row} still={still} onOpen={onOpen && row.artifact ? () => onOpen(row.key) : undefined} />)}</ul>
         </section>
       ) : null}
     </>
@@ -181,10 +193,11 @@ function StepList({ rows }: { rows: StepRow[] }) {
     <ul className="cp-rows">
       {rows.map((row) => (
         <li key={row.key} className={`cp-row${row.reached ? "" : " history"}`} data-step={row.key} data-state={row.state} data-reached={row.reached ? "true" : "false"}>
-          <StepStatus status={row.error ? { id: "codeplan.step.failed_code", values: { code: row.error } } : row.status} tone={row.tone} />
+          <StepStatus status={stepStatus(row)} tone={row.tone} title={row.error ?? undefined} />
           <span className="cp-row-label" title={stepLabel(row, t)}>{stepLabel(row, t)}</span>
           {row.model ? <span className="cp-step-model">{row.model}</span> : null}
           {row.price ? <span className="cp-price">{tm(row.price)}</span> : null}
+          <StepProblemNote row={row} />
         </li>
       ))}
     </ul>

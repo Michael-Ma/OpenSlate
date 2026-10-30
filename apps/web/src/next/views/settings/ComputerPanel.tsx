@@ -9,6 +9,7 @@ import { msg } from "../../model/types.ts";
 import { useStore } from "../../store/react.tsx";
 import type { Resource } from "../../store/useResource.ts";
 import { CodeText, Panel, ReadState } from "./parts.tsx";
+import { setDeveloperMode, useDeveloperMode } from "../../app/useDeveloperMode.ts";
 
 const codeOf = (error: unknown): string => (error instanceof ApiError ? error.code : "NETWORK_ERROR");
 
@@ -77,6 +78,23 @@ export function ComputerPanel({ providers, setup, hasFilm, offline }: { provider
           <div className="impact keys-note"><span className="ic" aria-hidden="true">i</span><span><CodeText text={t("set.computer.keys_note")} /></span></div>
         </>
       ) : <ReadState error={providers.error} onRetry={providers.reload} />}
+      <DeveloperRow />
     </Panel>
+  );
+}
+
+/** Developer mode: a browser preference that shows code-plan films' programs (the Code tab). Works offline too. */
+function DeveloperRow() {
+  const { t } = useI18n();
+  const on = useDeveloperMode();
+  return (
+    <div className="srow developer-row" data-row="developer">
+      <div className="txt">
+        <b id="set-developer">{t("set.developer.title")}</b>
+        <span id="set-developer-d">{t("set.developer.note")}</span>
+      </div>
+      <button type="button" className="switch" role="switch" data-act="developer-toggle" aria-checked={on}
+        aria-labelledby="set-developer" aria-describedby="set-developer-d" onClick={() => setDeveloperMode(!on)} />
+    </div>
   );
 }

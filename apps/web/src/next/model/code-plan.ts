@@ -210,6 +210,11 @@ export function ceilingPress(view: Pick<CodePlanView, "ceilingMicros">, body: Co
   return { pressId: CEILING_PRESS, logical: { from: view.ceilingMicros, to: body.ceilingMicros }, body };
 }
 
+/** Retrying this step from its current attempt; a second press before the studio answers resends the same request. */
+export function retryPress(step: Pick<StepRow, "key" | "attempts">): { pressId: string; logical: unknown } {
+  return { pressId: `codeplan:retry:${step.key}`, logical: { stepKey: step.key, attempt: step.attempts } };
+}
+
 export const SOURCE_PRESS = "codeplan:source";
 
 /** FNV-1a, hex: a short stand-in for the source in the press's logical identity (the body keeps the whole source). */
@@ -240,7 +245,26 @@ export interface StepRow {
   /** An answered choice picked this step's output. */
   chosen: boolean;
   error: string | null;
+  /** A failed step (or one whose answer never came): what happened, in plain words, and what a retry would mean. */
+  problem: StepProblem | null;
+  /** Attempts so far, retries included (1 when the studio does not say). */
+  attempts: number;
   updatedAt: string;
+}
+
+export type ProblemCause = "lost" | "refused" | "key" | "busy" | "timeout" | "media" | "input" | "limit" | "other";
+
+export interface StepProblem {
+  cause: ProblemCause;
+  /** What happened. */
+  what: Msg;
+  /** "It may already have cost $0.10", when the vendor may have charged. */
+  cost: Msg | null;
+  /** The step's price as money ("$0.10"), for the retry confirm; null when it has none. */
+  price: string | null;
+  /** What a retry means: free of double charges ("safe"), may charge again ("consent"), or will not help ("none"). */
+  retry: "safe" | "consent" | "none";
+  retryNote: Msg;
 }
 
 const STEP_STATUS: Record<CodePlanStepState, Msg> = {
@@ -251,6 +275,68 @@ const STEP_STATUS: Record<CodePlanStepState, Msg> = {
   failed: msg("codeplan.step.failed"),
   cancelled: msg("codeplan.step.cancelled"),
 };
+
+/** A step the person must see: it failed, or the run stopped waiting for the service's answer. */
+export const needsAttention = (step: Pick<CodePlanStepView, "state" | "error" | "reached">): boolean =>
+  step.reached && (step.state === "failed" || (step.state === "unknown" && !!step.error));
+
+/** The tab that shows a step of this kind. */
+export const viewOfStep = (kind: CodePlanStepKind): "keyframes" | "film" => (kind === "image" ? "keyframes" : "film");
+
+/** The tabs holding a step that needs the person (their red dot). */
+export function attentionViews(view: CodePlanView | null): Set<"keyframes" | "film"> {
+  return new Set((view?.steps ?? []).filter(needsAttention).map((step) => viewOfStep(step.kind)));
+}
+
+/** A code-plan step in "Needs attention": what failed, in plain words, and the tab that shows it. */
+export interface CodePlanAttentionItem { key: string; view: "keyframes" | "film"; badge: Msg; title: Msg; detail: Msg }
+
+export function codePlanAttentionItems(view: CodePlanView | null, locale: string): CodePlanAttentionItem[] {
+  return (view?.steps ?? []).filter(needsAttention).map((step) => {
+    const kind = step.kind === "image" ? "image" : step.kind === "render" ? "render" : "clip";
+    const label = text(step.label, 60);
+    const problem = stepProblem(step, locale);
+    return {
+      key: step.key, view: viewOfStep(step.kind), badge: msg(`codeplan.attention.badge_${kind}`),
+      title: kind === "render" ? msg("codeplan.attention.title_render") : msg(`codeplan.attention.title_${kind}`, { label }),
+      detail: problem?.what ?? msg("codeplan.problem.other", { code: step.error?.code ?? "?" }),
+    };
+  });
+}
+
+/** Codes are the vendors' and the runtime's own; their words decide the cause, never the exact spelling. */
+export function problemCause(code: string | null | undefined, state: CodePlanStepState): ProblemCause {
+  const value = (code ?? "").toUpperCase();
+  const has = (...parts: string[]) => parts.some((part) => value.includes(part));
+  if (!value) return state === "unknown" ? "lost" : "other";
+  if (has("RESPONSE_LOST", "RESPONSE_LOSS", "TRANSPORT", "NO_ANSWER")) return "lost";
+  if (has("MODERAT", "CONTENT", "SAFETY", "POLICY", "REFUS", "FACE")) return "refused";
+  if (has("CREDENTIAL", "AUTH", "UNAUTHORIZED", "FORBIDDEN", "API_KEY")) return "key";
+  if (has("RATE", "QUOTA", "429", "BUSY", "OVERLOAD")) return "busy";
+  if (has("TIMEOUT", "TIMED_OUT", "EXPIRED")) return "timeout";
+  if (has("CEILING", "BUDGET", "LIMIT")) return "limit";
+  if (has("MEDIA", "INGEST", "PROBE", "DOWNLOAD", "DECODE")) return "media";
+  if (has("INPUT", "INVALID", "UNSUPPORTED", "VALIDATION")) return "input";
+  return "other";
+}
+
+/** The plain account of a failed step; the runtime's own facts (N1) win over what the cause suggests. */
+export function stepProblem(step: CodePlanStepView, locale: string): StepProblem | null {
+  if (!(step.state === "failed" || (step.state === "unknown" && step.error))) return null;
+  const code = step.error?.code ?? null;
+  const cause = problemCause(code, step.state);
+  const retry = step.error?.retry ?? (cause === "refused" || cause === "input" || cause === "limit" ? "none" : "consent");
+  const charged = step.error?.mayHaveCharged ?? cause === "lost";
+  const price = micros(step.priceMicros);
+  return {
+    cause,
+    what: cause === "other" ? msg("codeplan.problem.other", { code: code ?? "?" }) : msg(`codeplan.problem.${cause}`),
+    cost: charged && price > 0n ? msg("codeplan.problem.charged", { price: formatMicros(String(price), locale) }) : null,
+    price: price > 0n ? formatMicros(String(price), locale) : null,
+    retry,
+    retryNote: msg(`codeplan.problem.retry_${retry}`),
+  };
+}
 
 /** The artifact ids an answered choice picked. */
 export function chosenArtifacts(view: CodePlanView): Set<string> {
@@ -276,6 +362,8 @@ export function stepRow(step: CodePlanStepView, view: CodePlanView, locale: stri
     price: price > 0n ? msg("codeplan.step.price", { price: formatMicros(String(price), locale) }) : null,
     artifact, reached: step.reached, chosen: !!artifact && chosen.has(artifact.artifactId),
     error: step.state === "failed" ? text(step.error?.code, 120) || null : null,
+    problem: step.reached ? stepProblem(step, locale) : null,
+    attempts: Number.isSafeInteger(step.attempts) && step.attempts! > 0 ? step.attempts! : 1,
     updatedAt: step.updatedAt,
   };
 }

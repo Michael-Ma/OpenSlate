@@ -19,12 +19,14 @@ import type { FixtureRoute } from "./types.ts";
  * - `budget`: both frames chosen; 1.2's clip would pass the $1 ceiling, so the run is paused (Raise the limit).
  * - `error`: version 3 threw after the first clip; the error is shown and the run stopped.
  * - `done`: everything made, the render plays in Film.
+ * - `failed`: 1.2's clip was sent but the service never answered (SUBMISSION_RESPONSE_LOST, may have been charged);
+ *   the run stopped with a failure. Retry (after its confirm) makes the clip again and the film renders.
  * - `empty`: no plan yet; a message to the Director writes version 1.
  * A film made in Start as a code plan starts empty the same way. Choosing a frame, raising the limit and a message to
  * the Director move the run on, as the server would. The Last Ferry (a graph film) refuses these routes.
  */
 
-export type CodePlanPreset = "waiting" | "budget" | "error" | "done" | "empty";
+export type CodePlanPreset = "waiting" | "budget" | "error" | "done" | "failed" | "empty";
 export const CODE_FILM_ID = "harbour-code";
 export const CODE_FILM_NAME = "Harbour lights";
 /** Simulated provider time for one stage of the run. */
@@ -35,13 +37,13 @@ export function codePlanPreset(): CodePlanPreset | null {
   try { value = new URLSearchParams(globalThis.location?.search ?? "").get("codeplan"); } catch { return null; }
   if (value === null) return null;
   if (value === "" || value === "on") return "waiting";
-  return (["waiting", "budget", "error", "done", "empty"] as const).find((preset) => preset === value) ?? "waiting";
+  return (["waiting", "budget", "error", "done", "failed", "empty"] as const).find((preset) => preset === value) ?? "waiting";
 }
 
 // ---- the story's pieces ------------------------------------------------------------------------
 
 /** Where the run is. The main path runs top to bottom; error branches off after the first clip, and its fix rejoins. */
-type Stage = "empty" | "making_open" | "waiting" | "making_1_2" | "choose_1_2" | "budget" | "making_clip" | "rendering" | "done" | "error" | "fixed_making";
+type Stage = "empty" | "making_open" | "waiting" | "making_1_2" | "choose_1_2" | "budget" | "making_clip" | "rendering" | "done" | "error" | "fixed_making" | "clip_failed";
 
 const IMAGE_MODEL = "flux-schnell", VIDEO_MODEL = "kling-2.1", IMAGE_MICROS = "40000", VIDEO_MICROS = "450000";
 /** What the 1.2 clip would bring the spend to: $0.81 spent, $0.45 more. */
@@ -76,6 +78,8 @@ interface CodeFilm {
   held: boolean;
   /** When each step reached its state (the view's updatedAt), so history sorts like a real journal. */
   stamps: Map<string, string>;
+  /** Attempts made for 1.2's clip: a retry after the lost answer is the second. */
+  pierAttempts: number;
 }
 
 /** A time today, never later than a few minutes ago (early in the morning, "10:31" has not happened yet). */
@@ -157,10 +161,10 @@ function addVersion(film: CodeFilm, draft: Draft, at: [number, number] | null = 
   film.current = version;
 }
 
-const PRESET_STAGE: Record<CodePlanPreset, Stage> = { waiting: "waiting", budget: "budget", error: "error", done: "done", empty: "empty" };
+const PRESET_STAGE: Record<CodePlanPreset, Stage> = { waiting: "waiting", budget: "budget", error: "error", done: "done", failed: "clip_failed", empty: "empty" };
 
 function newFilm(preset: CodePlanPreset): CodeFilm {
-  const film: CodeFilm = { stage: PRESET_STAGE[preset], versions: [], sources: new Map(), current: null, history: preset !== "empty", ceilingMicros: preset === "done" ? "2000000" : "1000000", pickOpen: 0, pickPier: 1, held: false, stamps: new Map() };
+  const film: CodeFilm = { stage: PRESET_STAGE[preset], versions: [], sources: new Map(), current: null, history: preset !== "empty", ceilingMicros: preset === "done" || preset === "failed" ? "2000000" : "1000000", pickOpen: 0, pickPier: 1, held: false, stamps: new Map(), pierAttempts: 1 };
   if (preset !== "empty") { addVersion(film, "terminal", [10, 31]); addVersion(film, "harbour", [10, 36]); }
   if (preset === "error") addVersion(film, "bug", [10, 41]);
   return film;
@@ -168,21 +172,22 @@ function newFilm(preset: CodePlanPreset): CodeFilm {
 
 // ---- the view of a stage --------------------------------------------------------------------
 
-const ONE_CHOSEN: readonly Stage[] = ["making_1_2", "choose_1_2", "budget", "making_clip", "rendering", "done", "error", "fixed_making"];
-const PIER_FRAMES: readonly Stage[] = ["making_1_2", "fixed_making", "choose_1_2", "budget", "making_clip", "rendering", "done"];
-const PIER_CHOSEN: readonly Stage[] = ["budget", "making_clip", "rendering", "done"];
+const ONE_CHOSEN: readonly Stage[] = ["making_1_2", "choose_1_2", "budget", "making_clip", "rendering", "done", "error", "fixed_making", "clip_failed"];
+const PIER_FRAMES: readonly Stage[] = ["making_1_2", "fixed_making", "choose_1_2", "budget", "making_clip", "rendering", "done", "clip_failed"];
+const PIER_CHOSEN: readonly Stage[] = ["budget", "making_clip", "rendering", "done", "clip_failed"];
 const RUN_STATE: Record<Stage, CodePlanView["state"]> = {
   empty: "empty", making_open: "running", waiting: "waiting", making_1_2: "running", choose_1_2: "waiting", budget: "paused_budget",
-  making_clip: "running", rendering: "running", done: "done", error: "error", fixed_making: "running",
+  making_clip: "running", rendering: "running", done: "done", error: "error", fixed_making: "running", clip_failed: "done_with_failures",
 };
 
 function viewOf(film: CodeFilm, projectId: string): CodePlanView {
   const { stage } = film;
   const steps: CodePlanStepView[] = [];
-  const add = (key: string, kind: CodePlanStepKind, label: string, model: string, priceMicros: string, state: CodePlanStepState, reached: boolean, made?: StudioArtifactRef) => {
+  const add = (key: string, kind: CodePlanStepKind, label: string, model: string, priceMicros: string, state: CodePlanStepState, reached: boolean, made?: StudioArtifactRef,
+    extra: Pick<CodePlanStepView, "error" | "attempts"> = {}) => {
     const seen = film.stamps.get(`${key}:${state}`) ?? new Date().toISOString();
     film.stamps.set(`${key}:${state}`, seen);
-    steps.push({ key, kind, state, model, label, priceMicros, reached, updatedAt: seen, ...(state === "succeeded" && made ? { artifact: made } : {}) });
+    steps.push({ key, kind, state, model, label, priceMicros, reached, updatedAt: seen, ...(state === "succeeded" && made ? { artifact: made } : {}), ...extra });
   };
   const started = stage !== "empty";
   // Version 1's terminal frames: made before version 2 moved the opening to the harbour, now history.
@@ -193,7 +198,9 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
     const making = stage === "making_1_2" || stage === "fixed_making";
     FRAMES.pier.forEach((frame, index) => add(`img-pier-${index + 1}`, "image", PROMPT_PIER, IMAGE_MODEL, IMAGE_MICROS, making ? "in_flight" : "succeeded", true, frame));
   }
-  if (PIER_CHOSEN.includes(stage)) add("clip-pier", "video", "Slow push-in on Mara", VIDEO_MODEL, VIDEO_MICROS, stage === "budget" ? "absent" : stage === "making_clip" ? "in_flight" : "succeeded", true, CLIP_PIER);
+  if (PIER_CHOSEN.includes(stage)) add("clip-pier", "video", "Slow push-in on Mara", VIDEO_MODEL, VIDEO_MICROS,
+    stage === "budget" ? "absent" : stage === "making_clip" ? "in_flight" : stage === "clip_failed" ? "failed" : "succeeded", true, CLIP_PIER,
+    { attempts: film.pierAttempts, ...(stage === "clip_failed" ? { error: { code: "SUBMISSION_RESPONSE_LOST", mayHaveCharged: true, retry: "consent" as const } } : {}) });
   if (stage === "rendering" || stage === "done") add("render", "render", "Harbour lights · 2 clips", "ffmpeg", "0", stage === "rendering" ? "in_flight" : "succeeded", true, RENDER);
 
   const choices: CodePlanChoiceView[] = [];
@@ -226,7 +233,7 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
     steps,
     choices,
     versions: film.versions.slice(0, 50),
-    logs: ONE_CHOSEN.includes(stage) ? ["1.1: frame chosen", ...(stage === "rendering" || stage === "done" ? ["Rendering 2 clips"] : [])] : [],
+    logs: ONE_CHOSEN.includes(stage) ? ["1.1: frame chosen", ...(stage === "clip_failed" ? ["1.2: the clip failed (SUBMISSION_RESPONSE_LOST); stopping"] : []), ...(stage === "rendering" || stage === "done" ? ["Rendering 2 clips"] : [])] : [],
     lastPassAt: started ? new Date().toISOString() : null,
   };
 }
@@ -370,6 +377,18 @@ export const codePlanRoutes: FixtureRoute[] = [
       film.ceilingMicros = next;
       if (film.stage === "budget" && BigInt(next) >= NEEDED_FOR_PIER_CLIP) moveTo(world, id!, "making_clip");
       else bumpFilmCursor(world, id!);
+      return receipt(world, id!);
+    },
+  },
+  {
+    method: "POST",
+    match: own("/steps/([^/]+)/retry"),
+    handle(world, [id, key]) {
+      const film = filmOf(world, id);
+      // Only 1.2's lost clip can be retried here: a new attempt, the first one's possible charge kept.
+      if (film.stage !== "clip_failed" || decodeURIComponent(key ?? "") !== "clip-pier") throw new ApiError("CODE_PLAN_RETRY", 409);
+      film.pierAttempts += 1;
+      moveTo(world, id!, "making_clip");
       return receipt(world, id!);
     },
   },

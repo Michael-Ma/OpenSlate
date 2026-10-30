@@ -41,7 +41,9 @@
 .cp-options.media{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
 .cp-thumb{position:relative;display:flex;flex-direction:column;gap:4px;padding:0;border:0;background:none;text-align:left;color:var(--text);min-width:0}
 .cp-thumb-pic{position:relative;display:block;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:var(--track);border:1px solid var(--hairline)}
-.cp-thumb-pic .pic-img,.cp-thumb-pic .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.cp-thumb-pic .pic-img,.cp-thumb-pic .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.cp-thumb{cursor:zoom-in}
+.cp-thumb-pic{background:#0b0c0d}
 .cp-thumb:hover:not(:disabled) .cp-thumb-pic{border-color:var(--text-2)}
 .cp-thumb:focus-visible{outline:none}
 .cp-thumb:focus-visible .cp-thumb-pic{outline:2px solid var(--focus);outline-offset:2px}
@@ -64,7 +66,7 @@ dialog.cp-compare::backdrop{background:rgba(8,9,10,.62)}
 .cp-compare-head h2{margin:0;font-size:16px;font-weight:700;letter-spacing:-.01em;line-height:1.35}
 .cp-compare-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:14px}
 .cp-compare-item{margin:0;display:flex;flex-direction:column;gap:8px;min-width:0}
-.cp-compare-pic{position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--track);border:1px solid var(--hairline)}
+.cp-compare-pic{position:relative;aspect-ratio:16/9;max-height:70vh;border-radius:10px;overflow:hidden;background:var(--track);border:1px solid var(--hairline)}
 .cp-compare-pic .pic-img,.cp-compare-pic .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
 .cp-compare-item.chosen .cp-compare-pic{border:2px solid var(--select)}
 .cp-compare-item figcaption{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:30px}
@@ -93,7 +95,11 @@ dialog.cp-compare::backdrop{background:rgba(8,9,10,.62)}
 .cp-step.history{opacity:.55}
 .cp-step.history:hover,.cp-step.history:focus-within{opacity:.85}
 .cp-step-pic{position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--surface-stripe)}
-.cp-step-pic .pic-img,.cp-step-pic .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.cp-step-pic .pic-img,.cp-step-pic .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+/* A made picture opens larger: the whole box is the button, shaped like the picture (inline aspect-ratio). */
+button.cp-step-pic{display:block;width:100%;padding:0;border:0;font:inherit;color:inherit;cursor:zoom-in;background:#0b0c0d;max-height:420px}
+button.cp-step-pic:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+button.cp-step-pic:hover .pic-img{filter:brightness(1.06)}
 .cp-step-wait{position:absolute;inset:0;display:grid;place-items:center;padding:10px;text-align:center;color:var(--muted);font-size:12px;border:1.5px dashed var(--track);border-radius:10px}
 .cp-step[data-state="in_flight"] .cp-step-pic{background:repeating-linear-gradient(135deg,var(--surface) 0 14px,var(--surface-stripe) 14px 28px)}
 .cp-step[data-state="in_flight"] .cp-step-wait{border-style:solid;border-color:transparent}
@@ -178,3 +184,11 @@ dialog.cp-compare::backdrop{background:rgba(8,9,10,.62)}
 @media (prefers-reduced-motion: reduce){
   .cp-spin{animation:none;border-top-color:var(--text-2)}
 }
+
+/* A failed step in plain words, under its card or row; Retry when it can help */
+.cp-problem{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:2px;padding:8px 10px;border:1px solid var(--amber-line);background:var(--amber-surface);border-radius:10px;font-size:12px;line-height:1.45;color:var(--text)}
+.cp-problem p{margin:0}
+.cp-problem .cp-problem-retry{color:var(--text-2)}
+.cp-problem .pill{margin-top:4px}
+.cp-row .cp-problem{grid-column:1 / -1}
+dialog.cp-retry-dialog .foot{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap}
