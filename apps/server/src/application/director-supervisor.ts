@@ -6,6 +6,7 @@ import type { ProductionService } from "./service.js";
 import { ToolInvocationService } from "./tool-invocations.js";
 import { directorInputDigest } from "./director-input-identity.js";
 import { safeNativeDiagnostic } from "./native-diagnostics.js";
+import { holdCodePlanRequest, releaseCodePlanRequest } from "../code-plan/director.js";
 
 export type TurnState = "queued" | "running" | "completed" | "waiting_user" | "interrupted" | "unknown" | "failed";
 export interface DirectorTurn {
@@ -48,6 +49,7 @@ export class DirectorSupervisor {
     return this.service.store.transaction(() => {
       const existing = this.turns(projectId).find(turn => turn.requestId === human.requestId);
       if (existing) return existing;
+      holdCodePlanRequest(this.service, projectId, human.requestId);
       const timestamp = new Date(this.now()).toISOString();
       const turn: DirectorTurn = { id: newId(), projectId, requestId: human.requestId, runtimeId: this.runtime.id, state: "queued",
         createdAt: timestamp, updatedAt: timestamp, owner: null, leaseExpiresAt: 0, epochId: null,
@@ -115,6 +117,7 @@ export class DirectorSupervisor {
     this.save({ ...turn, state, errorCode, leaseExpiresAt: 0 });
     this.service.store.appendEvent(turn.projectId, "director.finished", { turnId: turn.id, requestId: turn.requestId, state, errorCode });
     this.service.releaseFinishedRequestHolds(turn.projectId, turn.requestId);
+    releaseCodePlanRequest(this.service, turn.projectId, turn.requestId);
   }
 
   /** Called on startup and periodically. A foreign owner retains its lease until expiry. */
@@ -130,6 +133,10 @@ export class DirectorSupervisor {
           if (turn.state !== "running") {
             // Reconcile saved terminal requests after restart or after a held proposal becomes stale.
             this.service.releaseFinishedRequestHolds(project.id, turn.requestId);
+            if (turn.state !== "queued") {
+              releaseCodePlanRequest(this.service, project.id, turn.requestId);
+              if (project.planMode === "code" && turn.epochId) new ToolInvocationService(this.service).reconcileEpoch(project.id, turn.epochId);
+            }
             continue;
           }
           const local = this.active.get(project.id);
@@ -275,7 +282,10 @@ export class DirectorSupervisor {
     }
   }
 
-  async settle(): Promise<void> { await Promise.all([...this.active.values()].map(active => active.done)); }
+  async settle(): Promise<void> {
+    await Promise.all([...this.active.values()].map(active => active.done));
+    await new ToolInvocationService(this.service).settleReconciliation();
+  }
   async close(): Promise<void> {
     this.closed = true;
     for (const [projectId, active] of this.active) {
