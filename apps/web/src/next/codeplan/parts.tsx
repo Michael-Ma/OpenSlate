@@ -15,10 +15,14 @@ export function StepStatus({ status, tone }: { status: Msg; tone: RunTone }) {
   );
 }
 
+/** A step's words: its prompt. A render has none of its own, so it is named for what it makes. */
+export const stepLabel = (row: StepRow, t: ReturnType<typeof useI18n>["t"]): string =>
+  row.label || t(row.kind === "render" ? "codeplan.step.render_label" : "codeplan.step.no_label");
+
 /** One media step as a card: its picture once made (the chosen one marked white), else what it is waiting for. */
 export function StepCard({ row, still = true }: { row: StepRow; still?: boolean }) {
   const { t, tm } = useI18n();
-  const label = row.label || t("codeplan.step.no_label");
+  const label = stepLabel(row, t);
   return (
     <li className={`cp-step${row.reached ? "" : " history"}${row.chosen ? " chosen" : ""}`} data-step={row.key} data-state={row.state} data-reached={row.reached ? "true" : "false"}>
       <div className="cp-step-pic">

@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { Picture } from "../keyframes/parts.tsx";
 import { answerPress, threadChoices, type ChoiceCard, type ChoiceOption } from "../model/code-plan.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
+import { Modal } from "../views/plan/Modal.tsx";
 import { CodePlanMedia, useStore, useStudio } from "../store/react.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
 import "./codeplan.css";
@@ -48,6 +49,7 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
   const unconfirmed = !card.answered && !sending && store.unconfirmed(pressId);
   const off = card.answered || sending || guard.disabled;
   const choose = (option: ChoiceOption) => { if (!off) void store.answerCodePlanChoice(card, option.value); };
+  const [comparing, setComparing] = useState(false);
   return (
     <section
       className={`cp-choice${card.answered ? " done" : ""}`}
@@ -88,9 +90,58 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
           );
         })}
       </div>
+      {card.media ? (
+        <button type="button" className="pill sm cp-compare-open" data-act="code-plan-compare" onClick={() => setComparing(true)}>
+          {t("codeplan.choice.compare")}
+        </button>
+      ) : null}
+      {comparing ? (
+        <ChoiceCompare card={card} off={off} offTitle={!card.answered && guard.disabled ? guard.title : undefined}
+          onChoose={(option) => { choose(option); setComparing(false); }} onClose={() => setComparing(false)} />
+      ) : null}
       {sending ? <p className="cp-choice-note" role="status">{t("codeplan.choice.sending")}</p> : null}
       {unconfirmed ? <p className="cp-choice-note" role="status" data-act="code-plan-unconfirmed">{t("codeplan.choice.unconfirmed")}</p> : null}
       {!card.answered && !sending && !unconfirmed ? <p className="cp-choice-note">{t("codeplan.choice.cost")}</p> : null}
     </section>
+  );
+}
+
+/**
+ * The options of a media choice side by side at a size that can be judged, since the thumbnails in the thread are
+ * too small to compare. Choosing here sends the same answer as the thumbnail and closes the dialog; an answered card
+ * opens it read only, its pick marked.
+ */
+function ChoiceCompare({ card, off, offTitle, onChoose, onClose }: {
+  card: ChoiceCard; off: boolean; offTitle: string | undefined; onChoose(option: ChoiceOption): void; onClose(): void;
+}) {
+  const { t } = useI18n();
+  const titleId = `cp-compare-${card.choiceId}`;
+  return (
+    <Modal className="cp-compare" labelledBy={titleId} onClose={onClose}>
+      <div className="cp-compare-head" data-modal-chrome>
+        <h2 id={titleId}>{card.question || t("codeplan.choice.eyebrow")}</h2>
+        <button type="button" className="pill sm" data-act="code-plan-compare-close" onClick={onClose}>{t("codeplan.choice.compare_close")}</button>
+      </div>
+      <div className="cp-compare-grid">
+        {card.options.map((option) => {
+          const name = optionName(option, t);
+          return (
+            <figure key={option.index} className={`cp-compare-item${option.chosen ? " chosen" : ""}`} data-option={option.index}>
+              <div className="cp-compare-pic">{option.artifact ? <Picture artifact={option.artifact} alt={name} /> : null}</div>
+              <figcaption>
+                <span className="cp-compare-name">{name}</span>
+                {option.chosen ? <span className="cp-chosen-mark static">✓ {t("codeplan.choice.chosen")}</span>
+                  : card.answered ? null : (
+                    <button type="button" className="pill sm primary" data-act="code-plan-choose" data-option={option.index}
+                      data-autofocus={option.index === 0 ? true : undefined} disabled={off} title={offTitle} onClick={() => onChoose(option)}>
+                      {t("codeplan.choice.choose", { option: name })}
+                    </button>
+                  )}
+              </figcaption>
+            </figure>
+          );
+        })}
+      </div>
+    </Modal>
   );
 }

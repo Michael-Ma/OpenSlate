@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { transformWithOxc } from '../../node_modules/vite/dist/node/index.js';
-import { answerPress, choiceCard, CEILING_PRESS, runStrip, threadChoices } from '../../src/next/model/code-plan.ts';
+import { answerPress, choiceCard, CEILING_PRESS, declaredPlan, runStrip, threadChoices } from '../../src/next/model/code-plan.ts';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
 
 /**
@@ -35,8 +35,11 @@ function store(pending = {}, unconfirmed = () => false) {
   };
 }
 
-async function choiceCards({ locale = 'en', guard = { disabled: false, title: undefined }, s = store(), codePlan = { view: null } } = {}) {
-  return load('ChoiceCards.tsx', ['CodePlanChoiceCard', 'CodePlanChoiceGroup', 'useCodePlanChoices'], {
+// The card's one piece of state is whether the comparison is open: `comparing` sets it, and setting it is recorded.
+async function choiceCards({ locale = 'en', guard = { disabled: false, title: undefined }, s = store(), codePlan = { view: null }, comparing = false } = {}) {
+  return load('ChoiceCards.tsx', ['CodePlanChoiceCard', 'CodePlanChoiceGroup', 'useCodePlanChoices', 'ChoiceCompare'], {
+    useState: (initial) => [comparing || initial, (value) => s.calls.push(['comparing', value])],
+    Modal: ({ className, labelledBy, children }) => React.createElement('dialog', { className, 'aria-labelledby': labelledBy, open: true }, children),
     useI18n: () => i18n(locale),
     Picture: ({ artifact, alt }) => React.createElement('img', { 'data-artifact': artifact.artifactId, alt }),
     answerPress, threadChoices,
@@ -156,4 +159,78 @@ test('an error is said plainly with the pass’s own message; an unreadable run 
   assert.match(unread, /data-act="code-plan-reload"/);
   const Nothing = await runStripComponent({ codePlan: { view: null } });
   assert.equal(renderToStaticMarkup(React.createElement(Nothing)), '');
+});
+
+const pressables = (tree) => {
+  const found = [];
+  const walk = (node) => { if (!node || typeof node !== 'object') return; if (Array.isArray(node)) { node.forEach(walk); return; } if (node.props?.['data-act']) found.push(node); walk(node.props?.children); };
+  walk(tree);
+  return found;
+};
+
+test('a media choice offers Compare larger (text choices do not); pressing it opens the comparison', async () => {
+  const s = store();
+  const { CodePlanChoiceCard } = await choiceCards({ s });
+  const compare = pressables(CodePlanChoiceCard({ card: choiceCard(frames) })).find((node) => node.props['data-act'] === 'code-plan-compare');
+  assert.ok(compare);
+  compare.props.onClick();
+  assert.deepEqual(s.calls, [['comparing', true]]);
+  const chips = renderToStaticMarkup(React.createElement(CodePlanChoiceCard, { card: choiceCard({ choiceId: 'tone', optionsDigest: 'd2', question: 'Which tone?', options: ['Warm', 'Cold'] }) }));
+  assert.doesNotMatch(chips, /Compare larger/);
+});
+
+test('the comparison shows each option large with its own Choose; choosing answers once and closes it', async () => {
+  const s = store();
+  const { CodePlanChoiceCard, ChoiceCompare } = await choiceCards({ s, comparing: true });
+  const card = choiceCard(frames);
+  const html = renderToStaticMarkup(React.createElement(CodePlanChoiceCard, { card }));
+  assert.match(html, /<dialog class="cp-compare" aria-labelledby="cp-compare-frame-1\.1" open="">/);
+  assert.match(html, /<h2 id="cp-compare-frame-1\.1">Which frame should 1\.1 start from\?<\/h2>/);
+  assert.equal((html.match(/class="cp-compare-item"/g) ?? []).length, 3);
+  assert.deepEqual([...html.matchAll(/class="pill sm primary"[^>]*>(Choose [^<]+)</g)].map((m) => m[1]), ['Choose Option 1', 'Choose Option 2', 'Choose Option 3']);
+  assert.equal((html.match(/data-autofocus="true"/g) ?? []).length, 1);
+  // Choosing in the dialog is the thumbnail's own answer, then the dialog closes.
+  const tree = CodePlanChoiceCard({ card });
+  let compare = null;
+  const walk = (node) => { if (!node || typeof node !== 'object') return; if (Array.isArray(node)) { node.forEach(walk); return; } if (node.type === ChoiceCompare) compare = node; walk(node.props?.children); };
+  walk(tree);
+  compare.props.onChoose(card.options[1]);
+  assert.deepEqual(s.calls, [['answer', 'frame-1.1', ref('a2')], ['comparing', false]]);
+  // Its Choose buttons carry each option.
+  const picks = [];
+  const buttons = pressables(ChoiceCompare({ card, off: false, offTitle: undefined, onChoose: (option) => picks.push(option.index), onClose() {} }))
+    .filter((node) => node.props['data-act'] === 'code-plan-choose');
+  buttons[2].props.onClick();
+  assert.deepEqual(picks, [2]);
+});
+
+test('an answered choice compares read only: its pick is marked and nothing can be chosen', async () => {
+  const { ChoiceCompare } = await choiceCards({ locale: 'zh-CN' });
+  const card = choiceCard({ ...frames, answer: ref('a3'), answeredAt: '2026-10-29T10:38:00Z' });
+  const html = renderToStaticMarkup(React.createElement(ChoiceCompare, { card, off: true, offTitle: undefined, onChoose() {}, onClose() {} }));
+  assert.equal((html.match(/class="cp-compare-item chosen"/g) ?? []).length, 1);
+  assert.match(html, /✓ 已选/);
+  assert.doesNotMatch(html, /data-act="code-plan-choose"/);
+  assert.match(html, /data-act="code-plan-compare-close"[^>]*>关闭/);
+});
+
+test('a render step is named "Film render", not "No prompt"; other unlabelled steps keep "No prompt"', async () => {
+  const { stepLabel } = await load('parts.tsx', ['stepLabel'], { useI18n: () => i18n('en') });
+  const t = i18n('en').t;
+  assert.equal(stepLabel({ kind: 'render', label: '' }, t), 'Film render');
+  assert.equal(stepLabel({ kind: 'image', label: '' }, t), 'No prompt');
+  assert.equal(stepLabel({ kind: 'render', label: 'Final cut' }, t), 'Final cut');
+  assert.equal(stepLabel({ kind: 'render', label: '' }, i18n('zh-CN').t), '影片渲染');
+});
+
+test('Plan before the first pass ends says the plan is running, not that it declares nothing', async () => {
+  const parts = await load('parts.tsx', ['ViewHead', 'ViewMessage', 'StepCard', 'StepStatus', 'stepLabel'], { useI18n: () => i18n('en') });
+  const plan = async (codePlan) => (await load('CodePlanViews.tsx', ['CodePlanPlanView'], {
+    useI18n: () => i18n('en'), useCodePlan: () => ({ error: null, loading: false, reload() {}, ...codePlan }), declaredPlan,
+    CodePlanMedia: ({ children }) => React.createElement('div', null, children), ...parts,
+  })).CodePlanPlanView;
+  const Running = await plan({ view: view({ planVersion: 1, state: 'running', lastPassAt: null }) });
+  assert.match(renderToStaticMarkup(React.createElement(Running)), /The plan is running\. Its scenes and shots appear when it reaches them\./);
+  const Empty = await plan({ view: view({ planVersion: 1, state: 'done', lastPassAt: '2026-10-29T22:45:40Z' }) });
+  assert.match(renderToStaticMarkup(React.createElement(Empty)), /This version declares no scenes or shots\./);
 });

@@ -8,7 +8,7 @@ import { artifactRefOf, declaredPlan, latestRender, stepRow, stepRows, type Decl
 import { CodePlanMedia, useMode } from "../store/react.tsx";
 import { Thumb } from "../views/plan/ShotRow.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
-import { StepCard, StepStatus, ViewHead, ViewMessage } from "./parts.tsx";
+import { StepCard, StepStatus, ViewHead, ViewMessage, stepLabel } from "./parts.tsx";
 import "../views/plan/plan.css";
 import "./codeplan.css";
 
@@ -43,7 +43,8 @@ export function CodePlanPlanView() {
       {waiting ?? (plan && (
         <CodePlanMedia>
           <p className="cp-lead">{t("codeplan.plan.note")}</p>
-          {!plan.scenes.length && !plan.loose.length ? <ViewMessage title={t("codeplan.plan.no_rows")} /> : null}
+          {/* Before the first pass ends, an empty list only means the run has not reached the declarations yet. */}
+          {!plan.scenes.length && !plan.loose.length ? <ViewMessage title={t(view?.lastPassAt ? "codeplan.plan.no_rows" : "codeplan.plan.first_pass")} /> : null}
           <div className="scenes">
             {plan.scenes.map((scene) => (
               <section key={scene.key} className="scene panel" data-scene={scene.key} aria-label={scene.title || t("codeplan.plan.scene", { n: scene.ordinal })}>
@@ -181,7 +182,7 @@ function StepList({ rows }: { rows: StepRow[] }) {
       {rows.map((row) => (
         <li key={row.key} className={`cp-row${row.reached ? "" : " history"}`} data-step={row.key} data-state={row.state} data-reached={row.reached ? "true" : "false"}>
           <StepStatus status={row.error ? { id: "codeplan.step.failed_code", values: { code: row.error } } : row.status} tone={row.tone} />
-          <span className="cp-row-label" title={row.label}>{row.label || t("codeplan.step.no_label")}</span>
+          <span className="cp-row-label" title={stepLabel(row, t)}>{stepLabel(row, t)}</span>
           {row.model ? <span className="cp-step-model">{row.model}</span> : null}
           {row.price ? <span className="cp-price">{tm(row.price)}</span> : null}
         </li>

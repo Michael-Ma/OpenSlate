@@ -44,6 +44,8 @@ export const codePlanMessages = {
   "codeplan.choice.sending": { en: "Sending your choice…", zh: "正在发送你的选择…" },
   "codeplan.choice.unconfirmed": { en: "Not confirmed. Press the same option again to check; it is never sent twice.", zh: "未确认。再按同一个选项即可核实，不会重复发送。" },
   "codeplan.choice.cost": { en: "Choosing lets the plan go on; what it makes next is priced in Code.", zh: "选择后计划会继续；接下来要生成的内容和价格见“代码”。" },
+  "codeplan.choice.compare": { en: "Compare larger", zh: "放大对比" },
+  "codeplan.choice.compare_close": { en: "Close", zh: "关闭" },
 
   // ---- steps ----
   "codeplan.step.absent": { en: "Not sent yet", zh: "还未发出" },
@@ -57,6 +59,7 @@ export const codePlanMessages = {
   "codeplan.step.chosen": { en: "Chosen", zh: "已选" },
   "codeplan.step.alt": { en: "Image step: {label}", zh: "图片步骤：{label}" },
   "codeplan.step.no_label": { en: "No prompt", zh: "没有提示词" },
+  "codeplan.step.render_label": { en: "Film render", zh: "影片渲染" },
   "codeplan.step.failed_code": { en: "Failed ({code})", zh: "失败（{code}）" },
   "codeplan.steps.current": { en: "In the current plan", zh: "当前计划中" },
   "codeplan.steps.history": { en: "Earlier steps", zh: "之前的步骤" },
@@ -74,6 +77,7 @@ export const codePlanMessages = {
   "codeplan.plan.empty_title": { en: "No plan yet", zh: "还没有计划" },
   "codeplan.plan.empty_body": { en: "Tell the Director what the film is about. It writes the plan as a program, and its scenes and shots appear here.", zh: "告诉导演这部影片讲什么。导演会把计划写成程序，场次和镜头会显示在这里。" },
   "codeplan.plan.no_rows": { en: "This version declares no scenes or shots.", zh: "这一版没有声明场次或镜头。" },
+  "codeplan.plan.first_pass": { en: "The plan is running. Its scenes and shots appear when it reaches them.", zh: "计划正在运行，运行到场次和镜头时会显示在这里。" },
   "codeplan.plan.loose": { en: "Shots without a scene", zh: "未归入场次的镜头" },
   "codeplan.plan.scene": { en: "Scene {n}", zh: "第 {n} 场" },
   "codeplan.plan.seconds": { en: "{seconds} s", zh: "{seconds} 秒" },
