@@ -29,6 +29,9 @@ importers:
       '@openslate/providers':
         specifier: workspace:*
         version: link:../../packages/providers
+      '@tootallnate/quickjs-emscripten':
+        specifier: 0.23.0
+        version: 0.23.0
       better-sqlite3:
         specifier: 13.0.3
         version: 13.0.3
@@ -474,6 +477,9 @@ packages:
 
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
+
+  '@tootallnate/quickjs-emscripten@0.23.0':
+    resolution: {integrity: sha512-C5Mc6rdnsaJDjO3UpGW/CQTHtCKaYlScZTly4JIu97Jxo/odCiH0ITnDXSJPTOrEKk/ycSZ0AOgTmkDtkOsvIA==}
 
   '@types/better-sqlite3@9.6.0':
     resolution: {integrity: sha512-ZEEwBSgMu7GYJOynoagg5X9JbxfL6dTJDsgViJIqh67jV44kyOr9RXfmFjLK5rzC4MWssP06t9hu/JwGDnUbCg==}
@@ -1202,6 +1208,8 @@ snapshots:
     optional: true
 
   '@rolldown/pluginutils@1.0.1': {}
+
+  '@tootallnate/quickjs-emscripten@0.23.0': {}
 
   '@types/better-sqlite3@9.6.0':
     dependencies:
