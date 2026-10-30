@@ -1,3 +1,4 @@
+import { connectFailureCode } from "./connect-failure.js";
 import { createHash } from "node:crypto";
 
 /** Wire contract reviewed against official MiniMax v2 docs on 2026-09-12. */
@@ -176,7 +177,8 @@ export class MiniMaxH3Provider {
       return { kind: "rejected", certainty: "not_accepted", error: { code: "H3_REQUEST_DIGEST_MISMATCH", category: "invalid_input" } };
     if (options.signal?.aborted) return { kind: "rejected", certainty: "not_accepted", error: { code: "H3_ABORTED_BEFORE_DISPATCH", category: "aborted" } };
     const response = await this.request("POST", "/v2/video_generation", body, options.signal);
-    if (!response.ok) return { kind: "unknown", error: response.error };
+    if (!response.ok) return response.notSubmitted
+      ? { kind: "rejected", certainty: "not_accepted", error: response.error } : { kind: "unknown", error: response.error };
     if (response.status === 200 && this.safeId(response.body.task_id) && response.body.type !== "error" && response.body.error === undefined)
       return { kind: "accepted", taskId: response.body.task_id as string, requestedModel: this.model };
     const rejection = this.rejection(response);
@@ -233,11 +235,12 @@ export class MiniMaxH3Provider {
     const stop = (code: string) => { stopped = code; controller.abort(); reject(); };
     const abort = () => stop("H3_CALL_ABORTED"); signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => stop("H3_CALL_TIMEOUT"), this.#timeoutMs);
-    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined, connected = false;
     const operation = async (): Promise<HttpResult> => {
       const response = await this.#fetch(`https://api.minimax.io${path}`, { method,
         headers: { Authorization: `Bearer ${this.#key}`, Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
         ...(body === undefined ? {} : { body }), redirect: "manual", signal: controller.signal });
+      connected = true;
       if (controller.signal.aborted) { void response.body?.cancel().catch(() => {}); throw new Error("interrupted"); }
       const length = response.headers.get("content-length");
       if (response.redirected || (length !== null && (!/^\d+$/.test(length) || Number(length) > MINIMAX_H3_LIMITS.responseBytes))) throw new Error("invalid response");
@@ -251,10 +254,13 @@ export class MiniMaxH3Provider {
         ...(retry !== null && /^\d+$/.test(retry) && Number(retry) <= 86400 ? { retryAfterSeconds: Number(retry) } : {}) };
     };
     try { return await Promise.race([operation(), interruption]); }
-    catch { return { ok: false, error: { code: controller.signal.aborted ? stopped : "H3_TRANSPORT_OR_RESPONSE_FAILED",
+    catch (error) {
+      const code = !connected && !controller.signal.aborted ? connectFailureCode(error) : undefined;
+      if (code) return { ok: false, notSubmitted: true, error: { code: `H3_CONNECT_${code}`, category: "transport" } };
+      return { ok: false, error: { code: controller.signal.aborted ? stopped : "H3_TRANSPORT_OR_RESPONSE_FAILED",
       category: controller.signal.aborted && stopped === "H3_CALL_ABORTED" ? "aborted" : "transport" } }; }
     finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); controller.abort(); void reader?.cancel().catch(() => {}); }
   }
 }
 interface HttpResult { ok: true; status: number; body: Record<string, unknown>; retryAfterSeconds?: number }
-type HttpResponse = HttpResult | { ok: false; error: MiniMaxH3Diagnostic };
+type HttpResponse = HttpResult | { ok: false; error: MiniMaxH3Diagnostic; notSubmitted?: boolean };

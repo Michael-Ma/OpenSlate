@@ -333,7 +333,9 @@ export class ViggleH3Execution implements ExecutionProvider {
   private async replay(attempt: Attempt, signal?: AbortSignal): Promise<ExecutionOutcome> {
     const retained = this.submission(attempt);
     if (retained?.observation.kind === 'not_dispatched' || retained?.observation.kind === 'rejected') return { type: 'rejected', certainty: 'not_accepted',
-      failureId: `h3-${digest(retained).slice(0, 32)}`, technical: retained.observation.kind === 'not_dispatched', retryAllowed: false };
+      failureId: retained.observation.kind === "rejected" ? retained.observation.error.code : retained.observation.code,
+      technical: retained.observation.kind === "not_dispatched" || retained.observation.error.category === "transport",
+      retryAllowed: retained.observation.kind === "rejected" && retained.observation.error.category === "transport" && retained.observation.error.code.startsWith("CONNECT_") };
     try { const completed = await this.#outputs.recoverCompletion(attempt.projectId, attempt.id, signal ? { signal } : {});
       if (completed) { assertViggleSpoolLineage(this.#store, attempt, completed.outputs[0]!.storage.spoolId); return completed; } }
     catch (error) {
@@ -351,7 +353,9 @@ export class ViggleH3Execution implements ExecutionProvider {
     }
     const observation = submit.observation;
     if (observation.kind === "not_dispatched" || observation.kind === "rejected") return { type: "rejected", certainty: "not_accepted",
-      failureId: `h3-${digest(submit).slice(0, 32)}`, technical: observation.kind === "not_dispatched", retryAllowed: false };
+      failureId: observation.kind === "rejected" ? observation.error.code : observation.code,
+      technical: observation.kind === "not_dispatched" || observation.error.category === "transport",
+      retryAllowed: observation.kind === "rejected" && observation.error.category === "transport" && observation.error.code.startsWith("CONNECT_") };
     if (observation.kind === "unknown") return attempt.taskId ? unknown(`H3 submission unresolved: ${observation.error.code}`, attempt.taskId) : responseLost();
     invariant(!attempt.taskId || attempt.taskId === observation.taskId, "VIGGLE_H3_EXECUTION_CONFLICT", "H3 accepted identity contradicts the saved task");
     const schedule = this.#store.transaction(() => this.schedule(attempt, submit));
