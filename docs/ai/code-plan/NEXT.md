@@ -119,7 +119,7 @@ Researched October 30, 2026; official docs and pricing pages; no account was use
 
 - Seedance through BytePlus ModelArk, official.
 - No cap on limit changes made in chat.
-- Music: **Lyria 3.5 through the Gemini API**, using the same key variable as song analysis (`OPENSLATE_GEMINI_API_KEY`). It is paid tier only: the key's Google project needs billing. On October 30 that variable was not set on this machine, so the owner adds it. Card N3.
+- Music: **Lyria 3.5 through the Gemini API**, using the same key variable as song analysis (`OPENSLATE_GEMINI_API_KEY`). It is paid tier only: the key's Google project needs billing. The owner added the key on October 30, and one live call succeeded ($0.08, 19 s). It returned a 68 s MP3 for a 20 s ask, so plans always trim to the cut. Card N3.
 - Start Wave A.
 
 ## Phases and owners
