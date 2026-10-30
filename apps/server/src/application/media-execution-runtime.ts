@@ -211,19 +211,20 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
       return configured.authorize(input);
     },
   };
-  const engine = new Engine(store, registry, { artifactDir, outputStore,
-    outputIngestor: new ExecutionIngestionRouter({ ...(imageStore ? { image: new SpoolImageIngestor(outputStore, imageStore) } : {}),
+  const outputIngestor = new ExecutionIngestionRouter({ ...(imageStore ? { image: new SpoolImageIngestor(outputStore, imageStore) } : {}),
       ...(localMedia ? { video: new SpoolVideoIngestor(outputStore, localMedia, { rootDir: join(directory, "video-derivations") }),
         audio: new SpoolAudioIngestor(outputStore, localMedia, { rootDir: join(directory, "audio-derivations") }),
-        transcription: new SpoolTranscriptIngestor(outputStore, localMedia, transcriptionFiles!, { artifactDir }) } : {}) }),
+        transcription: new SpoolTranscriptIngestor(outputStore, localMedia, transcriptionFiles!, { artifactDir }) } : {}) });
+  const localExecutor = localMedia ? new LocalMediaExecutor(store, localMedia, { artifactDir }) : undefined;
+  const engine = new Engine(store, registry, { artifactDir, outputStore, outputIngestor,
     ...(enabled ? { externalAdmission } : {}),
     ...(transcriptionExecution ? { submissionPreparation: transcriptionExecution } : {}),
-    ...(localMedia ? { localExecution: new LocalMediaExecutor(store, localMedia, { artifactDir }) } : {}) });
+    ...(localExecutor ? { localExecution: localExecutor } : {}) });
   const providerCatalog = new InstalledProviderCatalog({ ...(options.providerConfiguration === undefined ? {} : { configuration: options.providerConfiguration }),
     registry, credentials, enabledExecutions, codexImageConfigured, mediaTools: { image: !!imageStore, video: !!localMedia, audio: !!localMedia } });
   const lipSyncProfiles = providerCatalog.lipSyncProfiles();
   const productionOptions: ProductionServiceOptions = configuration.h3 || configuration.viggleH3
     ? { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video",
       ...(lipSyncProfiles.length ? { newProjectLipSyncProfiles: lipSyncProfiles } : {}) } : {};
-  return { close: () => closing ??= nativeWorker?.close() ?? Promise.resolve(), engine, localMedia, imageStore, outputStore, providerCatalog, uploadDirectory, productionOptions };
+  return { close: () => closing ??= nativeWorker?.close() ?? Promise.resolve(), engine, registry, outputIngestor, localExecutor, localMedia, imageStore, outputStore, providerCatalog, uploadDirectory, productionOptions };
 }

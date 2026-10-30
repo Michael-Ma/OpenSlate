@@ -175,7 +175,7 @@ export class Store {
       const configured = assertConfiguredProviderPin(this, { ...body, id, projectId } as unknown as Attempt);
       if (configured) {
         reference("capability_lock", (body.request as Attempt["request"]).providerUse!.capabilityLockId);
-        reference("grant", this.get<{ grantId: string }>("candidate", String(body.candidateId))!.grantId);
+        if (body.candidateId !== null) reference("grant", this.get<{ grantId: string }>("candidate", String(body.candidateId))!.grantId);
       }
       // Initial admission writes its reservation next. Every later attempt write must retain the full proof.
       if (this.get("attempt", id)) assertConfiguredProviderAdmission(this, { ...body, id, projectId } as unknown as Attempt);
@@ -777,7 +777,7 @@ export class Store {
           invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "H3 poll identity and host policy are immutable");
         invariant(Number(next.count) >= Number(previous.count), "H3_EXECUTION_CONFLICT", "H3 poll backoff cannot rewind");
       }
-      if (["local_execution_intent", "local_execution_dispatch", "local_execution_completion", "installation_recovery_fence"].includes(kind))
+      if (["code_plan_render_intent", "local_execution_intent", "local_execution_dispatch", "local_execution_completion", "installation_recovery_fence"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
       if (["audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
         "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result",
@@ -798,6 +798,11 @@ export class Store {
         for (const field of ["requestId", "epochId", "argumentsDigest"])
           invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Director generation identity is immutable");
         if (previous.complete) invariant(old.body === encoded, "IMMUTABLE_RECORD", "Completed keyframe receipts are immutable");
+      }
+      if (kind === "code_plan_execution") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        for (const field of ["requestDigest", "createdAt", "planVersion", "normalizedInput", "priceMicros"])
+          invariant(canonical(previous[field] ?? null) === canonical(next[field] ?? null), "IMMUTABLE_RECORD", "Code-plan execution intent is immutable");
       }
       if (kind === "message") {
         const previous = JSON.parse(old.body), next = JSON.parse(encoded);

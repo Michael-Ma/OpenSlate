@@ -11,16 +11,17 @@ import { projectRequest } from "../application/request-source.js";
 
 // Several application paths construct a tool service without constructor options.
 // Scope the host port to the production service, never to model arguments or global project IDs.
-const ports = new WeakMap<ProductionService, CodePlanPort>();
-export function wireCodePlans(service: ProductionService, port: CodePlanPort): void { ports.set(service, port); }
-export function codePlanPort(service: ProductionService): CodePlanPort {
+interface CodePlanModelPort { availableModels(projectId: string): ReturnType<typeof import("./models.js").modelDescriptions> }
+const ports = new WeakMap<ProductionService, CodePlanPort & Partial<CodePlanModelPort>>();
+export function wireCodePlans(service: ProductionService, port: CodePlanPort & Partial<CodePlanModelPort>): void { ports.set(service, port); }
+export function codePlanPort(service: ProductionService): CodePlanPort & Partial<CodePlanModelPort> {
   const port = ports.get(service);
   invariant(port, "TOOL_CAPABILITY_UNAVAILABLE", "Code-plan runtime is not configured on this server");
   return port;
 }
 export function readCodeFilm(service: ProductionService, projectId: string) {
   const port = codePlanPort(service), view = port.view(projectId);
-  return { ...view, source: view.planVersion === null ? null : port.source(projectId, view.planVersion).source };
+  return { ...view, models: port.availableModels?.(projectId) ?? [], source: view.planVersion === null ? null : port.source(projectId, view.planVersion).source };
 }
 
 interface RequestHold { id: string; projectId: string; requestId: string; state: "open" | "released" }

@@ -1,3 +1,5 @@
+import { assertCodePlanProviderAdmission, resolveCodePlanProviderAdmission, assertCodePlanFirstDispatch, assertCodePlanProviderLease, isCodePlanAttempt } from "../code-plan/provider-authority.js";
+import type { CodePlanProviderAdmission } from "../code-plan/provider-authority.js";
 import { configuredProfileMatches, providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, effectiveNodeDigest, invariant, RECIPE_DIGEST, shotIntentDigest, shotVideoTiming } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
@@ -10,13 +12,14 @@ import type { ViggleH3ExecutionMapping } from "./viggle-h3-receipts.js";
 
 export interface ViggleCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; [key: string]: unknown }
 export interface ViggleReservation { id: string; projectId: string; attemptId: string; micros: string; state: string }
-export interface ViggleAdmission {
+interface GraphViggleAdmission {
   attempt: Attempt; candidate: Candidate; grant: Grant; reservation: ViggleReservation;
   profile: ProviderProfile; capabilityLock: ViggleCapabilityLock;
   frame?: ViggleFrameEvidence;
 }
 interface ViggleApproval { id: string; projectId: string; snapshotId: string; videoNodeId: string; approvalDigest: string; authorityId: string }
-export interface ViggleFrameEvidence { artifact: ArtifactRecord; approval: ViggleApproval; snapshot: ReviewSnapshot }
+export type ViggleFrameEvidence = { artifact: ArtifactRecord; approval: ViggleApproval; snapshot: ReviewSnapshot } | { artifact: ArtifactRecord; codePlan: { attemptId: string; requestDigest: string } };
+export type ViggleAdmission = GraphViggleAdmission | (CodePlanProviderAdmission & { frame?: ViggleFrameEvidence });
 export type ViggleProfilePin = Pick<ViggleH3ExecutionMapping, "capabilityLockId" | "capabilityLockDigest" | "profileDefinition">;
 export type ViggleAuthorityStore = Pick<Store, "get" | "getProject" | "db">;
 export const VIGGLE_H3_PROFILE_LOOKUP_LIMITS = Object.freeze({ lockBytes: 65536, profiles: 64 });
@@ -24,6 +27,7 @@ const fail = (condition: unknown, message: string): void => invariant(condition,
 
 /** Retained admission proof; current selection is checked separately before first submit. */
 export function assertViggleAdmission(value: ViggleAdmission): void {
+  if ("codePlan" in value) { assertCodePlanProviderAdmission(value); assertViggleH3ExecutionProfile(value.profile, value.attempt); return; }
   const { attempt, candidate, grant, reservation, profile, capabilityLock } = value;
   fail(attempt && attempt.id === attempt.request.attemptId && attempt.nodeId === attempt.request.nodeId && attempt.fingerprint === attempt.request.fingerprint
     && attempt.request.kind === "video" && attempt.request.execution.adapter === "viggle-h3" && attempt.request.execution.version === "1"
@@ -60,6 +64,7 @@ export function viggleRecord<T>(store: ViggleAuthorityStore, kind: string, id: s
   const value = store.get<T>(kind, id); fail(value, "Viggle evidence disappeared"); return value;
 }
 export function viggleFramePin(frame: ViggleFrameEvidence): ViggleH3ExecutionMapping["firstFrame"] {
+  if ("codePlan" in frame) return { artifactId: frame.artifact.id, artifactDigest: digest(frame.artifact), codePlanAttemptId: frame.codePlan.attemptId, codePlanRequestDigest: frame.codePlan.requestDigest };
   return { artifactId: frame.artifact.id, artifactDigest: digest(frame.artifact), approvalId: frame.approval.id,
     approvalDigest: digest(frame.approval), snapshotId: frame.snapshot.id, snapshotDigest: digest(frame.snapshot) };
 }
@@ -72,8 +77,15 @@ export function resolveViggleFrame(store: ViggleAuthorityStore, attempt: Attempt
     && Number.isSafeInteger(artifact.byteLength) && artifact.byteLength! >= 45 && artifact.byteLength! <= 32 * 1024 ** 2
     && Number.isSafeInteger(artifact.width) && artifact.width! >= 1 && artifact.width! <= 8192 && Number.isSafeInteger(artifact.height) && artifact.height! >= 1 && artifact.height! <= 8192,
   "Viggle requires an exact validated owned PNG");
+  if (isCodePlanAttempt(attempt)) {
+    const admission = resolveCodePlanProviderAdmission(store, attempt.request);
+    fail(admission, "Frame must belong to an admitted code-plan intent");
+    const result: ViggleFrameEvidence = { artifact: artifact!, codePlan: { attemptId: attempt.id, requestDigest: digest(attempt.request) } };
+    if (pin) fail(canonical(pin) === canonical(viggleFramePin(result)), "Pinned code-plan frame changed");
+    return result;
+  }
   let approval: ViggleApproval | undefined;
-  if (pin) approval = viggleRecord(store, "approval", pin.approvalId, attempt.projectId);
+  if (pin && "approvalId" in pin) approval = viggleRecord(store, "approval", pin.approvalId, attempt.projectId);
   else {
     const rows = store.db.prepare("SELECT id, length(CAST(body AS BLOB)) bytes FROM entities WHERE kind='approval' AND project_id=? AND json_extract(body,'$.videoNodeId')=? AND json_extract(body,'$.approvalDigest')=? ORDER BY id LIMIT 129")
       .all(attempt.projectId, attempt.nodeId, attempt.fingerprint) as { id: string; bytes: number }[];
@@ -113,6 +125,12 @@ export function resolveViggleFrame(store: ViggleAuthorityStore, attempt: Attempt
 
 /** Resolve the exact original lock and full profile definition recorded at admission. */
 export function resolveViggleAdmission(store: ViggleAuthorityStore, input: Readonly<ExecutionRequest>, pinned?: ViggleProfilePin & Partial<Pick<ViggleH3ExecutionMapping, "firstFrame">>): ViggleAdmission {
+  const code = resolveCodePlanProviderAdmission(store, input, pinned);
+  if (code) {
+    const result: ViggleAdmission = code;
+    if (pinned?.firstFrame) result.frame = resolveViggleFrame(store, result.attempt, pinned.firstFrame);
+    assertViggleAdmission(result); return result;
+  }
   const request = structuredClone(input), attempt = store.get<Attempt>("attempt", request.attemptId);
   fail(attempt && canonical(attempt.request) === canonical(request) && attempt.candidateId && attempt.reservationId,
     "Viggle requires an unchanged stored admission");
@@ -146,6 +164,7 @@ export function resolveViggleAdmission(store: ViggleAuthorityStore, input: Reado
 
 /** Use inside the short pre-marker/local-failure transaction; late provider observations use no first-submit check. */
 export function assertViggleDispatchLease(store: Store, original: ViggleAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): ViggleAdmission {
+  if ("codePlan" in original) { assertCodePlanProviderLease(store, original.attempt, expectedLease); return resolveViggleAdmission(store, original.attempt.request); }
   new InstallationRecoveryGuard(store).assertFirstSubmit(original.attempt.projectId, original.attempt.id);
   const current = resolveViggleAdmission(store, original.attempt.request, { capabilityLockId: original.capabilityLock.id,
     capabilityLockDigest: digest(original.capabilityLock), profileDefinition: original.profile });
@@ -157,6 +176,7 @@ export function assertViggleDispatchLease(store: Store, original: ViggleAdmissio
   return current;
 }
 export function assertViggleFirstDispatch(store: Store, original: ViggleAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): void {
+  if ("codePlan" in original) { assertCodePlanFirstDispatch(store, original.attempt, expectedLease); return; }
   const current = assertViggleDispatchLease(store, original, expectedLease);
   const lock = store.get<ViggleCapabilityLock>("capability_lock", store.getProject(current.attempt.projectId).capabilityLockId);
   invariant(lock?.projectId === current.attempt.projectId && lock.profiles.some(profile => canonical(profile) === canonical(current.profile)),

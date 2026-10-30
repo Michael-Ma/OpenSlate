@@ -1,3 +1,4 @@
+import { resolveCodePlanProviderAdmission, assertCodePlanFirstDispatch, assertCodePlanProviderLease, isCodePlanAttempt } from "../code-plan/provider-authority.js";
 import { assertConfiguredProviderAdmission, providerAdmissionRequest } from "./provider-use.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
@@ -179,6 +180,8 @@ export class MiniMaxH3Execution implements ExecutionProvider {
   private admitted(request: ExecutionRequest): Attempt {
     this.#recovery.assertWritable();
     assertExecutionRequest(this, request);
+    const code = resolveCodePlanProviderAdmission(this.#store, request);
+    if (code) return code.attempt;
     const attempt = this.#store.get<Attempt>("attempt", request.attemptId);
     invariant(attempt && attempt.nodeId === request.nodeId && attempt.fingerprint === request.fingerprint && attempt.candidateId && attempt.reservationId
       && request.kind === "video" && canonical(attempt.request) === canonical(request) && providerAdmissionRequest(request),
@@ -190,9 +193,11 @@ export class MiniMaxH3Execution implements ExecutionProvider {
   }
   private dispatchable(previous: Attempt, expected: ExecutionCallOptions["expectedLease"]): void {
     this.leaseOwned(previous, expected);
+    if (isCodePlanAttempt(previous)) { assertCodePlanFirstDispatch(this.#store, previous, expected); return; }
     assertCurrentGeneratedSelection(this.#store, previous, 'H3_EXECUTION_NOT_DISPATCHABLE');
   }
   private leaseOwned(previous: Attempt, expected: ExecutionCallOptions["expectedLease"]): void {
+    if (isCodePlanAttempt(previous)) { assertCodePlanProviderLease(this.#store, previous, expected); return; }
     this.#recovery.assertFirstSubmit(previous.projectId, previous.id);
     const current = this.admitted(previous.request), reservation = this.#store.get<{ state: string }>("reservation", current.reservationId!);
     invariant(expected && Object.keys(expected).every(key => ["owner", "epoch"].includes(key)) && expected.owner === current.leaseOwner
@@ -206,7 +211,8 @@ export class MiniMaxH3Execution implements ExecutionProvider {
       // Reconciliation owns a new epoch, so every old first-POST writer is fenced before this receipt is sealed.
       if (options.signal?.aborted || this.started(current.id) || current.taskId || !expected || current.phase !== "submission_unknown"
         || current.leaseOwner !== expected.owner || current.leaseEpoch !== expected.epoch || current.leaseExpiresAt <= Date.now()
-        || this.#store.get<{ state: string }>("reservation", current.reservationId!)?.state !== "reserved") return;
+        || (isCodePlanAttempt(current) ? resolveCodePlanProviderAdmission(this.#store, current.request)?.codePlan.liability
+          : this.#store.get<{ state: string }>("reservation", current.reservationId!)?.state) !== "reserved") return;
       this.saveSubmit(current, { kind: "not_dispatched", code: "LOCAL_CANCELLED" });
     });
   }
@@ -312,7 +318,7 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     invariant(request.inputs.length === 1 && request.inputs[0]!.kind === "image" && Number.isSafeInteger(request.args.durationFrames)
       && Number(request.args.durationFrames) % 30 === 0 && canonical(request.args.frameRate) === canonical({ numerator: 30, denominator: 1 }),
     "H3_EXECUTION_CONFLICT", "H3 requires one reviewed first frame and exact integer seconds");
-    invariant(this.#store.list<{ videoNodeId: string; approvalDigest: string }>("approval", attempt.projectId)
+    invariant(resolveCodePlanProviderAdmission(this.#store, request) || this.#store.list<{ videoNodeId: string; approvalDigest: string }>("approval", attempt.projectId)
       .some(approval => approval.videoNodeId === request.nodeId && approval.approvalDigest === request.fingerprint),
     "H3_EXECUTION_CONFLICT", "H3 first frame lacks its exact human approval");
     const reference = request.inputs[0]!, record = this.#store.get<ArtifactRecord>("artifact", reference.artifactId);

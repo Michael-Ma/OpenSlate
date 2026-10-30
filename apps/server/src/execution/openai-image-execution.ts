@@ -1,3 +1,4 @@
+import { resolveCodePlanProviderAdmission, assertCodePlanFirstDispatch, assertCodePlanProviderLease, isCodePlanAttempt } from "../code-plan/provider-authority.js";
 import { assertConfiguredProviderAdmission, providerAdmissionRequest } from "./provider-use.js";
 import { createHash } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
@@ -146,6 +147,8 @@ export class OpenAIImageExecution implements ExecutionProvider {
   private admitted(request: ExecutionRequest): Attempt {
     this.#recovery.assertWritable();
     assertExecutionRequest(this, request);
+    const code = resolveCodePlanProviderAdmission(this.#store, request);
+    if (code) return code.attempt;
     const attempt = this.#store.get<Attempt>("attempt", request.attemptId);
     invariant(attempt && attempt.id === request.attemptId && attempt.nodeId === request.nodeId && attempt.fingerprint === request.fingerprint
       && attempt.candidateId && attempt.reservationId && attempt.taskId === null && request.kind === "image"
@@ -159,9 +162,11 @@ export class OpenAIImageExecution implements ExecutionProvider {
   }
   private dispatchable(previous: Attempt, expectedLease: ExecutionCallOptions["expectedLease"]): void {
     this.leaseOwned(previous, expectedLease);
+    if (isCodePlanAttempt(previous)) { assertCodePlanFirstDispatch(this.#store, previous, expectedLease); return; }
     assertCurrentGeneratedSelection(this.#store, previous, 'IMAGE_EXECUTION_NOT_DISPATCHABLE');
   }
   private leaseOwned(previous: Attempt, expectedLease: ExecutionCallOptions["expectedLease"]): void {
+    if (isCodePlanAttempt(previous)) { assertCodePlanProviderLease(this.#store, previous, expectedLease); return; }
     this.#recovery.assertFirstSubmit(previous.projectId, previous.id);
     const current = this.admitted(previous.request);
     const reservation = this.#store.get<{ state: string }>("reservation", current.reservationId!);
@@ -177,7 +182,8 @@ export class OpenAIImageExecution implements ExecutionProvider {
       // A current reconciliation lease fences the submitter before durable no-POST evidence is written.
       if (options.signal?.aborted || this.hasDispatchOrResult(current.id) || current.taskId || !expected || current.phase !== "submission_unknown"
         || current.leaseOwner !== expected.owner || current.leaseEpoch !== expected.epoch || current.leaseExpiresAt <= Date.now()
-        || this.#store.get<{ state: string }>("reservation", current.reservationId!)?.state !== "reserved") return;
+        || (isCodePlanAttempt(current) ? resolveCodePlanProviderAdmission(this.#store, current.request)?.codePlan.liability
+          : this.#store.get<{ state: string }>("reservation", current.reservationId!)?.state) !== "reserved") return;
       this.saveResult(current, { kind: "not_dispatched", code: "LOCAL_CANCELLED" });
     });
   }
