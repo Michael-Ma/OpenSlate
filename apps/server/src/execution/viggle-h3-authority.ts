@@ -49,13 +49,13 @@ export function assertViggleMappingAdmission(admission: ViggleAdmission, mapping
     && canonical(mapping.profileDefinition) === canonical(admission.profile)
     && mapping.estimatedMicros === admission.reservation.micros, "Viggle mapping lost its exact retained admission evidence");
   if ("codePlan" in admission && admission.attempt.request.args.enhance !== undefined) {
-    const checkFrame = (frame: ViggleFrameEvidence | undefined, pin: ViggleH3ExecutionMapping["firstFrame"], image: ViggleH3ExecutionMapping["transport"]["firstFrame"], crop = false) => {
+    const checkFrame = (frame: ViggleFrameEvidence | undefined, pin: ViggleH3ExecutionMapping["firstFrame"], image: ViggleH3ExecutionMapping["transport"]["firstFrame"], crop?: ViggleH3ExecutionMapping["firstFrameCrop"]) => {
       fail(frame && pin && image && canonical(pin) === canonical(viggleFramePin(frame)) && (crop
-        ? mapping.firstFrameCrop!.sourceWidth === frame.artifact.width && mapping.firstFrameCrop!.sourceHeight === frame.artifact.height
+        ? crop.sourceWidth === frame.artifact.width && crop.sourceHeight === frame.artifact.height
         : canonical(image) === canonical({ sha256: frame.artifact.artifact.sha256, byteLength: frame.artifact.byteLength, width: frame.artifact.width, height: frame.artifact.height, mediaType: "image/png" })), "Code Viggle image evidence changed");
     };
-    if (mapping.firstFrame) checkFrame(admission.frame, mapping.firstFrame, mapping.transport.firstFrame, !!mapping.firstFrameCrop);
-    if (mapping.lastFrame) checkFrame(admission.lastFrame, mapping.lastFrame, mapping.transport.lastFrame);
+    if (mapping.firstFrame) checkFrame(admission.frame, mapping.firstFrame, mapping.transport.firstFrame, mapping.firstFrameCrop);
+    if (mapping.lastFrame) checkFrame(admission.lastFrame, mapping.lastFrame, mapping.transport.lastFrame, mapping.lastFrameCrop);
     mapping.references?.forEach((pin, index) => checkFrame(admission.references?.[index], pin, mapping.transport.references?.[index]));
     return;
   }
