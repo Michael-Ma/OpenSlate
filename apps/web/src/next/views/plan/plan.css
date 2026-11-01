@@ -85,8 +85,7 @@
 .plan .check{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--track);background:var(--raised);color:var(--text);border-radius:var(--r-pill);padding:2px 9px 2px 4px;font-size:11.5px;font-weight:600;white-space:nowrap;max-width:100%}
 .plan .check .ic,.plan .status .ic,.plan .edit-error .ic{width:15px;height:15px;border-radius:50%;border:1.5px solid currentColor;display:inline-grid;place-items:center;font-size:9.5px;font-weight:800;flex:none;line-height:1;font-style:normal}
 .plan .status{max-width:100%;overflow:hidden;text-overflow:ellipsis}
-.plan .status.fail{color:var(--text);border-color:var(--track);background:var(--raised)}
-.plan .status.fail .ic{background:var(--text);color:var(--surface);border-color:var(--text)}
+.plan .status.fail .ic{background:var(--danger-solid);color:var(--danger-ink);border-color:var(--danger-solid)}
 .plan .edit-error{display:flex;gap:8px;align-items:center;margin:0;font-size:12.5px;color:var(--text);line-height:1.4}
 .plan .edit-error .ic{background:var(--text);color:var(--surface);border-color:var(--text)}
 

@@ -26,6 +26,8 @@ export function AttentionMenu() {
   const film = useMemo(() => filmAttentionItems(overview), [overview]);
   const pending = useStudio((s) => s.pending);
   const count = items.length + film.length + steps.length;
+  // Red only when something went wrong; a job still waiting for the service's answer is amber.
+  const failed = steps.length > 0 || film.length > 0 || items.some((item) => item.group === "failed");
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -86,7 +88,7 @@ export function AttentionMenu() {
 
   return (
     <>
-      <button ref={button} type="button" className="attn-btn" data-act="attention" aria-haspopup="dialog" aria-expanded={open}
+      <button ref={button} type="button" className="attn-btn" data-act="attention" data-severity={failed ? "failed" : "waiting"} aria-haspopup="dialog" aria-expanded={open}
         aria-label={t("attention.button_label", { count })} onClick={() => setOpen((value) => !value)}>
         <span className="count" aria-hidden="true">{count}</span><span className="attn-word">{t("attention.button")}</span>
       </button>

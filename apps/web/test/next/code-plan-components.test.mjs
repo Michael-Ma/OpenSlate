@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { transformWithOxc } from '../../node_modules/vite/dist/node/index.js';
-import { answerPress, choiceCard, CEILING_PRESS, declaredPlan, retryPress, runStrip, stepRows, threadChoices } from '../../src/next/model/code-plan.ts';
+import { answerPress, choiceCard, CEILING_PRESS, declaredPlan, retryPress, runStrip, stepRows, threadChoices, TONE_CLASS, TONE_GLYPH } from '../../src/next/model/code-plan.ts';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
 
 /**
@@ -117,7 +117,7 @@ async function runStripComponent({ locale = 'en', codePlan, s = store(), guard =
   return (await load('RunStrip.tsx', ['CodePlanRunStrip'], {
     useI18n: () => i18n(locale),
     numberLocale: (l) => (l === 'zh-CN' ? 'zh-CN' : 'en-US'),
-    CEILING_PRESS, runStrip,
+    CEILING_PRESS, runStrip, TONE_CLASS, TONE_GLYPH,
     useGuarded: () => ({ ...guard, 'data-needs': 'run' }),
     useStore: () => s,
     useStudio: (select) => select({ pending: s.pending }),

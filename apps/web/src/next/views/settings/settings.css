@@ -3,7 +3,7 @@
  * The P5 system components this view uses (view header, panel, fields, segmented control, switch, impact,
  * dialog, ack) are copied from the study's system.css section 8 and scoped to this view, so they cannot
  * collide with other views until they move into ui/studio.css.
- * Colour roles: amber never appears here; white is the chosen option and the primary action; green is done.
+ * Colour roles as everywhere: white is the chosen option and the primary action; green is done.
  */
 
 /* ---------- workspace: one scrolling page ---------- */

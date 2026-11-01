@@ -42,7 +42,29 @@ Measured result at 1440 × 900 (image 1 in brackets): top bar 0–52 (0–52); D
 | `--select` / `--select-ink` | `#ececee` / `#141517` | Selected scene pill, selected card border, chosen option, primary action, send button |
 | `--coat-red` / `--coat-maroon` | `#c8102e` / `#6e1423` | Swatches in the coat decision |
 
-Image 1's yellow is not used anywhere: selection is white, opened is green, amber is only the Director.
+Image 1's yellow is not used anywhere.
+
+### Semantic colours (October 2026)
+
+The first version kept amber for the Director and made everything else grey, and in real use the interface read as monotone: 95.5% of colour references were grey. Surfaces stay neutral, so the pictures are still the most colourful thing on screen, but each colour below now means one thing everywhere. Proposal and research: https://claude.ai/artifact/CiTXxumXMbExcHWfw9NUfs
+
+| Token | Value | Meaning | Used for |
+|---|---|---|---|
+| `--you` / `--you-surface` / `--you-line` | `#8ac1ff` / `#212d3e` / `#3b5c87` | You | Your bubble, byline and @ chips, the focused composer. Never links |
+| `--amber` and its family | as above | The Director, and what waits for you | Avatar, byline, choice cards, notes, "waiting for your choice", budget at 80% |
+| `--work` / `--work-surface` / `--work-line` | `#c9adfd` / `#2f293c` / `#625081` | Work in progress | Running, making, the Director working |
+| `--green` and its family | as above | Done | Made, done, synced, current |
+| `--danger` / `--danger-solid` / `--danger-ink` / `--danger-surface` / `--danger-line` | `#ffa098` / `#e5484d` / `#ffffff` / `#3c2624` / `#824844` | Failed | Failed chips, error text, "Needs attention" with a failure, tab and film dots, budget at 100% |
+| `--money` | `#65d2d2` | Money | Prices, spend, the budget meter, amounts in the Director's replies |
+
+Rules:
+
+1. A colour means one thing. Blue is only you, so links stay neutral.
+2. The commoner a state, the quieter it is. Done is green words with a check; only what needs you is filled.
+3. Colour never says it alone. Every state has a word and an icon, because these colours are close in lightness (1.0 to 1.2:1 between them) and cannot be told apart in greyscale.
+4. Large surfaces stay neutral. White stays the chosen option and the primary action. Asset kinds stay neutral with a glyph, since the thumbnails are already colourful.
+
+All text colours measure at least 6.3:1 on every surface.
 
 ## Type
 

@@ -1,6 +1,6 @@
 import { useI18n } from "../i18n/I18n.tsx";
 import { numberLocale } from "../i18n/translate.ts";
-import { CEILING_PRESS, runStrip } from "../model/code-plan.ts";
+import { CEILING_PRESS, runStrip, TONE_CLASS, TONE_GLYPH } from "../model/code-plan.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
@@ -9,7 +9,7 @@ import "./codeplan.css";
 /**
  * Under the Director's header in a code-plan film: the run's state as a chip, the version it runs, and what it has
  * spent of its ceiling (with what is sent and not yet known). While a Director turn holds new paid work it says so.
- * At the ceiling it offers one more dollar; an error is said plainly, in the pass's own words. App facts: neutral.
+ * At the ceiling it offers one more dollar; an error is said plainly, in the pass's own words.
  */
 export function CodePlanRunStrip() {
   const { t, tm, locale } = useI18n();
@@ -27,18 +27,17 @@ export function CodePlanRunStrip() {
     );
   }
   const strip = runStrip(view, numberLocale(locale));
-  const tone = strip.tone === "busy" ? "status busy" : strip.tone === "attention" ? "status attn" : "status";
   return (
     <section className="cp-run" aria-label={t("codeplan.run.label")} data-state={view.state} data-held={strip.held ? "true" : undefined}>
       <div className="cp-run-top">
-        <span className={tone} data-act="code-plan-state" data-run={view.state}>
-          {strip.tone === "busy" ? <i className="cp-spin" aria-hidden="true" /> : null}
+        <span className={TONE_CLASS[strip.tone]} data-act="code-plan-state" data-run={view.state}>
+          {strip.tone === "busy" ? <i className="cp-spin" aria-hidden="true" /> : TONE_GLYPH[strip.tone] ? <span aria-hidden="true">{TONE_GLYPH[strip.tone]}</span> : null}
           {tm(strip.status)}
         </span>
         {view.planVersion !== null ? <span className="cp-run-ver">{t("codeplan.run.version", { version: view.planVersion })}</span> : null}
         <span className="cp-run-spend" data-act="code-plan-spend">{tm(strip.spend)}</span>
       </div>
-      <div className="cp-meter" aria-hidden="true">
+      <div className="cp-meter" aria-hidden="true" data-level={strip.meter.level ?? undefined}>
         <i className="spent" style={{ width: `${strip.meter.spent * 100}%` }} />
         <i className="reserved" style={{ width: `${strip.meter.reserved * 100}%` }} />
       </div>

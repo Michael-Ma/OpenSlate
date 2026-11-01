@@ -96,7 +96,6 @@
 .anno.check .letter { background: var(--track); color: var(--text); }
 
 /* ---------- status tones ---------- */
-.status.attn { color: var(--text); border-color: var(--track); background: var(--raised); }
 
 /* ---------- pictures ---------- */
 .pic-img { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; }

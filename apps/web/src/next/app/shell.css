@@ -23,8 +23,10 @@
 .topbar .film-pick option{background:var(--raised);color:var(--text)}
 .topbar .film-name:has(.film-pick:focus-visible){outline:2px solid var(--focus);outline-offset:3px;border-radius:6px}
 .topbar .saved{display:inline-flex;align-items:center;gap:7px}
+.topbar .saved.ok{color:var(--green);border-color:var(--green-line)}
+.topbar .saved.ok::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--green)}
 .topbar .saved.waiting{color:var(--text);border-style:dashed;border-color:var(--track)}
-.topbar .saved.waiting::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--muted);animation:blink 1s infinite}
+.topbar .saved.waiting::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--work);animation:blink 1s infinite}
 /* Offline: a plain read got no answer either. Still neutral (failures never get a colour), with a hollow dot that stays still. */
 .topbar .saved.offline{color:var(--text);border-style:dashed;border-color:var(--track)}
 .topbar .saved.offline::before{content:"";width:6px;height:6px;border-radius:50%;border:1.5px solid var(--text-2);box-sizing:border-box}
@@ -133,9 +135,12 @@ dialog.shell-dialog::backdrop{background:rgba(8,9,10,.62)}
 
 /* ---------- Needs attention (failure-display item 3): counted pill, film-wide list ---------- */
 .topbar .attn-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--track);background:var(--raised);color:var(--text);border-radius:var(--r-pill);padding:4px 11px 4px 8px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;flex:none}
-.topbar .attn-btn:hover,.topbar .attn-btn[aria-expanded="true"]{background:var(--raised-2)}
+.topbar .attn-btn{border-color:var(--amber-line);background:var(--amber-surface);color:var(--amber)}
+.topbar .attn-btn[data-severity="failed"]{border-color:var(--danger-line);background:var(--danger-surface);color:var(--danger)}
+.topbar .attn-btn[data-severity="failed"] .count{background:var(--danger-solid);color:var(--danger-ink)}
+.topbar .attn-btn:hover,.topbar .attn-btn[aria-expanded="true"]{filter:brightness(1.12)}
 .topbar .attn-btn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
-.topbar .attn-btn .count{min-width:16px;height:16px;border-radius:8px;background:var(--select);color:var(--select-ink);font-size:10.5px;font-weight:800;display:grid;place-items:center;padding:0 4px;box-sizing:border-box}
+.topbar .attn-btn .count{min-width:16px;height:16px;border-radius:8px;background:var(--amber);color:var(--amber-ink);font-size:10.5px;font-weight:800;display:grid;place-items:center;padding:0 4px;box-sizing:border-box}
 .attn-pop{position:fixed;z-index:70;white-space:normal;text-align:left;width:440px;max-width:calc(100vw - 16px);max-height:min(70vh,560px);overflow:auto;background:var(--raised);border:1px solid var(--track);border-radius:14px;box-shadow:0 14px 34px rgba(0,0,0,.5);padding:8px;box-sizing:border-box;color:var(--text)}
 .attn-pop h3{font-size:13px;margin:6px 8px 2px;font-weight:700}
 .attn-pop .sub{font-size:12px;color:var(--text-2);margin:0 8px 8px}
@@ -155,4 +160,4 @@ dialog.shell-dialog::backdrop{background:rgba(8,9,10,.62)}
 .topbar .attn-pop .t,.topbar .attn-pop h3,.topbar .attn-pop .sub,.topbar .attn-pop .attn-foot{white-space:normal;overflow-wrap:anywhere}
 
 /* A red dot on a view tab whose film has a failed step there (code-plan films) */
-.topbar .tab .tab-dot{display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:var(--danger,#e5484d);vertical-align:middle;box-shadow:0 0 0 2px var(--bar)}
+.topbar .tab .tab-dot{display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:var(--danger-solid);vertical-align:middle;box-shadow:0 0 0 2px var(--bar)}

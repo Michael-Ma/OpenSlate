@@ -3,17 +3,17 @@ import { useGuarded } from "../app/useWriteGuard.ts";
 import { useI18n } from "../i18n/I18n.tsx";
 import { Picture } from "../keyframes/parts.tsx";
 import { useNaturalAspect } from "../media/Viewer.tsx";
-import { retryPress, type RunTone, type StepRow } from "../model/code-plan.ts";
+import { retryPress, TONE_CLASS, TONE_GLYPH, type RunTone, type StepRow } from "../model/code-plan.ts";
 import type { Msg } from "../model/types.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { Modal } from "../views/plan/Modal.tsx";
 
-/** A neutral status chip; busy work spins, a step that needs the person has the attention outline. Never green here. */
+/** A step's state: its colour, always with a word and for most tones a glyph. */
 export function StepStatus({ status, tone, title }: { status: Msg; tone: RunTone; title?: string | undefined }) {
   const { tm } = useI18n();
   return (
-    <span className={tone === "busy" ? "status busy" : tone === "attention" ? "status attn" : "status"} data-tone={tone} title={title}>
-      {tone === "busy" ? <i className="cp-spin" aria-hidden="true" /> : null}
+    <span className={TONE_CLASS[tone]} data-tone={tone} title={title}>
+      {tone === "busy" ? <i className="cp-spin" aria-hidden="true" /> : TONE_GLYPH[tone] ? <span aria-hidden="true">{TONE_GLYPH[tone]}</span> : null}
       {tm(status)}
     </span>
   );

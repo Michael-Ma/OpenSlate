@@ -187,6 +187,11 @@ export function paragraphs(text: string): string[] {
 /** Any `[label](#openslate-ref/...)` link in a user's message. */
 const REF_ANYWHERE = /\[([^\]\n]{1,180})\]\((#openslate-ref\/[^)\s]*)\)/g;
 
+/** Text split around the dollar amounts in it, so a reply's money reads at a glance. */
+export function moneyParts(text: string): { text: string; money: boolean }[] {
+  return text.split(/(\$\d[\d,]*(?:\.\d+)?)/).filter(Boolean).map((part) => ({ text: part, money: /^\$\d/.test(part) }));
+}
+
 export type UserSegment = { kind: "text"; text: string } | { kind: "ref"; ref: RefLink; label: string };
 
 export interface UserMessage {

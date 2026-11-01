@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
+import { moneyParts } from "../model/director.ts";
 import { resolveRef } from "../model/director.ts";
 import type { Block, Inline, RefLink } from "../model/markdown.ts";
 import { useStudio } from "../store/react.tsx";
@@ -86,7 +87,7 @@ function InlineView({ inline }: { inline: Inline }): ReactNode {
   const { t } = useI18n();
   switch (inline.type) {
     case "text":
-      return inline.text;
+      return moneyParts(inline.text).map((part, index) => (part.money ? <span key={index} className="money">{part.text}</span> : part.text));
     case "br":
       return <br />;
     case "code":
