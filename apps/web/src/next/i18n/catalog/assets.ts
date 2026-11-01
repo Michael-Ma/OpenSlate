@@ -43,6 +43,7 @@ export const assetsMessages = {
 
   // ---- tiles ----
   "assets.use.current": { en: "Current", zh: "当前" },
+  "assets.pending.title": { en: "Making and failed", zh: "生成中和失败" },
   "assets.close": { en: "Close", zh: "关闭" },
   "assets.use.earlier": { en: "Earlier", zh: "旧版本" },
   "assets.use.not_chosen": { en: "Not chosen", zh: "未选用" },

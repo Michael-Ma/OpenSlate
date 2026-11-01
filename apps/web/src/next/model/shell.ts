@@ -9,8 +9,8 @@ import { msg, type Msg, type ProjectSummary, type ViewName } from "./types.ts";
 export const NARROW_QUERY = "(max-width: 899px)";
 
 export const VIEWS: readonly ViewName[] = ["plan", "keyframes", "assets", "film"];
-/** A code-plan film's tabs: the same four, plus Code (its program and versions). */
-export const CODE_VIEWS: readonly ViewName[] = ["plan", "keyframes", "assets", "film", "code"];
+/** A code-plan film's tabs: its frames are in Assets, and Code holds its program and versions. */
+export const CODE_VIEWS: readonly ViewName[] = ["plan", "assets", "film", "code"];
 
 export interface ViewTab {
   view: ViewName;
@@ -30,8 +30,9 @@ const TAB_LABELS: Record<ViewName, MessageId> = {
   start: "shell.tab.start",
 };
 
-export function viewTabs(current: ViewName, codePlan = false): ViewTab[] {
-  const views = codePlan ? CODE_VIEWS : VIEWS;
+/** A code-plan film always has its own tabs; only Developer mode adds Code to them. */
+export function viewTabs(current: ViewName, codePlan = false, developer = true): ViewTab[] {
+  const views = codePlan ? CODE_VIEWS.filter((view) => developer || view !== "code") : VIEWS;
   const anySelected = views.includes(current);
   return views.map((view, index) => ({ view, label: TAB_LABELS[view], selected: view === current, focusable: anySelected ? view === current : index === 0 }));
 }
@@ -51,6 +52,8 @@ export function shownView(state: Pick<StudioState, "view" | "projectId" | "proje
   // Code is a code-plan film's tab: a graph film that is open (its snapshot read) shows Keyframes instead.
   const snapshot = state.snapshot;
   if (state.view === "code" && snapshot && snapshot.project.id === state.projectId && snapshot.project.planMode !== "code") return "keyframes";
+  // A code-plan film keeps its frames in Assets.
+  if (state.view === "keyframes" && snapshot && snapshot.project.id === state.projectId && snapshot.project.planMode === "code") return "assets";
   return state.view;
 }
 

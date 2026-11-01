@@ -84,7 +84,7 @@ export function MediaViewer({ items, start, onClose, stage, side }: { items: Vie
   );
 }
 
-function ViewerClip({ artifact, poster, title }: { artifact: StudioArtifactRef; poster: StudioArtifactRef | undefined; title: string }) {
+export function ViewerClip({ artifact, poster, title, onShape }: { artifact: StudioArtifactRef; poster: StudioArtifactRef | undefined; title: string; onShape?: (aspect: number) => void }) {
   const { t } = useI18n();
   // The sample studio has no video files: the clip's first frame stands in, as in Film's player.
   const live = useMode() === "live";
@@ -92,5 +92,5 @@ function ViewerClip({ artifact, poster, title }: { artifact: StudioArtifactRef; 
   if (!live) return <Picture artifact={poster ?? { ...artifact, kind: "image" }} alt={title} />;
   if (source.status === "failed") return <div className="pic-note" role="status">{t("preview.clip.failed")}</div>;
   if (source.status !== "ready") return <div className="pic-note pic-loading" role="status">{t("preview.clip.loading")}</div>;
-  return <video className="mv-video" src={source.url} controls autoPlay playsInline aria-label={title} />;
+  return <video className="mv-video" src={source.url} controls autoPlay playsInline aria-label={title} onLoadedMetadata={(event) => { const { videoWidth: width, videoHeight: height } = event.currentTarget; if (width && height) onShape?.(width / height); }} />;
 }

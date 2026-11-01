@@ -55,6 +55,10 @@
 .cp-thumb:focus-visible{outline:none}
 .cp-thumb:focus-visible .cp-thumb-pic{outline:2px solid var(--focus);outline-offset:2px}
 .cp-thumb.chosen .cp-thumb-pic{border:2px solid var(--select)}
+.cp-thumb-play{position:absolute;inset:0;display:grid;place-items:center;color:var(--text);font-size:18px;text-shadow:0 1px 4px rgba(0,0,0,.7)}
+.cp-review-clip{width:96px;margin-top:9px}
+.cp-review-clip .cp-thumb-pic{aspect-ratio:9/16}
+.cp-compare-pic .mv-video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#0b0c0d}
 .cp-thumb-label{font-size:11.5px;font-weight:600;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cp-thumb.chosen .cp-thumb-label{color:var(--text)}
 .cp-thumb:disabled{cursor:default}

@@ -109,56 +109,9 @@ function DeclaredShotRow({ shot, onOpen }: { shot: DeclaredShot; onOpen(key: str
   );
 }
 
-// ---- Keyframes --------------------------------------------------------------------------------
-
-/** Keyframes in a code-plan film: every image step, the ones the current plan reaches first; the rest as history. */
-export function CodePlanKeyframesView() {
-  const { t, tm, locale } = useI18n();
-  const { view } = useCodePlan();
-  const waiting = useNotReady();
-  const rows = useMemo(() => (view ? stepRows(view, ["image"], numberLocale(locale)) : null), [view, locale]);
-  const count = rows ? rows.current.length + rows.history.length : 0;
-  const made = rows ? [...rows.current, ...rows.history].filter((row) => row.state === "succeeded").length : 0;
-  // Every made frame, current then history, opens in one viewer that steps through them.
-  const pictures = useMemo(() => (rows ? viewerItems([...rows.current, ...rows.history], t, tm) : []), [rows, t, tm]);
-  const [viewing, setViewing] = useState<number | null>(null);
-  return (
-    <main className="work plan cp-view cp-keyframes" data-view="keyframes" data-code-plan="true">
-      <ViewHead title={t("shell.tab.keyframes")} line={rows && !waiting ? t("codeplan.keyframes.line", { count, made }) : null} />
-      {waiting ?? (rows && (
-        <CodePlanMedia>
-          {!count ? <ViewMessage title={t("codeplan.keyframes.empty")} /> : null}
-          <StepGroups rows={rows} onOpen={(key) => setViewing(Math.max(0, pictures.findIndex((item) => item.key === key)))} />
-          {viewing !== null && pictures.length ? <MediaViewer items={pictures} start={viewing} onClose={() => setViewing(null)} /> : null}
-        </CodePlanMedia>
-      ))}
-    </main>
-  );
-}
-
 /** Made steps with media, for the viewer: the label as its title, its model and status underneath. */
 export function viewerItems(rows: StepRow[], t: ReturnType<typeof useI18n>["t"], tm: ReturnType<typeof useI18n>["tm"]): ViewerItem[] {
   return rows.flatMap((row) => (row.artifact ? [{ key: row.key, artifact: row.artifact, title: stepLabel(row, t), detail: [row.model, tm(row.status)].filter(Boolean).join(" · "), stepKey: row.key, ...(row.poster ? { poster: row.poster } : {}) }] : []));
-}
-
-function StepGroups({ rows, still = true, onOpen }: { rows: { current: StepRow[]; history: StepRow[] }; still?: boolean; onOpen?: ((key: string) => void) | undefined }) {
-  const { t } = useI18n();
-  return (
-    <>
-      {rows.current.length ? (
-        <section className="cp-group" aria-label={t("codeplan.steps.current")}>
-          <ul className="cp-steps">{rows.current.map((row) => <StepCard key={row.key} row={row} still={still} onOpen={onOpen && row.artifact ? () => onOpen(row.key) : undefined} />)}</ul>
-        </section>
-      ) : null}
-      {rows.history.length ? (
-        <section className="cp-group history" aria-label={t("codeplan.steps.history")}>
-          <h2 className="cp-group-title">{t("codeplan.steps.history")}</h2>
-          <p className="cp-hint">{t("codeplan.steps.history_hint")}</p>
-          <ul className="cp-steps">{rows.history.map((row) => <StepCard key={row.key} row={row} still={still} onOpen={onOpen && row.artifact ? () => onOpen(row.key) : undefined} />)}</ul>
-        </section>
-      ) : null}
-    </>
-  );
 }
 
 // ---- Film -------------------------------------------------------------------------------------

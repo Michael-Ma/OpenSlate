@@ -69,7 +69,7 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
     [codePlan.enabled, codePlan.view, name, projects, projectId, overview]);
   const mode = topBarMode(view, !!projectId);
   const pill = connectionPill(connection, offline);
-  const tabs = viewTabs(view, codePlan.enabled && developer);
+  const tabs = viewTabs(view, codePlan.enabled, developer);
   // A red dot on the tab that holds a failed step, so a failure is never hidden in a corner.
   const dots = useMemo(() => attentionViews(codePlan.enabled ? codePlan.view : null), [codePlan.enabled, codePlan.view]);
   const stop = mode === "film" && showStop(overview, director, reachable, view);
@@ -187,11 +187,11 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
               data-view={tab.view}
               aria-selected={tab.selected}
               tabIndex={tab.focusable ? 0 : -1}
-              aria-label={dots.has(tab.view as "keyframes" | "film") ? t("codeplan.tab.attention", { tab: t(tab.label) }) : undefined}
+              aria-label={dots.has(tab.view as "assets" | "film") ? t("codeplan.tab.attention", { tab: t(tab.label) }) : undefined}
               onClick={() => go(tab.view)}
             >
               {t(tab.label)}
-              {dots.has(tab.view as "keyframes" | "film") ? <i className="tab-dot" aria-hidden="true" data-dot={tab.view} /> : null}
+              {dots.has(tab.view as "assets" | "film") ? <i className="tab-dot" aria-hidden="true" data-dot={tab.view} /> : null}
             </button>
           ))}
         </div>

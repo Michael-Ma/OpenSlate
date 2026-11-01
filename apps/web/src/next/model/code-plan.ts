@@ -155,6 +155,10 @@ export interface ChoiceOption {
   artifact: StudioArtifactRef | null;
   /** null: a media option without words (the card names it "Option n"). */
   label: string | null;
+  /** A clip's still, for its thumbnail. */
+  poster: StudioArtifactRef | null;
+  /** The option's own `approved` field, when the plan asks to pass or reject something. */
+  approved: boolean | null;
   chosen: boolean;
 }
 
@@ -168,19 +172,29 @@ export interface ChoiceCard {
   chosen: number | null;
   /** Every option is media: the card lays them out as thumbnails. */
   media: boolean;
+  /** Every option is the same clip: the card shows that one clip, and its options are what to do with it. */
+  clip: { artifact: StudioArtifactRef; poster: StudioArtifactRef | null; stepKey: string | null } | null;
   answeredAt: string | null;
 }
 
-export function choiceCard(choice: CodePlanChoiceView): ChoiceCard {
+export function choiceCard(choice: CodePlanChoiceView, steps: readonly CodePlanStepView[] = []): ChoiceCard {
   const done = answered(choice);
   const answer = done ? canonicalJson(choice.answer) : null;
-  const options = (Array.isArray(choice.options) ? choice.options : []).slice(0, 24).map((value, index): ChoiceOption => ({
-    index, value, artifact: optionArtifact(value), label: optionLabel(value), chosen: answer !== null && canonicalJson(value) === answer,
-  }));
+  const stepOf = (artifact: StudioArtifactRef | null) => (artifact ? steps.find((step) => step.artifact?.artifactId === artifact.artifactId) : undefined);
+  const rows = (Array.isArray(choice.options) ? choice.options : []).slice(0, 24).map((value, index): ChoiceOption => {
+    const artifact = optionArtifact(value);
+    return { index, value, artifact, label: optionLabel(value), poster: artifactRefOf(stepOf(artifact)?.poster), approved: isObject(value) && typeof value.approved === "boolean" ? value.approved : null,
+      chosen: answer !== null && canonicalJson(value) === answer };
+  });
+  // Two options on one clip are not two clips to compare: they are two answers about it.
+  const first = rows[0]?.artifact ?? null;
+  const oneClip = rows.length > 1 && first?.kind === "video" && rows.every((option) => option.artifact?.artifactId === first.artifactId);
+  const options = oneClip ? rows.map((option) => ({ ...option, artifact: null })) : rows;
   const chosen = options.find((option) => option.chosen)?.index ?? null;
   return {
     choiceId: choice.choiceId, optionsDigest: choice.optionsDigest, question: text(choice.question, 500), options, answered: done, chosen,
     media: options.length > 0 && options.every((option) => option.artifact),
+    clip: oneClip && first ? { artifact: first, poster: rows[0]!.poster, stepKey: stepOf(first)?.key ?? null } : null,
     answeredAt: done && typeof choice.answeredAt === "string" ? choice.answeredAt : null,
   };
 }
@@ -206,7 +220,7 @@ export function placeByTime<T extends { at: string | null }>(entryTimes: readonl
 /** The thread shows answered choices first (in the order they were asked), then the ones still waiting, last. */
 export function threadChoices(view: CodePlanView | null): ChoiceCard[] {
   if (!view) return [];
-  const cards = view.choices.map(choiceCard);
+  const cards = view.choices.map((choice) => choiceCard(choice, view.steps));
   return [...cards.filter((card) => card.answered), ...cards.filter((card) => !card.answered)];
 }
 
@@ -301,15 +315,15 @@ export const needsAttention = (step: Pick<CodePlanStepView, "state" | "error" | 
   step.reached && (step.state === "failed" || (step.state === "unknown" && !!step.error));
 
 /** The tab that shows a step of this kind. */
-export const viewOfStep = (kind: CodePlanStepKind): "keyframes" | "film" => (kind === "image" ? "keyframes" : "film");
+export const viewOfStep = (kind: CodePlanStepKind): "assets" | "film" => (kind === "image" ? "assets" : "film");
 
 /** The tabs holding a step that needs the person (their red dot). */
-export function attentionViews(view: CodePlanView | null): Set<"keyframes" | "film"> {
+export function attentionViews(view: CodePlanView | null): Set<"assets" | "film"> {
   return new Set((view?.steps ?? []).filter(needsAttention).map((step) => viewOfStep(step.kind)));
 }
 
 /** A code-plan step in "Needs attention": what failed, in plain words, and the tab that shows it. */
-export interface CodePlanAttentionItem { key: string; view: "keyframes" | "film"; badge: Msg; title: Msg; detail: Msg }
+export interface CodePlanAttentionItem { key: string; view: "assets" | "film"; badge: Msg; title: Msg; detail: Msg }
 
 export function codePlanAttentionItems(view: CodePlanView | null, locale: string): CodePlanAttentionItem[] {
   return (view?.steps ?? []).filter(needsAttention).map((step) => {

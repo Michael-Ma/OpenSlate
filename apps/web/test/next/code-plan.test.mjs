@@ -294,8 +294,8 @@ test('the planning choice: storyboard stays the default and sends nothing new; a
 
 test('a code-plan film has a Code tab; a graph film never shows Code', () => {
   assert.deepEqual(viewTabs('plan').map((t) => t.view), ['plan', 'keyframes', 'assets', 'film']);
-  assert.deepEqual(viewTabs('code', true).map((t) => [t.view, t.selected]), [['plan', false], ['keyframes', false], ['assets', false], ['film', false], ['code', true]]);
-  assert.equal(en({ id: viewTabs('code', true)[4].label }), 'Code');
+  assert.deepEqual(viewTabs('code', true).map((t) => [t.view, t.selected]), [['plan', false], ['assets', false], ['film', false], ['code', true]]);
+  assert.equal(en({ id: viewTabs('code', true)[3].label }), 'Code');
   const base = { view: 'code', projectId: 'p', projects: [{ id: 'p', name: 'P' }], connection: 'connected' };
   assert.equal(shownView({ ...base, snapshot: { project: { id: 'p' } } }), 'keyframes');
   assert.equal(shownView({ ...base, snapshot: { project: { id: 'p', planMode: 'code' } } }), 'code');
@@ -489,10 +489,10 @@ test('failed steps put a red dot on their tab and list in Needs attention; unrea
     step('fine', 'image', 'succeeded'),
   ] });
   assert.deepEqual(plan.steps.map(needsAttention), [true, true, false, false]);
-  assert.deepEqual([...attentionViews(plan)].sort(), ['film', 'keyframes']);
+  assert.deepEqual([...attentionViews(plan)].sort(), ['assets', 'film']);
   assert.deepEqual([...attentionViews(view({ steps: [step('fine', 'image', 'succeeded')] }))], []);
   const items = codePlanAttentionItems(plan, 'en-US');
-  assert.deepEqual(items.map((item) => [item.key, item.view, en(item.badge)]), [['frame', 'keyframes', 'Frame'], ['clip', 'film', 'Clip']]);
+  assert.deepEqual(items.map((item) => [item.key, item.view, en(item.badge)]), [['frame', 'assets', 'Frame'], ['clip', 'film', 'Clip']]);
   assert.equal(en(items[1].title), 'A clip failed: Push in on Tofu');
   assert.match(en(items[1].detail), /did not answer/);
 });
@@ -518,7 +518,7 @@ test('developer mode is a browser preference, off unless saved as on; storage th
   setDeveloperMode(false, null);
   // Without it a code film has no Code tab.
   assert.deepEqual(viewTabs('plan', false).map((tab) => tab.view), ['plan', 'keyframes', 'assets', 'film']);
-  assert.deepEqual(viewTabs('plan', true).map((tab) => tab.view), ['plan', 'keyframes', 'assets', 'film', 'code']);
+  assert.deepEqual(viewTabs('plan', true).map((tab) => tab.view), ['plan', 'assets', 'film', 'code']);
 });
 
 test('?codeplan=failed: a lost clip stops the run; Retry (with consent) makes it again and the film renders', async (t) => {
@@ -625,4 +625,24 @@ test('a typed limit must be an amount no lower than what is spent or started', (
   assert.deepEqual(limitDraft('0.90', film), { micros: '900000', problem: null, changed: true });
   assert.equal(limitDraft('0.89', film).problem, 'below');
   assert.deepEqual(limitDraft('abc', film), { micros: null, problem: 'invalid', changed: false });
+});
+
+test('a code-plan film shows its frames in Assets: an old keyframes link lands there', () => {
+  const base = { view: 'keyframes', projectId: 'p', projects: [{ id: 'p', name: 'P' }], connection: 'connected' };
+  assert.equal(shownView({ ...base, snapshot: { project: { id: 'p', planMode: 'code' } } }), 'assets');
+  assert.deepEqual(viewTabs('plan', true, false).map((tab) => tab.view), ['plan', 'assets', 'film'], 'with Developer mode off too');
+  assert.equal(shownView({ ...base, snapshot: { project: { id: 'p' } } }), 'keyframes', 'a graph film keeps its Keyframes tab');
+});
+
+test('two options on one clip are one clip and two answers, with no broken thumbnails', () => {
+  const clip = ref('c1', 'video'), still = ref('s1');
+  const choice = { choiceId: 'shot-1-video-review', optionsDigest: 'd', question: 'Check it', options: [{ artifact: clip, approved: true }, { artifact: clip, approved: false }] };
+  const card = choiceCard(choice, [{ key: 'step-1', kind: 'video', artifact: clip, poster: still }]);
+  assert.equal(card.media, false);
+  assert.deepEqual(card.clip, { artifact: clip, poster: still, stepKey: 'step-1' });
+  assert.deepEqual(card.options.map((option) => [option.artifact, option.approved]), [[null, true], [null, false]]);
+  assert.equal(answerPress(card, card.options[1].value).body.answer.approved, false, 'the answer is still exactly what the plan passed');
+  const two = choiceCard({ ...choice, options: [ref('c1', 'video'), ref('c2', 'video')] }, [{ key: 'a', kind: 'video', artifact: ref('c1', 'video'), poster: still }]);
+  assert.equal(two.clip, null); assert.equal(two.media, true);
+  assert.deepEqual(two.options.map((option) => option.poster), [still, null]);
 });

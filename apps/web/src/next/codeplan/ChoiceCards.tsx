@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { Picture } from "../keyframes/parts.tsx";
-import { useNaturalAspect } from "../media/Viewer.tsx";
+import { MediaViewer, useNaturalAspect, ViewerClip } from "../media/Viewer.tsx";
 import { answerPress, threadChoices, type ChoiceCard, type ChoiceOption } from "../model/code-plan.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { Modal } from "../views/plan/Modal.tsx";
@@ -37,9 +37,9 @@ export function CodePlanChoiceGroup({ cards }: { cards: ChoiceCard[] }) {
   );
 }
 
-/** Words for an option: its own, else "Option n". */
-export const optionName = (option: ChoiceOption, t: (id: "codeplan.choice.option", values: { n: number }) => string): string =>
-  option.label ?? t("codeplan.choice.option", { n: option.index + 1 });
+/** Words for an option: its own, else pass or reject, else "Option n". */
+export const optionName = (option: ChoiceOption, t: ReturnType<typeof useI18n>["t"]): string =>
+  option.label ?? (option.approved === null ? t("codeplan.choice.option", { n: option.index + 1 }) : t(option.approved ? "codeplan.choice.approve" : "codeplan.choice.reject"));
 
 export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
   const { t } = useI18n();
@@ -53,6 +53,7 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
   const choose = (option: ChoiceOption) => { if (!off) void store.answerCodePlanChoice(card, option.value); };
   // The option whose large view is open (media choices are chosen there, never by one press on a thumbnail).
   const [comparing, setComparing] = useState<number | null>(null);
+  const [watching, setWatching] = useState(false);
   // Code is mentioned only to developers, who have the Code tab.
   const developer = useDeveloperMode();
   return (
@@ -64,6 +65,14 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
     >
       <span className="cp-eyebrow">{t(card.answered ? "codeplan.choice.eyebrow_done" : "codeplan.choice.eyebrow")}</span>
       {card.question ? <p className="cp-question">{card.question}</p> : null}
+      {card.clip ? (
+        <button type="button" className="cp-thumb cp-review-clip" data-kind="video" data-act="code-plan-watch" aria-label={t("codeplan.choice.watch")} onClick={() => setWatching(true)}>
+          <span className="cp-thumb-pic">{card.clip.poster ? <Picture artifact={card.clip.poster} alt="" /> : null}<span className="cp-thumb-play" aria-hidden="true">▶</span></span>
+        </button>
+      ) : null}
+      {watching && card.clip ? (
+        <MediaViewer items={[{ key: card.choiceId, artifact: card.clip.artifact, title: card.question || t("codeplan.choice.watch"), ...(card.clip.poster ? { poster: card.clip.poster } : {}), ...(card.clip.stepKey ? { stepKey: card.clip.stepKey } : {}) }]} start={0} onClose={() => setWatching(false)} />
+      ) : null}
       <div className={`cp-options${card.media ? " media" : ""}`}>
         {card.options.map((option) => {
           const name = optionName(option, t);
@@ -73,7 +82,10 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
               <button key={option.index} type="button" className={`cp-thumb${option.chosen ? " chosen" : ""}`} data-kind={option.artifact.kind}
                 data-act="code-plan-look" data-option={option.index} aria-pressed={option.chosen}
                 aria-label={t(card.answered ? "codeplan.choice.look_done" : "codeplan.choice.look", { option: name })} onClick={() => setComparing(option.index)}>
-                <span className="cp-thumb-pic"><Picture artifact={option.artifact} alt="" /></span>
+                <span className="cp-thumb-pic">
+                  {option.artifact.kind !== "video" ? <Picture artifact={option.artifact} alt="" /> : option.poster ? <Picture artifact={option.poster} alt="" /> : null}
+                  {option.artifact.kind === "video" ? <span className="cp-thumb-play" aria-hidden="true">▶</span> : null}
+                </span>
                 <span className="cp-thumb-label">{name}</span>
                 {option.chosen ? <span className="cp-chosen-mark" aria-hidden="true">✓ {t("codeplan.choice.chosen")}</span> : null}
               </button>
@@ -128,7 +140,7 @@ function ChoiceCompare({ card, focus, off, offTitle, onChoose, onClose }: {
           const name = optionName(option, t);
           return (
             <figure key={option.index} className={`cp-compare-item${option.chosen ? " chosen" : ""}`} data-option={option.index}>
-              {option.artifact ? <ComparePicture artifact={option.artifact} name={name} /> : null}
+              {option.artifact ? <ComparePicture artifact={option.artifact} poster={option.poster} name={name} /> : null}
               <figcaption>
                 <span className="cp-compare-name">{name}</span>
                 {option.chosen ? <span className="cp-chosen-mark static">✓ {t("codeplan.choice.chosen")}</span>
@@ -147,8 +159,14 @@ function ChoiceCompare({ card, focus, off, offTitle, onChoose, onClose }: {
   );
 }
 
-/** The box takes the picture's own shape, up to the dialog's height, so a portrait frame fills it instead of sitting between bars. */
-function ComparePicture({ artifact, name }: { artifact: NonNullable<ChoiceOption["artifact"]>; name: string }) {
+/** The box takes the picture's own shape, up to the dialog's height, so a portrait frame fills it instead of sitting between bars. A clip plays. */
+function ComparePicture({ artifact, poster, name }: { artifact: NonNullable<ChoiceOption["artifact"]>; poster: ChoiceOption["poster"]; name: string }) {
   const shape = useNaturalAspect();
-  return <div className="cp-compare-pic" style={shape.style}><Picture artifact={artifact} alt={name} onDecoded={shape.onDecoded} /></div>;
+  return (
+    <div className="cp-compare-pic" style={shape.style}>
+      {artifact.kind === "video"
+        ? <ViewerClip artifact={artifact} poster={poster ?? undefined} title={name} onShape={(aspect) => shape.onDecoded(artifact.artifactId, aspect)} />
+        : <Picture artifact={artifact} alt={name} onDecoded={shape.onDecoded} />}
+    </div>
+  );
 }

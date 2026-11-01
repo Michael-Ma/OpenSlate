@@ -236,11 +236,11 @@ export function tileFor(item: AssetItem, items: readonly AssetItem[], overview: 
   };
 }
 
-/** Role order; music, uploads and exports in use first; then oldest first, so takes read 1, 2, 3. */
+/** Role order; what is in use first; then oldest first, so takes read 1, 2, 3. */
 export function compareAssets(a: AssetItem, b: AssetItem): number {
   const role = ROLE_ORDER[a.role] - ROLE_ORDER[b.role];
   if (role) return role;
-  if (!a.shotId && !b.shotId && a.current !== b.current) return a.current ? -1 : 1;
+  if (a.current !== b.current) return a.current ? -1 : 1;
   return time(a.createdAt) - time(b.createdAt) || (a.takeIndex ?? 0) - (b.takeIndex ?? 0);
 }
 

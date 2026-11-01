@@ -2,6 +2,9 @@ import type { AssetItem } from "@openslate/core/public";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNarrow } from "../../app/useNarrow.ts";
 import { useCodePlan } from "../../codeplan/CodePlanContext.tsx";
+import { StepCard } from "../../codeplan/parts.tsx";
+import { numberLocale } from "../../i18n/translate.ts";
+import { stepRows } from "../../model/code-plan.ts";
 import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { importDoneMsg } from "../../model/assets-import.ts";
@@ -67,7 +70,7 @@ function focusComposer(tries = 12): void {
 
 function Library() {
   const store = useStore();
-  const { t, tm } = useI18n();
+  const { t, tm, locale } = useI18n();
   const studioOverview = useStudio((s) => s.overview)!;
   // A code plan declares its own scenes and shots; a graph film's are the overview's.
   const { enabled: codeFilm, view: codePlan, error: codePlanError } = useCodePlan();
@@ -110,6 +113,8 @@ function Library() {
     key: tile.key, artifact: tile.item.artifact, title: tm(tile.title),
     ...(tile.item.stepKey ? { stepKey: tile.item.stepKey } : {}), ...(tile.picture ? { poster: tile.picture } : {}),
   })), [shownTiles, tm]);
+  // A frame still being made, or one that failed, has no asset yet: it shows here with its state and Retry.
+  const unfinished = useMemo(() => (codePlan ? stepRows(codePlan, ["image"], numberLocale(locale)).current.filter((row) => row.state !== "succeeded") : []), [codePlan, locale]);
   const start = viewing === null ? -1 : viewerItems.findIndex((item) => item.key === viewing);
   const tileOf = (key: string) => shownTiles.find((tile) => tile.key === key);
   const open = useCallback((key: string) => setViewing(key), []);
@@ -204,6 +209,14 @@ function Library() {
             </div>
           ) : (
             <>
+              {unfinished.length > 0 && (
+                <CodePlanMedia>
+                  <section className="panel group" aria-labelledby="av-g-unfinished" data-group="unfinished">
+                    <h2 id="av-g-unfinished" tabIndex={-1}>{t("assets.pending.title")}</h2>
+                    <div className="shotset av-former"><ul className="cp-steps">{unfinished.map((row) => <StepCard key={row.key} row={row} />)}</ul></div>
+                  </section>
+                </CodePlanMedia>
+              )}
               {library.film && (
                 <section className="panel group" aria-labelledby="av-g-film" data-group="film">
                   <h2 id="av-g-film" tabIndex={-1}>{t("assets.film.title")}<span className="meta">{t("assets.film.meta")}</span></h2>

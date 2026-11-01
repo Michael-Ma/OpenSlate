@@ -42,7 +42,7 @@ test('the library groups the whole film first, then each scene and shot in film 
   ]);
   const s12 = view.scenes[0].sets[1];
   assert.deepEqual(s12.tiles.map((t) => en(t.title)), ['Keyframe 1.2 · take 1', 'Clip 1.2 · take 1', 'Voice line 1.2', 'Voice line 1.2']);
-  assert.deepEqual(s12.tiles.map((t) => en(t.use.label)), ['Current', 'Current', 'Earlier', 'Current']);
+  assert.deepEqual(s12.tiles.map((t) => en(t.use.label)), ['Current', 'Current', 'Current', 'Earlier']);
   assert.deepEqual(view.scenes[2].sets.map((set) => set.tiles.length), [0, 0], 'Scene 3 shots say nothing made yet');
   assert.equal(view.nothingMatches, false);
 });
@@ -294,4 +294,9 @@ test('a code plan\'s unchosen frame reads Not chosen, and its step facts replace
   assert.deepEqual(detail.rows.map((row) => row.label.id), ['assets.row.kind', 'assets.row.shot', 'assets.row.take', 'assets.row.in_use']);
   assert.equal(detail.point, null, 'a code plan has no graph shot to point at');
   assert.equal(detail.open.shotId, null);
+});
+
+test('within a shot, the frame in use comes first', () => {
+  const unchosen = { ...kf('1.1', 1), current: false, createdAt: at(9, 0) }, chosen = { ...kf('1.1', 2), current: true, createdAt: at(10, 0) };
+  assert.deepEqual([unchosen, chosen].sort(compareAssets).map((item) => item.takeIndex), [chosen.takeIndex, unchosen.takeIndex]);
 });

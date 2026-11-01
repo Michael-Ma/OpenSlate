@@ -24,7 +24,7 @@ import { PlanView } from "../views/plan/PlanView.tsx";
 import { SettingsView } from "../views/settings/SettingsView.tsx";
 import { StartView } from "../views/start/StartView.tsx";
 import { CodePlanProvider, codePlanOpen } from "../codeplan/CodePlanContext.tsx";
-import { CodePlanFilmView, CodePlanKeyframesView, CodePlanPlanView } from "../codeplan/CodePlanViews.tsx";
+import { CodePlanFilmView, CodePlanPlanView } from "../codeplan/CodePlanViews.tsx";
 import { CodePlanCodeView } from "../codeplan/CodeView.tsx";
 import "./shell.css";
 
@@ -229,7 +229,6 @@ export function NextApp({ onReconnect, onDisconnected, carried = null, onCarried
   // A code-plan film shows its run in Plan, Keyframes and Film, and its program in Code; every other view is shared.
   const workspace = showReview ? <RecoveryReview onPutAway={lookAround} />
     : codePlan && (view === "plan" || (view === "code" && !developer)) ? <CodePlanPlanView />
-    : codePlan && view === "keyframes" ? <CodePlanKeyframesView />
     : codePlan && view === "film" ? <CodePlanFilmView />
     : codePlan && view === "code" ? <CodePlanCodeView />
     : view === "keyframes" || view === "code" ? <KeyframesView />
