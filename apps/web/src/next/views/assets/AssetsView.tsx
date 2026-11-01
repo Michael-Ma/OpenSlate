@@ -8,6 +8,7 @@ import { stepRows } from "../../model/code-plan.ts";
 import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { importDoneMsg } from "../../model/assets-import.ts";
+import { focusComposer } from "../../director/ShowDirector.tsx";
 import { MediaViewer, type ViewerItem } from "../../media/Viewer.tsx";
 import {
   ALL_ASSETS,
@@ -54,18 +55,6 @@ export function AssetsView() {
       </main>
     );
   return <Library />;
-}
-
-/**
- * After pointing the Director, the message is written in its composer: focus moves there (on a phone once its
- * drawer has opened, so the next few frames are tried).
- */
-function focusComposer(tries = 12): void {
-  requestAnimationFrame(() => {
-    const composer = document.querySelector<HTMLTextAreaElement>("#director textarea[data-field='message']");
-    composer?.focus({ preventScroll: true });
-    if (document.activeElement !== composer && tries > 1) focusComposer(tries - 1);
-  });
 }
 
 function Library() {

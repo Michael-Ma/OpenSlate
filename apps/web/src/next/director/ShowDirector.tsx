@@ -5,12 +5,15 @@ import { NARROW_QUERY } from "../model/shell.ts";
 import { msg } from "../model/types.ts";
 import { useStore } from "../store/react.tsx";
 
-/** Focus the reply box; on a phone its drawer opens first, so the next few frames are tried. */
-export function focusComposer(tries = 12): void {
+/**
+ * Focus the reply box; on a phone its drawer opens first, so the next few frames are tried. The first success is
+ * checked again one frame on: a dialog closing in the same press hands focus back to its opener in between.
+ */
+export function focusComposer(tries = 12, first = true): void {
   requestAnimationFrame(() => {
     const composer = document.querySelector<HTMLTextAreaElement>("#director textarea[data-field='message']");
     composer?.focus({ preventScroll: true });
-    if (document.activeElement !== composer && tries > 1) focusComposer(tries - 1);
+    if ((first || document.activeElement !== composer) && tries > 1) focusComposer(tries - 1, false);
   });
 }
 

@@ -96,6 +96,8 @@ export function Toast() {
   useLayoutEffect(() => {
     const toast = box.current;
     if (id === undefined || !toast) return;
+    // In the top layer, so an open dialog never covers it.
+    if (!toast.matches(":popover-open")) toast.showPopover?.();
     placeToast(toast);
     let frame = 0;
     const later = () => {
@@ -144,6 +146,7 @@ export function Toast() {
   const body = toast && (
     <div
       ref={box}
+      popover="manual"
       className={`toast ${toast.tone}`}
       data-tone={toast.tone}
       onMouseEnter={() => { hovered.current = true; hold(); }}

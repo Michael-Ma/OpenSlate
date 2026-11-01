@@ -2,7 +2,7 @@ import type { StudioArtifactRef } from "@openslate/core/public";
 import { useEffect, useState, type RefObject } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { artifactKey } from "../media/artifact-cache.ts";
-import { useArtifactUrl } from "../media/useArtifactUrl.ts";
+import { usePictureUrl } from "../views/assets/media.ts";
 import type { CardTone } from "../model/keyframes.ts";
 import type { Msg } from "../model/types.ts";
 
@@ -24,7 +24,7 @@ export function StatusPill({ status, tone, reason }: { status: Msg; tone: CardTo
  */
 export function Picture({ artifact, alt, onDecoded }: { artifact: StudioArtifactRef; alt: string; onDecoded?(key: string, aspect: number | null): void }) {
   const { t } = useI18n();
-  const source = useArtifactUrl(artifact);
+  const source = usePictureUrl(artifact);
   const key = artifactKey(artifact);
   if (source.status === "failed") return <div className="pic-note" role="img" aria-label={alt}>{t("preview.failed")}</div>;
   if (source.status !== "ready") return <div className="pic-note pic-loading" role="img" aria-label={t("preview.loading")} />;

@@ -287,8 +287,8 @@ function importImage(world: FixtureWorld, raw: string | undefined, body: UploadB
   requireHead(world, raw);
   const name = uploadName(raw);
   const size = Number(body.size ?? 0);
-  // The studio stores PNG, JPEG, WebP and HEIC pictures as PNG; anything else, or too small to hold a picture, is refused.
-  if (!["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"].includes(String(body.type)) || size <= 32) throw new ApiError("IMAGE_INPUT_INVALID", 409);
+  // The studio stores every picture it can decode as PNG; anything else, or too small to hold a picture, is refused.
+  if (!["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp", "image/tiff", "image/avif", "image/heic", "image/heif"].includes(String(body.type)) || size <= 32) throw new ApiError("IMAGE_INPUT_INVALID", 409);
   if (size > 32 * MIB) throw new ApiError("UPLOAD_TOO_LARGE", 409);
   const fixture = state(world);
   const artifact: StudioArtifactRef = { ...artifactFor(`import-${fixture.tag}-${++fixture.serial}`), kind: "image" };
