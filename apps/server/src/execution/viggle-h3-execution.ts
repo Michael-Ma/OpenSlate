@@ -117,7 +117,8 @@ export class ViggleH3Execution implements ExecutionProvider {
       const proposed: ViggleH3ExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
         profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile, capabilityLockId: admission.capabilityLock.id,
         capabilityLockDigest: digest(admission.capabilityLock), estimatedMicros: admission.reservation.micros, ...preparation.pins,
-        ...(preparation.crop ? { firstFrameCrop: preparation.crop } : {}), transport: describeViggleH3Request(prepared) };
+        ...(preparation.crop ? { firstFrameCrop: preparation.crop } : {}),
+        ...(preparation.lastFrameCrop ? { lastFrameCrop: preparation.lastFrameCrop } : {}), transport: describeViggleH3Request(prepared) };
       assertViggleH3ExecutionMapping(attempt, proposed);
       mapping = this.#store.transaction(() => {
         this.dispatchable(attempt, expected);
@@ -430,35 +431,37 @@ export class ViggleH3Execution implements ExecutionProvider {
     return bytes;
   }
 
-  private async prepare(attempt: Attempt, signal?: AbortSignal): Promise<{ request: ViggleH3Request; crop?: PngCenterCrop;
+  private async prepare(attempt: Attempt, signal?: AbortSignal): Promise<{ request: ViggleH3Request; crop?: PngCenterCrop; lastFrameCrop?: PngCenterCrop;
     pins: Pick<ViggleH3ExecutionMapping, "firstFrame" | "lastFrame" | "references"> }> {
     const request = attempt.request, configuration = request.profile!.configuration;
     const admission = resolveViggleAdmission(this.#store, request, this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id));
     assertViggleH3OperationOptions(admission.profile, request.args);
     const aspectRatio = viggleH3RequestAspect(request.args, request.profile!);
     const pins: Pick<ViggleH3ExecutionMapping, "firstFrame" | "lastFrame" | "references"> = {};
-    let crop: PngCenterCrop | undefined;
-    const image = async (sha256: string, first = false) => {
+    let crop: PngCenterCrop | undefined, lastFrameCrop: PngCenterCrop | undefined;
+    const image = async (sha256: string, role: "first" | "last" | "reference") => {
       const ref = request.inputs.find(row => row.kind === "image" && row.sha256 === sha256);
       invariant(ref, "VIGGLE_H3_EXECUTION_CONFLICT", "Missing owned image input");
       const frame = resolveViggleFrame(this.#store, attempt, undefined, ref), record = frame.artifact;
       const bytes = await this.readImage(record, signal);
-      if (first) assertViggleH3FirstFrameAspect(request.args, record.width, record.height);
-      const upload = first ? centerCropPng(bytes, aspectRatio) : { bytes };
-      if ("crop" in upload) crop = upload.crop;
-      return { pin: viggleFramePin(frame), upload: { bytes: upload.bytes, sha256: createHash("sha256").update(upload.bytes).digest("hex"),
-        width: first && crop ? crop.width : record.width!, height: first && crop ? crop.height : record.height!, byteLength: upload.bytes.length, mediaType: "image/png" as const } };
+      if (role === "first") assertViggleH3FirstFrameAspect(request.args, record.width, record.height);
+      const upload = role === "reference" ? { bytes, crop: undefined } : centerCropPng(bytes, aspectRatio);
+      return { pin: viggleFramePin(frame), crop: upload.crop,
+        upload: { bytes: upload.bytes, sha256: createHash("sha256").update(upload.bytes).digest("hex"),
+          width: upload.crop?.width ?? record.width!, height: upload.crop?.height ?? record.height!, byteLength: upload.bytes.length, mediaType: "image/png" as const } };
     };
     const prepared: ViggleH3Request = { prompt: String(request.args.prompt), durationSeconds: Number(request.args.durationFrames) / 30,
       resolution: configuration.settings!.resolution as ViggleH3Resolution, quality: configuration.settings!.quality as ViggleH3Quality,
       aspectRatio, watermark: false, ...(request.args.enhance === false ? { enhance: false } : {}) };
     if (Array.isArray(request.args.references)) {
       pins.references = []; prepared.references = [];
-      for (const hash of request.args.references) { const result = await image(String(hash)); pins.references.push(result.pin); prepared.references.push(result.upload); }
+      for (const hash of request.args.references) { const result = await image(String(hash), "reference"); pins.references.push(result.pin); prepared.references.push(result.upload); }
     } else if (request.inputs.length) {
-      const first = await image(request.inputs[0]!.sha256, true); pins.firstFrame = first.pin; prepared.firstFrame = first.upload;
-      if (request.args.lastFrameSha256) { const last = await image(String(request.args.lastFrameSha256)); pins.lastFrame = last.pin; prepared.lastFrame = last.upload; }
+      const first = await image(request.inputs[0]!.sha256, "first"); pins.firstFrame = first.pin; prepared.firstFrame = first.upload; crop = first.crop;
+      if (request.args.lastFrameSha256) {
+        const last = await image(String(request.args.lastFrameSha256), "last"); pins.lastFrame = last.pin; prepared.lastFrame = last.upload; lastFrameCrop = last.crop;
+      }
     }
-    return { request: prepared, pins, ...(crop ? { crop } : {}) };
+    return { request: prepared, pins, ...(crop ? { crop } : {}), ...(lastFrameCrop ? { lastFrameCrop } : {}) };
   }
 }

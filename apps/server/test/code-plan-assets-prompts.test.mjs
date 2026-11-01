@@ -166,7 +166,8 @@ for (const [adapter, mappingKind] of adapterRows) test(`${adapter} step details 
   // Inject contaminated persisted read shapes; production Store validators reject such writes.
   // This exercises the HTTP projection independently of that earlier defense.
   let mapping = { id: 'latest', projectId: f.projectId, ...(hasTransport ? { transport } : {}), requestDigest: hash('intent'), ...secrets,
-    native: secrets, firstFrame: { ...secrets }, firstFrameCrop: { sourceWidth: 1344, sourceHeight: 768, width: 432, height: 768, ...secrets } };
+    native: secrets, firstFrame: { ...secrets }, firstFrameCrop: { sourceWidth: 1344, sourceHeight: 768, width: 432, height: 768, ...secrets },
+    lastFrameCrop: { sourceWidth: 1024, sourceHeight: 1536, width: 864, height: 1536, ...secrets } };
   const originalGet = f.store.get.bind(f.store);
   f.store.get = (kind, id) => kind === mappingKind && id === 'latest' ? mapping : originalGet(kind, id);
   f.run([step.key]); const before = snapshot(f), response = await f.get('/code-plan/steps/step'); assert.equal(response.statusCode, 200, response.body);
@@ -174,6 +175,7 @@ for (const [adapter, mappingKind] of adapterRows) test(`${adapter} step details 
   assert.equal(call.providerModel, hasTransport ? 'recorded-model' : 'provider-model');
   assert.equal(call.settings.resolution, hasTransport ? '768p' : '1080p');
   assert.deepEqual(call.firstFrameCrop, { sourceWidth: 1344, sourceHeight: 768, width: 432, height: 768 });
+  assert.deepEqual(call.lastFrameCrop, { sourceWidth: 1024, sourceHeight: 1536, width: 864, height: 1536 });
   assert.equal(call.requestDigest, hash(hasTransport ? 'transport' : 'intent'));
   for (const secret of Object.values(secrets)) assert.ok(!response.body.includes(secret), secret);
   for (const key of Object.keys(call.settings)) assert.ok(['model','resolution','quality','aspectRatio','ratio','durationSeconds','durationFrames','width','height','seed','generateAudio','instrumental','voice'].includes(key), key);

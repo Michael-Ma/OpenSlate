@@ -38,13 +38,17 @@ function providerCall(store: Store, attempt: Attempt): Call | undefined {
   const exact = Object.keys(transport).length > 0;
   const selected = exact ? settings(transport) : settings(config, object(config.settings), args, object(args.settings), { mode: mapping.mode });
   const providerModel = selected.model;
-  const crop = object(mapping.firstFrameCrop), cropKeys = ["sourceWidth", "sourceHeight", "width", "height"] as const;
-  const firstFrameCrop = cropKeys.every(key => positive(crop[key])) ? {
-    sourceWidth: crop.sourceWidth as number, sourceHeight: crop.sourceHeight as number, width: crop.width as number, height: crop.height as number,
-  } : undefined;
+  const projectCrop = (value: unknown): Call["firstFrameCrop"] => {
+    const crop = object(value), cropKeys = ["sourceWidth", "sourceHeight", "width", "height"] as const;
+    return cropKeys.every(key => positive(crop[key])) ? {
+      sourceWidth: crop.sourceWidth as number, sourceHeight: crop.sourceHeight as number, width: crop.width as number, height: crop.height as number,
+    } : undefined;
+  };
+  const firstFrameCrop = projectCrop(mapping.firstFrameCrop), lastFrameCrop = projectCrop(mapping.lastFrameCrop);
   const requestDigest = transport.requestDigest ?? mapping.requestDigest;
   return { adapter, ...(typeof providerModel === "string" ? { providerModel } : {}), settings: selected,
-    ...(firstFrameCrop ? { firstFrameCrop } : {}), ...(token(attempt.taskId) && !attempt.taskId.includes("/") ? { taskId: attempt.taskId } : {}),
+    ...(firstFrameCrop ? { firstFrameCrop } : {}), ...(lastFrameCrop ? { lastFrameCrop } : {}),
+    ...(token(attempt.taskId) && !attempt.taskId.includes("/") ? { taskId: attempt.taskId } : {}),
     ...(typeof requestDigest === "string" && /^[a-f0-9]{64}$/.test(requestDigest) ? { requestDigest } : {}) };
 }
 

@@ -831,6 +831,8 @@ export interface CodePlanStepDetail {
     settings: Record<string, string | number | boolean>;
     /** Present when the first frame was cropped to the provider's ratio before sending. */
     firstFrameCrop?: { sourceWidth: number; sourceHeight: number; width: number; height: number };
+    /** Present when the last frame was cropped to the provider's ratio before sending. */
+    lastFrameCrop?: { sourceWidth: number; sourceHeight: number; width: number; height: number };
     taskId?: string;
     requestDigest?: string;
   };

@@ -18,6 +18,7 @@ export interface ViggleH3ExecutionMapping extends Identity {
   lastFrame?: ViggleFramePin;
   references?: ViggleFramePin[];
   firstFrameCrop?: PngCenterCrop;
+  lastFrameCrop?: PngCenterCrop;
   transport: ViggleH3Description;
 }
 export type ViggleFramePin = NonNullable<ViggleH3ExecutionMapping["firstFrame"]>;
@@ -108,9 +109,10 @@ export function assertViggleH3OperationOptions(profile: ProviderProfile, args: J
   } catch { invariant(false, "VIGGLE_H3_PREFLIGHT_INVALID", "Unsupported Viggle operation options"); }
 }
 export function assertViggleH3ExecutionMapping(attempt: Attempt, mapping: ViggleH3ExecutionMapping): void {
-  // Validate this optional nested object before base() canonically measures the receipt; never invoke crop accessors.
-  const cropField = Object.getOwnPropertyDescriptor(mapping, "firstFrameCrop");
-  if (cropField) {
+  // Validate optional crop objects before base() canonically measures the receipt; never invoke crop accessors.
+  for (const key of ["firstFrameCrop", "lastFrameCrop"]) {
+    const cropField = Object.getOwnPropertyDescriptor(mapping, key);
+    if (!cropField) continue;
     invariant(Object.hasOwn(cropField, "value"), "VIGGLE_H3_EXECUTION_CONFLICT", "Unsupported Viggle crop field");
     const crop = cropField.value as PngCenterCrop;
     viggleH3Fields(crop, ["recipe", "sourceWidth", "sourceHeight", "width", "height"]);
@@ -167,7 +169,7 @@ export function assertViggleH3ExecutionMapping(attempt: Attempt, mapping: Viggle
 /** New code attempts retain all ordered image pins. Historical graph/first-frame receipts use the original validator above. */
 function assertCodeViggleMapping(attempt: Attempt, mapping: ViggleH3ExecutionMapping): void {
   base(attempt, mapping, ["profileDigest", "profileDefinitionDigest", "profileDefinition", "capabilityLockId", "capabilityLockDigest", "estimatedMicros", "transport"], false,
-    ["firstFrame", "lastFrame", "references", "firstFrameCrop"]);
+    ["firstFrame", "lastFrame", "references", "firstFrameCrop", "lastFrameCrop"]);
   assertViggleH3ExecutionProfile(mapping.profileDefinition, attempt); assertViggleH3OperationOptions(mapping.profileDefinition, attempt.request.args);
   const request = attempt.request, description = mapping.transport, config = request.profile!.configuration.settings!;
   const { requestDigest, bodySha256, bodyByteLength, ...metadata } = description;
@@ -181,32 +183,32 @@ function assertCodeViggleMapping(attempt: Attempt, mapping: ViggleH3ExecutionMap
     && mapping.estimatedMicros === vigglePriceMicros(description) && requestDigest === viggleH3MetadataDigest(String(request.args.prompt), metadata)
     && viggleH3Hash(bodySha256) && integer(bodyByteLength, 1, VIGGLE_H3_LIMITS.requestBytes),
     "VIGGLE_H3_EXECUTION_CONFLICT", "Code Viggle mapping differs from its exact input and price");
-  const checkImage = (pin: ViggleFramePin | undefined, image: ViggleH3Description["firstFrame"], sha256: string, crop = false) => {
+  const checkImage = (pin: ViggleFramePin | undefined, image: ViggleH3Description["firstFrame"], sha256: string, crop?: PngCenterCrop) => {
     invariant(pin && image, "VIGGLE_H3_EXECUTION_CONFLICT", "Missing owned image pin");
     viggleH3Fields(pin, ["artifactId", "artifactDigest", "codePlanAttemptId", "codePlanRequestDigest"]);
     const ref = request.inputs.find(row => row.kind === "image" && row.sha256 === sha256);
     invariant(ref && pin.artifactId === ref.artifactId && viggleH3Hash(pin.artifactDigest) && "codePlanAttemptId" in pin && pin.codePlanAttemptId === attempt.id
       && pin.codePlanRequestDigest === digest(request) && (crop || image.sha256 === sha256), "VIGGLE_H3_EXECUTION_CONFLICT", "Owned image pin changed");
+    if (crop) invariant(canonical(crop) === canonical(pngCenterCropDimensions(crop.sourceWidth, crop.sourceHeight, description.aspectRatio))
+      && image.width === crop.width && image.height === crop.height && image.sha256 !== sha256,
+      "VIGGLE_H3_EXECUTION_CONFLICT", "Frame crop changed");
   };
   invariant(request.inputs.every(row => row.kind === "image"), "VIGGLE_H3_EXECUTION_CONFLICT", "Video inputs must be images");
   if (references) {
-    invariant(!mapping.firstFrame && !mapping.lastFrame && !mapping.firstFrameCrop && !description.firstFrame && !description.lastFrame
+    invariant(!mapping.firstFrame && !mapping.lastFrame && !mapping.firstFrameCrop && !mapping.lastFrameCrop && !description.firstFrame && !description.lastFrame
       && mapping.references?.length === references.length && description.references?.length === references.length
       && request.inputs.length === new Set(references).size, "VIGGLE_H3_EXECUTION_CONFLICT", "Reference mode cannot contain frame inputs");
     references.forEach((sha256, index) => checkImage(mapping.references![index], description.references![index], sha256));
   } else {
     invariant(!mapping.references && !description.references, "VIGGLE_H3_EXECUTION_CONFLICT", "Unexpected references");
-    if (mode === "text") invariant(!request.inputs.length && !mapping.firstFrame && !mapping.lastFrame && !mapping.firstFrameCrop
+    if (mode === "text") invariant(!request.inputs.length && !mapping.firstFrame && !mapping.lastFrame && !mapping.firstFrameCrop && !mapping.lastFrameCrop
       && !description.firstFrame && !description.lastFrame, "VIGGLE_H3_EXECUTION_CONFLICT", "Text mode has no image inputs");
     else {
       const source = request.inputs[0]!;
-      checkImage(mapping.firstFrame, description.firstFrame, source.sha256, !!mapping.firstFrameCrop);
-      const crop = mapping.firstFrameCrop;
-      if (crop) invariant(canonical(crop) === canonical(pngCenterCropDimensions(crop.sourceWidth, crop.sourceHeight, description.aspectRatio))
-        && description.firstFrame!.width === crop.width && description.firstFrame!.height === crop.height && description.firstFrame!.sha256 !== source.sha256,
-        "VIGGLE_H3_EXECUTION_CONFLICT", "First-frame crop changed");
-      if (mode === "first_last_frame") checkImage(mapping.lastFrame, description.lastFrame, String(request.args.lastFrameSha256));
-      else invariant(!mapping.lastFrame && !description.lastFrame, "VIGGLE_H3_EXECUTION_CONFLICT", "Unexpected last frame");
+      checkImage(mapping.firstFrame, description.firstFrame, source.sha256, mapping.firstFrameCrop);
+      // An absent last crop retains historical receipts whose last frame was uploaded unchanged.
+      if (mode === "first_last_frame") checkImage(mapping.lastFrame, description.lastFrame, String(request.args.lastFrameSha256), mapping.lastFrameCrop);
+      else invariant(!mapping.lastFrame && !mapping.lastFrameCrop && !description.lastFrame, "VIGGLE_H3_EXECUTION_CONFLICT", "Unexpected last frame");
       invariant(request.inputs.length === new Set([source.sha256, ...(mode === "first_last_frame" ? [String(request.args.lastFrameSha256)] : [])]).size,
         "VIGGLE_H3_EXECUTION_CONFLICT", "Unexpected image inputs");
     }
