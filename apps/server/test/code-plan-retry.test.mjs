@@ -4,7 +4,7 @@ import dns from 'node:dns';
 import net from 'node:net';
 import { once } from 'node:events';
 import { digest } from '@openslate/core';
-import { realCodeFixture, videoProfile, miniMaxProfile, imageSource } from './code-plan-providers-fixture.mjs';
+import { realCodeFixture, videoProfile, miniMaxProfile, imageSource, settleLostSubmission } from './code-plan-providers-fixture.mjs';
 import { codexImageProfile } from './codex-image-execution-fixture.mjs';
 import { pngBytes } from './viggle-h3-execution-fixture.mjs';
 import { wireCodePlans, readCodeFilm } from '../dist/code-plan/director.js';
@@ -55,7 +55,7 @@ test('safe automatic retry can succeed on its second intent without a new step o
 test('terminal lost-submit needs consent, keeps earlier liability, fences new dispatch with Stop/hold/ceiling and reuses other media',async t=>{
  const f=await seed(t),working=f.viggleFetch;
  f.viggleFetch=async()=>{throw new TypeError('fetch failed',{cause:Object.assign(new Error(),{code:'ECONNRESET'})});};
- await f.submit(f.source);await failed(f);const key=f.videoStep().key, old=f.videoStep().attemptId;
+ await f.submit(f.source);await settleLostSubmission(f,t);await failed(f);const key=f.videoStep().key, old=f.videoStep().attemptId;
  wireCodePlans(f.service,f.plans);const step=readCodeFilm(f.service,f.project.id).steps.find(s=>s.key===key);
  assert.deepEqual(step.error,{code:'SUBMISSION_RESPONSE_LOST',retry:'consent',mayHaveCharged:true});assert.equal(step.attempts,1);
  assert.equal(f.plans.view(f.project.id).spentMicros,'60000');
@@ -105,7 +105,7 @@ for(const explicit of [false,true])test(`941×1672 code first frame uses a 9:16 
 });
 
 test('a submitted replacement fences retry eligibility before its first pass',async t=>{
- const f=await seed(t);f.viggleFetch=async()=>{throw Error('lost reply');};await f.submit(f.source);await failed(f);
+ const f=await seed(t);f.viggleFetch=async()=>{throw Error('lost reply');};await f.submit(f.source);await settleLostSubmission(f,t);await failed(f);
  const key=f.videoStep().key;await f.submit('export default async function(ctx){await ctx.log("skip the clip");}');
  assert.throws(()=>f.plans.retryStep(f.project.id,{stepKey:key,consent:{by:'person'}}),{code:'CODE_PLAN_RETRY'});await f.finish();
 });
@@ -144,7 +144,7 @@ test('historical default-ratio journals remain reused; an explicit ratio deliber
 });
 
 test('pre-N1 saved failures project retry meaning before replay and can be retried after upgrading',async t=>{
- const f=await seed(t),working=f.viggleFetch;f.viggleFetch=async()=>{throw Error('lost submit');};await f.submit(f.source);await failed(f);
+ const f=await seed(t),working=f.viggleFetch;f.viggleFetch=async()=>{throw Error('lost submit');};await f.submit(f.source);await settleLostSubmission(f,t);await failed(f);
  const step=f.videoStep();f.store.put('code_plan_step',step.id,f.project.id,{...step,result:{ok:false,error:{code:'SUBMISSION_RESPONSE_LOST',message:'old failure'}}});
  assert.deepEqual(f.plans.view(f.project.id).steps.find(s=>s.key===step.key).error,{code:'SUBMISSION_RESPONSE_LOST',retry:'consent',mayHaveCharged:true});
  await f.restart();await f.tick();assert.equal(f.videoStep().result.error.retry,'consent');

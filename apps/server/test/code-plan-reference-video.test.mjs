@@ -8,7 +8,7 @@ import { resolveCodePlanProviderAdmission } from '../dist/code-plan/provider-aut
 import { assertViggleH3ExecutionMapping } from '../dist/execution/viggle-h3-receipts.js';
 import { viggleBackupClosure } from '../dist/persistence/viggle-backup.js';
 import { readFile } from 'node:fs/promises';
-import { realCodeFixture, videoProfile, miniMaxProfile, imageSource } from './code-plan-providers-fixture.mjs';
+import { realCodeFixture, videoProfile, miniMaxProfile, imageSource, settleLostSubmission } from './code-plan-providers-fixture.mjs';
 import { codexImageProfile } from './codex-image-execution-fixture.mjs';
 import { accepted, completed, pngBytes } from './viggle-h3-execution-fixture.mjs';
 
@@ -113,7 +113,7 @@ async function historical(t,lost=false){
  const id=digest({projectId:f.project.id,key}),at=new Date().toISOString();
  f.store.put('code_plan_step',id,f.project.id,{id,projectId:f.project.id,key,kind:'video',input,state:'in_flight',attemptId:attempt.id,result:null,priceMicros:'100000',createdAt:at,updatedAt:at});
  const working=f.viggleFetch;if(lost)f.viggleFetch=async()=>{throw Error('lost POST reply');};
- await f.execution.submit(attempt.id);await f.finish();return Object.assign(f,{oldKey:key,oldAttempt:attempt,oldInput:input,working,oldSource:source});
+ await f.execution.submit(attempt.id);if(lost)await settleLostSubmission(f,t);await f.finish();return Object.assign(f,{oldKey:key,oldAttempt:attempt,oldInput:input,working,oldSource:source});
 }
 
 test('saved pre-N6 first-frame plan and digest survive restart without any repayment',async t=>{

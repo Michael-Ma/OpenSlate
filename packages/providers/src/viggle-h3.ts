@@ -30,6 +30,21 @@ export interface ViggleH3Receipt { requestId: string | null; httpStatus: number 
 export interface ViggleH3Diagnostic {
   code: string; category: "invalid_input" | "auth" | "quota" | "policy" | "throttled" | "transport" | "protocol" | "aborted" | "provider_failure";
   retryAfterMs?: number;
+  errorName?: string; causeCode?: string; causeName?: string; causeSyscall?: string;
+}
+export interface ViggleH3VideoSummary { id: string; createdAt: string }
+export type ViggleH3ListResult =
+  | { kind: "listed"; items: ViggleH3VideoSummary[]; hasMore: boolean; receipt: ViggleH3Receipt }
+  | { kind: "unknown"; error: ViggleH3Diagnostic; receipt: ViggleH3Receipt };
+/** Bounded tokens only: transport messages and arbitrary nested objects never enter receipts. */
+export const VIGGLE_DIAGNOSTIC_TOKEN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+function dataField(value: unknown, key: string): unknown {
+  if (value === null || typeof value !== "object") return;
+  // Error.name normally lives on its prototype. Read data descriptors without invoking getters.
+  for (let depth = 0, current: object | null = value; current && depth < 4; depth++, current = Object.getPrototypeOf(current)) {
+    const field = Object.getOwnPropertyDescriptor(current, key);
+    if (field) return Object.hasOwn(field, "value") ? field.value : undefined;
+  }
 }
 export type ViggleH3SubmitResult =
   | { kind: "accepted"; taskId: string; requestedModel: "MiniMax-H3"; receipt: ViggleH3Receipt }
@@ -261,6 +276,22 @@ export class ViggleH3Provider {
     return { kind: "completed", taskId, requestedModel: "MiniMax-H3", reportedModel: null, output: { url: data.video_url, expiresAt: null },
       reported: { seed: Number.isSafeInteger(data.seed) && Number(data.seed) >= 0 ? data.seed as number : null }, receipt: response.receipt };
   }
+  async listVideos(limit: number, options: ViggleH3CallOptions = {}): Promise<ViggleH3ListResult> {
+    let context: ViggleH3CallOptions;
+    try { context = callOptions(options); ensure(Number.isSafeInteger(limit) && limit >= 1 && limit <= 100, "VIGGLE_H3_LIST_LIMIT_INVALID"); }
+    catch { return { kind: "unknown", error: { code: "VIGGLE_H3_LIST_LIMIT_INVALID", category: "invalid_input" }, receipt: blankReceipt() }; }
+    const response = await this.call("GET", `/v1/videos?limit=${limit}`, context.signal);
+    if (!response.ok) return { kind: "unknown", error: response.error, receipt: response.receipt };
+    const { items, has_more: hasMore } = response.body;
+    if (response.receipt.httpStatus !== 200 || typeof hasMore !== "boolean" || !Array.isArray(items) || items.length > limit
+      || hasMore && items.length === 0 || !items.every(item => object(item) && this.safeTask(item.id)
+        && typeof item.created_at === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(item.created_at)
+        && Number.isFinite(Date.parse(item.created_at)) && new Date(item.created_at).toISOString() === item.created_at.replace("Z", ".000Z"))
+      || new Set(items.map(item => item.id)).size !== items.length
+      || items.some((item, index) => index > 0 && Date.parse(item.created_at) > Date.parse(items[index - 1].created_at)))
+      return { kind: "unknown", error: { code: "VIGGLE_H3_LIST_INVALID", category: "protocol" }, receipt: response.receipt };
+    return { kind: "listed", items: items.map(item => ({ id: item.id as string, createdAt: item.created_at as string })), hasMore, receipt: response.receipt };
+  }
   async reconcile(receipt: { taskId?: string }, options: ViggleH3CallOptions = {}): Promise<ViggleH3PollResult> {
     try { const row = own(receipt, ["taskId"], "VIGGLE_H3_TASK_ID_INVALID"); if (this.safeTask(row.taskId)) return this.poll(row.taskId, options); }
     catch { /* Missing/invalid saved identity cannot justify a new submission. */ }
@@ -327,10 +358,17 @@ export class ViggleH3Provider {
       // Complete parsed evidence survives a later cleanup/abort race. Cancellation
       // cannot erase an observed provider job and justify another paid submission.
       if (observed) return observed;
-      const code = receipt.httpStatus === null && !controller.signal.aborted ? connectFailureCode(error) : undefined;
-      if (code) return { ok: false, notSubmitted: true, receipt: { ...receipt }, error: { code: `CONNECT_${code}`, category: "transport" } };
+      const cause = dataField(error, "cause");
+      const code = receipt.httpStatus === null && !controller.signal.aborted ? connectFailureCode({ cause }) : undefined;
+      const detail: Partial<ViggleH3Diagnostic> = {};
+      if (receipt.httpStatus === null) {
+        for (const [field, value] of [["errorName", dataField(error, "name")], ["causeCode", dataField(cause, "code")],
+          ["causeName", dataField(cause, "name")], ["causeSyscall", dataField(cause, "syscall")]] as const)
+          if (typeof value === "string" && VIGGLE_DIAGNOSTIC_TOKEN.test(value) && !value.includes(this.#key)) detail[field] = value;
+      }
+      if (code) return { ok: false, notSubmitted: true, receipt: { ...receipt }, error: { code: `CONNECT_${code}`, category: "transport", ...detail } };
       return {ok:false,receipt:{...receipt},error:{code:error instanceof ViggleH3ValidationError ? error.code : "VIGGLE_H3_TRANSPORT_OR_RESPONSE_LOSS",
-      category:controller.signal.aborted ? timedOut ? "transport" : "aborted" : "protocol"}};
+      category:controller.signal.aborted ? timedOut ? "transport" : "aborted" : "protocol", ...detail}};
     } finally {clearTimeout(timer);signal?.removeEventListener("abort",stop);controller.signal.removeEventListener("abort",reject);controller.abort();cancelBody?.();}
   }
 }

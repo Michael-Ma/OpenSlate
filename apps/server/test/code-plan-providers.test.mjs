@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { digest } from '@openslate/core';
-import { realCodeFixture, imageSource, videoProfile, speechProfile, miniMaxProfile } from './code-plan-providers-fixture.mjs';
+import { realCodeFixture, imageSource, videoProfile, speechProfile, miniMaxProfile, settleLostSubmission } from './code-plan-providers-fixture.mjs';
 import { codexImageProfile, codexApiProfile } from './codex-image-execution-fixture.mjs';
 import { response as speechResponse, wave } from './speech-execution-fixture.mjs';
 import { tool, pngBytes } from './viggle-h3-execution-fixture.mjs';
@@ -177,13 +177,13 @@ test('MiniMax H3 uses the registered adapter, retained task and existing video d
  assert.equal(f.store.list('video_derivation_receipt',f.project.id).length,1); f.noGraph();
 });
 
-test('a terminal lost Viggle POST retains charged liability and never permits resubmission',async t=>{
- const f=await realCodeFixture(t); let posts=0;f.viggleFetch=async(_url,init)=>{assert.equal(init.method,'POST');posts++;throw Error('lost HTTP reply');};
+test('a lost Viggle POST with an unreadable settlement list retains charged liability and never permits resubmission',async t=>{
+ const f=await realCodeFixture(t); let posts=0,lists=0;f.viggleFetch=async(_url,init)=>{if(init.method==='GET'){lists++;throw Error('list unavailable');}posts++;throw Error('lost HTTP reply');};
  await f.submit(`export default async function(ctx){const image=await ctx.image({prompt:'Tea'});if(image.ok)await ctx.video({firstFrame:image.artifact,prompt:'Slow camera',durationSeconds:3});}`);
- await f.tick(); await f.tick(); const video=f.execution.attempts(f.project.id).find(row=>row.request.kind==='video');
+ await f.tick(); await f.tick(); await settleLostSubmission(f,t); const video=f.execution.attempts(f.project.id).find(row=>row.request.kind==='video');
  assert.equal(video.phase,'failed'); assert.equal(video.failure.id,'SUBMISSION_RESPONSE_LOST'); assert.equal(video.failure.retryAllowed,false); assert.equal(f.execution.liability(video.id),'charged');
  await f.restart();for(let i=0;i<3;i++)await f.tick();
- assert.equal(posts,1);assert.equal(f.plans.view(f.project.id).spentMicros,'60000');assert.equal(f.fake.acceptedCount(),0);f.noGraph();
+ assert.equal(posts,1);assert.equal(lists,1);assert.equal(f.plans.view(f.project.id).spentMicros,'60000');assert.equal(f.fake.acceptedCount(),0);f.noGraph();
 });
 
 test('completed video ingestion can restart without another submit, poll or download',async t=>{

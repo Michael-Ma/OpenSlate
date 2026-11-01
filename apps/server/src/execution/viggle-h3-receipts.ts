@@ -1,7 +1,7 @@
 import { providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, frameMatchesAspect, invariant, isProjectAspect, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { JsonObject, ProviderProfile } from "@openslate/core";
-import { describeViggleH3Request, pngCenterCropDimensions, VIGGLE_H3_ADAPTER_VERSION, VIGGLE_H3_LIMITS, viggleH3MetadataDigest, vigglePriceMicros } from "@openslate/providers";
+import { describeViggleH3Request, pngCenterCropDimensions, VIGGLE_H3_ADAPTER_VERSION, VIGGLE_H3_LIMITS, VIGGLE_DIAGNOSTIC_TOKEN, viggleH3MetadataDigest, vigglePriceMicros } from "@openslate/providers";
 import type { PngCenterCrop, ViggleH3AspectRatio, ViggleH3Description, ViggleH3Diagnostic, ViggleH3PollResult, ViggleH3SubmitResult } from "@openslate/providers";
 import type { Attempt } from "./engine.js";
 import { assertOutputReceiptIdentity } from "./output-store.js";
@@ -218,13 +218,14 @@ export function assertViggleH3ExecutionDispatch(attempt: Attempt, mapping: Viggl
     && integer(dispatch.createdAt, 0, Number.MAX_SAFE_INTEGER),
   "VIGGLE_H3_EXECUTION_CONFLICT", "H3 dispatch marker differs from its prepared mapping");
 }
-function diagnostic(value: ViggleH3Diagnostic): void {
-  viggleH3Fields(value, ["code", "category"], ["retryAfterMs"]);
+export function assertViggleH3Diagnostic(value: ViggleH3Diagnostic): void {
+  viggleH3Fields(value, ["code", "category"], ["retryAfterMs", "errorName", "causeCode", "causeName", "causeSyscall"]);
   invariant(typeof value.code === "string" && /^[A-Z][A-Z0-9_]{0,95}$/.test(value.code)
     && ["invalid_input", "auth", "quota", "policy", "throttled", "transport", "protocol", "aborted", "provider_failure"].includes(value.category)
-    && (value.retryAfterMs === undefined || integer(value.retryAfterMs, 0, 600000)), "VIGGLE_H3_EXECUTION_CONFLICT", "Invalid redacted Viggle diagnostic");
+    && (value.retryAfterMs === undefined || integer(value.retryAfterMs, 0, 600000))
+    && [value.errorName, value.causeCode, value.causeName, value.causeSyscall].every(token => token === undefined || typeof token === "string" && VIGGLE_DIAGNOSTIC_TOKEN.test(token)), "VIGGLE_H3_EXECUTION_CONFLICT", "Invalid redacted Viggle diagnostic");
 }
-function receipt(value: { requestId: string | null; httpStatus: number | null }): void {
+export function assertViggleH3Receipt(value: { requestId: string | null; httpStatus: number | null }): void {
   viggleH3Fields(value, ["requestId", "httpStatus"]);
   invariant((value.requestId === null || typeof value.requestId === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value.requestId))
     && (value.httpStatus === null || integer(value.httpStatus, 100, 599)), "VIGGLE_H3_EXECUTION_CONFLICT", "Invalid Viggle HTTP receipt");
@@ -248,9 +249,9 @@ export function assertViggleH3ExecutionSubmit(attempt: Attempt, mapping: ViggleH
   } else {
     viggleH3Fields(observation, observation.kind === "rejected" ? ["kind", "certainty", "source", "error", "receipt"] : ["kind", "error", "receipt"]);
     invariant(observation.kind === "unknown" || (observation.kind === "rejected" && observation.certainty === "not_accepted" && ["local", "provider"].includes(observation.source)), "VIGGLE_H3_EXECUTION_CONFLICT", "Invalid H3 submit state");
-    diagnostic(observation.error);
+    assertViggleH3Diagnostic(observation.error);
   }
-  receipt(observation.receipt);
+  assertViggleH3Receipt(observation.receipt);
 }
 export function viggleH3CompletedObservationId(attemptId: string, outputReceiptId: string): string { return digest({ attemptId, outputReceiptId }); }
 export function viggleH3ObservationId(attemptId: string, observation: ViggleH3PollObservation): string {
@@ -268,7 +269,7 @@ export function assertViggleH3ExecutionObservation(attempt: Attempt, mapping: Vi
   if (observation.kind === "pending") {
     viggleH3Fields(observation, ["kind", "taskId", "status", "receipt"]); invariant(["queued", "processing"].includes(observation.status), "VIGGLE_H3_EXECUTION_CONFLICT", "Invalid pending task status");
   } else if (observation.kind === "failed" || observation.kind === "unknown") {
-    viggleH3Fields(observation, ["kind", "taskId", "error", "receipt"]); diagnostic(observation.error);
+    viggleH3Fields(observation, ["kind", "taskId", "error", "receipt"]); assertViggleH3Diagnostic(observation.error);
   } else if (observation.kind === "cancelled") viggleH3Fields(observation, ["kind", "taskId", "receipt"]);
   else {
     viggleH3Fields(observation, ["kind", "taskId", "requestedModel", "reportedModel", "reported", "outputReceiptId", "receipt"]);
@@ -282,7 +283,7 @@ export function assertViggleH3ExecutionObservation(attempt: Attempt, mapping: Vi
     viggleH3Fields(observation.reported, ["seed"]);
     invariant(observation.reported.seed === null || integer(observation.reported.seed, 0, Number.MAX_SAFE_INTEGER), "VIGGLE_H3_EXECUTION_CONFLICT", "Invalid Viggle reported seed");
   }
-  receipt(observation.receipt);
+  assertViggleH3Receipt(observation.receipt);
 }
 export function assertViggleH3PollPolicy(value: ViggleH3PollPolicy): void {
   viggleH3Fields(value, ["initialMs", "maximumMs", "retryAfterMaximumMs", "claimMs"]);

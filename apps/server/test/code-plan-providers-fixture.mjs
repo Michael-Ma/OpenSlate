@@ -26,6 +26,12 @@ export const miniMaxProfile = { ...videoProfile, id: 'code-minimax', adapter: 'm
   configuration: { model: 'MiniMax-H3', settings: { resolution: '768P' } }, minFrames: 180, maxFrames: 180 };
 export const imageSource = `export default async function(ctx) { await ctx.image({model:'${codexImageProfile.id}',prompt:'A window at dawn'}); }`;
 
+/** Existing lost-reply regressions now finish only after N8's first (unreadable) list check. */
+export async function settleLostSubmission(f, t) {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  for (let i = 0; i < 4; i++) { t.mock.timers.tick(10000); await f.tick(); }
+}
+
 /** Test transports consume synthetic bytes in memory. No real sockets, native runtime or personal configuration. */
 export async function realCodeFixture(t, changes = {}) {
   const root = mkdtempSync(join(tmpdir(), 'openslate-p4a-'));
