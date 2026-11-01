@@ -20,6 +20,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@napi-rs/canvas':
+        specifier: 0.1.100
+        version: 0.1.100
       '@openslate/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1193,7 +1196,6 @@ snapshots:
       '@napi-rs/canvas-linux-x64-musl': 0.1.100
       '@napi-rs/canvas-win32-arm64-msvc': 0.1.100
       '@napi-rs/canvas-win32-x64-msvc': 0.1.100
-    optional: true
 
   '@oxc-project/types@0.148.0': {}
 
