@@ -8,6 +8,7 @@ import type { ProviderProfile } from "@openslate/core";
 import type { InstalledProviderCatalog } from "../application/provider-catalog.js";
 import type { Store } from "../persistence/store.js";
 import { CODE_PLAN_MODELS, videoMode, videoModes, type CodePlanModel } from "./identity.js";
+import { videoCapabilities } from "./video-capabilities.js";
 
 export interface CodePlanCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; localExecution?: unknown; [key: string]: unknown }
 export const supportedCodePlanAdapters = new Set(["codex-image", "openai-image", "viggle-h3", "minimax-h3", "openai-speech", "seedance", "fal-video-i2v", "gemini-lyria"]);
@@ -68,7 +69,7 @@ export function modelDescriptions(models: Readonly<Record<string, CodePlanModel>
     priceUnit: model.priceUnit ?? "call", priceUnknown: model.priceUnit === "input" ? false : !model.priceMicros || model.priceMicros === "0" && !!model.profile && model.profile.adapter !== "codex-image",
     ...(model.profile?.adapter === "codex-image" ? { subscription: "codex", authentication: "checked_before_dispatch" } : {}),
     ...(model.profile?.adapter === "gemini-lyria" ? { note: "length is approximate; trim and fade at the cut", watermark: "SynthID" } : {}),
-    ...(model.kind === "video" ? { videoModes: videoModes(model) } : {}),
+    ...(model.kind === "video" ? { videoModes: videoModes(model), ...videoCapabilities(model) } : {}),
     ...(model.priceUnit === "input" ? { priceBasis: model.profile?.adapter === "viggle-h3" ? { unit: "ceil_output_seconds", formula: "ceil(seconds) * creditsPer5Seconds / 5 * $0.01", enhance: false,
       resolutions: ["480p", "768p", "1080p", "2k", "4k"], creditsPer5Seconds: Object.fromEntries(Object.entries(VIGGLE_PRICE_CREDITS).map(([mode, rates]) => [mode, rates.off])) }
       : model.profile?.adapter === "seedance" ? { unit: "output_tokens", formula: "seconds * width * height * 24 / 1024", usdPerMillionTokens: model.profile.configuration!.model.startsWith("seedance-1") ? "1.00" : model.profile.configuration!.model.includes("mini") ? "3.50" : "7.00 (1080p: 7.70)" }

@@ -106,7 +106,7 @@ export class ProductionService {
     invariant(planMode === undefined || planMode === "graph" || planMode === "code", "VALIDATION_ERROR", "Use graph or code plan mode");
     invariant(ceilingMicros === undefined || planMode === "code", "CODE_PLAN_MODE", "A spend limit at creation requires a code film");
     if (ceilingMicros !== undefined) moneyMicros(ceilingMicros);
-    const selected = selection === undefined ? undefined : selectedProviderProfiles(selection);
+    const selected = selection === undefined ? undefined : selectedProviderProfiles(selection, planMode);
     const chosen = selected?.profiles ?? this.profiles;
     const pinLocalExecution = this.newProjectLocalExecution && (this.newProjectLocalExecutionFor === "all"
       || chosen.some(profile => profile.kind === "video" && profile.adapter !== "fake"));

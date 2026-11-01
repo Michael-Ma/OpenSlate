@@ -31,3 +31,10 @@ export function codePlanArtifacts(store: Store, projectId: string) {
   }));
   return { records, find, posters, posterIds: new Set(rows.flatMap(row => row.poster ? [row.poster.artifactId] : [])) };
 }
+
+/** Measured output only; requested dimensions never stand in for a returned file. */
+export function codePlanOutput(media: ReturnType<typeof codePlanArtifacts>, ref: ArtifactRef | undefined) {
+  const artifact = ref ? media.find(ref) : undefined;
+  return artifact ? { ...pictureSize(artifact.artifact.kind === "image" ? artifact : media.posters.get(artifact.id)),
+    ...(positive(artifact.physicalDurationSeconds) ? { durationSeconds: artifact.physicalDurationSeconds } : {}) } : undefined;
+}

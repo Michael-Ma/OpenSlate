@@ -32,7 +32,7 @@ export async function realCodeFixture(t, changes = {}) {
   const f = { root, calls: { prepare: 0, start: 0, lookup: 0, video: 0, poll: 0, download: 0, render: 0 }, controls: { lostStart: false, pending: false, credential: 'offline-fixture-key' } };
   f.png = pngBytes(320, 320);
   const raw = join(root, 'raw.mp4');
-  await promisify(execFile)(tool('ffmpeg'), ['-nostdin','-v','error','-f','lavfi','-i','testsrc2=s=160x90:r=24','-t',String(changes.videoSeconds ?? 3),
+  await promisify(execFile)(tool('ffmpeg'), ['-nostdin','-v','error','-f','lavfi','-i',`testsrc2=s=${changes.videoSize ?? '160x90'}:r=24`,'-t',String(changes.videoSeconds ?? 3),
     '-an','-c:v','libx264','-threads','1','-pix_fmt','yuv420p',raw], { timeout: 15000 });
   f.video = readFileSync(raw);
   const download = { lookup: async () => [{address:'8.8.8.8',family:4}], request: (args, callback) => {
@@ -87,7 +87,14 @@ export async function realCodeFixture(t, changes = {}) {
   t.after(async () => { await close(); rmSync(root,{recursive:true,force:true}); });
   f.open();
   const catalog = f.mediaRuntime.providerCatalog;
-  f.project = f.service.createProject('Offline code providers', catalog.select(catalog.digest, changes.selected ?? (changes.profiles ?? [codexImageProfile,videoProfile]).map(profile => profile.id)), 'code');
+  const selection = catalog.select(catalog.digest, changes.selected ?? (changes.profiles ?? [codexImageProfile,videoProfile]).map(profile => profile.id));
+  if (changes.newFilm) f.project = f.service.createProject('Offline code providers', selection, 'code');
+  else {
+    // Existing adapter/recovery regressions exercise pre-N7 saved locks (including three-second Viggle profiles).
+    // Build that historical lock through the unchanged graph selection path, then load it as a saved code film.
+    const project = f.service.createProject('Offline saved code providers', selection, 'graph');
+    f.project = f.store.saveProject({ ...project, planMode: 'code' }, project.headVersion);
+  }
   f.submit = source => f.plans.submit(f.project.id,{source,author:'user',basedOnVersion:f.plans.getRun(f.project.id)?.planVersion ?? null,invocationId:newId()});
   f.due = () => { for (const kind of ['viggle_h3_poll_schedule','h3_poll_schedule']) for (const row of f.store.list(kind,f.project.id))
     f.store.put(kind,row.id,f.project.id,{...row,nextPollAt:0}); };

@@ -4,7 +4,7 @@ import type { CodePlanStepDetail } from "@openslate/core/public";
 import type { Attempt } from "../execution/engine.js";
 import type { Store } from "../persistence/store.js";
 import type { CodePlanStep } from "./records.js";
-import { codePlanArtifacts, object, pictureSize, positive, publicArtifact } from "./artifacts.js";
+import { codePlanArtifacts, codePlanOutput, object, positive, publicArtifact } from "./artifacts.js";
 
 type Call = NonNullable<CodePlanStepDetail["call"]>;
 const mappings: Record<string, string> = { "viggle-h3": "viggle_h3_execution_mapping", "minimax-h3": "h3_execution_mapping",
@@ -54,9 +54,7 @@ export function codePlanStepDetail(store: Store, projectId: string, stepKey: str
   const media = codePlanArtifacts(store, projectId), input = step.input;
   const attempt = attempts.find(row => row.id === step.attemptId && row.fingerprint === step.key);
   const call = attempt ? providerCall(store, attempt) : undefined;
-  const artifact = step.result?.ok ? media.find(step.result.artifact) : undefined;
-  const output = artifact ? { ...pictureSize(artifact.artifact.kind === "image" ? artifact : media.posters.get(artifact.id)),
-    ...(positive(artifact.physicalDurationSeconds) ? { durationSeconds: artifact.physicalDurationSeconds } : {}) } : undefined;
+  const output = codePlanOutput(media, step.result?.ok ? step.result.artifact : undefined);
   const firstFrame = media.find(input.firstFrame), lastFrame = media.find(input.lastFrame);
   const references = Array.isArray(input.references) ? input.references.flatMap(ref => { const row = media.find(ref); return row?.artifact.kind === "image" ? [publicArtifact(row.artifact)] : []; }) : [];
   const prompt = typeof input.prompt === "string" ? input.prompt : typeof input.text === "string" ? input.text : typeof input.motion === "string" ? input.motion : undefined;

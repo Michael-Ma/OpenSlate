@@ -199,12 +199,12 @@ test('a free Seedance task failure that is not a content refusal retries safely,
 });
 
 test('a new code film can use every ready video model, the selected one first; a graph film keeps one',async t=>{
- const f=await realCodeFixture(t,{profiles:[codexImageProfile,videoProfile,miniMaxProfile],selected:[codexImageProfile.id,videoProfile.id],
+ const f=await realCodeFixture(t,{newFilm:true,profiles:[codexImageProfile,videoProfile,miniMaxProfile],selected:[codexImageProfile.id,videoProfile.id],
   configuration:{h3:true,h3DownloadHosts:['media.example.test']}});
  const lock=f.store.get('capability_lock',f.store.getProject(f.project.id).capabilityLockId);
- assert.deepEqual(lock.profiles.filter(row=>row.kind==='video').map(row=>row.id),[videoProfile.id,miniMaxProfile.id]);
+ assert.deepEqual(lock.profiles.filter(row=>row.kind==='video').map(row=>row.id),['viggle-h3',miniMaxProfile.id]);
  const models=projectModels(f.store,f.project.id,f.mediaRuntime.providerCatalog);
- assert.ok(models[videoProfile.id]&&models[miniMaxProfile.id]);
+ assert.ok(models['viggle-h3']&&models[miniMaxProfile.id]);assert.equal(models[videoProfile.id],undefined);
  const catalog=f.mediaRuntime.providerCatalog;
  const graph=f.service.createProject('Graph keeps one',catalog.select(catalog.digest,[codexImageProfile.id,videoProfile.id]));
  const graphLock=f.store.get('capability_lock',graph.capabilityLockId);
