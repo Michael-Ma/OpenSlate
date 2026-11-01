@@ -2,6 +2,16 @@
 
 Reconciled October 16, 2026 (feature branch after the B18 merge, including B1–B18). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
+## November 1 film quality — Director craft, review turns, renderer and uploads
+
+Contract 0.3.0 gives the Director film-craft guidance (`skills/code-plan/references/film-craft.md`), `ctx.image` references and aspect ratios checked at plan time, `ctx.review` and the free `read_clip_frames` contact sheet, and render row edits, captions, built-in sounds, fade-in and measured `loudnorm` mastering. Director turns now reason at high effort, new films start with a $4 ceiling, and first and last Viggle frames crop alike. 0.1.0 and 0.2.0 films keep their guidance, capabilities and step keys.
+
+Uploads now pick the demuxer from file content. FFmpeg was choosing `image2` from the `.jpg` extension whenever the JPEG end marker lay past its probe window, so the `jpeg_pipe` whitelist refused almost every real JPEG. PNG, JPEG, WebP, GIF, BMP, TIFF, AVIF and HEIC/HEIF import, oversized pictures scale down, and more video and audio containers are accepted.
+
+**Real-provider check (November 1):** the original Tofu brief ran through a real Director, Viggle and Lyria: 28 `read_clip_frames` calls, one conversation-driven retake, $2.68 for the film and $0.95 for a five-way model comparison, 355 Viggle credits in all. The picture stage held one room across shots. A cold read with one small model moved from "several rooms, no visible joke, 4/10" to "one room, works out then collapses then runs to food, 6/10"; this is a single sample. Reference mode re-framed all 4 clips and cut the subject off in 2, while 7 first-frame clips kept it whole. `quality`, 1080p, `enhance` and prompt language made no visible difference. Sound has not been listened to. See `docs/ai/film-quality/RESULTS.md`.
+
+Pinned setup/preflight and all five builds passed. Final `pnpm test` passed **5,041**, with **zero failures and two optional skips**; all **five** typechecks and `pnpm demo:code` passed.
+
 ## October 31 N8 — settle lost code-plan Viggle submissions (offline)
 
 Code-plan Viggle unknown submissions without a saved HTTP status/task id now wait for two durable account-list checks, by default dispatch +10 s/+30 s. Complete stranger-free windows release liability and use N1's existing bounded safe retries. A stranger, unreadable/malformed list or unexhausted coverage retains possible charge and human-consent retry; foreign tasks are never adopted. Ownership includes accepted submit rows across this installation's projects and graph/code films. A JSON settlement entity retains the original receipt digests, claims, timing and append-only evidence across restart and backup inspection. Graph behavior, status-bearing replies, dispatch-only recovery and terminal pre-N8 failures retain their previous behavior. No-status diagnostics keep four bounded error/cause tokens without prose, and Director prices expose only the locked resolution and scalar mode rates.
