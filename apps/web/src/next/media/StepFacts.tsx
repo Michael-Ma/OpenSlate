@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useDeveloperMode } from "../app/useDeveloperMode.ts";
 import { useI18n } from "../i18n/I18n.tsx";
 import { numberLocale } from "../i18n/translate.ts";
-import { callFacts, stepFacts } from "../model/step-detail.ts";
+import { Picture } from "../keyframes/parts.tsx";
+import { callFacts, stepFacts, stepInputs } from "../model/step-detail.ts";
 import { useStore } from "../store/react.tsx";
 
 type Read = { status: "loading" } | { status: "failed"; code: string } | { status: "ready"; detail: CodePlanStepDetail };
@@ -30,6 +31,7 @@ export function StepFacts({ stepKey }: { stepKey: string }) {
   const detail = read.status === "ready" ? read.detail : null;
   const facts = useMemo(() => (detail ? stepFacts(detail, new Date(), numberLocale(locale)) : []), [detail, locale]);
   const call = useMemo(() => (detail && developer ? callFacts(detail) : []), [detail, developer]);
+  const inputs = useMemo(() => (detail ? stepInputs(detail) : []), [detail]);
 
   if (read.status === "loading") return <p className="mv-note" role="status">{t("viewer.prompt.loading")}</p>;
   if (read.status === "failed") return <p className="mv-note" role="alert">{t("viewer.prompt.failed", { code: read.code })}</p>;
@@ -47,6 +49,14 @@ export function StepFacts({ stepKey }: { stepKey: string }) {
             <button type="button" className="pill sm" data-act="copy-prompt" onClick={copy}>{t(copied ? "viewer.prompt.copied" : "viewer.prompt.copy")}</button>
           </div>
           <p className="mv-prompt" data-field="prompt">{prompt}</p>
+        </section>
+      ) : null}
+      {inputs.length ? (
+        <section className="mv-block" data-block="inputs">
+          <h3>{t("viewer.inputs")}</h3>
+          <ul className="mv-inputs">
+            {inputs.map((input) => <li key={input.key}><span className="mv-input-pic"><Picture artifact={input.artifact} alt={tm(input.label)} /></span><span>{tm(input.label)}</span></li>)}
+          </ul>
         </section>
       ) : null}
       <dl className="mv-rows">

@@ -22,6 +22,10 @@ dialog.media-viewer::backdrop{background:rgba(8,9,10,.78)}
 .mv-block h3{margin:0;font-size:12px;font-weight:600;color:var(--text-2)}
 .mv-block-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .mv-prompt{margin:0;max-height:38vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--sunken);border:1px solid var(--hairline);border-radius:10px;padding:9px 11px;color:var(--text)}
+.mv-inputs{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.mv-inputs li{display:flex;flex-direction:column;gap:3px;width:72px;font-size:11.5px;color:var(--text-2)}
+.mv-input-pic{position:relative;display:block;height:96px;border-radius:6px;overflow:hidden;background:#0b0c0d;border:1px solid var(--hairline)}
+.mv-input-pic .pic-img,.mv-input-pic .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
 .mv-rows{margin:0;display:flex;flex-direction:column;gap:5px}
 .mv-rows > div{display:grid;grid-template-columns:72px minmax(0,1fr);gap:10px}
 .mv-rows dt{color:var(--text-2)}

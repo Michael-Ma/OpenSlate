@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { callFacts, stepFacts } from '../../src/next/model/step-detail.ts';
+import { callFacts, stepFacts, stepInputs } from '../../src/next/model/step-detail.ts';
 import { moneyParts } from '../../src/next/model/director.ts';
 import { translate } from '../../src/next/i18n/translate.ts';
 
@@ -41,4 +41,16 @@ test('money in a reply is picked out, and only money', () => {
     { text: '花了 ', money: false }, { text: '$0.24', money: true }, { text: '，上限 ', money: false }, { text: '$1,000.50', money: true }, { text: '。', money: false },
   ]);
   assert.deepEqual(moneyParts('no amounts, not even $x'), [{ text: 'no amounts, not even $x', money: false }]);
+});
+
+test('a clip says how it was made and which pictures it was given', () => {
+  const frame = (id) => ({ artifactId: id, sha256: 'a'.repeat(64), kind: 'image' });
+  const reference = { ...detail, aspectRatio: undefined, mode: 'reference', references: [frame('one'), frame('two')] };
+  const mode = stepFacts(reference, now, 'en').find((row) => row.label.id === 'viewer.fact.mode');
+  assert.equal(en(mode.value), 'Reference images');
+  assert.equal(zh(mode.value), '参考图');
+  assert.deepEqual(stepInputs(reference).map((input) => [en(input.label), input.artifact.artifactId]), [['Reference 1', 'one'], ['Reference 2', 'two']]);
+  const framed = { ...detail, mode: 'first_last_frame', firstFrame: frame('a'), lastFrame: frame('b') };
+  assert.deepEqual(stepInputs(framed).map((input) => en(input.label)), ['First frame', 'Last frame']);
+  assert.deepEqual(stepInputs({ ...detail, mode: 'text' }), []);
 });

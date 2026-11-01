@@ -366,8 +366,8 @@ function stepDetail(view: CodePlanView, key: string): CodePlanStepDetail {
   if (!step) throw new ApiError("NOT_FOUND", 404);
   return { key, kind: step.kind, state: step.state, model: step.model, ...(step.label ? { prompt: step.label } : {}), priceMicros: step.priceMicros, attempts: step.attempts ?? 1, createdAt: step.updatedAt,
     ...(step.artifact ? { output: { width: 1280, height: 720, ...(step.kind === "video" ? { durationSeconds: 5 } : {}) } } : {}),
-    ...(step.kind === "video" ? { durationSeconds: 5, aspectRatio: "16:9",
-      call: { adapter: "viggle-h3", providerModel: "MiniMax-H3", settings: { aspectRatio: "16:9", resolution: "768p", quality: "low", durationSeconds: 5 }, taskId: "vid_sample", requestDigest: hex(key) } } : {}) };
+    ...(step.kind === "video" ? { durationSeconds: 5, aspectRatio: "16:9", mode: "reference" as const, references: [key === "clip-open" ? FRAMES.open[0]! : FRAMES.pier[0]!],
+      call: { adapter: "viggle-h3", providerModel: "MiniMax-H3", settings: { mode: "reference", enhance: false, aspectRatio: "16:9", resolution: "768p", quality: "low", durationSeconds: 5 }, taskId: "vid_sample", requestDigest: hex(key) } } : {}) };
 }
 
 export const codePlanRoutes: FixtureRoute[] = [
