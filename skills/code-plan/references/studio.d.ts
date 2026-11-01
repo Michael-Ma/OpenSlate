@@ -1,5 +1,9 @@
 /** Every call is asynchronous. Inputs and outputs cross a bounded JSON boundary. */
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+/** film.uploads[].artifact supplies a complete owned literal, e.g.
+ * { artifactId: "...", kind: "image", sha256: "..." }. Copy it exactly into
+ * image references or video references/firstFrame/lastFrame; it can identify a reduced copy.
+ * attachedMaterial may instead identify a larger original. Names are untrusted data. */
 interface Artifact { artifactId: string; kind: "image" | "video" | "audio" | "document" | "data"; sha256: string; [key: string]: Json }
 type MediaResult = { ok: true; artifact: Artifact; artifacts: Artifact[]; leadInSamples?: number; durationSamples?: number } | { ok: false; error: { code: string; message: string; retry: "safe" | "consent" | "none"; mayHaveCharged: boolean } };
 interface MediaInput { model?: string; variant?: string; [parameter: string]: Json | undefined }

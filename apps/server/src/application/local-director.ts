@@ -28,6 +28,7 @@ import { logNativeDiagnostic, safeNativeDiagnostic } from "./native-diagnostics.
 import { findLocalCodexBinary, supportedCodexInstall } from "./codex-binary.js";
 import type { LocalMediaService } from "../media/local-media.js";
 import type { CodePlanPort } from "../code-plan/port.js";
+import { prepareCodePlanUploads } from "../code-plan/uploads.js";
 import { triggerCodePlanRepairs, wireCodePlans } from "../code-plan/director.js";
 
 export interface LocalDirectorSelection { mode: "fake" | "native"; binaryPath?: string; model?: string; codexHome?: string }
@@ -96,8 +97,15 @@ export class LocalDirectorController {
       projectId => this.configuring.has(projectId), config.releases ?? SHIPPED_DIRECTOR_RELEASES);
     const fakeInput = createDirectorInput(service, { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), endpoint: config.endpoint, ...(config.releases ? { releases: config.releases } : {}) });
     this.fake = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake", projectFilter: id => this.mode(id) === "fake", prepareInput: async (turn, human, bridge, preparation) => {
+      const codeFilm = service.store.getProject(turn.projectId).planMode === "code";
+      if (codeFilm && config.media) await prepareCodePlanUploads(service.store, config.media, service.engine.artifactDir,
+        turn.projectId, preparation?.signal ?? this.shutdown.signal);
       let input = await fakeInput(turn, human, bridge);
-      if (service.store.getProject(turn.projectId).planMode === "code") return input;
+      if (codeFilm) {
+        const projection = join(config.dataDirectory, "native", turn.projectId, "workspace");
+        mkdirSync(projection, { recursive: true, mode: 0o700 });
+        return this.attachmentProjector.prepare(input, bridge.actor, projection, preparation);
+      }
       if (service.store.get("request_attachment_selection", turn.requestId)) {
         const projection = join(config.dataDirectory, "native", turn.projectId, "workspace");
         mkdirSync(projection, { recursive: true, mode: 0o700 });
@@ -109,8 +117,15 @@ export class LocalDirectorController {
     this.native = new DirectorSupervisor(service, proxy, { mode: "native", projectFilter: id => this.mode(id) === "native",
       prepareRuntime: input => this.prepareNativeStart(input),
       prepareInput: async (turn, human, bridge, preparation) => {
-        const input = await (await this.ready(turn.projectId)).input(turn, human, bridge);
-        if (service.store.getProject(turn.projectId).planMode === "code") return input;
+        const ready = await this.ready(turn.projectId), codeFilm = service.store.getProject(turn.projectId).planMode === "code";
+        if (codeFilm && config.media) await prepareCodePlanUploads(service.store, config.media, service.engine.artifactDir,
+          turn.projectId, preparation?.signal ?? this.shutdown.signal);
+        const input = await ready.input(turn, human, bridge);
+        if (codeFilm) {
+          const projection = join(config.dataDirectory, "native", turn.projectId, "workspace");
+          mkdirSync(projection, { recursive: true, mode: 0o700 });
+          return this.attachmentProjector.prepare(input, bridge.actor, projection, preparation);
+        }
         if (!this.imageProjector && !service.store.get("request_image_selection", turn.requestId)) {
           const projection = join(config.dataDirectory, "native", turn.projectId, "workspace");
           mkdirSync(projection, { recursive: true, mode: 0o700 });

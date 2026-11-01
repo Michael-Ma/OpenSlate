@@ -154,6 +154,15 @@ test("documents and all eight attachment picture slots retain their owned backup
       fixture: false, attemptId: null, mimeType: "image/png", origin: "supplied_image", physicalDurationSeconds: null });
     return { artifactId: id, sha256: artifact.sha256 };
   });
+  const referenceBytes = Buffer.from("synthetic reduced image reference"), referenceSha = sha(referenceBytes);
+  const sourceRef = { ...refs[0], kind: "image" }, referenceId = digest({ imageReference: sourceRef.artifactId, sha256: referenceSha });
+  const reference = { artifactId: referenceId, kind: "image", sha256: referenceSha };
+  const referencePath = `artifacts/images/blobs/${referenceSha}.png`;
+  f.store.insert("artifact", referenceId, project.id, { id: referenceId, projectId: project.id, artifact: reference,
+    path: write(f.source, referencePath, referenceBytes), byteLength: referenceBytes.length, mimeType: "image/png", width: 320, height: 180,
+    validationDigest: "a".repeat(64), fixture: false, attemptId: null, physicalDurationSeconds: null });
+  const referenceRow = { id: sourceRef.artifactId, projectId: project.id, source: sourceRef, reference };
+  f.store.insert("code_plan_image_reference", sourceRef.artifactId, project.id, referenceRow);
   const saved = f.store.getProject(project.id);
   f.store.saveProject({ ...saved, artifacts: [...saved.artifacts, ...refs.map(ref => ({ ...ref, kind: "image" }))] }, saved.headVersion);
   const legacy = service.beginRequest(project.id, "local-user", "Eight references", { editing: false, contextDigest: imageMessageContext(refs) });
@@ -179,6 +188,11 @@ test("documents and all eight attachment picture slots retain their owned backup
   write(f.source, "artifacts/documents/tmp/import-incomplete/private", "unpublished");
   write(f.source, `native/${project.id}/workspace/material-attachments/${digest({ requestId: message.requestId })}/prepare-incomplete/private`, "unpublished");
   const result = await f.backup();
+  assert.deepEqual(readFileSync(join(f.destination, referencePath)), referenceBytes);
+  const savedDb = new Database(join(f.destination, "openslate.sqlite"), { readonly: true });
+  try {
+    assert.deepEqual(JSON.parse(savedDb.prepare("SELECT body FROM entities WHERE kind='code_plan_image_reference' AND id=?").get(sourceRef.artifactId).body), referenceRow);
+  } finally { savedDb.close(); }
   assert.deepEqual(readFileSync(join(f.destination, documentPath)), bytes);
   assert.ok(result.manifest.files.some(file => file.path === materialPath));
   assert.ok(result.manifest.files.some(file => /\/7-[a-f0-9]{64}\.jpg$/.test(file.path)));

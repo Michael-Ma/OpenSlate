@@ -8,6 +8,8 @@ import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import { runMediaProcess } from "./process.js";
 import { LocalImageStore } from "./local-images.js";
+import { CODEX_IMAGE_LIMITS } from "@openslate/providers";
+import { imageFormat, imageInputArgs } from "./image-input.js";
 import type { StoredImage } from "./local-images.js";
 import { inspectPcmWave } from "./pcm-wave.js";
 import { assertTranscriptionAudioCapacity, assertTranscriptionAudioMeasurement, assertTranscriptionAudioRecipe, TRANSCRIPTION_AUDIO_LIMITS } from "./transcription-audio-types.js";
@@ -254,6 +256,40 @@ export class LocalMediaService {
       aborted(signal);
       const images = new LocalImageStore({ rootDir: join(root, "posters"), ffmpegPath: this.ffmpeg, ffprobePath: this.ffprobe, timeoutMs });
       return images.ingest({ bytes, sha256: createHash("sha256").update(bytes).digest("hex"), mimeType: "image/png", width: video.width!, height: video.height! }, options);
+    }));
+  }
+
+  /** Free bounded image-reference copy, preserving the original upload and its content identity. */
+  async reducedPicture(input: { path: string; sha256: string; artifactDir: string }, options: { signal?: AbortSignal } = {}): Promise<StoredImage> {
+    input = structuredClone(input);
+    const { signal } = options, timeoutMs = Math.min(this.limits.timeoutMs, 30000), maxBytes = 32 * 1024 * 1024;
+    return this.exclusive(async () => this.temporary(async dir => {
+      invariant(HASH.test(input.sha256) && isAbsolute(input.artifactDir) && input.artifactDir !== "/", "MEDIA_INVALID_INPUT", "A reference requires an owned picture identity and artifact root");
+      const root = await realpath(input.artifactDir), source = join(dir, "picture"), target = join(dir, "reference.png");
+      await this.snapshot(input.path, source, signal, [root]);
+      invariant((await this.hashFile(source, maxBytes, signal)).sha256 === input.sha256,
+        "MEDIA_INTEGRITY_ERROR", "Reference source differs from the owned picture");
+      const inputArgs = imageInputArgs(imageFormat(await readFile(source)));
+      for (const size of [2048, 1536, 1280, 1024, 768]) {
+        aborted(signal);
+        const scale = `scale=w='max(1,floor(iw*min(1,${size}/max(iw,ih))))':h='max(1,floor(ih*min(1,${size}/max(iw,ih))))'`;
+        await this.run(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-y", "-threads", "1", "-filter_threads", "1", ...inputArgs, "-i", source,
+          "-map", "0:v:0", "-map_metadata", "-1", "-frames:v", "1", "-vf", scale, "-threads", "1", "-c:v", "png", "-fs", String(maxBytes), "-f", "image2", target], signal, timeoutMs);
+        const file = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+        let bytes: Buffer;
+        try {
+          const stat = await file.stat();
+          if (!stat.isFile() || stat.size <= 32 || stat.size > CODEX_IMAGE_LIMITS.referenceBytes) continue;
+          bytes = await file.readFile();
+          invariant(bytes.length === stat.size, "MEDIA_INTEGRITY_ERROR", "Reference changed during publication");
+        } finally { await file.close(); }
+        const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20);
+        if (width > CODEX_IMAGE_LIMITS.dimension || height > CODEX_IMAGE_LIMITS.dimension) continue;
+        aborted(signal);
+        const images = new LocalImageStore({ rootDir: join(root, "images"), ffmpegPath: this.ffmpeg, ffprobePath: this.ffprobe, timeoutMs });
+        return images.ingest({ bytes, sha256: createHash("sha256").update(bytes).digest("hex"), mimeType: "image/png", width, height }, options);
+      }
+      throw new DomainError("MEDIA_OUTPUT_LIMIT", "No reduced picture fits the image reference bounds");
     }));
   }
 
