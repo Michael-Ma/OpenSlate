@@ -24,6 +24,13 @@ export function videoAspect(input: JsonObject, profile: ProviderProfile, frame?:
   return { ...input, aspectRatio: aspect };
 }
 
+/** Names the fields a plan got wrong and the ones it may use, so the Director can correct itself. */
+function assertOnlyAllowed(profile: ProviderProfile, input: JsonObject, allowed: readonly string[]): void {
+  const unknown = Object.keys(input).filter(key => !allowed.includes(key));
+  invariant(unknown.length === 0, "CODE_PLAN_INPUT",
+    `${profile.id} does not take ${unknown.join(", ")}. Its fields are: ${allowed.filter(key => key !== "profileDefinitionDigest").join(", ")}`);
+}
+
 /** Translate the small Studio input into the adapter's existing, pinned operation contract. */
 export function codePlanProviderArgs(profile: ProviderProfile, input: JsonObject, policy: { enhance?: false } = {}): JsonObject {
   const base = providerProfileArguments(profile), settings = profile.configuration?.settings ?? {};
@@ -62,7 +69,7 @@ export function codePlanProviderArgs(profile: ProviderProfile, input: JsonObject
         ...frames,
         settings: { resolution: options.resolution, [profile.adapter === "seedance" ? "ratio" : "aspectRatio"]: options.aspectRatio, generateAudio: options.generateAudio },
         ...(options.seed === undefined ? {} : { seed: options.seed }) };
-      invariant(Object.keys(input).every(key => allowed.includes(key)), "CODE_PLAN_INPUT", "Unsupported provider parameters");
+      assertOnlyAllowed(profile, input, allowed);
       return operation;
     }
     operation = { ...base, prompt: input.prompt, durationFrames: Number(input.durationSeconds) * 30,
@@ -80,6 +87,6 @@ export function codePlanProviderArgs(profile: ProviderProfile, input: JsonObject
     operation = { ...base, text: input.text!, voice: input.voice!, instructions: input.instructions ?? "", settings: {} };
     assertAudioOperationOptions(profile, operation);
   }
-  invariant(Object.keys(input).every(key => allowed.includes(key)), "CODE_PLAN_INPUT", "Unsupported provider parameters");
+  assertOnlyAllowed(profile, input, allowed);
   return operation;
 }

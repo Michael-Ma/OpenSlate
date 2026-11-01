@@ -17,6 +17,7 @@ import type { CodePlanPort } from "./port.js";
 import { codePlanView, emptyDiff, stepLabel } from "./view.js";
 import { codePlanCeiling } from "./settings.js";
 import { codePlanStepDetail } from "./step-detail.js";
+import { codePlanProviderArgs } from "./provider-input.js";
 export { normalizeStepInput, stepKey } from "./identity.js";
 export type * from "./records.js";
 
@@ -365,7 +366,10 @@ export class CodePlanRuntime implements CodePlanPort {
         reused.add(key);
         return step.result ?? SANDBOX_PENDING;
       }
-      const priceMicros = modelPrice(models[String(input.model)]!, input, codePlanPriceFrame(this.store, projectId, input));
+      // Refuse now what dispatch would refuse, while nothing is spent and the Director can still fix its plan.
+      const model = models[String(input.model)]!;
+      if (model.profile) codePlanProviderArgs(model.profile, input);
+      const priceMicros = modelPrice(model, input, codePlanPriceFrame(this.store, projectId, input));
       step = { ...(step ?? { id, projectId, key, kind, input, attemptId: null, result: null, createdAt: stamp() }),
         ...(shotId === undefined ? {} : { shotId }),
         state: "absent", priceMicros,

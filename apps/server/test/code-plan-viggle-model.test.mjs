@@ -199,3 +199,31 @@ test('graph selection and quotes retain the configured six-second profile and pe
   assert.equal(unitQuote(lock, 'video').micros, legacy.unitCostMicros);
   assert.equal(f.store.list('attempt', graph.id).length, 0); assert.equal(f.calls.video, 0);
 });
+
+test('a field the model does not take is refused at submit, by name, with the fields it does take', async t => {
+  const f = await realCodeFixture(t, { profiles: [codexImageProfile, legacy] });
+  wireCodePlans(f.service, f.plans);
+  await f.submit(imageSource); await f.finish();
+  const frame = f.plans.steps(f.project.id)[0].result.artifact, before = f.plans.view(f.project.id).planVersion;
+  const program = source(legacy.id, 6, `firstFrame:${JSON.stringify(frame)},videoMode:'first_frame',aspectRatio:'9:16'`);
+  const preview = await f.plans.dryRun(f.project.id, program);
+  const detail = preview.findings.find(row => row.code === 'RUNTIME_ERROR').detail;
+  assert.match(detail, /viggle-live-six-seconds does not take videoMode/);
+  assert.match(detail, /aspectRatio/); assert.doesNotMatch(detail, /profileDefinitionDigest/);
+  await assert.rejects(f.submit(program), error => error.code === 'CODE_PLAN_REJECTED' && /does not take videoMode/.test(JSON.stringify(error.details)));
+  assert.equal(f.plans.view(f.project.id).planVersion, before, 'nothing was stored');
+  assert.equal(f.calls.video, 0);
+});
+
+test('a saved film on the six-second model can make a vertical clip from a reference', async t => {
+  const f = await realCodeFixture(t, { profiles: [codexImageProfile, legacy], videoSeconds: 6, videoSize: '160x288' });
+  wireCodePlans(f.service, f.plans);
+  await f.submit(imageSource); await f.finish();
+  const frame = f.plans.steps(f.project.id)[0].result.artifact;
+  await f.submit(source(legacy.id, 6, `references:[${JSON.stringify(frame)}],aspectRatio:'9:16'`)); await f.finish();
+  const step = f.plans.steps(f.project.id).find(row => row.kind === 'video');
+  // The fixture profile is 480p: 15 credits per 5 s, so 18 credits for 6 s.
+  assert.equal(step.state, 'succeeded'); assert.equal(step.priceMicros, '180000');
+  assert.equal(f.form.get('aspect_ratio'), '9:16'); assert.equal(f.form.get('enhance'), 'false');
+  assert.equal(f.form.getAll('reference_image').length, 1); assert.equal(f.form.has('first_frame_image'), false);
+});
