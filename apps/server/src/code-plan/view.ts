@@ -7,6 +7,8 @@ import type { CodePlanChoice, CodePlanHold, CodePlanRun, CodePlanStep, CodePlanV
 import { codePlanCeiling } from "./settings.js";
 import { codePlanShotLinks } from "./projection.js";
 import type { CodePlanPoster } from "./posters.js";
+import { codePlanArtifacts, pictureSize } from "./artifacts.js";
+import { codePlanFitWarning } from "./fit-warning.js";
 
 export const emptyDiff = (): CodePlanDiff => ({ reusedSteps: 0, newSteps: [], cancelledSteps: 0,
   certainMicros: "0", dependsOnPending: false, findings: [] });
@@ -22,6 +24,9 @@ export function codePlanView(store: Store, execution: CodePlanExecution, project
   const steps = store.list<CodePlanStep>("code_plan_step", projectId);
   const choices = store.list<CodePlanChoice>("code_plan_choice", projectId), links = codePlanShotLinks(steps, choices);
   const posters = new Map(store.list<CodePlanPoster>("code_plan_poster", projectId).map(row => [row.id, row.poster]));
+  const media = codePlanArtifacts(store, projectId);
+  const sizes = new Map(media.records.filter(record => record.artifact.kind === "video" && media.posters.has(record.id))
+    .map(record => [`video:${record.artifact.sha256}`, pictureSize(media.posters.get(record.id))]));
   const accounting = execution.accounting(projectId), attempts = execution.attempts(projectId);
   return {
     projectId, planVersion: run?.planVersion ?? null, state: run?.state ?? "empty",
@@ -29,14 +34,18 @@ export function codePlanView(store: Store, execution: CodePlanExecution, project
     held: store.list<CodePlanHold>("code_plan_hold", projectId).some(hold => !hold.released),
     ceilingMicros: codePlanCeiling(store, projectId), spentMicros: (accounting.charged + accounting.unknown).toString(), reservedMicros: accounting.inFlight.toString(),
     declarations: run?.declarations ?? { scenes: [], shots: [] },
-    steps: steps.map(step => ({ key: step.key, kind: step.kind, state: step.state, model: String(step.input.model),
+    steps: steps.map(step => {
+      const fitWarning = step.kind === "render" ? codePlanFitWarning(step.input, sizes) : undefined;
+      return { key: step.key, kind: step.kind, state: step.state, model: String(step.input.model),
       label: stepLabel(step.input), ...(step.result?.ok ? { artifact: mediaArtifact(step.result.artifact) } : {}),
       ...(links.has(step.key) ? { shotId: links.get(step.key)! } : {}),
       ...(step.result?.ok && posters.get(step.result.artifact.artifactId) ? { poster: mediaArtifact(posters.get(step.result.artifact.artifactId)!) } : {}),
+      ...(fitWarning ? { fitWarning } : {}),
       ...(step.result && !step.result.ok ? { error: step.attemptId ? execution.failure(step.attemptId)
         : { code: step.result.error.code, retry: "none" as const, mayHaveCharged: false } } : {}),
       attempts: attempts.filter(attempt => attempt.fingerprint === step.key).length,
-      priceMicros: step.priceMicros, reached: run?.reachedStepKeys.includes(step.key) ?? false, updatedAt: step.updatedAt })),
+      priceMicros: step.priceMicros, reached: run?.reachedStepKeys.includes(step.key) ?? false, updatedAt: step.updatedAt };
+    }),
     choices: choices
       .sort((a, b) => Number(Object.hasOwn(a, "answer")) - Number(Object.hasOwn(b, "answer")))
       .map(({ choiceId, optionsDigest, question, options, answer, answeredAt }) => ({ choiceId, optionsDigest, question, options,

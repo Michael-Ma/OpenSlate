@@ -1,4 +1,4 @@
-import type { CodePlanDiff, CodePlanSourceView, CodePlanView } from "@openslate/core/public";
+import type { CodePlanDiff, CodePlanSourceView, CodePlanStepDetail, CodePlanView } from "@openslate/core/public";
 
 /**
  * What the Director (card P2a) and the HTTP routes (card P3a) may ask of a code-plan project.
@@ -10,6 +10,9 @@ import type { CodePlanDiff, CodePlanSourceView, CodePlanView } from "@openslate/
 export interface CodePlanPort {
   /** Read model for GET routes and for the Director's read_film tool. */
   view(projectId: string): CodePlanView;
+
+  /** Complete prompt and safe recorded call metadata. NOT_FOUND for an unknown step. */
+  stepDetail(projectId: string, stepKey: string): CodePlanStepDetail;
 
   /** One stored version's source. NOT_FOUND for an unknown version. */
   source(projectId: string, version: number): CodePlanSourceView;

@@ -265,7 +265,7 @@ test("200 dispatched steps remain available after more than 200 held and cancell
 test("all port methods reject unknown and graph projects", async t => {
   const f = fixture(t, { planMode: "graph" });
   for (const [id, code] of [[f.projectId, "CODE_PLAN_MODE"], [randomUUID(), "NOT_FOUND"]]) {
-    for (const call of [() => f.runtime.view(id), () => f.runtime.source(id, 1), () => f.runtime.failure(id),
+    for (const call of [() => f.runtime.view(id), () => f.runtime.stepDetail(id, "unknown-step"), () => f.runtime.source(id, 1), () => f.runtime.failure(id),
       () => f.runtime.answer(id, { choiceId: "x", optionsDigest: "x", answer: 1 }), () => f.runtime.raiseCeiling(id, "2000000"),
       () => f.runtime.hold(id, "x"), () => f.runtime.release(id, "x")]) assert.throws(call, { code });
     await assert.rejects(f.runtime.dryRun(id, film('')), { code });
