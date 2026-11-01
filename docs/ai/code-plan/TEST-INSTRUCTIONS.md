@@ -17,10 +17,12 @@ cd /Users/michael/SideProject/OpenSlate/.claude/worktrees/last-ferry
 ```
 
 ```bash
-OPENSLATE_DATA_DIR="$HOME/openslate-code-$(date +%Y%m%d-%H%M)" node --env-file=/Users/michael/SideProject/OpenSlate/.env.live.local scripts/start-local.mjs
+OPENSLATE_DATA_DIR="$HOME/openslate-code-20261029-2351" node --env-file=/Users/michael/SideProject/OpenSlate/.env.live.local scripts/start-local.mjs
 ```
 
 确认跑对了代码：构建日志里的路径含 `worktrees/last-ferry`，New film 里有 **Code plan (experimental)**。
+
+影片和对话都存在这个数据目录里，所有测试和以后每次启动都用这同一条命令，历史才不会消失。不要重命名或移动这个目录，否则图片会打不开。
 
 ## 测试 1：竖屏 + 音乐，一部完整的片子（约 $0.28）
 
@@ -63,11 +65,7 @@ OPENSLATE_DATA_DIR="$HOME/openslate-code-$(date +%Y%m%d-%H%M)" node --env-file=/
 
 对应：5、8。
 
-先 Ctrl+C 停掉 studio，再用**旧数据目录**启动：
-
-```bash
-OPENSLATE_DATA_DIR="$HOME/openslate-code-20261029-2351" node --env-file=/Users/michael/SideProject/OpenSlate/.env.live.local scripts/start-local.mjs
-```
+这部片子就在第 0 步的数据目录里，不用重启，回到影片列表打开即可。
 
 | # | 看哪里 | 应该看到 |
 |---|---|---|
@@ -113,6 +111,7 @@ OPENSLATE_PROVIDER_CONFIG=/Users/michael/SideProject/OpenSlate/.claude/worktrees
 - **供应商生成的音频目前会被去掉。** 视频都先转成无声，声音来自旁白和音乐。
 - **旧片子** 保留它们创建时的模型列表，新模型和音乐要新建影片才有。
 - **Settings 里的新片上限和 Developer mode** 存在浏览器里，换浏览器要重设。
+- **更早的影片** 在 `~/openslate-ig-test` 和 `~/openslate-branch-test` 里，这两个目录新代码打不开，要从主目录用 `main` 启动才能看。
 
 ## 出问题时告诉我
 
