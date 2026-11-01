@@ -343,6 +343,8 @@ export interface ThreadEntry {
   reviewNotesFailure: Msg | null;
   /** A person's message: the files it carried. */
   attachments: MessageAttachmentView[];
+  /** The Director's turn for this message is still preparing its files, so whether they can be read is not known yet. */
+  reading?: boolean;
   /** Director replies: the paid work its turn started (keyframes and voice lines, a transcription), priced. */
   generation: GenerationLine[];
   /** Director replies: the parts of the request the application refused, with what unblocks them. */
@@ -640,6 +642,8 @@ export function threadView(
   // The marker says it where the reply is; the ending line would only repeat it.
   const marked = !!latest && failures.has(latest.requestId) && entries.some((entry) => entry.requestId === latest.requestId);
   const working = director?.status === "running" || overview?.director.state === "working";
+  const preparing = working ? director?.turn?.requestId ?? director?.activeRequestId ?? (overview?.director.state === "working" ? overview.director.requestId : null) : null;
+  if (preparing) entries.forEach((entry, index) => { if (entry.who === "you" && entry.requestId === preparing) entries[index] = { ...entry, reading: true }; });
   return { entries, reviewNotesFailures, questions: pendingQuestions(snapshot?.questions), held: heldEdits(overview, snapshot, director), working, ...status, ending: marked ? null : status.ending };
 }
 

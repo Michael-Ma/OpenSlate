@@ -31,7 +31,7 @@ export function codePlanAssets(store: Store, project: ProjectRecord): AssetItem[
   const firstEvent = store.readEvents(projectId)[0]?.occurredAt ?? new Date(0).toISOString();
   const counts = new Map<string, number>(), items: AssetItem[] = [];
   for (const record of media.records) {
-    if (media.posterIds.has(record.id) || !["image", "video", "audio", "document"].includes(record.artifact.kind)) continue;
+    if (media.posterIds.has(record.id) || media.referenceIds.has(record.id) || !["image", "video", "audio", "document"].includes(record.artifact.kind)) continue;
     const step = produced.get(record.id), recording = audio.get(record.id), shotId = step ? links.get(step.key) : undefined;
     const shot = shotId ? shots.get(shotId) : undefined, sceneId = typeof shot?.sceneId === "string" ? shot.sceneId : undefined;
     const scene = sceneId ? scenes.get(sceneId) : undefined;
@@ -42,7 +42,8 @@ export function codePlanAssets(store: Store, project: ProjectRecord): AssetItem[
     const group = `${shotId ?? ""}:${role}`, numbered = role === "keyframe" || role === "clip", takeIndex = (counts.get(group) ?? 0) + 1;
     if (numbered) counts.set(group, takeIndex);
     const ref = record.artifact, frameChoices = step?.kind === "image" ? choices.filter(choice => choice.options.some(option => sameImage(option, { ...ref }))) : [];
-    const current = ref.kind === "image" && videoFrames.has(ref.sha256) || !!step && reached.has(step.key) && (step.kind !== "image" || frameChoices.length === 0
+    const reference = media.imageReferences.get(record.id);
+    const current = ref.kind === "image" && (videoFrames.has(ref.sha256) || !!reference && videoFrames.has(reference.artifact.sha256)) || !!step && reached.has(step.key) && (step.kind !== "image" || frameChoices.length === 0
       || frameChoices.some(choice => sameImage(choice.answer, { ...ref })) || videoFrames.has(ref.sha256));
     const poster = media.posters.get(record.id), size = pictureSize(ref.kind === "image" ? record : poster);
     const document = role === "document" ? record as SuppliedDocumentArtifact : undefined;

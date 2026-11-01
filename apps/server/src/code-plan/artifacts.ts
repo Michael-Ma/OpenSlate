@@ -2,6 +2,7 @@ import type { ArtifactRef } from "@openslate/core";
 import type { StudioArtifactRef } from "@openslate/core/public";
 import type { ArtifactRecord } from "../execution/engine.js";
 import type { Store } from "../persistence/store.js";
+import type { CodePlanImageReference } from "./uploads.js";
 import type { CodePlanPoster } from "./posters.js";
 
 export const object = (value: unknown): Record<string, unknown> =>
@@ -29,7 +30,11 @@ export function codePlanArtifacts(store: Store, projectId: string) {
     const source = find(row.source), poster = find(row.poster);
     return source && poster?.artifact.kind === "image" ? [[source.id, poster] as const] : [];
   }));
-  return { records, find, posters, posterIds: new Set(rows.flatMap(row => row.poster ? [row.poster.artifactId] : [])) };
+  const imageReferences = new Map(store.list<CodePlanImageReference>("code_plan_image_reference", projectId).flatMap(row => {
+    const source = find(row.source), reference = find(row.reference);
+    return source && reference?.artifact.kind === "image" ? [[source.id, reference] as const] : [];
+  }));
+  return { records, find, posters, imageReferences, referenceIds: new Set([...imageReferences.values()].map(record => record.id)), posterIds: new Set(rows.flatMap(row => row.poster ? [row.poster.artifactId] : [])) };
 }
 
 /** Measured output only; requested dimensions never stand in for a returned file. */

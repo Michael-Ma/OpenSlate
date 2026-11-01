@@ -257,7 +257,7 @@ const codePlanV2Descriptors = freeze([...codePlanDescriptors,
   }, ["stepKey", "quote"]), false),
 ]);
 const codePlanV3Descriptors = freeze([...codePlanV2Descriptors,
-  descriptor("read_clip_frames", "Watch an owned clip or render as a labelled JPEG contact sheet, with source frame numbers at 30 fps and frame-difference motion. Free and read-only. At most 36 frames; increase everyFrames or narrow the range for more detail.", object({
+  descriptor("read_clip_frames", "Look at an owned picture as a JPEG, or watch an owned clip or render as a labelled JPEG contact sheet, with source frame numbers at 30 fps and frame-difference motion. Free and read-only. At most 36 frames; increase everyFrames or narrow the range for more detail.", object({
     artifactId: id, startFrame: { type: "integer", minimum: 0, maximum: 10799 }, endFrame: { type: "integer", minimum: 0, maximum: 10799 },
     everyFrames: { type: "integer", minimum: 1, maximum: 90 },
   }, ["artifactId"]), true),

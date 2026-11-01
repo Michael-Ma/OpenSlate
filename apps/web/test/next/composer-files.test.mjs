@@ -75,6 +75,15 @@ test('drops and pastes take real files only; uploads go to the route for their k
   assert.equal(importedRef('image', { artifact: { artifactId: 'x' } }), null, 'a receipt without a hash names nothing');
 });
 
+test('a file is only called unreadable after the Director has finished preparing it', () => {
+  const file = { artifact: { artifactId: 'a', sha256: hash('a'), kind: 'image' }, name: 'photo.png', readable: false };
+  const message = { id: 'm', role: 'user', requestId: 'r', text: 'Use this', attachments: [file] };
+  const view = director => threadView({ conversation: [message], turns: [] }, lastFerryOverview(), director, 'en', new Date()).entries.at(-1);
+  assert.equal(view({ status: 'running', activeRequestId: 'r' }).reading, true, 'its own turn is still starting');
+  assert.equal(view({ status: 'running', activeRequestId: 'another' }).reading, undefined, 'another turn says nothing about this file');
+  assert.equal(view({ status: 'idle' }).reading, undefined, 'a finished turn leaves the file unreadable');
+});
+
 test('the Director says what it started and its price, and offers Stop while it is being made', () => {
   const overview = lastFerryOverview();
   const effect = { kind: 'keyframes', sceneIds: [sceneId(3)], shotIds: [shotId('3.1'), shotId('3.2')], keyframes: 2, voiceLines: 1,

@@ -213,7 +213,7 @@ function Entry({ entry }: { entry: ThreadEntry }) {
             ? <span key={index}>{segment.text}</span>
             : <RefChip key={index} label={segment.label} target={resolveRef(segment.ref, overview).open} />)}
         </div>
-        {entry.attachments.length > 0 && <SentFiles files={entry.attachments} />}
+        {entry.attachments.length > 0 && <SentFiles files={entry.attachments} reading={!!entry.reading} />}
         {entry.attention && <AttentionNote attention={entry.attention} />}
       </div>
     );
@@ -234,16 +234,19 @@ function Entry({ entry }: { entry: ThreadEntry }) {
 }
 
 /** The files a message carried, by name and kind; a picture shows itself. */
-function SentFiles({ files }: { files: MessageAttachmentView[] }) {
+function SentFiles({ files, reading }: { files: MessageAttachmentView[]; reading: boolean }) {
   const { t } = useI18n();
   return (
     <ul className="sent-files" aria-label={t("director.attachment.group")}>
-      {files.map((file) => (
-        <li key={file.artifact.artifactId} className={`sent-file${file.readable ? "" : " unreadable"}`} data-kind={file.artifact.kind}>
-          <span className="sent-kind">{t(`director.attachment.kind.${file.artifact.kind}` as const)}</span>
-          <span className="sent-name" title={file.name}>{file.readable ? file.name : t("director.attachment.unreadable", { name: file.name })}</span>
-        </li>
-      ))}
+      {files.map((file) => {
+        const unreadable = !file.readable && !reading;
+        return (
+          <li key={file.artifact.artifactId} className={`sent-file${unreadable ? " unreadable" : ""}`} data-kind={file.artifact.kind}>
+            <span className="sent-kind">{t(`director.attachment.kind.${file.artifact.kind}` as const)}</span>
+            <span className="sent-name" title={file.name}>{unreadable ? t("director.attachment.unreadable", { name: file.name }) : file.name}</span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
