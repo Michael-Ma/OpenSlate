@@ -800,6 +800,8 @@ export interface CodePlanStepView {
   updatedAt: string;
 }
 
+export type CodePlanVideoMode = "reference" | "first_frame" | "first_last_frame" | "text";
+
 /** One step for a person debugging it: GET /code-plan/steps/:stepKey. Holds no credential, path or provider secret. */
 export interface CodePlanStepDetail {
   key: string;
@@ -811,7 +813,11 @@ export interface CodePlanStepDetail {
   durationSeconds?: number;
   aspectRatio?: string;
   variant?: string;
+  /** A video step's input: images that guide the clip, or the exact first frame it starts from, or text alone. */
+  mode?: CodePlanVideoMode;
+  references?: StudioArtifactRef[];
   firstFrame?: StudioArtifactRef;
+  lastFrame?: StudioArtifactRef;
   /** The finished file. */
   output?: { width?: number; height?: number; durationSeconds?: number };
   priceMicros: Micros;
