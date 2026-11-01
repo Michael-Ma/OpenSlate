@@ -15,7 +15,7 @@ import type { FrozenRenderManifest, LocalMediaOptions, MediaAudioNormalizationId
 const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioSources: 130, maxAudioPlacements: 260, timeoutMs: 120000 };
 // No playlists, concat demuxer, devices or network protocols. MOV external data
 // references remain disabled by the demuxer's default; files are copied first.
-const INPUT_OPTIONS = ["-protocol_whitelist", "file", "-format_whitelist", "mov,matroska,webm,avi,wav,mp3,flac,ogg"];
+const INPUT_OPTIONS = ["-protocol_whitelist", "file", "-format_whitelist", "mov,matroska,webm,avi,wav,mp3,flac,ogg,aac,aiff,mpeg,flv,asf"];
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const FPS = 30, SAMPLE_RATE = 48000, SAMPLES_PER_FRAME = 1600;

@@ -134,13 +134,13 @@ test('JPEG and WebP uploads become owned PNG references and replay their origina
     const replay = await f.upload(name, undefined, bytes, version); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), result);
   }
   assert.equal(f.head().artifacts.length, 2); assert.deepEqual(await readdir(f.uploads.rootDir), []);
-  const list = await f.request('GET', f.path); assert.deepEqual(list.json().capabilities.acceptedFormats, ['image/png', 'image/jpeg', 'image/webp', 'image/heic']);
+  const list = await f.request('GET', f.path); assert.deepEqual(list.json().capabilities.acceptedFormats, ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff', 'image/avif', 'image/heic', 'image/heif']);
 });
 
 test('an undecodable generated HEIC container gives IMAGE_FORMAT_UNSUPPORTED and publishes nothing', async t => {
   const f = await fixture(t), response = await f.upload('heic', undefined, heic);
   assert.equal(response.statusCode, 409, response.body); assert.equal(response.json().error.code, 'IMAGE_FORMAT_UNSUPPORTED');
-  assert.match(response.json().error.message, /HEIC.*PNG, JPEG or WebP/);
+  assert.match(response.json().error.message, /HEIC.*PNG or JPEG/);
   assert.equal(f.head().artifacts.length, 0); assert.deepEqual(await readdir(f.uploads.rootDir), []);
 });
 
@@ -191,7 +191,7 @@ test("batch uploads share an explicit request; continuation transfers its hold a
 
 test("missing tools report an unavailable import capability without creating a request or staging files", async t => {
   const f = await fixture(t, { available: false }), list = await f.request("GET", f.path);
-  assert.equal(list.statusCode, 200); assert.equal(list.json().capabilities.import, false); assert.match(list.json().capabilities.unavailableReason, /FFmpeg and ffprobe/);
+  assert.equal(list.statusCode, 200); assert.equal(list.json().capabilities.import, false); assert.match(list.json().capabilities.unavailableReason, /Image tools are unavailable/);
   const response = await f.upload(); assert.equal(response.statusCode, 503, response.body); assert.equal(response.json().error.code, "SERVICE_UNAVAILABLE");
   assert.equal(f.store.list("message", f.project.id).length, 0); assert.deepEqual(await readdir(f.uploads.rootDir), []);
 });

@@ -10,6 +10,7 @@ import type { LocalMediaService } from '../media/local-media.js';
 import type { ProductionService, RequestRecord } from './service.js';
 import { DirectorImageProjector } from './director-images.js';
 import { runMediaProcess } from '../media/process.js';
+import { imageFormat, imageInputArgs } from "../media/image-input.js";
 
 export interface KeyframePin { shotId: string; nodeId: string; candidateId: string | null; artifactId: string; sha256: string; thumbnailSha256: string; tile: number }
 export interface KeyframeProjection {
@@ -64,12 +65,12 @@ export class KeyframeProjector extends DirectorImageProjector {
             const cell = Math.min(768, Math.floor(3840 / Math.max(columns, rows)));
             for (const [tile, source] of group.entries()) {
               const path = join(temporary, `source-${tile}`); await writeFile(path, await this.bytes(source.record.path, this.artifactRoot, source.pin.sha256, source.size, 32 * 1024 * 1024), { mode: 0o600 }); current();
-              await runMediaProcess(this.ffmpeg, [...args, '-protocol_whitelist', 'file', '-format_whitelist', source.record.mimeType === 'image/png' ? 'png_pipe' : 'jpeg_pipe', '-i', path, '-frames:v', '1', '-vf', `scale=${cell}:${cell}:force_original_aspect_ratio=decrease,pad=${cell}:${cell}:(ow-iw)/2:(oh-ih)/2`, '-threads', '1', join(temporary, `cell-${String(tile).padStart(4, '0')}.png`)], { cwd: temporary, timeoutMs: 30000, ...(signal ? { signal } : {}) }); current();
+              await runMediaProcess(this.ffmpeg, [...args, ...imageInputArgs(imageFormat(readFileSync(path))), '-i', path, '-frames:v', '1', '-vf', `scale=${cell}:${cell}:force_original_aspect_ratio=decrease,pad=${cell}:${cell}:(ow-iw)/2:(oh-ih)/2`, '-threads', '1', join(temporary, `cell-${String(tile).padStart(4, '0')}.png`)], { cwd: temporary, timeoutMs: 30000, ...(signal ? { signal } : {}) }); current();
             }
-            args.push('-protocol_whitelist', 'file', '-format_whitelist', 'image2', '-framerate', '1', '-i', join(temporary, 'cell-%04d.png'), '-vf', `tile=${columns}x${rows}:nb_frames=${group.length}`);
+            args.push('-protocol_whitelist', 'file', '-format_whitelist', 'image2', '-f', 'image2', '-framerate', '1', '-i', join(temporary, 'cell-%04d.png'), '-vf', `tile=${columns}x${rows}:nb_frames=${group.length}`);
           } else {
             const path = join(temporary, `source-${index}`); const source = group[0]!; await writeFile(path, await this.bytes(source.record.path, this.artifactRoot, source.pin.sha256, source.size, 32 * 1024 * 1024), { mode: 0o600 }); current();
-            args.push('-protocol_whitelist', 'file', '-format_whitelist', source.record.mimeType === 'image/png' ? 'png_pipe' : 'jpeg_pipe', '-i', path, '-vf', "scale=w='min(768,iw)':h='min(768,ih)':force_original_aspect_ratio=decrease");
+            args.push(...imageInputArgs(imageFormat(readFileSync(path))), '-i', path, '-vf', "scale=w='min(768,iw)':h='min(768,ih)':force_original_aspect_ratio=decrease");
           }
           const budget = Math.floor((DIRECTOR_IMAGE_LIMITS.totalBytes - (referenced.images ?? []).reduce((sum, image) => sum + readFileSync(image.path).length, 0)) / groups.length);
           let bytes: Buffer | undefined;
@@ -88,7 +89,7 @@ export class KeyframeProjector extends DirectorImageProjector {
           group.forEach((source, tile) => images.push({ ...source.pin, thumbnailSha256: sha256, tile }));
         }
       } catch (error) {
-        if (!['MEDIA_TOOL_UNAVAILABLE', 'MEDIA_TOOL_FAILED', 'DIRECTOR_IMAGE_LIMIT'].includes((error as { code?: string }).code ?? '')) throw error;
+        if (!['MEDIA_TOOL_UNAVAILABLE', 'MEDIA_TOOL_FAILED', 'IMAGE_FORMAT_UNSUPPORTED', 'DIRECTOR_IMAGE_LIMIT'].includes((error as { code?: string }).code ?? '')) throw error;
         images.length = 0; attachments.length = 0;
         sources.forEach(s => described.push({ shotId: s.pin.shotId, reason: 'image_projection_unavailable' }));
       } finally { await rm(temporary, { recursive: true, force: true }); }

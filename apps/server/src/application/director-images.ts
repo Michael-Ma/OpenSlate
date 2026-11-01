@@ -15,6 +15,7 @@ import type { ProductionService } from "./service.js";
 import type { SuppliedImageArtifact } from "../media/image-application.js";
 import { PNG_IMPORT_MAX_BYTES } from "../media/image-application.js";
 import { runMediaProcess } from "../media/process.js";
+import { imageFormat, imageInputArgs } from "../media/image-input.js";
 
 export interface SelectedDirectorImage { artifactId: string; sha256: string }
 export interface RequestImageSelection { id: string; projectId: string; requestId: string; images: SelectedDirectorImage[]; selectionDigest: string }
@@ -233,7 +234,7 @@ export class DirectorImageProjector {
           const source = join(temporary, "source.png"), target = join(temporary, "thumbnail.jpg");
           const handle = await open(source, "wx", 0o600); try { await handle.writeFile(bytes); } finally { await handle.close(); }
           current();
-          await runMediaProcess(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", "-filter_threads", "1", "-protocol_whitelist", "file", "-format_whitelist", "png_pipe", "-i", source,
+          await runMediaProcess(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", "-filter_threads", "1", ...imageInputArgs(imageFormat(bytes)), "-i", source,
             "-map", "0:v:0", "-map_metadata", "-1", "-frames:v", "1", "-vf", "scale=w='min(768,iw)':h='min(768,ih)':force_original_aspect_ratio=decrease:flags=lanczos",
             "-c:v", "mjpeg", "-q:v", "8", "-pix_fmt", "yuvj444p", "-threads", "1", "-f", "image2", target], { cwd: temporary, timeoutMs: 30000, maxOutputBytes: 16384, ...(signal ? { signal } : {}) });
           current();
@@ -351,7 +352,7 @@ export class DirectorImageProjector {
             let thumbnail: Buffer | undefined;
             for (const [quality, dimension] of [[8, 768], [16, 768], [31, 768], [31, 512], [31, 256]] as const) {
               current();
-              await runMediaProcess(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-y", "-threads", "1", "-filter_threads", "1", "-protocol_whitelist", "file", "-format_whitelist", format,
+              await runMediaProcess(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-y", "-threads", "1", "-filter_threads", "1", ...(record.artifact.kind === "image" ? imageInputArgs(imageFormat(bytes)) : ["-protocol_whitelist", "file", "-format_whitelist", format]),
                 ...(record.artifact.kind === "video" ? ["-ss", String(timeSeconds)] : []), "-i", source, "-map", "0:v:0", "-map_metadata", "-1", "-frames:v", "1",
                 "-vf", `scale=w='min(${dimension},iw)':h='min(${dimension},ih)':force_original_aspect_ratio=decrease:flags=lanczos`, "-c:v", "mjpeg", "-q:v", String(quality), "-pix_fmt", "yuvj444p", "-threads", "1", "-f", "image2", target],
               { cwd: temporary, timeoutMs: 30000, maxOutputBytes: 16384, ...(signal ? { signal } : {}) });
@@ -377,7 +378,7 @@ export class DirectorImageProjector {
           }
           material.readable = true; material.frames = images.slice(start).map((_, index) => start + index);
         } catch (error) {
-          if (!["MEDIA_TOOL_UNAVAILABLE", "MEDIA_TOOL_FAILED", "MEDIA_TIMEOUT", "MEDIA_TOOL_OUTPUT_LIMIT", "DIRECTOR_IMAGE_LIMIT"].includes((error as { code?: string }).code ?? "")) throw error;
+          if (!["MEDIA_TOOL_UNAVAILABLE", "MEDIA_TOOL_FAILED", "MEDIA_TIMEOUT", "MEDIA_TOOL_OUTPUT_LIMIT", "IMAGE_FORMAT_UNSUPPORTED", "DIRECTOR_IMAGE_LIMIT"].includes((error as { code?: string }).code ?? "")) throw error;
           images.splice(start); material.readable = false; material.reason = "image_projection_unavailable";
         } finally { await rm(temporary, { recursive: true, force: true }); }
       }

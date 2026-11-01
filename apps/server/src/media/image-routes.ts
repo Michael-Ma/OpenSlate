@@ -7,6 +7,7 @@ import type { ProductionService } from "../application/service.js";
 import type { ManagedUpload, ManagedUploadStore } from "../narration/managed-upload.js";
 import { ImageApplicationService, PNG_IMPORT_MAX_BYTES } from "./image-application.js";
 import type { SuppliedImageArtifact } from "./image-application.js";
+import { IMAGE_UPLOAD_FORMATS } from "./image-input.js";
 import { uploadNameSchema } from "./upload-name.js";
 
 interface ImageRouteOptions { production: ProductionService; images: ImageApplicationService | null; uploads: ManagedUploadStore }
@@ -41,7 +42,7 @@ export function registerImageRoutes(app: FastifyInstance, options: ImageRouteOpt
       const owned = production.store.list<SuppliedImageArtifact>("artifact", project.id).filter(record => record.origin === "supplied_image" && !record.fixture && ids.has(record.id)).reverse();
       const selected = owned.slice(offset, offset + 40);
       return { headVersion: project.headVersion, revisionId: project.revisionId,
-        capabilities: { import: images !== null, format: "image/png", acceptedFormats: ["image/png", "image/jpeg", "image/webp", "image/heic"], maxBytes: uploads.maxBytes, unavailableReason: images ? null : "Local FFmpeg and ffprobe are required to validate image references." },
+        capabilities: { import: images !== null, format: "image/png", acceptedFormats: IMAGE_UPLOAD_FORMATS, maxBytes: uploads.maxBytes, unavailableReason: images ? null : "Image tools are unavailable. Check Settings, This computer." },
         images: selected.map(record => ({ artifact: record.artifact, mimeType: record.mimeType, width: record.width, height: record.height, byteLength: record.byteLength, fixture: false, origin: record.origin })),
         coverage: { offset, returned: selected.length, total: owned.length, nextOffset: offset + selected.length < owned.length ? offset + selected.length : null } };
     });
@@ -49,7 +50,7 @@ export function registerImageRoutes(app: FastifyInstance, options: ImageRouteOpt
       bodyLimit: uploads.maxBytes,
       schema: { querystring: object({ expectedHeadVersion: { type: "string", pattern: "^(0|[1-9][0-9]{0,14})$" }, name: uploadNameSchema, requestId: text, continuationRequestId: text }, ["expectedHeadVersion"]) },
     }, async (request, reply) => {
-      invariant(images, "SERVICE_UNAVAILABLE", "Image reference import requires local FFmpeg and ffprobe");
+      invariant(images, "SERVICE_UNAVAILABLE", "Image tools are unavailable. Check Settings, This computer.");
       invariant(request.headers["content-type"]?.split(";")[0] === "application/octet-stream", "VALIDATION_ERROR", "Upload image bytes as application/octet-stream");
       const projectId = request.params.projectId, key = commandKey(request), expectedHeadVersion = Number(request.query.expectedHeadVersion);
       const name = request.query.name === undefined ? {} : { name: request.query.name };

@@ -21,7 +21,7 @@ test('a file chip says what it is, how the upload goes, or why it failed', () =>
   assert.equal(zh(fileStatus(file('a', { kind: 'video', size: 3 * 1024 * 1024 }))), '视频 · 3 MB');
   assert.equal(en(fileStatus(file('a', { state: 'uploading', loaded: 512 }))), 'Uploading 25%');
   assert.equal(en(fileStatus(file('a', { state: 'uploading', loaded: 2048 }))), 'Saving to Assets…');
-  assert.equal(en(fileStatus(file('a', { state: 'failed', refusal: { id: 'assets.refusal.image_format' } }))), 'This picture format can’t be imported. Use PNG, JPEG, WebP or HEIC.');
+  assert.equal(en(fileStatus(file('a', { state: 'failed', refusal: { id: 'assets.refusal.image_format' } }))), 'This picture format cannot be read here. Export it as PNG or JPEG and try again. SVG pictures must be exported first.');
 });
 
 test('Send waits for uploads, is held by a failed file or too many, and carries only saved files', () => {

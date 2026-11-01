@@ -17,7 +17,7 @@ test('a file goes to the route for its kind, by type or extension', () => {
   assert.equal(importKind({ name: 'a.jpg', type: 'image/jpeg' }), 'image', 'JPEG, WebP and HEIC are stored as PNG by the studio');
   assert.equal(importKind({ name: 'a.webp', type: '' }), 'image');
   assert.equal(importKind({ name: 'a.HEIC', type: 'application/octet-stream' }), 'image');
-  assert.equal(importKind({ name: 'a.gif', type: 'image/gif' }), 'other_image');
+  assert.equal(importKind({ name: 'a.gif', type: 'image/gif' }), 'image');
   assert.equal(importKind({ name: 'a.mp4', type: 'video/mp4' }), 'video');
   assert.equal(importKind({ name: 'a.mov', type: '' }), 'video');
   assert.equal(importKind({ name: 'a.wav', type: 'audio/wav' }), 'audio');
@@ -31,7 +31,7 @@ test('a file goes to the route for its kind, by type or extension', () => {
 test('files are refused before sending: wrong kind, unsupported picture, empty, too large, not importable here', () => {
   assert.deepEqual(checkFile({ name: 'a.png', type: 'image/png', size: 1000 }), { ok: true, kind: 'image' });
   assert.deepEqual(checkFile({ name: 'a.jpg', type: 'image/jpeg', size: 1000 }), { ok: true, kind: 'image' });
-  assert.equal(en(checkFile({ name: 'a.gif', type: 'image/gif', size: 1000 }).refusal), 'This picture format can’t be imported. Use PNG, JPEG, WebP or HEIC.');
+  assert.equal(checkFile({ name: 'a.svg', type: 'image/svg+xml', size: 1000 }).refusal.id, 'assets.refusal.image_format');
   assert.deepEqual(checkFile({ name: 'a.txt', type: 'text/plain', size: 10 }), { ok: true, kind: 'document' });
   assert.equal(checkFile({ name: 'a.zip', type: 'application/zip', size: 10 }).refusal.id, 'assets.refusal.type');
   assert.equal(checkFile({ name: 'a.pdf', type: 'application/pdf', size: 33 * MIB }).refusal.id, 'assets.refusal.too_large');
@@ -55,17 +55,18 @@ function pngHeader(width, height, { signature = true, chunk = 'IHDR' } = {}) {
   return new Uint8Array(bytes);
 }
 
-test('a PNG is checked by its first bytes: a real PNG, at most 3840 × 2160 pixels and 4096 on a side', () => {
+test('PNG uploads up to 100 MP reach server scaling; damaged headers and larger images are refused', () => {
   assert.deepEqual(checkPngHeader(pngHeader(1600, 900)), { ok: true, kind: 'image' });
   assert.deepEqual(checkPngHeader(pngHeader(3840, 2160)), { ok: true, kind: 'image' }, 'exactly the pixel limit');
   assert.deepEqual(checkPngHeader(pngHeader(4096, 2025)), { ok: true, kind: 'image' }, 'a 4096 side within the pixel limit');
-  assert.equal(en(checkPngHeader(pngHeader(4097, 100)).refusal),
-    'This image is 4097 × 100 pixels. The studio takes PNG images up to 3840 × 2160 (8.3 million pixels, no side over 4096).');
-  assert.equal(checkPngHeader(pngHeader(4096, 4096)).refusal.id, 'assets.refusal.png_pixels', 'over the pixel limit');
-  assert.equal(checkPngHeader(pngHeader(10, 10, { signature: false })).refusal.id, 'assets.refusal.not_png');
+  assert.deepEqual(checkPngHeader(pngHeader(6000, 4000)), { ok: true, kind: 'image' });
+  assert.deepEqual(checkPngHeader(pngHeader(10000, 10000)), { ok: true, kind: 'image' });
+  assert.equal(checkPngHeader(pngHeader(10001, 10000)).refusal.id, 'assets.refusal.png_pixels');
+  assert.deepEqual(checkPngHeader(pngHeader(10, 10, { signature: false })), { ok: true, kind: 'image' });
   assert.equal(checkPngHeader(pngHeader(10, 10, { chunk: 'IDAT' })).refusal.id, 'assets.refusal.not_png');
   assert.equal(checkPngHeader(pngHeader(0, 10)).refusal.id, 'assets.refusal.not_png');
-  assert.equal(checkPngHeader(new TextEncoder().encode('not a png')).refusal.id, 'assets.refusal.not_png', 'too short to be a PNG');
+  assert.deepEqual(checkPngHeader(new TextEncoder().encode('not a png')), { ok: true, kind: 'image' }, 'non-PNG content is validated on the server');
+  assert.deepEqual(checkPngHeader(new Uint8Array([255,216,255,224])), { ok: true, kind: 'image' }, 'JPEG with an empty browser MIME reaches normalization');
   assert.deepEqual(checkPngHeader(null), { ok: true, kind: 'image' }, 'an unreadable start is left to the studio');
 });
 
@@ -208,7 +209,7 @@ test('the codes the studio sends for long, unreadable or oversized media say so 
   // The studio refuses a damaged PNG and one too large in pixels with the same code: the words cover both.
   for (const code of ['IMAGE_INPUT_INVALID', 'IMAGE_VALIDATION_FAILED', 'IMAGE_EXECUTION_INPUT_INVALID'])
     assert.equal(id(code), 'assets.refusal.png_refused', code);
-  assert.equal(en(refusalMsg('IMAGE_INPUT_INVALID')), 'The studio could not take this PNG. It may be damaged, or larger than 3840 × 2160 pixels.');
+  assert.equal(en(refusalMsg('IMAGE_INPUT_INVALID')), 'This picture could not be read. Export it again as PNG or JPEG, up to 100 million pixels.');
   assert.equal(id('IMAGE_DIGEST_MISMATCH'), 'assets.refusal.corrupt');
   assert.equal(id('MEDIA_UNSUPPORTED'), 'assets.refusal.not_supported');
   assert.equal(id('MEDIA_TIMEOUT'), 'assets.refusal.slow');
@@ -231,4 +232,18 @@ test('progress is a real fraction while sending; sizes read in binary units', ()
   assert.equal(en(importDoneMsg('audio', 'music', 'low-tide.mp3')), 'Imported low-tide.mp3 as music.');
   assert.equal(en(importDoneMsg('audio', 'upload', 'pier.wav')), 'Imported pier.wav as other audio.');
   assert.equal(en(importDoneMsg('image', 'music', 'pier.png')), 'Imported pier.png.');
+});
+
+test('every supported picture, video and audio extension reaches its route with generic MIME', () => {
+  for (const extension of ['png','jpg','jpeg','webp','gif','bmp','tif','tiff','avif','heic','heif'])
+    for (const type of ['', 'application/octet-stream']) assert.equal(importKind({ name: `file.${extension}`, type }), 'image');
+  for (const extension of ['mp4','mov','m4v','webm','mkv','avi','mpeg','mpg','flv','wmv','3gp'])
+    for (const type of ['', 'application/octet-stream']) assert.equal(importKind({ name: `file.${extension}`, type }), 'video');
+  for (const extension of ['wav','mp3','m4a','aac','flac','ogg','oga','opus','aif','aiff','weba'])
+    for (const type of ['', 'application/octet-stream']) assert.equal(importKind({ name: `file.${extension}`, type }), 'audio');
+  for (const type of ['', 'application/octet-stream','image/svg+xml','image/png'])
+    assert.equal(importKind({ name: 'file.svg', type }), 'other_image');
+  assert.equal(refusalMsg('IMAGE_FORMAT_UNSUPPORTED').id, 'assets.refusal.image_format');
+  for (const locale of ['en','zh']) for (const code of ['MEDIA_TOOL_FAILED','IMAGE_FORMAT_UNSUPPORTED','IMAGE_INPUT_INVALID','SERVICE_UNAVAILABLE'])
+    assert.doesNotMatch(translate(locale, refusalMsg(code).id), /ffmpeg/i);
 });

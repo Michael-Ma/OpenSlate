@@ -6,6 +6,7 @@ import type { ActorContext, ArtifactRef } from "@openslate/core";
 import type { ProductionService } from "../application/service.js";
 import type { ArtifactRecord } from "../execution/engine.js";
 import { LocalImageStore } from "./local-images.js";
+import { imageFits } from "./image-input.js";
 import { validateUploadName } from "./upload-name.js";
 
 export const PNG_IMPORT_MAX_BYTES = 32 * 1024 * 1024;
@@ -44,7 +45,7 @@ export class ImageApplicationService {
       Number.isSafeInteger(input.expectedHeadVersion) && input.expectedHeadVersion >= 0 && typeof input.key === "string" && input.key.length > 0 && input.key.length <= 160,
     "VALIDATION_ERROR", "Use a bounded image import command and current project version");
     validateUploadName(input.name);
-    invariant(input.bytes instanceof Uint8Array && input.bytes.byteLength > 32 && input.bytes.byteLength <= PNG_IMPORT_MAX_BYTES, "IMAGE_INPUT_INVALID", "Choose a PNG, JPEG, WebP or HEIC image of at most 32 MiB");
+    invariant(input.bytes instanceof Uint8Array && input.bytes.byteLength > 32 && input.bytes.byteLength <= PNG_IMPORT_MAX_BYTES, "IMAGE_INPUT_INVALID", "Choose a picture of at most 32 MiB");
     // Snapshot all mutable caller data before file validation yields.
     const bytes = Buffer.from(input.bytes), hash = input.sha256, key = input.key, expectedHeadVersion = input.expectedHeadVersion;
     const name = input.name === undefined ? {} : { name: input.name };
@@ -67,7 +68,7 @@ export class ImageApplicationService {
     if (prior) return receipt(prior);
     const stored = await this.images.normalizeUpload({ bytes, sha256: hash }, signal ? { signal } : {});
     invariant(!signal?.aborted, "MEDIA_CANCELLED", "Reference image import cancelled");
-    invariant((!png || (stored.sha256 === hash && stored.byteLength === bytes.length && stored.width === width && stored.height === height)) &&
+    invariant((!png || !imageFits(width!, height!) || (stored.sha256 === hash && stored.byteLength === bytes.length && stored.width === width && stored.height === height)) &&
       inside(this.artifactRoot, realpathSync(stored.path)), "IMAGE_INTEGRITY_ERROR", "Validated reference differs from its import intent or managed location");
     return this.store.transaction(() => {
       this.authorize(projectId, authority);
