@@ -15,13 +15,17 @@ const BUILT_IN_PROFILES: ProviderProfile[] = structuredClone(DEFAULT_PROFILES);
 /** Lyria needs only the Gemini key the studio already reads: with its route enabled and no music profile configured, it installs itself. */
 const LYRIA_PROFILE: ProviderProfile = { id: "lyria-3.5-music", revision: "1", kind: "music", adapter: "gemini-lyria", executionVersion: "1",
   configuration: { model: "lyria-3.5", settings: {} }, maxConcurrency: 1, unitCostMicros: "80000", maxRetries: 0 };
+/** New code films use the model's duration range, independent of manual live-validation profiles. */
+const VIGGLE_PROFILE: ProviderProfile = { id: "viggle-h3", revision: "1", kind: "video", adapter: "viggle-h3", executionVersion: "1",
+  configuration: { model: "MiniMax-H3", settings: { quality: "low", resolution: "768p", aspectRatio: "16:9" } },
+  minFrames: 150, maxFrames: 450, maxConcurrency: 1, unitCostMicros: "750000", maxRetries: 0 };
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const generatedKinds = ["image", "video", "speech", "transcription", "music"] as const;
 interface Definition { label: string; profile: ProviderProfile }
 interface Configuration { version: 1; profiles: Definition[] }
 export interface InstalledProviderSelection { readonly catalogDigest: string; readonly profileIds: readonly string[] }
 interface SelectionSnapshot { profiles: ProviderProfile[]; provenance: { catalogDigest: string; profileIds: string[] } }
-const selections = new WeakMap<InstalledProviderSelection, SelectionSnapshot>();
+const selections = new WeakMap<InstalledProviderSelection, { graph: SelectionSnapshot; code: SelectionSnapshot }>();
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value)
   && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 function exact(value: unknown, fields: string[]): asserts value is Record<string, unknown> {
@@ -126,6 +130,8 @@ function validateConfiguration(input: unknown): Configuration {
       exact(entry, ["label", "profile"]);
       invariant(label(entry.label), "PROVIDER_CATALOG_INVALID", "Use a short provider label without host locations");
       const policy = profilePolicy(entry.profile as ProviderProfile), profile = entry.profile as ProviderProfile;
+      invariant(profile.id !== VIGGLE_PROFILE.id || canonical(profile) === canonical(VIGGLE_PROFILE),
+        "PROVIDER_CATALOG_INVALID", "The built-in Viggle identity requires its exact definition; use a distinct id for custom profiles");
       invariant(!policy.fixture && !used.has(profile.id), "PROVIDER_CATALOG_INVALID", "Additional external profiles require distinct nonreserved identities"); used.add(profile.id);
     }
     return structuredClone(input) as unknown as Configuration;
@@ -147,9 +153,9 @@ export function readInstalledProviderConfiguration(path: string): unknown {
 }
 
 /** Only catalog-issued selections may enter project creation. Return a detached immutable-lock snapshot. */
-export function selectedProviderProfiles(selection: InstalledProviderSelection): SelectionSnapshot {
+export function selectedProviderProfiles(selection: InstalledProviderSelection, planMode?: "graph" | "code"): SelectionSnapshot {
   const value = selections.get(selection);
-  invariant(value, "PROVIDER_SELECTION_INVALID", "Use a trusted installed provider selection"); return structuredClone(value);
+  invariant(value, "PROVIDER_SELECTION_INVALID", "Use a trusted installed provider selection"); return structuredClone(planMode === "code" ? value.code : value.graph);
 }
 
 /** Immutable host configuration and read-only local readiness. No network, grants or activation. */
@@ -167,7 +173,9 @@ export class InstalledProviderCatalog {
     const configuration = options.configuration === undefined ? { version: 1 as const, profiles: [] } : validateConfiguration(options.configuration);
     this.#credentials = options.credentials ?? new EnvironmentMediaCredentials();
     const lyria = !configuration.profiles.some(row => row.profile.kind === "music") && (options.enabledExecutions ?? []).some(row => row.adapter === "gemini-lyria");
+    const viggle = !configuration.profiles.some(row => row.profile.id === VIGGLE_PROFILE.id) && (options.enabledExecutions ?? []).some(row => row.adapter === "viggle-h3");
     this.#definitions = [...BUILT_IN_PROFILES.map(profile => ({ label: `Demo ${profile.kind}`, profile: structuredClone(profile) })), ...configuration.profiles,
+      ...(viggle ? [{ label: "Viggle H3", profile: structuredClone(VIGGLE_PROFILE) }] : []),
       ...(lyria ? [{ label: "Google Lyria 3.5 · $0.08/song", profile: structuredClone(LYRIA_PROFILE) }] : [])];
     this.#digest = digest({ version: 1, profiles: this.#definitions }); this.#registry = options.registry;
     this.#mediaTools = Object.freeze({ image: options.mediaTools?.image === true, video: options.mediaTools?.video === true, audio: options.mediaTools?.audio === true });
@@ -218,7 +226,10 @@ export class InstalledProviderCatalog {
     const profiles = BUILT_IN_PROFILES.map(fallback => structuredClone(selected.find(profile => profile.kind === fallback.kind) ?? fallback));
     profiles.push(...selected.filter(profile => profile.kind === "music").map(profile => structuredClone(profile)));
     const value = Object.freeze({ catalogDigest: this.digest, profileIds: Object.freeze([...profileIds]) });
-    selections.set(value, { profiles, provenance: { catalogDigest: this.digest, profileIds: profiles.map(profile => profile.id) } }); return value;
+    const viggle = this.#definitions.find(row => row.profile.id === VIGGLE_PROFILE.id)?.profile;
+    const codeProfiles = profiles.map(profile => profile.adapter === "viggle-h3" && viggle ? structuredClone(viggle) : structuredClone(profile));
+    const snapshot = (rows: ProviderProfile[]): SelectionSnapshot => ({ profiles: rows, provenance: { catalogDigest: this.digest, profileIds: rows.map(profile => profile.id) } });
+    selections.set(value, { graph: snapshot(profiles), code: snapshot(codeProfiles) }); return value;
   }
   /** Installed, enabled and ready lip-sync profiles, pinned on new projects whose video is a real model. */
   lipSyncProfiles(): ProviderProfile[] {
@@ -228,6 +239,7 @@ export class InstalledProviderCatalog {
   /** Every ready video and music model, pinned on new code films: their plans choose a model per shot. */
   codeMediaProfiles(): ProviderProfile[] {
     return this.#definitions.filter(definition => (definition.profile.kind === "video" || definition.profile.kind === "music") && definition.profile.adapter !== "fal-h3-lipsync"
+      && (definition.profile.adapter !== "viggle-h3" || definition.profile.id === VIGGLE_PROFILE.id)
       && this.describe(definition.profile).readiness.realExecutionEnabled).map(definition => structuredClone(definition.profile));
   }
   private describe(input: unknown, name?: string) {

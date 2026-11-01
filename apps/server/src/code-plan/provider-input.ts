@@ -6,8 +6,9 @@ import type { JsonObject, ProviderProfile } from "@openslate/core";
 import { assertCodexImageOperationOptions } from "../execution/codex-image-receipts.js";
 import { assertViggleH3OperationOptions } from "../execution/viggle-h3-receipts.js";
 import { assertAudioOperationOptions } from "../execution/audio-preflight.js";
+import { videoRatios, assertProfileVideoDuration } from "./video-capabilities.js";
 
-export const videoRatios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] as const;
+export { videoRatios } from "./video-capabilities.js";
 const ratioValue = (ratio: string): number => { const [w, h] = ratio.split(":").map(Number); return w! / h!; };
 export function videoAspect(input: JsonObject, profile: ProviderProfile, frame?: { width?: number; height?: number }): JsonObject {
   if (profile.adapter !== "viggle-h3" && profile.adapter !== "minimax-h3") return input;
@@ -51,9 +52,9 @@ export function codePlanProviderArgs(profile: ProviderProfile, input: JsonObject
     const references = Array.isArray(input.references) && input.references.length ? input.references.map(frameHash) : undefined;
     const frames = { ...(input.firstFrame ? { firstFrameSha256: frameHash(input.firstFrame) } : {}),
       ...(input.lastFrame ? { lastFrameSha256: frameHash(input.lastFrame) } : {}), ...(references ? { references } : {}) };
-    invariant(typeof input.prompt === "string" && input.prompt.trim().length > 0 && Buffer.byteLength(input.prompt) <= 32768
-      && Number.isSafeInteger(input.durationSeconds) && Number(input.durationSeconds) * 30 >= (profile.minFrames ?? 1)
-      && Number(input.durationSeconds) * 30 <= (profile.maxFrames ?? 450), "CODE_PLAN_INPUT", "Video duration must fit the installed profile");
+    invariant(typeof input.prompt === "string" && input.prompt.trim().length > 0 && Buffer.byteLength(input.prompt) <= 32768,
+      "CODE_PLAN_INPUT", "Video requires a bounded nonempty prompt");
+    assertProfileVideoDuration(profile, input.durationSeconds);
     if (codeOnlyVideoAdapter(profile.adapter)) {
       allowed.push("resolution", "generateAudio", "seed");
       const options = videoI2vOptions(profile, input);

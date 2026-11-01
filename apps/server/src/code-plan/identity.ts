@@ -1,5 +1,6 @@
 import { canonical, digest, invariant } from "@openslate/core";
 import type { JsonObject, JsonValue, ProviderProfile } from "@openslate/core";
+import { videoRatios, assertProfileVideoDuration } from "./video-capabilities.js";
 
 export type CodePlanMediaKind = "image" | "video" | "speech" | "music" | "render";
 export type VideoMode = "reference" | "first_frame" | "first_last_frame" | "text";
@@ -46,7 +47,7 @@ export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
   if (kind === "video") {
     const mode = videoMode(media), modes = videoModes(models[model]!);
     invariant(modes.includes(mode), "CODE_PLAN_INPUT", `${model} supports video modes: ${modes.join(", ")}`);
-    invariant(mode !== "text" || typeof media.aspectRatio === "string" && ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"].includes(media.aspectRatio),
+    invariant(mode !== "text" || typeof media.aspectRatio === "string" && (videoRatios as readonly string[]).includes(media.aspectRatio),
       "CODE_PLAN_INPUT", "Text video requires an explicit aspectRatio");
     const references = media.references as unknown[] | undefined;
     const maximum = models[model]!.profile?.adapter === "viggle-h3" ? 4 : 9;
@@ -55,6 +56,8 @@ export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
       invariant(frame && typeof frame === "object" && !Array.isArray(frame) && "kind" in frame && frame.kind === "image" && "sha256" in frame,
         "CODE_PLAN_INPUT", "Video inputs must be owned image artifacts");
     if (references?.length === 0) delete media.references;
+    const selected = models[model]!;
+    if (selected.profile) assertProfileVideoDuration(selected.profile, media.durationSeconds ?? selected.defaults?.durationSeconds);
     invariant(models[model]!.profile?.adapter !== "viggle-h3" || mode !== "reference"
       || Number(media.durationSeconds ?? models[model]!.defaults?.durationSeconds) >= 5, "CODE_PLAN_INPUT", "Viggle reference clips need 5–15 seconds");
   }

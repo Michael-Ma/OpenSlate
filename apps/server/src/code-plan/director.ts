@@ -8,6 +8,7 @@ import type { ProductionService, RequestRecord } from "../application/service.js
 import type { DirectorTurn, SupervisorOptions } from "../application/director-supervisor.js";
 import { CODE_PLAN_GUIDANCE_DIGEST, CODE_PLAN_V1_GUIDANCE_DIGEST, createDirectorSkillLock, directorSkillEnvironment, type DirectorSkillConfiguration } from "../application/director-capabilities.js";
 import { projectRequest } from "../application/request-source.js";
+import { codePlanArtifacts, codePlanOutput } from "./artifacts.js";
 
 // Several application paths construct a tool service without constructor options.
 // Scope the host port to the production service, never to model arguments or global project IDs.
@@ -21,7 +22,12 @@ export function codePlanPort(service: ProductionService): CodePlanPort & Partial
 }
 export function readCodeFilm(service: ProductionService, projectId: string) {
   const port = codePlanPort(service), view = port.view(projectId);
-  return { ...view, models: port.availableModels?.(projectId) ?? [], source: view.planVersion === null ? null : port.source(projectId, view.planVersion).source };
+  const media = codePlanArtifacts(service.store, projectId);
+  const steps = view.steps.map(step => {
+    const output = codePlanOutput(media, step.artifact);
+    return { ...step, ...(output ? { output } : {}) };
+  });
+  return { ...view, steps, models: port.availableModels?.(projectId) ?? [], source: view.planVersion === null ? null : port.source(projectId, view.planVersion).source };
 }
 
 const CONVERSATION_ROWS = 16, CONVERSATION_TEXT = 4000;
