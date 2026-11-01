@@ -1,6 +1,7 @@
 import { canonical, digest, invariant } from "@openslate/core";
 import type { JsonObject, JsonValue, ProviderProfile } from "@openslate/core";
 import { videoRatios, assertProfileVideoDuration } from "./video-capabilities.js";
+import { assertImageReferences, imageCapabilities } from "../execution/codex-image-plan.js";
 
 export type CodePlanMediaKind = "image" | "video" | "speech" | "music" | "render";
 export type VideoMode = "reference" | "first_frame" | "first_last_frame" | "text";
@@ -17,7 +18,8 @@ export function videoModes(model: CodePlanModel): VideoMode[] {
     return ["reference", "first_frame", "first_last_frame", "text"];
   return adapter === "fal-video-i2v" && !profile.configuration!.model.includes("veo") ? ["first_frame", "first_last_frame"] : ["first_frame"];
 }
-export interface CodePlanModel { kind: CodePlanMediaKind; defaults?: JsonObject; priceMicros?: string; priceUnit?: "call" | "input"; profile?: ProviderProfile; profileDefinitionDigest?: string }
+export interface CodePlanModel { kind: CodePlanMediaKind; defaults?: JsonObject; priceMicros?: string; priceUnit?: "call" | "input"; profile?: ProviderProfile; profileDefinitionDigest?: string;
+  validateImageReferences?: (references: readonly Record<string, unknown>[]) => void }
 export const CODE_PLAN_MODELS: Readonly<Record<string, CodePlanModel>> = Object.freeze({
   "fake-image": { kind: "image" },
   "fake-video": { kind: "video", defaults: { durationSeconds: 6 } },
@@ -44,6 +46,14 @@ export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
   const model = source.model ?? (models[defaultModel[kind]] ? defaultModel[kind] : Object.keys(models).find(id => models[id]?.kind === kind));
   invariant(typeof model === "string" && Object.hasOwn(models, model) && models[model]?.kind === kind,
     "CODE_PLAN_MODEL", "Use a configured model for this operation");
+  if (kind === "image") {
+    const selected = models[model]!;
+    assertImageReferences(media.references, selected.profile);
+    selected.validateImageReferences?.(media.references ?? []);
+    const ratios = imageCapabilities(selected.profile).imageAspectRatios;
+    invariant(media.aspectRatio === undefined || typeof media.aspectRatio === "string" && ratios.includes(media.aspectRatio),
+      "CODE_PLAN_INPUT", `${model} accepts image aspectRatio: ${ratios.join(", ") || "none; omit aspectRatio and use its installed canvas"}`);
+  }
   if (kind === "video") {
     const mode = videoMode(media), modes = videoModes(models[model]!);
     invariant(modes.includes(mode), "CODE_PLAN_INPUT", `${model} supports video modes: ${modes.join(", ")}`);

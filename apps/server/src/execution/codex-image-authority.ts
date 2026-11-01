@@ -10,6 +10,8 @@ import type { ArtifactRecord, Attempt, Candidate, Grant, NodeBinding } from "./e
 import { assertCodexImageExecutionProfile, assertCodexImageExecutionMapping } from "./codex-image-receipts.js";
 import { assertCharacterSheetSelection, isCharacterSheetBinding } from "./character-sheet-execution.js";
 import type { CodexImageExecutionMapping } from "./codex-image-receipts.js";
+import { CODEX_IMAGE_LIMITS } from "@openslate/providers";
+import { assertImageReferenceRecords } from "./codex-image-plan.js";
 
 export interface CodexImageCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; [key: string]: unknown }
 export interface CodexImageReservation { id: string; projectId: string; attemptId: string; micros: string; state: string }
@@ -113,19 +115,18 @@ export function assertCodexImageFirstDispatch(store: Store, original: CodexImage
 }
 
 export function resolveCodexImageReferences(store: CodexImageAuthorityStore, attempt: Attempt): ArtifactRecord[] {
-  fail(attempt.request.inputs.length <= 8, 'Too many image references');
-  let total = 0;
-  return attempt.request.inputs.map(input => {
+  fail(attempt.request.inputs.length <= CODEX_IMAGE_LIMITS.references, `Use at most ${CODEX_IMAGE_LIMITS.references} image references`);
+  const records = attempt.request.inputs.map(input => {
     const meta = store.db.prepare("SELECT project_id, length(CAST(body AS BLOB)) bytes FROM entities WHERE kind='artifact' AND id=?").get(input.artifactId) as {project_id:string;bytes:number}|undefined;
     fail(meta?.project_id === attempt.projectId && meta.bytes <= 32768, 'Reference row is missing, foreign or oversized');
     const value = store.get<ArtifactRecord>('artifact', input.artifactId);
     fail(value && value.id === input.artifactId && value.projectId === attempt.projectId && canonical(value.artifact) === canonical(input)
-      && input.kind === 'image' && value.fixture === false && value.mimeType === 'image/png'
-      && /^[a-f0-9]{64}$/.test(value.validationDigest ?? '') && Number.isSafeInteger(value.byteLength)
-      && value.byteLength! >= 33 && value.byteLength! <= 4 * 1024 ** 2 && Number.isSafeInteger(value.width) && Number.isSafeInteger(value.height),
+      && input.kind === 'image',
     'Reference must be an exact validated owned PNG');
-    total += value!.byteLength!; fail(total <= 24 * 1024 ** 2, 'Reference bytes exceed their total limit'); return value!;
+    return value!;
   });
+  assertImageReferenceRecords(records, "CODEX_IMAGE_EXECUTION_CONFLICT");
+  return records;
 }
 /** Current eligibility only. Historical result recovery does not reinterpret later edits/holds. */
 export function assertCodexImageCurrentSelection(store: CodexImageAuthorityStore, attempt: Attempt): void {

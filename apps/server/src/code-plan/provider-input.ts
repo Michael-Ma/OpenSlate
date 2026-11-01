@@ -7,6 +7,7 @@ import { assertCodexImageOperationOptions } from "../execution/codex-image-recei
 import { assertViggleH3OperationOptions } from "../execution/viggle-h3-receipts.js";
 import { assertAudioOperationOptions } from "../execution/audio-preflight.js";
 import { videoRatios, assertProfileVideoDuration } from "./video-capabilities.js";
+import { assertImageReferences, codexImageCanvas, imageCapabilities } from "../execution/codex-image-plan.js";
 
 export { videoRatios } from "./video-capabilities.js";
 const ratioValue = (ratio: string): number => { const [w, h] = ratio.split(":").map(Number); return w! / h!; };
@@ -37,12 +38,18 @@ export function codePlanProviderArgs(profile: ProviderProfile, input: JsonObject
   const allowed = ["model", "profileDefinitionDigest", "variant"];
   let operation: JsonObject;
   if (profile.kind === "image") {
-    allowed.push("prompt", "references", "width", "height");
+    allowed.push("prompt", "references", "width", "height", "aspectRatio");
     invariant(typeof input.prompt === "string" && input.prompt.trim().length > 0 && Buffer.byteLength(input.prompt) <= 32768,
       "CODE_PLAN_INPUT", "Images require a bounded nonempty prompt");
-    const width = input.width ?? settings.width, height = input.height ?? settings.height;
-    invariant(width === settings.width && height === settings.height, "CODE_PLAN_INPUT", "Image dimensions must match the installed profile");
-    operation = { ...base, prompt: input.prompt, width: width!, height: height!, settings: profile.adapter === "openai-image" ? { quality: settings.quality! } : {} };
+    assertImageReferences(input.references, profile);
+    const ratios = imageCapabilities(profile).imageAspectRatios;
+    invariant(input.aspectRatio === undefined || typeof input.aspectRatio === "string" && ratios.includes(input.aspectRatio),
+      "CODE_PLAN_INPUT", `${profile.id} accepts image aspectRatio: ${ratios.join(", ") || "none; omit aspectRatio and use its installed canvas"}`);
+    const canvas = profile.adapter === "codex-image" && typeof input.aspectRatio === "string" ? codexImageCanvas(input.aspectRatio) : undefined;
+    const width = canvas?.width ?? settings.width, height = canvas?.height ?? settings.height;
+    invariant((input.width === undefined || input.width === width) && (input.height === undefined || input.height === height),
+      "CODE_PLAN_INPUT", "Use aspectRatio to choose an image canvas; explicit dimensions must match that canvas or the installed profile");
+    operation = { ...base, prompt: input.prompt, width: width!, height: height!, ...(canvas ? { aspect: canvas.aspect } : {}), settings: profile.adapter === "openai-image" ? { quality: settings.quality! } : {} };
     if (profile.adapter === "codex-image") assertCodexImageOperationOptions(profile, operation);
   } else if (profile.kind === "video") {
     allowed.push("prompt", "firstFrame", "lastFrame", "references", "durationSeconds", "aspectRatio");
