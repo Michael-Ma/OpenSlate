@@ -2,7 +2,7 @@ import { browserPreference } from "./browserPreference.ts";
 
 /** The spend limit a new code-plan film starts with (Settings › This computer), in micro-dollars. A browser preference. */
 export const DEFAULT_LIMIT_STORAGE_KEY = "openslate.defaultSpendLimit";
-export const STANDARD_LIMIT_MICROS = "1000000";
+export const STANDARD_LIMIT_MICROS = "4000000";
 
 const preference = browserPreference(DEFAULT_LIMIT_STORAGE_KEY);
 const valid = (value: string | null): string | null => (value && /^[1-9]\d{0,14}$/.test(value) ? value : null);

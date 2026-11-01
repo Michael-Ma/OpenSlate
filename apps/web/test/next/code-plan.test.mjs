@@ -11,7 +11,7 @@ import {
   sourcePress, stepProblem, stepRow, stepRows, threadChoices, versionRows,
 } from '../../src/next/model/code-plan.ts';
 import { DEVELOPER_STORAGE_KEY, readDeveloperMode, setDeveloperMode } from '../../src/next/app/useDeveloperMode.ts';
-import { DEFAULT_LIMIT_STORAGE_KEY, readDefaultLimit, setDefaultLimit } from '../../src/next/app/useDefaultLimit.ts';
+import { DEFAULT_LIMIT_STORAGE_KEY, STANDARD_LIMIT_MICROS, readDefaultLimit, setDefaultLimit } from '../../src/next/app/useDefaultLimit.ts';
 import { microsFromDollars } from '../../src/next/model/price.ts';
 import { filmsView } from '../../src/next/model/start.ts';
 import { createBody, planningStep, stepFits } from '../../src/next/model/start-new.ts';
@@ -568,6 +568,11 @@ test('typed amounts become micro-dollars; the default limit is a browser prefere
   const saved = new Map();
   const storage = { getItem: (k) => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v), removeItem: (k) => saved.delete(k) };
   assert.equal(readDefaultLimit(storage), null);
+  assert.equal(STANDARD_LIMIT_MICROS, '4000000');
+  assert.deepEqual(createBody('New', null, 'U', 'code', readDefaultLimit(storage) ?? STANDARD_LIMIT_MICROS),
+    { name: 'New', planMode: 'code', ceilingMicros: '4000000' });
+  saved.set(DEFAULT_LIMIT_STORAGE_KEY, '1000000');
+  assert.equal(readDefaultLimit(storage), '1000000', 'a stored limit is not replaced by the new default');
   setDefaultLimit('5000000', storage);
   assert.equal(saved.get(DEFAULT_LIMIT_STORAGE_KEY), '5000000');
   assert.equal(readDefaultLimit(storage), '5000000');

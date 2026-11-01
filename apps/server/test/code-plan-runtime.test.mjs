@@ -44,6 +44,7 @@ function fixture(t, options = {}) {
   open();
   const project = { ...projectFixture(f.projectId, 0), ...(options.planMode === undefined ? { planMode: "code" } : options.planMode === null ? {} : { planMode: options.planMode }) };
   f.store.createProject(project);
+  if (options.ceilingMicros !== undefined) f.store.put("code_plan_settings", f.projectId, f.projectId, { ceilingMicros: options.ceilingMicros });
   f.reopen = () => { f.provider.close(); f.store.close(); open(); };
   t.after(() => { if (f.provider.db.open) f.provider.close(); if (f.store.db.open) f.store.close(); rmSync(directory, { recursive: true, force: true }); });
   return f;
@@ -224,8 +225,8 @@ test("speech returns a priced fake audio artifact and reuses it on replay", asyn
   await replay(f); assert.equal(f.calls.submit.length, 1);
 });
 
-test("paid parallel steps reserve against the $1 ceiling and a raised ceiling wakes remaining work", async t => {
-  const f = fixture(t, { models: { paid: { kind: "image", priceMicros: "600000" } } });
+test("paid parallel steps reserve against a stored $1 ceiling and a raised ceiling wakes remaining work", async t => {
+  const f = fixture(t, { ceilingMicros: "1000000", models: { paid: { kind: "image", priceMicros: "600000" } } });
   submit(f, film(`await Promise.all(["front", "side", "back"].map(prompt => ctx.image({ model: "paid", prompt })));`));
   await settle(f, "paused_budget"); assert.equal(f.calls.submit.length, 1);
   await f.runtime.tick(); assert.equal(f.calls.submit.length, 1, "charged work must continue counting against the ceiling");
@@ -234,7 +235,7 @@ test("paid parallel steps reserve against the $1 ceiling and a raised ceiling wa
 });
 
 test("possibly charged unknown outcomes retain their ceiling reservation across restart", async t => {
-  const f = fixture(t, { models: { paid: { kind: "image", priceMicros: "600000" } }, mode: () => "unknown_after_accept" });
+  const f = fixture(t, { ceilingMicros: "1000000", models: { paid: { kind: "image", priceMicros: "600000" } }, mode: () => "unknown_after_accept" });
   submit(f, film(`await Promise.all(["front", "side"].map(prompt => ctx.image({ model: "paid", prompt })));`));
   await settle(f, "paused_budget"); assert.equal(f.calls.submit.length, 1);
   f.reopen();
@@ -244,7 +245,7 @@ test("possibly charged unknown outcomes retain their ceiling reservation across 
 });
 
 test("unsent steps refresh trusted prices while dispatched reservations keep their original price", async t => {
-  const f = fixture(t, { models: { paid: { kind: "image", priceMicros: "600000" } } });
+  const f = fixture(t, { ceilingMicros: "1000000", models: { paid: { kind: "image", priceMicros: "600000" } } });
   submit(f, film(`await Promise.all(["first", "second"].map(prompt => ctx.image({ model: "paid", prompt })));`));
   await settle(f, "paused_budget");
   f.runtime = new CodePlanRuntime(f.store, { execution: f.execution, models: { paid: { kind: "image", priceMicros: "800000" } } });
@@ -291,7 +292,7 @@ test("a historical ingestion failure cannot block a replacement plan that no lon
 });
 
 test("code edits cancel unreached unsent steps while retaining the journal", async t => {
-  const f = fixture(t, { models: { costly: { kind: "image", priceMicros: "1000001" } } });
+  const f = fixture(t, { models: { costly: { kind: "image", priceMicros: "4000001" } } });
   submit(f, film(`await ctx.image({ model: "costly", prompt: "not affordable" });`));
   await settle(f, "paused_budget");
   const blocked = f.runtime.steps(f.projectId)[0];

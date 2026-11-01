@@ -139,7 +139,8 @@ test('completed Seedance download failure recovers retained locators without ano
 });
 
 test('input-dependent ceiling blocks dispatch before submit',async t=>{
- const f=await fixture(t);await f.submit(f.source.replace('durationSeconds:5','durationSeconds:15'));for(let i=0;i<8;i++)await f.tick();
+ const f=await fixture(t);f.plans.setCeiling(f.project.id,{ceilingMicros:'1000000',by:'person'});
+ await f.submit(f.source.replace('durationSeconds:5','durationSeconds:15'));for(let i=0;i<8;i++)await f.tick();
  assert.equal(f.plans.getRun(f.project.id).state,'paused_budget');assert.equal(f.state.creates,0);
  assert.equal(f.plans.steps(f.project.id).find(s=>s.kind==='video').priceMicros,'1134000');
 });

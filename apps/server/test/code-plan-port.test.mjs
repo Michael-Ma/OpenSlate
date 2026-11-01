@@ -49,7 +49,7 @@ const paid = { paid: { kind: "image", priceMicros: "600000" }, "local-render": {
 test("port projects empty state, stores source and version diff, and fences stale submissions", async t => {
   const f = fixture(t), before = snapshot(f);
   assert.equal(view(f).state, "empty"); assert.equal(view(f).planVersion, null);
-  assert.equal(view(f).ceilingMicros, "1000000"); assert.equal(f.runtime.failure(f.projectId), null);
+  assert.equal(view(f).ceilingMicros, "4000000"); assert.equal(f.runtime.failure(f.projectId), null);
   assert.equal(snapshot(f), before, "reads do not write");
   const source = film('ctx.log("first");'), result = await submit(f, source);
   assert.equal(result.version, 1); assert.deepEqual(view(f).versions[0].diff, result.diff);
@@ -73,6 +73,29 @@ test("invocation retries, concurrent retries and restart all return the original
   await f.reopen();
   assert.deepEqual(await submit(f, "invalid retry source", input), results[0]);
   assert.equal(view(f).versions.length, 1);
+});
+
+test("new films can finish $3.60 of work under the default $4 ceiling", async t => {
+  const f = fixture(t, { models: { paid: { kind: "image", priceMicros: "1800000" } } });
+  await submit(f, film('await Promise.all(["front", "side"].map(prompt => ctx.image({ model: "paid", prompt })));'));
+  await settle(f);
+  assert.equal(view(f).ceilingMicros, "4000000"); assert.equal(view(f).spentMicros, "3600000");
+  assert.equal(f.calls.length, 2);
+  await f.reopen(); await f.runtime.replay(f.projectId);
+  assert.equal(view(f).ceilingMicros, "4000000"); assert.equal(f.calls.length, 2);
+});
+
+test("stored one-dollar and zero ceilings survive first plan and restart, and a saved run wins over settings", async t => {
+  for (const ceilingMicros of ["1000000", "0"]) {
+    const f = fixture(t);
+    f.runtime.setCeiling(f.projectId, { ceilingMicros, by: "person" });
+    assert.equal(view(f).ceilingMicros, ceilingMicros);
+    await submit(f, film('await ctx.log("Keep my limit");')); await settle(f);
+    await f.reopen(); assert.equal(view(f).ceilingMicros, ceilingMicros);
+    f.store.put("code_plan_settings", f.projectId, f.projectId, { ceilingMicros: "9000000" });
+    assert.equal(view(f).ceilingMicros, ceilingMicros);
+    assert.equal(f.calls.length, 0);
+  }
 });
 
 test("concurrent distinct invocations cannot both replace the same base version", async t => {
@@ -150,6 +173,7 @@ test("unawaited calls are warnings while await, then, catch and Promise.all atta
 
 test("ceiling preview counts unique new prices and existing charged liability", async t => {
   const f = fixture(t, { models: paid });
+  f.runtime.setCeiling(f.projectId, { ceilingMicros: "1000000", by: "person" });
   await submit(f, film('await ctx.image({ model: "paid", prompt: "spent" });')); await settle(f);
   assert.equal(view(f).spentMicros, "600000"); assert.equal(view(f).reservedMicros, "0");
   const diff = await f.runtime.dryRun(f.projectId, film('await Promise.all([ctx.image({ model: "paid", prompt: "new" }), ctx.image({ model: "paid", prompt: "new" })]);'));
@@ -168,6 +192,7 @@ test("read model separates unknown possible charges from pending reservations", 
 
 test("held execution finishes existing work and free renders, release dispatches paid work exactly once", async t => {
   const f = fixture(t, { models: paid, mode: "pending" });
+  f.runtime.setCeiling(f.projectId, { ceilingMicros: "1000000", by: "person" });
   const source = film(`
     const first = await ctx.image({ model: "paid", prompt: "first" });
     await Promise.all([ctx.render({ timeline: [first.artifact] }), ctx.image({ model: "paid", prompt: "second" })]);
@@ -217,7 +242,7 @@ test("events advance cursor once per change and stay silent on idle ticks and id
   f.runtime.answer(f.projectId, answer); assert.equal(events(f).length, 3);
   f.runtime.answer(f.projectId, answer); assert.equal(events(f).length, 3);
   await settle(f); assert.equal(events(f).length, 4);
-  f.runtime.raiseCeiling(f.projectId, "2000000"); assert.equal(events(f).length, 5);
+  f.runtime.raiseCeiling(f.projectId, "5000000"); assert.equal(events(f).length, 5);
   await f.runtime.tick(); assert.equal(events(f).length, 5);
   f.runtime.hold(f.projectId, "one"); f.runtime.hold(f.projectId, "one"); assert.equal(events(f).length, 6);
   f.runtime.release(f.projectId, "one"); f.runtime.release(f.projectId, "one"); assert.equal(events(f).length, 7);
@@ -296,7 +321,7 @@ test("first submission dry run and live run share the exact clock and random see
 
 test("held and budget-blocked identical replays do not emit timestamp-only changes", async t => {
   for (const hold of [true, false]) {
-    const f = fixture(t, { models: { paid: { kind: "image", priceMicros: "1000001" } } });
+    const f = fixture(t, { models: { paid: { kind: "image", priceMicros: "4000001" } } });
     if (hold) f.runtime.hold(f.projectId, "held");
     await submit(f, film('await ctx.image({ model: "paid", prompt: "blocked" });'));
     await settle(f, hold ? "waiting" : "paused_budget");
