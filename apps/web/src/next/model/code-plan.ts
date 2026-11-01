@@ -107,6 +107,8 @@ export interface RunStrip {
   error: string | null;
   /** Choices still waiting for the person. */
   waiting: number;
+  /** reviewing only: how many clips the Director is watching before it cuts. */
+  reviewingClips: number | null;
 }
 
 const STATUS: Record<CodePlanRunState, Msg> = {
@@ -135,13 +137,14 @@ export function runStrip(view: CodePlanView, locale: string): RunStrip {
   return {
     state,
     status,
-    tone: state === "running" ? "busy" : state === "error" || state === "done_with_failures" ? "failed" : state === "paused_budget" || (state === "waiting" && waiting > 0) ? "attention" : state === "done" ? "done" : "plain",
+    tone: state === "running" || state === "reviewing" ? "busy" : state === "error" || state === "done_with_failures" ? "failed" : state === "paused_budget" || (state === "waiting" && waiting > 0) ? "attention" : state === "done" ? "done" : "plain",
     held: view.held,
     spend,
     meter: { spent: share(spent, ceiling), reserved: share(reserved, ceiling), level: share(spent, ceiling) >= 1 ? "full" : share(spent, ceiling) >= HIGH_SPEND ? "high" : null },
     raise: state === "paused_budget" ? { body: { ceilingMicros: String(next) }, label: msg("codeplan.run.raise", { ceiling: formatMicros(String(next), locale) }), ceiling: values.ceiling } : null,
     error: state === "error" ? (view.error?.message?.trim() || null) : null,
     waiting,
+    reviewingClips: state === "reviewing" ? (view.reviews ?? []).filter((review) => review.state === "waiting" || review.state === "watching").reduce((sum, review) => sum + review.clipCount, 0) : null,
   };
 }
 

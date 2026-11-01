@@ -47,6 +47,7 @@ export function CodePlanRunStrip() {
         <i className="reserved" style={{ width: `${strip.meter.reserved * 100}%` }} />
       </div>
       {editing ? <LimitEditor view={view} onClose={() => setEditing(false)} /> : null}
+      {strip.reviewingClips ? <p className="cp-run-note" role="status" data-act="code-plan-reviewing">{t("codeplan.run.reviewing", { count: strip.reviewingClips })}</p> : null}
       {strip.held ? <p className="cp-run-note" role="status" data-act="code-plan-held">{t("codeplan.run.held")}</p> : null}
       {strip.error !== null || view.state === "error" ? (
         <div className="cp-run-error" role="alert">

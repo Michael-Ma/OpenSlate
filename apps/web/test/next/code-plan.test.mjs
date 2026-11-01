@@ -84,6 +84,9 @@ test('the run strip says the state, the version and the spend, with pending mone
   assert.equal(running.held, true);
   assert.equal(zh(running.spend), '已花费 $0.24（另有 $0.57 待定），上限 $1.00');
   assert.deepEqual(running.meter, { spent: 0.24, reserved: 0.57, level: null });
+  const reviewing = runStrip(view({ state: 'reviewing', reviews: [{ id: 'cut', note: 'n', state: 'watching', clipCount: 8, updatedAt: 't' }, { id: 'old', note: 'n', state: 'done', clipCount: 3, updatedAt: 't' }] }), 'en-US');
+  assert.equal(en(reviewing.status), 'Director is watching the clips'); assert.equal(reviewing.tone, 'busy'); assert.equal(reviewing.reviewingClips, 8);
+  assert.equal(runStrip(view({ state: 'done' }), 'en-US').reviewingClips, null);
   assert.equal(en(runStrip(view({ state: 'done' }), 'en-US').status), 'Done');
   assert.equal(en(runStrip(view({ state: 'empty', planVersion: null }), 'en-US').status), 'No plan yet');
 });

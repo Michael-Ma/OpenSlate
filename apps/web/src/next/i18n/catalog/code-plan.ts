@@ -32,6 +32,7 @@ export const codePlanMessages = {
   "codeplan.limit.below": { en: "It cannot be below the {floor} already spent or started.", zh: "不能低于已花费或进行中的 {floor}。" },
   "codeplan.run.spend": { en: "Spent {spent} of {ceiling}", zh: "已花费 {spent}，上限 {ceiling}" },
   "codeplan.run.spend_pending": { en: "Spent {spent} (+{reserved} pending) of {ceiling}", zh: "已花费 {spent}（另有 {reserved} 待定），上限 {ceiling}" },
+  "codeplan.run.reviewing": { en: "Watching {count} clips to decide the cuts. This step is free.", zh: "正在看 {count} 段素材，决定怎么剪。这一步不花钱。" },
   "codeplan.run.held": { en: "The Director is updating the plan. New paid work waits; work already sent goes on.", zh: "导演正在更新计划。新的付费任务先等待，已发出的任务继续进行。" },
   "codeplan.run.error_title": { en: "The plan stopped with an error", zh: "计划因错误停止" },
   "codeplan.run.error_next": { en: "Nothing more is sent until the plan changes. Tell the Director in the chat to fix it.", zh: "计划修改前不会再发出任务。可以在对话里让导演修复。" },
