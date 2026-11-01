@@ -10,7 +10,7 @@ Uploads now pick the demuxer from file content. FFmpeg was choosing `image2` fro
 
 **Real-provider check (November 1):** the original Tofu brief ran through a real Director, Viggle and Lyria: 28 `read_clip_frames` calls, one conversation-driven retake, $2.68 for the film and $0.95 for a five-way model comparison, 355 Viggle credits in all. The picture stage held one room across shots. A cold read with one small model moved from "several rooms, no visible joke, 4/10" to "one room, works out then collapses then runs to food, 6/10"; this is a single sample. Reference mode re-framed all 4 clips and cut the subject off in 2, while 7 first-frame clips kept it whole. `quality`, 1080p, `enhance` and prompt language made no visible difference. Sound has not been listened to. See `docs/ai/film-quality/RESULTS.md`.
 
-Pinned setup/preflight and all five builds passed. Final `pnpm test` passed **5,041**, with **zero failures and two optional skips**; all **five** typechecks and `pnpm demo:code` passed.
+Pinned setup/preflight and all five builds passed. Final `pnpm test` passed **5,041**, with **zero failures and two optional skips**; all **five** typechecks, `pnpm demo:code` and **207/207** browser scenarios passed. The browser suite had gone stale since the Assets viewer change; updating it also found three real bugs, now fixed: toasts hidden behind the viewer, focus lost after pointing the Director, and imported pictures not opening in the sample film.
 
 ## October 31 N8 — settle lost code-plan Viggle submissions (offline)
 
