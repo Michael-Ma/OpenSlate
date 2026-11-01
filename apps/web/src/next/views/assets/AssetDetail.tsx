@@ -188,7 +188,7 @@ export function AssetDetail({ detail, onPoint, onOpen, onShown }: { detail: Asse
       <div className="acts">
         <DownloadAction key={detail.key} detail={detail} title={title} />
         {/* Two Director actions, each naming what it acts on: the picture joins the message; Point adds its shot. */}
-        {picture && <button type="button" className="pill" data-act="show-director" onClick={() => { if (show(picture)) onShown(); }}>{t("assets.show_director")}</button>}
+        {picture && <button type="button" className="pill" data-act="show-director" onClick={() => { show(picture); onShown(); }}>{t("assets.show_director")}</button>}
         {detail.point && <button type="button" className="pill" data-act="point-director" onClick={onPoint}>{t("assets.point", { target: tm(detail.point.name) })}</button>}
         {detail.open && <button type="button" className="pill" data-act="open-in" data-target-view={detail.open.view} onClick={onOpen}>{tm(detail.open.label)}</button>}
       </div>
