@@ -9,6 +9,8 @@ import type { InstalledProviderCatalog } from "../application/provider-catalog.j
 import type { Store } from "../persistence/store.js";
 import { CODE_PLAN_MODELS, videoMode, videoModes, type CodePlanModel } from "./identity.js";
 import { videoCapabilities } from "./video-capabilities.js";
+import { codePlanArtifacts } from "./artifacts.js";
+import { assertImageReferenceRecords, imageCapabilities } from "../execution/codex-image-plan.js";
 
 export interface CodePlanCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; localExecution?: unknown; [key: string]: unknown }
 export const supportedCodePlanAdapters = new Set(["codex-image", "openai-image", "viggle-h3", "minimax-h3", "openai-speech", "seedance", "fal-video-i2v", "gemini-lyria"]);
@@ -21,7 +23,20 @@ export function projectModels(store: Store, projectId: string, catalog?: Install
     && installed.some(row => row.installedDefinition && canonical(row.profile) === canonical(profile))) ?? [];
   // A saved real lock must fail closed if its installation disappears; never turn it into a fixture project.
   const hasRealLock = lock?.profiles.some(profile => profile.adapter !== "fake") ?? false;
-  if (!hasRealLock) return structuredClone(CODE_PLAN_MODELS);
+  const withImageValidation = (models: Record<string, CodePlanModel>) => {
+    for (const model of Object.values(models)) if (model.kind === "image") model.validateImageReferences = references => {
+      if (!references.length) return;
+      const media = codePlanArtifacts(store, projectId);
+      const records = references.map(ref => {
+        const record = media.find(ref);
+        invariant(record?.artifact.kind === "image", "CODE_PLAN_INPUT", "Use PNG image artifacts owned by this film; replace foreign or missing references");
+        return record;
+      });
+      if (model.profile) assertImageReferenceRecords(records, "CODE_PLAN_INPUT");
+    };
+    return models;
+  };
+  if (!hasRealLock) return withImageValidation(structuredClone(CODE_PLAN_MODELS));
   const models: Record<string, CodePlanModel> = { "local-render": { kind: "render", priceMicros: "0" } };
   for (const profile of real) {
     if (!["image", "video", "speech", "music"].includes(profile.kind)) continue;
@@ -38,7 +53,7 @@ export function projectModels(store: Store, projectId: string, catalog?: Install
       defaults: profile.kind === "video" ? { durationSeconds, ...(video ? { resolution: profile.configuration!.settings!.resolution!, aspectRatio: profile.configuration!.settings![profile.adapter === "seedance" ? "ratio" : "aspectRatio"] ?? (profile.configuration!.model.includes("veo") ? "auto" : "adaptive"), generateAudio: profile.configuration!.settings!.generateAudio ?? false } : {}) }
         : profile.kind === "music" ? { instrumental: true } : profile.kind === "speech" ? { voice: "coral", instructions: "" } : {} };
   }
-  return models;
+  return withImageValidation(models);
 }
 
 /** Exact input-based rules live in the adapters; legacy profiles keep their configured per-call estimate. */
@@ -70,6 +85,7 @@ export function modelDescriptions(models: Readonly<Record<string, CodePlanModel>
     ...(model.profile?.adapter === "codex-image" ? { subscription: "codex", authentication: "checked_before_dispatch" } : {}),
     ...(model.profile?.adapter === "gemini-lyria" ? { note: "length is approximate; trim and fade at the cut", watermark: "SynthID" } : {}),
     ...(model.kind === "video" ? { videoModes: videoModes(model), ...videoCapabilities(model) } : {}),
+    ...(model.kind === "image" ? imageCapabilities(model.profile) : {}),
     ...(model.priceUnit === "input" ? { priceBasis: model.profile?.adapter === "viggle-h3" ? { unit: "ceil_output_seconds", formula: "ceil(seconds) * creditsPer5Seconds / 5 * $0.01", enhance: false,
       resolution: model.profile.configuration!.settings!.resolution,
       creditsPer5Seconds: Object.fromEntries(Object.entries(VIGGLE_PRICE_CREDITS).map(([mode, rates]) => [mode, rates.off[["480p", "768p", "1080p", "2k", "4k"].indexOf(String(model.profile!.configuration!.settings!.resolution))]])) }
