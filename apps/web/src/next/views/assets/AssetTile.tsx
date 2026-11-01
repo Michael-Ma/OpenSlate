@@ -1,5 +1,5 @@
 import type { StudioArtifactRef } from "@openslate/core/public";
-import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { artifactKey } from "../../media/artifact-cache.ts";
 import { PICTURE_LOADS_AT_ONCE, SlotQueue, waveHeights, type AssetTile } from "../../model/assets.ts";
@@ -80,10 +80,11 @@ export function AssetFace({ tile, alt, bars, lazy = false, near = true }: { tile
 }
 
 /**
- * One asset: picture, kind and length, label, ✓ Current / Earlier and its source. A real toggle button, named
- * by its label, kind tag and status; the picture inside is decorative (the detail panel describes it).
+ * One asset, in its own shape so nothing is cropped: picture, kind and length, label, ✓ Current / Earlier and its
+ * source. A real button that opens the asset larger, named by its label, kind tag and status; the picture inside is
+ * decorative.
  */
-export const AssetTileButton = memo(function AssetTileButton({ tile, selected, onSelect }: { tile: AssetTile; selected: boolean; onSelect(key: string): void }) {
+export const AssetTileButton = memo(function AssetTileButton({ tile, onOpen }: { tile: AssetTile; onOpen(key: string): void }) {
   const { tm } = useI18n();
   const picture = useRef<HTMLSpanElement>(null);
   const near = useNearScreen(picture);
@@ -91,12 +92,12 @@ export const AssetTileButton = memo(function AssetTileButton({ tile, selected, o
     <button
       type="button"
       className="tile"
-      aria-pressed={selected}
-      data-act="select-asset"
+      style={{ "--a": tile.aspect } as CSSProperties}
+      data-act="open-asset"
       data-asset={tile.key}
       data-role={tile.item.role}
       data-current={tile.item.current ? "true" : "false"}
-      onClick={() => onSelect(tile.key)}
+      onClick={() => onOpen(tile.key)}
     >
       <span className="tile-pic" ref={picture}>
         <AssetFace tile={tile} alt="" bars={28} lazy near={near} />

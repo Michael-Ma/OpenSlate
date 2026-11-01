@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { lastFerryOverview, shotId, sceneId, artifactFor } from '../../src/next/fixtures/last-ferry.ts';
 import {
-  ALL_ASSETS, assetDetail, assetKey, assetLibrary, compareAssets, downloadName, durationMsg, madeMsg, placement,
-  importNumber, readAllAssets, roleCounts, SlotQueue, stillFor, titleMsg, useMsg, validFilters, waveHeights,
+  ALL_ASSETS, assetDetail, assetKey, assetLibrary, codePlanPlaces, compareAssets, DEFAULT_ASPECT, downloadName, durationMsg, madeMsg, placement,
+  importNumber, readAllAssets, roleCounts, SlotQueue, stillFor, tileFor, titleMsg, useMsg, validFilters, waveHeights,
 } from '../../src/next/model/assets.ts';
 import { translate } from '../../src/next/i18n/translate.ts';
 
@@ -150,12 +150,10 @@ test('the detail lists only AssetItem facts and points the Director at the shot'
   assert.deepEqual(detail.point.target, { kind: 'shot', id: shotId('1.2') });
   assert.equal(en(detail.open.label), 'Open 1.2 in Film');
   assert.equal(detail.open.view, 'film');
-  assert.equal(detail.playable, true);
 
   const key = assetDetail(kf('2.1', 1), [], overview, now, 'en');
   assert.equal(en(key.open.label), 'Open 2.1 in Keyframes');
   assert.equal(key.rows.find((r) => r.label.id === 'assets.row.take').value.values.text, '1');
-  assert.equal(key.playable, false);
 
   const song = assetDetail(music('low-tide.mp3', { current: true }), [], overview, now, 'en');
   assert.equal(song.point, null, 'whole-film assets cannot be pointed at: messages name scenes and shots only');
@@ -251,4 +249,49 @@ test('an import is titled by the name it was sent with, extension or not; an unn
   assert.equal(en(titleMsg(upload('Harbour · dawn'), overview)), 'Harbour · dawn');
   assert.equal(en(titleMsg(upload('moodboard'), overview)), 'moodboard');
   assert.equal(en(titleMsg(upload('The Last Ferry · upload'), overview)), 'Imported image');
+});
+
+const codePlan = (shots, scenes = [{ id: 'harbour', title: 'Harbour', purpose: 'Waiting' }]) => ({ declarations: { scenes, shots }, steps: [], choices: [] });
+
+test('a code plan\'s declared shots place its assets, and shots with no scene share one group', () => {
+  const places = codePlanPlaces(codePlan([
+    { id: 'shot-1', scene: 'harbour', purpose: 'Opening', framing: 'Wide', seconds: 6 },
+    { id: 'shot-2', purpose: 'Stray', seconds: 3 },
+  ]), 30, 'Other shots');
+  assert.deepEqual(places.scenes.map((scene) => [scene.sceneId, scene.ordinal, scene.title, scene.shotIds]), [
+    ['harbour', 1, 'Harbour', ['shot-1']], ['loose', 2, 'Other shots', ['shot-2']],
+  ]);
+  assert.equal(places.shots['shot-1'].durationFrames, 180);
+  const item = { ...kf('1.1'), shotId: 'shot-1', sceneId: 'harbour', stepKey: 'step-1' };
+  assert.deepEqual(placement(item, places), { kind: 'shot', shotId: 'shot-1', sceneId: 'harbour' });
+  const library = assetLibrary([item], places, ALL_ASSETS);
+  assert.equal(library.scenes[0].sets[0].tiles.length, 1);
+  assert.equal(library.former.length, 0);
+});
+
+test('a tile takes the asset\'s shape, a clip shows its still, and only sized assets leave the default', () => {
+  const portrait = { ...kf('1.1'), width: 941, height: 1672 };
+  assert.ok(Math.abs(tileFor(portrait, [portrait], overview).aspect - 941 / 1672) < 1e-9);
+  const poster = { artifactId: 'still', sha256: 'c'.repeat(64), kind: 'image' };
+  const clip = { artifact: { artifactId: 'clip', sha256: 'd'.repeat(64), kind: 'video' }, role: 'clip', current: true, source: 'generated', label: '', createdAt: at(10, 0), poster, width: 768, height: 1344 };
+  const tile = tileFor(clip, [clip], overview);
+  assert.deepEqual(tile.picture, poster);
+  assert.equal(stillFor(clip, [clip], overview), poster);
+  assert.ok(Math.abs(tile.aspect - 768 / 1344) < 1e-9);
+  const song = music('low-tide.mp3', { current: true });
+  assert.equal(tileFor(song, [song], overview).aspect, DEFAULT_ASPECT);
+  // A very tall picture is bounded, so a tile never collapses.
+  const sliver = { ...kf('1.1'), width: 100, height: 2000 };
+  assert.ok(Math.abs(tileFor(sliver, [sliver], overview).aspect - 9 / 21) < 1e-9);
+});
+
+test('a code plan\'s unchosen frame reads Not chosen, and its step facts replace the detail rows', () => {
+  const places = codePlanPlaces(codePlan([{ id: 'shot-1', scene: 'harbour', purpose: 'Opening', framing: 'Wide', seconds: 6 }]), 30, 'Other');
+  const frame = { ...kf('1.1'), shotId: 'shot-1', sceneId: 'harbour', stepKey: 'step-1', current: false };
+  assert.equal(en(useMsg(frame).label), 'Not chosen');
+  assert.equal(en(useMsg({ ...frame, stepKey: undefined }).label), 'Earlier');
+  const detail = assetDetail(frame, [frame], places, now, 'en');
+  assert.deepEqual(detail.rows.map((row) => row.label.id), ['assets.row.kind', 'assets.row.shot', 'assets.row.take', 'assets.row.in_use']);
+  assert.equal(detail.point, null, 'a code plan has no graph shot to point at');
+  assert.equal(detail.open.shotId, null);
 });

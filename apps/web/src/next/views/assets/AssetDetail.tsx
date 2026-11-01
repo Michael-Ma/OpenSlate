@@ -1,29 +1,15 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
+import { StepFacts } from "../../media/StepFacts.tsx";
 import { downloadName, type AssetDetailView, type AssetTile } from "../../model/assets.ts";
-import { clock, motionKind, motionTransform } from "../../model/motion.ts";
+import { clock } from "../../model/motion.ts";
 import { msg } from "../../model/types.ts";
 import { useMode, useStore, useStudio } from "../../store/react.tsx";
 import { pictureFromAsset } from "../../model/director.ts";
 import { useShowToDirector } from "../../director/ShowDirector.tsx";
-import { AssetFace, AssetPicture, Wave } from "./AssetTile.tsx";
+import { AssetFace, Wave } from "./AssetTile.tsx";
 import { useAssetFile } from "./media.ts";
 import { SongAnalysis } from "./SongAnalysis.tsx";
-
-/** Follows prefers-reduced-motion: the picture stays still and only the scrubber moves. */
-function useReducedMotion(): boolean {
-  const query = "(prefers-reduced-motion: reduce)";
-  const [reduced, setReduced] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(query).matches);
-  useEffect(() => {
-    const list = window.matchMedia?.(query);
-    if (!list) return;
-    const update = () => setReduced(list.matches);
-    update();
-    list.addEventListener("change", update);
-    return () => list.removeEventListener("change", update);
-  }, []);
-  return reduced;
-}
 
 const PlayIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor" /></svg>;
 const PauseIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1h2.2v8H2zM5.8 1H8v8H5.8z" fill="currentColor" /></svg>;
@@ -33,26 +19,29 @@ function fileFailure(t: ReturnType<typeof useI18n>["t"], code: string): string {
   return code === "ARTIFACT_TOO_LARGE" ? t("assets.download.too_large") : t("assets.download.failed", { code });
 }
 
+/** What the viewer shows for an asset with no picture: a document's face, or audio's player. */
+export function AssetStage({ tile, title }: { tile: AssetTile; title: string }) {
+  if (tile.item.artifact.kind === "document") return <div className="big-pic" data-kind="document"><AssetFace tile={tile} alt={title} bars={60} /></div>;
+  return <AudioPlayer tile={tile} title={title} />;
+}
+
 /**
- * The picture, or a player for clips and audio. In the studio the verified file plays; it is loaded when Play is
- * first pressed (a clip or an export can be up to 256 MB), and until then a clip shows its keyframe. The sample
- * film has no video or audio files, so its clips play the keyframe's motion and its audio plays silently.
+ * In the studio the verified file plays; it is loaded when Play is first pressed. The sample film has no audio files,
+ * so its audio plays silently on a clock.
  */
-function AssetPreview({ detail, tile, title }: { detail: AssetDetailView; tile: AssetTile; title: string }) {
+function AudioPlayer({ tile, title }: { tile: AssetTile; title: string }) {
   const { t } = useI18n();
   const mode = useMode();
-  const reduced = useReducedMotion();
-  const kind = detail.item.artifact.kind;
-  const simulated = mode === "fixture" && kind !== "image" && kind !== "document";
-  // Pictures show through AssetPicture; clips and audio load their file once Play is pressed.
+  const { item } = tile;
+  const simulated = mode === "fixture";
   const [wanted, setWanted] = useState(false);
-  const file = useAssetFile(kind === "image" || kind === "document" ? null : detail.item, wanted);
+  const file = useAssetFile(item, wanted);
   const autoplay = useRef(false);
   const media = useRef<HTMLMediaElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const at = useRef(0);
-  const [length, setLength] = useState(detail.item.durationSeconds ?? 0);
+  const [length, setLength] = useState(item.durationSeconds ?? 0);
 
   // The sample film's clock: one frame at a time from where it stopped.
   useEffect(() => {
@@ -106,45 +95,34 @@ function AssetPreview({ detail, tile, title }: { detail: AssetDetailView; tile: 
   const loading = !simulated && wanted && file.status === "loading";
   const failed = !simulated && file.status === "failed";
 
-  let face;
-  if (kind === "image") face = <AssetPicture artifact={detail.picture} alt={title} />;
-  else if (kind === "video" && !simulated && file.status === "ready")
-    face = <video ref={(el) => { media.current = el; }} className="av-video" src={file.url} playsInline preload="metadata" aria-label={title} {...events} />;
-  else if (kind === "video")
-    face = <span className="av-anim" style={{ transform: simulated && !reduced && detail.motion ? motionTransform(motionKind(detail.motion), fraction) : "none" }}><AssetFace tile={tile} alt={title} bars={60} /></span>;
-  else if (kind === "document") face = <AssetFace tile={tile} alt={title} bars={60} />;
-  else face = <Wave seed={detail.item.artifact.artifactId} bars={60} />;
-
   let note = null;
-  if (simulated) note = t(kind === "audio" ? "assets.player.no_sound" : "assets.player.motion_only");
-  else if (kind !== "image" && kind !== "document" && file.status === "failed") note = fileFailure(t, file.code);
-  else if (kind !== "image" && loading) note = t("assets.player.loading");
+  if (simulated) note = t("assets.player.no_sound");
+  else if (file.status === "failed") note = fileFailure(t, file.code);
+  else if (loading) note = t("assets.player.loading");
 
   return (
-    <>
-      <div className="big-pic" data-kind={kind}>
-        {face}
-        {kind === "audio" && (playing || position > 0) && <span className="ph" style={{ left: `${fraction * 100}%` }} aria-hidden="true" />}
-        {kind === "audio" && !simulated && file.status === "ready" && <audio ref={(el) => { media.current = el; }} src={file.url} preload="metadata" {...events} />}
+    <div className="av-audio">
+      <div className="big-pic" data-kind="audio">
+        <Wave seed={item.artifact.artifactId} bars={60} />
+        {(playing || position > 0) && <span className="ph" style={{ left: `${fraction * 100}%` }} aria-hidden="true" />}
+        {!simulated && file.status === "ready" && <audio ref={(el) => { media.current = el; }} src={file.url} preload="metadata" {...events} />}
       </div>
-      {detail.playable && (
-        <div className="playrow">
-          <button type="button" className="play" data-act="play-asset" aria-label={t(playing ? "assets.pause" : "assets.play")} aria-busy={loading || undefined} disabled={failed} onClick={() => { if (!loading) toggle(); }}>
-            {playing ? <PauseIcon /> : <PlayIcon />}
-          </button>
-          <span>{clock(position)}</span>
-          <span className="track" role="progressbar" aria-label={title} aria-valuemin={0} aria-valuemax={Math.round(length)} aria-valuenow={Math.round(position)}><i style={{ width: `${fraction * 100}%` }} /></span>
-          <span>{clock(length)}</span>
-        </div>
-      )}
+      <div className="playrow">
+        <button type="button" className="play" data-act="play-asset" aria-label={t(playing ? "assets.pause" : "assets.play")} aria-busy={loading || undefined} disabled={failed} onClick={() => { if (!loading) toggle(); }}>
+          {playing ? <PauseIcon /> : <PlayIcon />}
+        </button>
+        <span>{clock(position)}</span>
+        <span className="track" role="progressbar" aria-label={title} aria-valuemin={0} aria-valuemax={Math.round(length)} aria-valuenow={Math.round(position)}><i style={{ width: `${fraction * 100}%` }} /></span>
+        <span>{clock(length)}</span>
+      </div>
       {note && <span className="hint av-note" role={loading || failed ? "status" : undefined}>{note}</span>}
-    </>
+    </div>
   );
 }
 
 /**
  * Download the verified file. It is loaded and checked when Download is pressed (not when the asset is
- * selected), then saved; the button keeps focus throughout. The sample film has no files, so it says what the
+ * opened), then saved; the button keeps focus throughout. The sample film has no files, so it says what the
  * studio would do.
  */
 function DownloadAction({ detail, title }: { detail: AssetDetailView; title: string }) {
@@ -185,18 +163,17 @@ function DownloadAction({ detail, title }: { detail: AssetDetailView; title: str
   );
 }
 
-/** The detail panel: preview, Kind / Shot / Take / In use / Source / Made / Length, and the actions. */
-export function AssetDetail({ detail, tile, headingId, onPoint, onOpen, onShown }: { detail: AssetDetailView; tile: AssetTile; headingId: string; onPoint(): void; onOpen(): void; onShown?(): void }) {
+/** Beside an open asset: the step's prompt, Kind / Shot / Take / In use / Source / Made / Length, and the actions. */
+export function AssetDetail({ detail, onPoint, onOpen, onShown }: { detail: AssetDetailView; onPoint(): void; onOpen(): void; onShown(): void }) {
   const { t, tm } = useI18n();
   const title = tm(detail.title);
-  // A picture (an imported one, or a shot's keyframe) can be shown to the Director in the next message.
+  // A graph film's picture (an imported one, or a shot's keyframe) can be shown to the Director in the next message.
   const overview = useStudio((s) => s.overview);
-  const picture = pictureFromAsset(detail.item, overview);
+  const picture = detail.item.stepKey ? null : pictureFromAsset(detail.item, overview);
   const show = useShowToDirector();
   return (
-    <>
-      <AssetPreview key={detail.key} detail={detail} tile={tile} title={title} />
-      <h3 id={headingId}>{title}</h3>
+    <div className="detail">
+      {detail.item.stepKey && <StepFacts stepKey={detail.item.stepKey} />}
       <dl className="rows">
         {detail.rows.map((row) => (
           <div key={row.label.id} className="av-row">
@@ -211,10 +188,10 @@ export function AssetDetail({ detail, tile, headingId, onPoint, onOpen, onShown 
       <div className="acts">
         <DownloadAction key={detail.key} detail={detail} title={title} />
         {/* Two Director actions, each naming what it acts on: the picture joins the message; Point adds its shot. */}
-        {picture && <button type="button" className="pill" data-act="show-director" onClick={() => { if (show(picture)) onShown?.(); }}>{t("assets.show_director")}</button>}
+        {picture && <button type="button" className="pill" data-act="show-director" onClick={() => { if (show(picture)) onShown(); }}>{t("assets.show_director")}</button>}
         {detail.point && <button type="button" className="pill" data-act="point-director" onClick={onPoint}>{t("assets.point", { target: tm(detail.point.name) })}</button>}
         {detail.open && <button type="button" className="pill" data-act="open-in" data-target-view={detail.open.view} onClick={onOpen}>{tm(detail.open.label)}</button>}
       </div>
-    </>
+    </div>
   );
 }

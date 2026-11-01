@@ -133,6 +133,7 @@ export const codePlanMessages = {
   "codeplan.film.none_body": { en: "The film appears here once the plan’s render step has finished.", zh: "计划的渲染步骤完成后，成片会显示在这里。" },
   "codeplan.film.player": { en: "The latest render of the film", zh: "最新渲染的成片" },
   "codeplan.film.sample": { en: "The sample studio has no video files: the render’s first frame stands in.", zh: "示例工作室没有视频文件，用渲染的第一帧代替。" },
+  "codeplan.film.fit_warning": { en: "{clips, plural, one {# clip has} other {# clips have}} a different shape from the film, so the render cropped them. At worst only {kept}% of the picture is left.", zh: "{clips} 个片段和成片比例不同，合成时被裁切，最少只保留了 {kept}% 的画面。" },
   "codeplan.film.renders": { en: "Renders", zh: "渲染" },
   "codeplan.film.clips": { en: "Clips and sound", zh: "片段和声音" },
   "codeplan.film.no_clips": { en: "No clip steps yet.", zh: "还没有视频步骤。" },

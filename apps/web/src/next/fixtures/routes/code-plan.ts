@@ -1,4 +1,5 @@
 import type {
+  AssetItem, CodePlanStepDetail,
   CodePlanChoiceView, CodePlanDiff, CodePlanReceipt, CodePlanSourceView, CodePlanStepKind, CodePlanStepState, CodePlanStepView, CodePlanVersionItem,
   CodePlanView, GenerationOverview, StudioArtifactRef,
 } from "@openslate/core/public";
@@ -19,6 +20,7 @@ import type { FixtureRoute } from "./types.ts";
  * - `budget`: both frames chosen; 1.2's clip would pass the $1 ceiling, so the run is paused (Raise the limit).
  * - `error`: version 3 threw after the first clip; the error is shown and the run stopped.
  * - `done`: everything made, the render plays in Film.
+ * - `cropped`: as `done`, but the render cropped clips of another shape, and Film says so.
  * - `failed`: 1.2's clip was sent but the service never answered (SUBMISSION_RESPONSE_LOST, may have been charged);
  *   the run stopped with a failure. Retry (after its confirm) makes the clip again and the film renders.
  * - `empty`: no plan yet; a message to the Director writes version 1.
@@ -26,7 +28,7 @@ import type { FixtureRoute } from "./types.ts";
  * the Director move the run on, as the server would. The Last Ferry (a graph film) refuses these routes.
  */
 
-export type CodePlanPreset = "waiting" | "budget" | "error" | "done" | "failed" | "empty";
+export type CodePlanPreset = "waiting" | "budget" | "error" | "done" | "cropped" | "failed" | "empty";
 export const CODE_FILM_ID = "harbour-code";
 export const CODE_FILM_NAME = "Harbour lights";
 /** Simulated provider time for one stage of the run. */
@@ -37,7 +39,7 @@ export function codePlanPreset(): CodePlanPreset | null {
   try { value = new URLSearchParams(globalThis.location?.search ?? "").get("codeplan"); } catch { return null; }
   if (value === null) return null;
   if (value === "" || value === "on") return "waiting";
-  return (["waiting", "budget", "error", "done", "failed", "empty"] as const).find((preset) => preset === value) ?? "waiting";
+  return (["waiting", "budget", "error", "done", "cropped", "failed", "empty"] as const).find((preset) => preset === value) ?? "waiting";
 }
 
 // ---- the story's pieces ------------------------------------------------------------------------
@@ -65,6 +67,7 @@ const FRAMES = {
 const CLIP_OPEN = artifact("2.1", 301, "video"), CLIP_PIER = artifact("2.2-red", 302, "video"), RENDER = artifact("2.1", 401, "video");
 
 interface CodeFilm {
+  cropped?: boolean;
   stage: Stage;
   /** The versions written so far (newest first) and the one in use. */
   versions: CodePlanVersionItem[];
@@ -161,12 +164,13 @@ function addVersion(film: CodeFilm, draft: Draft, at: [number, number] | null = 
   film.current = version;
 }
 
-const PRESET_STAGE: Record<CodePlanPreset, Stage> = { waiting: "waiting", budget: "budget", error: "error", done: "done", failed: "clip_failed", empty: "empty" };
+const PRESET_STAGE: Record<CodePlanPreset, Stage> = { waiting: "waiting", budget: "budget", error: "error", done: "done", cropped: "done", failed: "clip_failed", empty: "empty" };
 
 function newFilm(preset: CodePlanPreset): CodeFilm {
-  const film: CodeFilm = { stage: PRESET_STAGE[preset], versions: [], sources: new Map(), current: null, history: preset !== "empty", ceilingMicros: preset === "done" || preset === "failed" ? "2000000" : "1000000", pickOpen: 0, pickPier: 1, held: false, stamps: new Map(), pierAttempts: 1 };
+  const film: CodeFilm = { stage: PRESET_STAGE[preset], versions: [], sources: new Map(), current: null, history: preset !== "empty", ceilingMicros: preset === "done" || preset === "cropped" || preset === "failed" ? "2000000" : "1000000", pickOpen: 0, pickPier: 1, held: false, stamps: new Map(), pierAttempts: 1 };
   if (preset !== "empty") { addVersion(film, "terminal", [10, 31]); addVersion(film, "harbour", [10, 36]); }
   if (preset === "error") addVersion(film, "bug", [10, 41]);
+  film.cropped = preset === "cropped";
   return film;
 }
 
@@ -184,7 +188,7 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
   const { stage } = film;
   const steps: CodePlanStepView[] = [];
   const add = (key: string, kind: CodePlanStepKind, label: string, model: string, priceMicros: string, state: CodePlanStepState, reached: boolean, made?: StudioArtifactRef,
-    extra: Pick<CodePlanStepView, "error" | "attempts" | "shotId" | "poster"> = {}) => {
+    extra: Pick<CodePlanStepView, "error" | "attempts" | "shotId" | "poster" | "fitWarning"> = {}) => {
     const seen = film.stamps.get(`${key}:${state}`) ?? new Date().toISOString();
     film.stamps.set(`${key}:${state}`, seen);
     steps.push({ key, kind, state, model, label, priceMicros, reached, updatedAt: seen, ...(state === "succeeded" && made ? { artifact: made } : {}), ...extra });
@@ -201,7 +205,7 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
   if (PIER_CHOSEN.includes(stage)) add("clip-pier", "video", "Slow push-in on Mara", VIDEO_MODEL, VIDEO_MICROS,
     stage === "budget" ? "absent" : stage === "making_clip" ? "in_flight" : stage === "clip_failed" ? "failed" : "succeeded", true, CLIP_PIER,
     { shotId: "1.2", attempts: film.pierAttempts, ...(stage === "clip_failed" ? { error: { code: "SUBMISSION_RESPONSE_LOST", mayHaveCharged: true, retry: "consent" as const } } : stage === "rendering" || stage === "done" ? { poster: FRAMES.pier[film.pickPier]! } : {}) });
-  if (stage === "rendering" || stage === "done") add("render", "render", "Harbour lights · 2 clips", "ffmpeg", "0", stage === "rendering" ? "in_flight" : "succeeded", true, RENDER, stage === "done" ? { poster: FRAMES.open[film.pickOpen]! } : {});
+  if (stage === "rendering" || stage === "done") add("render", "render", "Harbour lights · 2 clips", "ffmpeg", "0", stage === "rendering" ? "in_flight" : "succeeded", true, RENDER, stage === "done" ? { ...(film.cropped ? { fitWarning: { clips: 2, keptPercent: 32 } } : {}), poster: FRAMES.open[film.pickOpen]! } : {});
 
   const choices: CodePlanChoiceView[] = [];
   const choice = (choiceId: string, options: StudioArtifactRef[], pick: number | null, at: [number, number]) => {
@@ -341,8 +345,42 @@ const asObject = (body: unknown): Record<string, unknown> => (body && typeof bod
 /** The Last Ferry's own paths are relative (no id); the other films' are absolute. */
 const own = (rest: string) => new RegExp(`^(?:/api/projects/([^/?]+))?/code-plan${rest}$`);
 
+/** A code film's library, as GET /assets reports it. The sample's pictures are all 16:9. */
+function codeFilmAssets(view: CodePlanView): AssetItem[] {
+  const chosen = new Set(view.choices.flatMap((choice) => (choice.answer as StudioArtifactRef | undefined)?.artifactId ?? []));
+  const roles = { image: "keyframe", video: "clip", speech: "voice", music: "music", render: "export" } as const;
+  const takes = new Map<string, number>();
+  return view.steps.flatMap((step) => {
+    if (step.state !== "succeeded" || !step.artifact) return [];
+    const role = roles[step.kind], group = `${step.shotId ?? ""}:${role}`, takeIndex = (takes.get(group) ?? 0) + 1;
+    takes.set(group, takeIndex);
+    return [{ artifact: step.artifact, role, stepKey: step.key, ...(step.shotId ? { shotId: step.shotId, sceneId: "harbour", takeIndex } : {}),
+      current: step.reached && (step.kind !== "image" || chosen.has(step.artifact.artifactId)), source: "demo" as const, label: step.label, createdAt: step.updatedAt,
+      width: 1280, height: 720, ...(step.poster ? { poster: step.poster } : {}), ...(step.kind === "video" ? { durationSeconds: 5 } : {}) }];
+  });
+}
+
+/** One step for the media viewer; a clip's call shows what Developer mode adds. */
+function stepDetail(view: CodePlanView, key: string): CodePlanStepDetail {
+  const step = view.steps.find((row) => row.key === key);
+  if (!step) throw new ApiError("NOT_FOUND", 404);
+  return { key, kind: step.kind, state: step.state, model: step.model, ...(step.label ? { prompt: step.label } : {}), priceMicros: step.priceMicros, attempts: step.attempts ?? 1, createdAt: step.updatedAt,
+    ...(step.artifact ? { output: { width: 1280, height: 720, ...(step.kind === "video" ? { durationSeconds: 5 } : {}) } } : {}),
+    ...(step.kind === "video" ? { durationSeconds: 5, aspectRatio: "16:9",
+      call: { adapter: "viggle-h3", providerModel: "MiniMax-H3", settings: { aspectRatio: "16:9", resolution: "768p", quality: "low", durationSeconds: 5 }, taskId: "vid_sample", requestDigest: hex(key) } } : {}) };
+}
+
 export const codePlanRoutes: FixtureRoute[] = [
   { method: "GET", match: own(""), handle: (world, [id]) => viewOf(filmOf(world, id), id!) },
+  { method: "GET", match: own("/steps/([^/]+)"), handle: (world, [id, key]) => stepDetail(viewOf(filmOf(world, id), id!), decodeURIComponent(key ?? "")) },
+  {
+    method: "GET",
+    match: /^\/api\/projects\/([^/?]+)\/assets(?:\?.*)?$/,
+    handle(world, [id]) {
+      const assets = codeFilmAssets(viewOf(filmOf(world, id), id!));
+      return { assets, total: assets.length, offset: 0, nextOffset: null };
+    },
+  },
   {
     method: "GET",
     match: own("/versions/(\\d+)"),

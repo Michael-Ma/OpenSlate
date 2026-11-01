@@ -16,6 +16,9 @@ export const CODE_PLAN_SOURCE_PATH = "/code-plan/source";
 /** POST {} → CodePlanReceipt (Idempotency-Key): a new attempt for a failed step, with the person's consent (card N1). */
 export const codePlanStepRetryPath = (stepKey: string): string => `/code-plan/steps/${encodeURIComponent(stepKey)}/retry`;
 
+/** GET → CodePlanStepDetail: one step's whole prompt and call, for the media viewer (card N5). */
+export const codePlanStepPath = (stepKey: string): string => `/code-plan/steps/${encodeURIComponent(stepKey)}`;
+
 /** GET → CodePlanSourceView. */
 export const codePlanVersionPath = (version: number): string => `/code-plan/versions/${encodeURIComponent(String(version))}`;
 

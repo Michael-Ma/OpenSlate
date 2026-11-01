@@ -1,7 +1,7 @@
-import type { AcceptProposalInput, NarrationFitInput, NarrationFitReceipt, CodePlanCeilingInput, CodePlanChoiceView, CodePlanReceipt, CodePlanSourceInput, CodePlanSourceView, CodePlanView, ControlInput, ControlReceipt, DirectorProposal, FrameViewInput, GenerationOverview, ProposalList, ProposalReceipt, ReleaseAttemptInput, ResolveNoteInput, DiscardAttemptInput, RetryLocalAttemptInput } from "@openslate/core/public";
+import type { AcceptProposalInput, NarrationFitInput, NarrationFitReceipt, CodePlanCeilingInput, CodePlanChoiceView, CodePlanReceipt, CodePlanSourceInput, CodePlanSourceView, CodePlanStepDetail, CodePlanView, ControlInput, ControlReceipt, DirectorProposal, FrameViewInput, GenerationOverview, ProposalList, ProposalReceipt, ReleaseAttemptInput, ResolveNoteInput, DiscardAttemptInput, RetryLocalAttemptInput } from "@openslate/core/public";
 import { ProjectSubscription } from "../../shared/project-subscription.ts";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
-import { CODE_PLAN_CEILING_PATH, CODE_PLAN_CHOICES_PATH, CODE_PLAN_PATH, CODE_PLAN_SOURCE_PATH, codePlanStepRetryPath, codePlanVersionPath } from "../api/code-plan.ts";
+import { CODE_PLAN_CEILING_PATH, CODE_PLAN_CHOICES_PATH, CODE_PLAN_PATH, CODE_PLAN_SOURCE_PATH, codePlanStepPath, codePlanStepRetryPath, codePlanVersionPath } from "../api/code-plan.ts";
 import { answerPress, ceilingPress, isCodeProject, retryPress, sourcePress, type StepRow } from "../model/code-plan.ts";
 import { errorMsg } from "../i18n/translate.ts";
 import type { RoleFilter } from "../model/assets.ts";
@@ -569,6 +569,13 @@ export class StudioStore {
     const projectId = this.#codePlanFilm();
     if (!projectId || !Number.isSafeInteger(version) || version < 1) return Promise.reject(new ApiError(projectId ? "VALIDATION_ERROR" : "CODE_PLAN_MODE", projectId ? 400 : 409));
     return this.#deps.client.request<CodePlanSourceView>(path(projectId, codePlanVersionPath(version)), signal ? { signal } : {});
+  }
+
+  /** GET /code-plan/steps/:stepKey: one step's whole prompt and what went to the provider. */
+  readCodePlanStep(stepKey: string, signal?: AbortSignal): Promise<CodePlanStepDetail> {
+    const projectId = this.#codePlanFilm();
+    if (!projectId) return Promise.reject(new ApiError("CODE_PLAN_MODE", 409));
+    return this.#deps.client.request<CodePlanStepDetail>(path(projectId, codePlanStepPath(stepKey)), signal ? { signal } : {});
   }
 
   /** Answer a choice the plan asked with one of its options, exactly as the plan passed it. */

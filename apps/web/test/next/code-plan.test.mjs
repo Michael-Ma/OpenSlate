@@ -6,7 +6,7 @@ import { StudioStore } from '../../src/next/store/store.ts';
 import { ApiError } from '../../src/next/api/client.ts';
 import { artifactContentPath, codePlanArtifactContentPath, codePlanVersionPath, CODE_PLAN_PATH } from '../../src/next/api/code-plan.ts';
 import {
-  answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
+  TONE_CLASS, TONE_GLYPH, answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
   findingMsg, isCodeProject, latestRender, lineDiff, needsAttention, optionArtifact, optionLabel, placeByTime, previousVersion, problemCause, retryPress, runStrip,
   sourcePress, stepProblem, stepRow, stepRows, threadChoices, versionRows,
 } from '../../src/next/model/code-plan.ts';
@@ -83,7 +83,7 @@ test('the run strip says the state, the version and the spend, with pending mone
   assert.equal(running.tone, 'busy');
   assert.equal(running.held, true);
   assert.equal(zh(running.spend), '已花费 $0.24（另有 $0.57 待定），上限 $1.00');
-  assert.deepEqual(running.meter, { spent: 0.24, reserved: 0.57 });
+  assert.deepEqual(running.meter, { spent: 0.24, reserved: 0.57, level: null });
   assert.equal(en(runStrip(view({ state: 'done' }), 'en-US').status), 'Done');
   assert.equal(en(runStrip(view({ state: 'empty', planVersion: null }), 'en-US').status), 'No plan yet');
 });
@@ -596,4 +596,24 @@ test('a step still making after ten minutes says how long it has waited, in the 
   assert.equal(slow.tone, 'attention');
   const fresh = stepRow(step_, plan, 'en-US', undefined, new Date('2026-10-30T10:12:00.000Z').getTime());
   assert.deepEqual([fresh.status.id, fresh.tone], ['codeplan.step.in_flight', 'busy']);
+});
+
+test('each state has its own tone: failed is not waiting, and done is marked', () => {
+  const steps = [
+    { key: 'a', kind: 'image', state: 'succeeded', model: 'm', label: 'made', priceMicros: '0', reached: true, updatedAt: '2026-10-31T10:00:00.000Z', artifact: ref('a') },
+    { key: 'b', kind: 'video', state: 'failed', model: 'm', label: 'lost', priceMicros: '0', reached: true, updatedAt: '2026-10-31T10:00:00.000Z', error: { code: 'SUBMISSION_RESPONSE_LOST', mayHaveCharged: true, retry: 'consent' } },
+  ];
+  const rows = stepRows(view({ steps }), ['image', 'video'], 'en').current;
+  assert.deepEqual(rows.map((row) => row.tone), ['done', 'failed']);
+  assert.equal(TONE_CLASS.failed, 'status fail');
+  assert.equal(TONE_GLYPH.done, '✓');
+  assert.equal(runStrip(view({ state: 'done_with_failures' }), 'en').tone, 'failed');
+  assert.equal(runStrip(view({ state: 'done' }), 'en').tone, 'done');
+});
+
+test('the budget meter warns at 80% and turns red at the limit', () => {
+  const at80 = runStrip(view({ spentMicros: '800000', ceilingMicros: '1000000' }), 'en').meter;
+  const under = runStrip(view({ spentMicros: '790000', ceilingMicros: '1000000' }), 'en').meter;
+  const full = runStrip(view({ spentMicros: '1000000', ceilingMicros: '1000000' }), 'en').meter;
+  assert.deepEqual([under.level, at80.level, full.level], [null, 'high', 'full']);
 });

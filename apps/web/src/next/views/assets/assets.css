@@ -2,8 +2,8 @@
  * Assets view (docs/ai/prototypes/last-ferry/assets.html). Only :root tokens. The shared P5 components it
  * uses (view head, panel, segmented control, select, sheet, progress) are taken from the study's
  * system.css section 8 and scoped to this view, so they cannot collide with the other views' copies.
- * Colour roles: neutral greys; white for the chosen tile and the primary action; green for "Current" / "In use";
- * refusals neutral with an icon and words. No amber: nothing here is the Director's.
+ * Colour roles: green for "Current" / "In use"; refusals neutral with an icon and words. The pictures are the colour
+ * here, so the kinds stay neutral with a glyph.
  */
 
 /* ---------- workspace: a column instead of the Keyframes grid ---------- */
@@ -44,8 +44,8 @@
 .assets-work .filters .select{width:auto;padding:5px 10px;border-radius:var(--r-pill);font-size:12.5px;background:var(--bar);border-color:var(--hairline)}
 .assets-work .filters .count{margin-left:auto;color:var(--muted);font-size:12.5px}
 
-/* ---------- library: groups beside the detail ---------- */
-.assets-work .lib{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;flex:1;min-height:0}
+/* ---------- library ---------- */
+.assets-work .lib{display:flex;flex-direction:column;flex:1;min-height:0}
 .assets-work .groups{overflow:auto;min-height:0;display:flex;flex-direction:column;gap:14px;padding-right:2px}
 .assets-work .group{padding:0;flex:none}
 .assets-work .group > h2{margin:0;padding:11px 16px;font-size:14px;font-weight:700;display:flex;gap:9px;align-items:center;border-bottom:1px solid var(--hairline)}
@@ -58,7 +58,8 @@
 .assets-work .group.flash{outline:2px solid var(--select);outline-offset:2px}
 .assets-work .shotset .who b{display:block;font-size:13.5px}
 .assets-work .shotset .who span{font-size:12px;color:var(--text-2)}
-.assets-work .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+/* Every tile keeps its asset's shape at one height, so a portrait frame and a wide clip both show whole. */
+.assets-work .tiles{--tile-h:136px;display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px}
 .assets-work .nothing{color:var(--muted);font-size:12.5px;align-self:center}
 .assets-work .empty-state{padding:22px 16px;color:var(--text-2);font-size:13px;line-height:1.5}
 .assets-work .group .empty-state{border-top:1px solid var(--hairline)}
@@ -67,9 +68,9 @@
 
 /* ---------- tiles ---------- */
 .assets-work .tile{position:relative;border:1px solid var(--hairline);background:var(--bar);border-radius:12px;padding:6px 6px 8px;text-align:left;display:flex;flex-direction:column;gap:6px;min-width:0;color:var(--text);font-size:inherit}
-.assets-work .tile:hover{border-color:var(--track)}
-.assets-work .tile[aria-pressed="true"]{border:2px solid var(--select);padding:5px 5px 7px}
-.assets-work .tile-pic{position:relative;display:block;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:var(--surface-stripe)}
+.assets-work .tile{flex:none;width:max(128px,calc(var(--a,1.778) * var(--tile-h) + 14px));max-width:100%;cursor:zoom-in}
+.assets-work .tile:hover{border-color:var(--text-2)}
+.assets-work .tile-pic{position:relative;display:block;height:var(--tile-h);border-radius:8px;overflow:hidden;background:#0b0c0d}
 .assets-work .tile-pic > .av-img,.assets-work .tile-pic > .av-pic-note,.assets-work .tile-pic > .wave{position:absolute;inset:0}
 .assets-work .tile-pic .kind,.assets-work .tile-pic .dur{position:absolute;bottom:5px;font-size:10.5px;font-weight:700;background:rgba(20,21,23,.86);color:var(--text);border-radius:5px;padding:1px 6px;display:inline-flex;align-items:center;gap:3px;line-height:1.45}
 .assets-work .tile-pic .kind{left:5px}
@@ -80,7 +81,7 @@
 .assets-work .tile .cur{color:var(--green);font-weight:600}
 
 /* pictures, waveforms and placeholders */
-.assets-work .av-img{display:block;width:100%;height:100%;object-fit:cover;user-select:none}
+.assets-work .av-img{display:block;width:100%;height:100%;object-fit:contain;user-select:none}
 .assets-work .av-pic-note{display:grid;place-items:center;padding:6px;text-align:center;color:var(--muted);font-size:11.5px}
 .assets-work .av-pic-loading{background:var(--surface-stripe)}
 .assets-work .av-video-face{background:var(--raised);color:var(--text-2)}
@@ -90,18 +91,14 @@
 .assets-work .wave i{flex:1;background:var(--text-2);border-radius:1px;min-width:2px;opacity:.75}
 
 /* ---------- detail ---------- */
-.assets-work .detail{display:flex;flex-direction:column;gap:10px;overflow:auto;padding:14px}
-.assets-work .detail .av-pick{padding:8px 2px}
-.assets-work .big-pic{position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--surface-stripe);flex:none}
-.assets-work .big-pic > .av-img,.assets-work .big-pic > .av-pic-note,.assets-work .big-pic > .wave,.assets-work .big-pic > .av-video{position:absolute;inset:0}
-.assets-work .big-pic .av-anim{position:absolute;inset:0;transform-origin:50% 50%;will-change:transform}
-.assets-work .big-pic .av-anim > *{position:absolute;inset:0}
-.assets-work .av-video{width:100%;height:100%;object-fit:contain;background:var(--ground);display:block}
+.assets-work .detail{display:flex;flex-direction:column;gap:14px;min-height:100%}
+.assets-work .av-audio{display:flex;flex-direction:column;gap:10px;width:min(640px,calc(100% - 32px))}
+.assets-work .big-pic{position:relative;width:min(640px,100%);aspect-ratio:16/5;border-radius:10px;overflow:hidden;background:var(--surface-stripe);flex:none}
+.assets-work .big-pic > .av-pic-note,.assets-work .big-pic > .wave{position:absolute;inset:0}
 .assets-work .big-pic .ph{position:absolute;top:0;bottom:0;width:2px;background:var(--text);left:0}
-.assets-work .detail h3{margin:0;font-size:17px;font-weight:700;letter-spacing:-.01em;line-height:1.3;overflow-wrap:anywhere}
-.assets-work .detail .rows{grid-template-columns:70px 1fr;font-size:13px;margin:0}
+.assets-work .detail .rows{grid-template-columns:72px 1fr;column-gap:10px;font-size:13px;margin:0}
 .assets-work .detail .av-row{display:contents}
-.assets-work .detail .acts{display:flex;flex-direction:column;gap:7px;margin-top:auto;padding-top:6px}
+.assets-work .detail .acts{position:sticky;bottom:0;display:flex;flex-direction:column;gap:7px;margin-top:auto;padding-top:8px;background:var(--bar)}
 .assets-work .detail .acts .pill{justify-content:center;padding:7px 10px;white-space:normal;text-align:center}
 .assets-work .detail .av-why{text-align:center}
 .assets-work .detail .av-song{display:flex;flex-direction:column;gap:5px;font-size:13px;line-height:1.4;border-top:1px solid var(--hairline);padding-top:8px}
@@ -138,11 +135,9 @@
 .assets-work .av-refusal .ic{flex:none;width:18px;height:18px;border-radius:50%;background:var(--text);color:var(--surface);display:grid;place-items:center;font-size:11px;font-weight:800;margin-top:1px}
 .assets-work .av-progress{display:flex;flex-direction:column;gap:7px}
 .assets-work .av-stopped{margin:0}
-.assets-work .av-detail-sheet .sheet-body.detail{padding:16px 18px;gap:12px}
 
 /* ---------- 900–1239 px: a narrower detail, shot names above their tiles (tiles stay at least 150 px) ---------- */
 @media (min-width: 900px) and (max-width: 1239px){
-  .assets-work .lib{grid-template-columns:minmax(0,1fr) 260px}
   .assets-work .shotset{grid-template-columns:1fr}
 }
 
@@ -153,10 +148,12 @@
   .assets-work .view-head .line{width:100%;order:3}
   .assets-work .view-head .actions{margin-left:0;order:4;width:100%}
   .assets-work .filters .count{margin-left:0;width:100%}
-  .assets-work .lib{grid-template-columns:minmax(0,1fr);flex:none}
+  .assets-work .lib{flex:none}
   .assets-work .groups{overflow:visible;padding-right:0}
   .assets-work .shotset{grid-template-columns:minmax(0,1fr);padding:12px}
-  .assets-work .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .assets-work .tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .assets-work .tile{width:auto}
+  .assets-work .tile-pic{height:auto;aspect-ratio:var(--a,1.778)}
   .assets-work .group > h2{padding:11px 12px}
   .assets-work .sheet{width:100vw;border-left:0}
   .assets-work .sheet-foot .grow{flex:1 1 100%}
@@ -164,5 +161,4 @@
 
 @media (prefers-reduced-motion: reduce){
   .assets-work .progress.indet i{width:100%;left:0;opacity:.35;animation:none}
-  .assets-work .big-pic .av-anim{transform:none !important}
 }

@@ -43,7 +43,9 @@ export const assetsMessages = {
 
   // ---- tiles ----
   "assets.use.current": { en: "Current", zh: "当前" },
+  "assets.close": { en: "Close", zh: "关闭" },
   "assets.use.earlier": { en: "Earlier", zh: "旧版本" },
+  "assets.use.not_chosen": { en: "Not chosen", zh: "未选用" },
   "assets.use.in_use": { en: "In use", zh: "使用中" },
   "assets.use.not_in_use": { en: "Not in use", zh: "未使用" },
   "assets.use.latest": { en: "Latest", zh: "最新" },
@@ -83,10 +85,6 @@ export const assetsMessages = {
   "assets.picture.failed": { en: "Couldn’t show it ({code})", zh: "无法显示（{code}）" },
 
   // ---- detail ----
-  "assets.detail.aria": { en: "Selected asset", zh: "选中的素材" },
-  "assets.detail.empty": { en: "Select an asset to see where it is used, download it, or point the Director at it.", zh: "选择一个素材，查看它用在哪里、下载它，或让导演指向它。" },
-  "assets.detail.sheet_title": { en: "Asset", zh: "素材" },
-  "assets.close": { en: "Close", zh: "关闭" },
   "assets.row.kind": { en: "Kind", zh: "类型" },
   "assets.row.shot": { en: "Shot", zh: "镜头" },
   "assets.row.take": { en: "Take", zh: "版本" },
@@ -141,7 +139,6 @@ export const assetsMessages = {
   "assets.pause": { en: "Pause", zh: "暂停" },
   "assets.player.loading": { en: "Loading…", zh: "正在载入…" },
   "assets.player.no_sound": { en: "No sound in the sample film.", zh: "示例影片里没有声音。" },
-  "assets.player.motion_only": { en: "The sample film has no video: this plays the keyframe’s motion.", zh: "示例影片里没有视频：这里播放的是关键帧的运动预览。" },
 
   // ---- import ----
   "assets.import.title": { en: "Import into this film", zh: "导入到这部影片" },

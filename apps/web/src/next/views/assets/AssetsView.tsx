@@ -1,24 +1,28 @@
 import type { AssetItem } from "@openslate/core/public";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNarrow } from "../../app/useNarrow.ts";
+import { useCodePlan } from "../../codeplan/CodePlanContext.tsx";
 import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { importDoneMsg } from "../../model/assets-import.ts";
+import { MediaViewer, type ViewerItem } from "../../media/Viewer.tsx";
 import {
   ALL_ASSETS,
   assetDetail,
   assetKey,
   assetLibrary,
+  codePlanPlaces,
   ROLE_FILTERS,
   tileFor,
   validFilters,
   type AssetFilters,
+  type AssetPlaces,
   type AssetTile,
   type RoleFilter,
 } from "../../model/assets.ts";
 import { msg } from "../../model/types.ts";
-import { useStore, useStudio } from "../../store/react.tsx";
-import { AssetDetail } from "./AssetDetail.tsx";
+import { CodePlanMedia, useStore, useStudio } from "../../store/react.tsx";
+import { AssetDetail, AssetStage } from "./AssetDetail.tsx";
 import { AssetTileButton } from "./AssetTile.tsx";
 import { ImportSheet, type ImportResult } from "./ImportSheet.tsx";
 import { Sheet } from "./Sheet.tsx";
@@ -33,8 +37,8 @@ const ROLE_LABEL = {
 
 /**
  * The Assets view (SB-21, docs/ai/prototypes/last-ferry/assets.html): everything the film has made or
- * been given, on the shot it belongs to, with role and scene filters, a detail panel (a sheet on a
- * phone) and Import. Reads GET /assets; imports go through the studio's upload routes.
+ * been given, on the shot it belongs to, with role and scene filters and Import. An asset opens larger in the shared
+ * viewer, with its details and actions beside it. Reads GET /assets; imports go through the studio's upload routes.
  */
 export function AssetsView() {
   const { t } = useI18n();
@@ -63,15 +67,20 @@ function focusComposer(tries = 12): void {
 
 function Library() {
   const store = useStore();
-  const { t, tm, locale } = useI18n();
-  const overview = useStudio((s) => s.overview)!;
+  const { t, tm } = useI18n();
+  const studioOverview = useStudio((s) => s.overview)!;
+  // A code plan declares its own scenes and shots; a graph film's are the overview's.
+  const { enabled: codeFilm, view: codePlan, error: codePlanError } = useCodePlan();
+  const looseTitle = t("codeplan.plan.loose");
+  const overview = useMemo<AssetPlaces>(() => (codePlan ? codePlanPlaces(codePlan, studioOverview.fps, looseTitle) : studioOverview), [codePlan, studioOverview, looseTitle]);
   // A restored studio in recovery review is read-only (app/useWriteGuard.ts): its reason replaces the offline one.
   const locked = useRecoveryLock();
   const connected = useStudio((s) => s.connection === "connected") && !locked;
   const focus = useStudio((s) => s.focus);
-  const narrow = useNarrow();
   const list = useAssetList();
-  const items = list.items ?? EMPTY;
+  // A code film's assets cannot be placed until its plan is read: until then they would all look like deleted shots.
+  const listed = codeFilm && !codePlan && !codePlanError ? null : list.items;
+  const items = listed ?? EMPTY;
 
   // Another view may have asked for one kind of file (Film's earlier exports); it applies once, then the tab opens on all.
   const asked = useStudio((s) => s.assetsFilter);
@@ -81,8 +90,7 @@ function Library() {
     setFilters({ ...ALL_ASSETS, role: asked.role });
     store.dispatch({ type: "assetsFilter", role: null });
   }, [asked, store]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [sheet, setSheet] = useState(false);
+  const [viewing, setViewing] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const groups = useRef<HTMLDivElement>(null);
@@ -92,14 +100,19 @@ function Library() {
 
   const active = validFilters(filters, overview);
   const library = useMemo(() => assetLibrary(items, overview, active), [items, overview, active]);
-  const selectedItem = useMemo(() => (selected ? items.find((item) => assetKey(item) === selected) ?? null : null), [items, selected]);
-  const selectedTile = useMemo(() => (selectedItem ? tileFor(selectedItem, items, overview) : null), [selectedItem, items, overview]);
-  const detail = useMemo(() => (selectedItem ? assetDetail(selectedItem, items, overview, new Date(), locale) : null), [selectedItem, items, overview, locale]);
-
-  const select = useCallback((key: string) => {
-    setSelected(key);
-    if (window.matchMedia("(max-width: 899px)").matches) setSheet(true);
-  }, []);
+  // Everything shown opens in one viewer, in the library's order.
+  const shownTiles = useMemo(() => [
+    ...(library.film?.tiles ?? []),
+    ...library.scenes.flatMap((scene) => [...scene.sceneTiles, ...scene.sets.flatMap((set) => set.tiles)]),
+    ...library.former,
+  ], [library]);
+  const viewerItems = useMemo<ViewerItem[]>(() => shownTiles.map((tile) => ({
+    key: tile.key, artifact: tile.item.artifact, title: tm(tile.title),
+    ...(tile.item.stepKey ? { stepKey: tile.item.stepKey } : {}), ...(tile.picture ? { poster: tile.picture } : {}),
+  })), [shownTiles, tm]);
+  const start = viewing === null ? -1 : viewerItems.findIndex((item) => item.key === viewing);
+  const tileOf = (key: string) => shownTiles.find((tile) => tile.key === key);
+  const open = useCallback((key: string) => setViewing(key), []);
 
   // A shot or scene opened elsewhere (a Director note's "Open 2.2") is scrolled to here, like the study does,
   // even when it is opened again.
@@ -118,22 +131,20 @@ function Library() {
     });
   }, [focus]);
 
-  // After an import, the new file is selected once the library lists it.
+  // After an import, the new file is scrolled to once the library lists it.
   useEffect(() => {
     if (!pendingId) return;
     const item = items.find((candidate) => candidate.artifact.artifactId === pendingId);
     if (!item) return;
-    const key = assetKey(item);
     setPendingId(null);
-    setSelected(key);
-    requestAnimationFrame(() => groups.current?.querySelector(`[data-asset="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "nearest" }));
+    requestAnimationFrame(() => groups.current?.querySelector(`[data-asset="${CSS.escape(assetKey(item))}"]`)?.scrollIntoView({ block: "nearest" }));
   }, [pendingId, items]);
 
   useEffect(() => {
-    if (!focusAfterLoad.current || !list.items) return;
+    if (!focusAfterLoad.current || !listed) return;
     focusAfterLoad.current = false;
     requestAnimationFrame(() => groups.current?.querySelector<HTMLElement>(".group > h2")?.focus());
-  }, [list.items]);
+  }, [listed]);
 
   const retry = () => {
     focusAfterLoad.current = true;
@@ -155,30 +166,14 @@ function Library() {
     store.dispatch({ type: "toast", message: importDoneMsg(result.kind, result.use, result.name, result.filmMusic), tone: "info" });
   };
 
-  const point = () => {
-    if (!detail?.point) return;
-    store.pointAt(detail.point.target);
-    setSheet(false);
-    // On a phone the Director is a drawer: open it so the pointer is seen.
-    if (narrow) store.setDirectorOpen(true);
-    store.dispatch({ type: "toast", message: msg("assets.point.toast", { target: tm(detail.point.name) }), tone: "info" });
-    focusComposer();
-  };
-
-  const open = () => {
-    if (!detail?.open) return;
-    if (detail.open.shotId) store.selectShot(detail.open.shotId);
-    store.setView(detail.open.view);
-  };
-
-  const tiles = (group: AssetTile[]) => group.map((tile) => <AssetTileButton key={tile.key} tile={tile} selected={tile.key === selected} onSelect={select} />);
+  const tiles = (group: AssetTile[]) => group.map((tile) => <AssetTileButton key={tile.key} tile={tile} onOpen={open} />);
   const setRole = (role: RoleFilter) => setFilters((current) => ({ ...current, role }));
 
   return (
-    <main className="work assets-work" id="workspace" data-view="assets" data-state={list.items ? "ready" : list.error ? "failed" : "loading"}>
+    <main className="work assets-work" id="workspace" data-view="assets" data-state={listed ? "ready" : list.error ? "failed" : "loading"}>
       <div className="view-head">
         <h1 tabIndex={-1}>{t("assets.title")}</h1>
-        <span className="line">{list.items ? t("assets.line", { count: list.total }) : ""}</span>
+        <span className="line">{listed ? t("assets.line", { count: list.total }) : ""}</span>
         <div className="actions">
           <button type="button" className="pill" data-act="import" disabled={!connected} title={!connected ? locked ?? t("assets.import.offline") : undefined} onClick={() => setImporting(true)}>{t("assets.import")}</button>
         </div>
@@ -198,12 +193,12 @@ function Library() {
           <option value="film">{t("assets.scene.film")}</option>
           {overview.scenes.map((scene) => <option key={scene.sceneId} value={scene.sceneId}>{t("assets.scene.option", { n: scene.ordinal, title: scene.title || scene.purpose })}</option>)}
         </select>
-        <span className="count" role="status">{list.items ? t("assets.showing", { shown: library.shown, total: list.total }) : ""}</span>
+        <span className="count" role="status">{listed ? t("assets.showing", { shown: library.shown, total: list.total }) : ""}</span>
       </div>
 
       <div className="lib">
         <div className="groups" ref={groups}>
-          {!list.items ? (
+          {!listed ? (
             <div className="panel empty-state" role={list.error ? "alert" : "status"} data-state={list.error ? "failed" : "loading"}>
               {list.error ? <>{t("assets.load_failed", { code: list.error })} <button type="button" className="pill sm" data-act="retry" onClick={retry}>{t("assets.retry")}</button></> : t("assets.loading")}
             </div>
@@ -257,27 +252,44 @@ function Library() {
             </>
           )}
         </div>
-        {!narrow && (
-          <aside className="panel detail" aria-label={t("assets.detail.aria")} data-asset={selected ?? undefined}>
-            {detail && selectedTile
-              ? <AssetDetail detail={detail} tile={selectedTile} headingId="av-detail-title" onPoint={point} onOpen={open} />
-              : <div className="empty-state av-pick">{t("assets.detail.empty")}</div>}
-          </aside>
-        )}
       </div>
 
-      {narrow && sheet && detail && selectedTile && (
-        <Sheet labelledBy="av-sheet-title" onClose={() => setSheet(false)} className="av-detail-sheet" act="asset-sheet">
-          <div className="sheet-head">
-            <h2 id="av-sheet-title">{t("assets.detail.sheet_title")}</h2>
-            <button type="button" className="pill sm" data-act="close-asset" onClick={() => setSheet(false)}>{t("assets.close")}</button>
-          </div>
-          <div className="sheet-body detail" data-asset={selected ?? undefined}>
-            <AssetDetail detail={detail} tile={selectedTile} headingId="av-sheet-detail-title" onPoint={point} onOpen={open} onShown={() => setSheet(false)} />
-          </div>
-        </Sheet>
+      {start >= 0 && (
+        <CodePlanMedia>
+          <MediaViewer
+            items={viewerItems}
+            start={start}
+            onClose={() => setViewing(null)}
+            stage={(item) => { const tile = tileOf(item.key); return tile && (tile.item.artifact.kind === "audio" || tile.item.artifact.kind === "document") ? <AssetStage key={tile.key} tile={tile} title={item.title} /> : null; }}
+            side={(item) => { const tile = tileOf(item.key); return tile ? <AssetSide tile={tile} items={items} places={overview} onLeave={() => setViewing(null)} /> : null; }}
+          />
+        </CodePlanMedia>
       )}
       {importing && <ImportSheet onClose={() => setImporting(false)} onImported={imported} />}
     </main>
   );
+}
+
+/** Beside an open asset: its details and what can be done with it. Leaving for the Director or another view closes it. */
+function AssetSide({ tile, items, places, onLeave }: { tile: AssetTile; items: readonly AssetItem[]; places: AssetPlaces; onLeave(): void }) {
+  const store = useStore();
+  const { tm, locale } = useI18n();
+  const narrow = useNarrow();
+  const detail = useMemo(() => assetDetail(tile.item, items, places, new Date(), locale), [tile, items, places, locale]);
+  const point = () => {
+    if (!detail.point) return;
+    store.pointAt(detail.point.target);
+    onLeave();
+    // On a phone the Director is a drawer: open it so the pointer is seen.
+    if (narrow) store.setDirectorOpen(true);
+    store.dispatch({ type: "toast", message: msg("assets.point.toast", { target: tm(detail.point.name) }), tone: "info" });
+    focusComposer();
+  };
+  const go = () => {
+    if (!detail.open) return;
+    if (detail.open.shotId) store.selectShot(detail.open.shotId);
+    onLeave();
+    store.setView(detail.open.view);
+  };
+  return <AssetDetail detail={detail} onPoint={point} onOpen={go} onShown={onLeave} />;
 }

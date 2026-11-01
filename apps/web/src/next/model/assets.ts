@@ -1,4 +1,6 @@
-import type { AssetItem, AssetRole, GenerationOverview, StudioArtifactRef } from "@openslate/core/public";
+import type { AssetItem, AssetRole, CodePlanView, SceneOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import { boundedAspect } from "./aspect.ts";
+import { declaredPlan } from "./code-plan.ts";
 import { clock } from "./motion.ts";
 import { msg, type Msg, type Target } from "./types.ts";
 
@@ -23,6 +25,27 @@ const ROLE_ORDER: Record<AssetRole, number> = { keyframe: 0, clip: 1, voice: 2, 
 /** Unique per stored file. Artifact ids alone are not enough: a take can reuse its id with new bytes. */
 export const assetKey = (item: Pick<AssetItem, "artifact">): string => `${item.artifact.kind}:${item.artifact.artifactId}:${item.artifact.sha256}`;
 
+/** The film's scenes and shots as the library reads them: the overview's, or the ones a code plan declares. */
+export interface AssetPlaces {
+  fps: number;
+  scenes: Pick<SceneOverview, "sceneId" | "ordinal" | "title" | "purpose" | "shotIds">[];
+  shots: Record<string, Pick<ShotOverview, "shotId" | "sceneId" | "label" | "framing" | "purpose" | "durationFrames"> & Partial<Pick<ShotOverview, "keyframe">>>;
+}
+
+/**
+ * A code plan keeps its scenes and shots in the run, not in the overview. Shots that name no scene sit in one group
+ * of their own, called `looseTitle`.
+ */
+export function codePlanPlaces(view: CodePlanView, fps: number, looseTitle: string): AssetPlaces {
+  const plan = declaredPlan(view);
+  const groups = plan.scenes.map((scene) => ({ sceneId: scene.key, ordinal: scene.ordinal, title: scene.title, purpose: scene.purpose, list: scene.shots }));
+  if (plan.loose.length) groups.push({ sceneId: "loose", ordinal: groups.length + 1, title: looseTitle, purpose: "", list: plan.loose });
+  const shots: AssetPlaces["shots"] = {};
+  for (const group of groups) for (const shot of group.list)
+    shots[shot.key] = { shotId: shot.key, sceneId: group.sceneId, label: shot.label, framing: shot.framing, purpose: shot.purpose, durationFrames: Math.round((shot.seconds ?? 0) * fps) };
+  return { fps, shots, scenes: groups.map(({ list, ...scene }) => ({ ...scene, shotIds: list.map((shot) => shot.key) })) };
+}
+
 /** Where an asset sits in the library. "former": its shot or scene is no longer in the film. */
 export type Placement =
   | { kind: "shot"; shotId: string; sceneId: string }
@@ -30,7 +53,7 @@ export type Placement =
   | { kind: "film" }
   | { kind: "former" };
 
-export function placement(item: AssetItem, overview: GenerationOverview): Placement {
+export function placement(item: AssetItem, overview: AssetPlaces): Placement {
   if (item.shotId) {
     const shot = overview.shots[item.shotId];
     return shot ? { kind: "shot", shotId: shot.shotId, sceneId: shot.sceneId } : { kind: "former" };
@@ -60,9 +83,14 @@ export interface AssetTile {
   /** The kind tag over the picture: clips and audio only. */
   tag: { label: Msg; glyph: "play" | "note" | "doc" } | null;
   duration: Msg | null;
-  /** The picture to show: the image itself, or the keyframe a clip was most likely made from. */
+  /** The picture to show: the image itself, a clip's still, or the keyframe a clip was most likely made from. */
   picture: StudioArtifactRef | null;
+  /** Width over height of what the tile shows, so nothing is cropped. */
+  aspect: number;
 }
+
+/** The shape of a tile with nothing to measure: audio, documents and clips with no still. */
+export const DEFAULT_ASPECT = 16 / 9;
 
 /** "6 s", "2.1 s"; a minute or more reads as a clock ("1:12"). */
 export function durationMsg(seconds: number | undefined): Msg | null {
@@ -105,7 +133,7 @@ export function importNumber(item: AssetItem, items: readonly AssetItem[]): numb
  * The tile and detail title. Shot assets are named by role, shot and take; an import keeps its file name when the
  * library has it, and imported pictures and videos without one are numbered among `items` (the whole library).
  */
-export function titleMsg(item: AssetItem, overview: GenerationOverview, items: readonly AssetItem[] = []): Msg {
+export function titleMsg(item: AssetItem, overview: AssetPlaces, items: readonly AssetItem[] = []): Msg {
   const shot = item.shotId ? overview.shots[item.shotId] : undefined;
   const take = item.takeIndex;
   switch (item.role) {
@@ -141,6 +169,8 @@ export function titleMsg(item: AssetItem, overview: GenerationOverview, items: r
 export function useMsg(item: AssetItem): { label: Msg; on: boolean } {
   switch (item.role) {
     case "keyframe":
+      // A code plan's other options were never replaced: they just were not chosen.
+      return { label: msg(item.current ? "assets.use.current" : item.stepKey ? "assets.use.not_chosen" : "assets.use.earlier"), on: item.current };
     case "clip":
     case "voice":
       return { label: msg(item.current ? "assets.use.current" : "assets.use.earlier"), on: item.current };
@@ -167,7 +197,8 @@ const time = (iso: string) => {
  * The keyframe a clip shows on its tile: the latest keyframe of its shot made before the clip, else the
  * shot's current keyframe. Loading every clip just for a thumbnail would be wasteful.
  */
-export function stillFor(clip: AssetItem, items: readonly AssetItem[], overview: GenerationOverview): StudioArtifactRef | null {
+export function stillFor(clip: AssetItem, items: readonly AssetItem[], overview: AssetPlaces): StudioArtifactRef | null {
+  if (clip.poster) return clip.poster;
   if (!clip.shotId) return null;
   const made = time(clip.createdAt);
   const before = items
@@ -178,13 +209,20 @@ export function stillFor(clip: AssetItem, items: readonly AssetItem[], overview:
   return keyframe?.state === "ready" ? keyframe.artifact ?? null : null;
 }
 
-export function pictureFor(item: AssetItem, items: readonly AssetItem[], overview: GenerationOverview): StudioArtifactRef | null {
+export function pictureFor(item: AssetItem, items: readonly AssetItem[], overview: AssetPlaces): StudioArtifactRef | null {
   if (item.artifact.kind === "image") return item.artifact;
   if (item.artifact.kind === "video") return stillFor(item, items, overview);
   return null;
 }
 
-export function tileFor(item: AssetItem, items: readonly AssetItem[], overview: GenerationOverview): AssetTile {
+/** The asset's own shape when the library knows it, else the shape of the keyframe it shows. */
+function aspectFor(item: AssetItem, picture: StudioArtifactRef | null, items: readonly AssetItem[]): number {
+  const sized = item.width && item.height ? item : picture ? items.find((other) => other.artifact.artifactId === picture.artifactId) : undefined;
+  return boundedAspect(sized?.width && sized.height ? sized.width / sized.height : null) ?? DEFAULT_ASPECT;
+}
+
+export function tileFor(item: AssetItem, items: readonly AssetItem[], overview: AssetPlaces): AssetTile {
+  const picture = pictureFor(item, items, overview);
   return {
     key: assetKey(item),
     item,
@@ -193,7 +231,8 @@ export function tileFor(item: AssetItem, items: readonly AssetItem[], overview: 
     source: sourceMsg(item),
     tag: tagFor(item),
     duration: durationMsg(item.durationSeconds),
-    picture: pictureFor(item, items, overview),
+    picture,
+    aspect: aspectFor(item, picture, items),
   };
 }
 
@@ -244,7 +283,7 @@ export function roleCounts(items: readonly AssetItem[]): Record<RoleFilter, numb
   return counts;
 }
 
-export function assetLibrary(items: readonly AssetItem[], overview: GenerationOverview, filters: AssetFilters): AssetLibraryView {
+export function assetLibrary(items: readonly AssetItem[], overview: AssetPlaces, filters: AssetFilters): AssetLibraryView {
   const placed = items.map((item) => ({ item, where: placement(item, overview) }));
   const shown = placed.filter(({ item, where }) => matches(item, where, filters));
   const tiles = (list: { item: AssetItem }[]) => list.map(({ item }) => item).sort(compareAssets).map((item) => tileFor(item, items, overview));
@@ -287,7 +326,7 @@ export function assetLibrary(items: readonly AssetItem[], overview: GenerationOv
 }
 
 /** The scene filter falls back to every scene once the chosen scene is gone (deleted, or another film). */
-export function validFilters(filters: AssetFilters, overview: GenerationOverview): AssetFilters {
+export function validFilters(filters: AssetFilters, overview: AssetPlaces): AssetFilters {
   if (filters.scene === "all" || filters.scene === "film" || overview.scenes.some((scene) => scene.sceneId === filters.scene)) return filters;
   return { ...filters, scene: "all" };
 }
@@ -308,11 +347,6 @@ export interface AssetDetailView {
   /** The Director is pointed at the asset's shot, else its scene; assets cannot be named in a message yet. */
   point: { target: Target; name: Msg } | null;
   open: { view: "keyframes" | "film"; shotId: string | null; label: Msg } | null;
-  /** Clips and audio play; pictures do not. */
-  playable: boolean;
-  picture: StudioArtifactRef | null;
-  /** The shot's motion, for the sample film's keyframe motion preview. */
-  motion: string | null;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -343,7 +377,7 @@ function inUseMsg(item: AssetItem): Msg {
   }
 }
 
-export function assetDetail(item: AssetItem, items: readonly AssetItem[], overview: GenerationOverview, now: Date, locale: string): AssetDetailView {
+export function assetDetail(item: AssetItem, items: readonly AssetItem[], overview: AssetPlaces, now: Date, locale: string): AssetDetailView {
   const where = placement(item, overview);
   const shot = where.kind === "shot" ? overview.shots[where.shotId] : undefined;
   const sceneId = where.kind === "shot" || where.kind === "scene" ? where.sceneId : item.sceneId;
@@ -355,21 +389,26 @@ export function assetDetail(item: AssetItem, items: readonly AssetItem[], overvi
   else rows.push({ label: msg("assets.row.shot"), value: msg(where.kind === "former" ? "assets.row.former_shot" : "assets.row.not_on_shot") });
   if (item.takeIndex) rows.push({ label: msg("assets.row.take"), value: msg("assets.raw", { text: String(item.takeIndex) }) });
   rows.push({ label: msg("assets.row.in_use"), value: inUseMsg(item) });
-  rows.push({ label: msg("assets.row.source"), value: sourceMsg(item) });
-  rows.push({ label: msg("assets.row.made"), value: madeMsg(item.createdAt, now, locale) });
-  const length = durationMsg(item.durationSeconds);
+  // A code-plan asset's source, time and length are in its step's facts, shown above these rows.
+  if (!item.stepKey) {
+    rows.push({ label: msg("assets.row.source"), value: sourceMsg(item) });
+    rows.push({ label: msg("assets.row.made"), value: madeMsg(item.createdAt, now, locale) });
+  }
+  const length = item.stepKey ? null : durationMsg(item.durationSeconds);
   // A clip comes back longer or shorter than its shot (a 6.6 s clip for a 6 s shot): say how much of it the film uses.
-  const used = shot && item.role === "clip" && item.current ? Math.round((shot.durationFrames / overview.fps) * 10) / 10 : null;
+  const used = shot?.durationFrames && item.role === "clip" && item.current ? Math.round((shot.durationFrames / overview.fps) * 10) / 10 : null;
   const trimmed = used !== null && item.durationSeconds !== undefined && Math.abs(item.durationSeconds - used) >= 0.05;
   if (length) rows.push({ label: msg("assets.row.length"), value: length, ...(trimmed ? { sub: msg("assets.row.length_used", { seconds: used }) } : {}) });
 
-  const point: AssetDetailView["point"] = shot ? { target: { kind: "shot", id: shot.shotId }, name: msg("assets.raw", { text: shot.label }) }
+  // A code plan's scenes and shots are not the graph's, so the Director cannot be pointed at them from here.
+  const point: AssetDetailView["point"] = item.stepKey ? null : shot ? { target: { kind: "shot", id: shot.shotId }, name: msg("assets.raw", { text: shot.label }) }
     : scene ? { target: { kind: "scene", id: scene.sceneId }, name: msg("assets.target.scene", { n: scene.ordinal }) }
     : null;
 
   let open: AssetDetailView["open"] = null;
-  if (shot && item.role === "keyframe") open = { view: "keyframes", shotId: shot.shotId, label: msg("assets.open.keyframes", { shot: shot.label }) };
-  else if (shot && (item.role === "clip" || item.role === "voice")) open = { view: "film", shotId: shot.shotId, label: msg("assets.open.film", { shot: shot.label }) };
+  const shotId = shot && !item.stepKey ? shot.shotId : null;
+  if (shot && item.role === "keyframe") open = { view: "keyframes", shotId, label: msg("assets.open.keyframes", { shot: shot.label }) };
+  else if (shot && (item.role === "clip" || item.role === "voice")) open = { view: "film", shotId, label: msg("assets.open.film", { shot: shot.label }) };
   else if (item.role === "music") open = { view: "film", shotId: null, label: msg("assets.open.music") };
   else if (item.role === "export") open = { view: "film", shotId: null, label: msg("assets.open.export") };
 
@@ -380,9 +419,6 @@ export function assetDetail(item: AssetItem, items: readonly AssetItem[], overvi
     rows,
     point,
     open,
-    playable: item.artifact.kind !== "image" && item.artifact.kind !== "document",
-    picture: pictureFor(item, items, overview),
-    motion: shot ? shot.motion : null,
   };
 }
 

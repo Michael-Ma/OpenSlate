@@ -74,7 +74,15 @@ export function optionLabel(value: unknown): string | null {
 
 // ---- the run strip ------------------------------------------------------------------------
 
-export type RunTone = "busy" | "attention" | "plain";
+/** busy: working. attention: waits for you. failed: went wrong. done: finished. */
+export type RunTone = "busy" | "attention" | "failed" | "done" | "plain";
+
+export const TONE_CLASS: Record<RunTone, string> = { busy: "status busy", attention: "status attn", failed: "status fail", done: "status ok", plain: "status" };
+/** The mark beside a state's word, so colour never says it alone. Busy work spins instead. */
+export const TONE_GLYPH: Partial<Record<RunTone, string>> = { done: "✓", failed: "!" };
+
+/** The share of the ceiling from which the meter warns. */
+export const HIGH_SPEND = 0.8;
 
 export interface RunStrip {
   state: CodePlanRunState;
@@ -84,7 +92,7 @@ export interface RunStrip {
   held: boolean;
   spend: Msg;
   /** Shares of the ceiling, 0..1, for the meter: charged (or possibly charged), then dispatched and not yet known. */
-  meter: { spent: number; reserved: number };
+  meter: { spent: number; reserved: number; level: "high" | "full" | null };
   /** paused_budget only: the next ceiling and its button, and the ceiling reached (as money). */
   raise: { body: CodePlanCeilingInput; label: Msg; ceiling: string } | null;
   /** state "error": the pass's message, as plain text. */
@@ -118,10 +126,10 @@ export function runStrip(view: CodePlanView, locale: string): RunStrip {
   return {
     state,
     status,
-    tone: state === "running" ? "busy" : state === "error" || state === "paused_budget" || state === "done_with_failures" || (state === "waiting" && waiting > 0) ? "attention" : "plain",
+    tone: state === "running" ? "busy" : state === "error" || state === "done_with_failures" ? "failed" : state === "paused_budget" || (state === "waiting" && waiting > 0) ? "attention" : state === "done" ? "done" : "plain",
     held: view.held,
     spend,
-    meter: { spent: share(spent, ceiling), reserved: share(reserved, ceiling) },
+    meter: { spent: share(spent, ceiling), reserved: share(reserved, ceiling), level: share(spent, ceiling) >= 1 ? "full" : share(spent, ceiling) >= HIGH_SPEND ? "high" : null },
     raise: state === "paused_budget" ? { body: { ceilingMicros: String(next) }, label: msg("codeplan.run.raise", { ceiling: formatMicros(String(next), locale) }), ceiling: values.ceiling } : null,
     error: state === "error" ? (view.error?.message?.trim() || null) : null,
     waiting,
@@ -251,6 +259,8 @@ export interface StepRow {
   attempts: number;
   /** A still of a made clip or render, for its thumbnail. */
   poster: StudioArtifactRef | null;
+  /** A render that cropped clips of another shape: how many, and the least of a clip's picture that survived. */
+  fitWarning: { clips: number; keptPercent: number } | null;
   updatedAt: string;
 }
 
@@ -364,7 +374,7 @@ export function stepRow(step: CodePlanStepView, view: CodePlanView, locale: stri
     key: step.key, kind: step.kind, state: step.state,
     status: budget ? msg("codeplan.step.budget") : waited >= SLOW_STEP_MS ? msg("codeplan.step.slow", { minutes: Math.floor(waited / 60000) })
       : STEP_STATUS[step.state] ?? msg("codeplan.state.unknown", { state: String(step.state) }),
-    tone: step.state === "in_flight" ? waited >= SLOW_STEP_MS ? "attention" : "busy" : step.state === "failed" || step.state === "unknown" || budget ? "attention" : "plain",
+    tone: step.state === "in_flight" ? waited >= SLOW_STEP_MS ? "attention" : "busy" : step.state === "failed" || step.state === "unknown" ? "failed" : budget ? "attention" : step.state === "succeeded" ? "done" : "plain",
     label: text(step.label, 200), model: text(step.model, 120),
     price: price > 0n ? msg("codeplan.step.price", { price: formatMicros(String(price), locale) }) : null,
     artifact, reached: step.reached, chosen: !!artifact && chosen.has(artifact.artifactId),
@@ -372,6 +382,7 @@ export function stepRow(step: CodePlanStepView, view: CodePlanView, locale: stri
     problem: step.reached ? stepProblem(step, locale) : null,
     attempts: Number.isSafeInteger(step.attempts) && step.attempts! > 0 ? step.attempts! : 1,
     poster: step.state === "succeeded" ? artifactRefOf(step.poster) : null,
+    fitWarning: step.state === "succeeded" ? step.fitWarning ?? null : null,
     updatedAt: step.updatedAt,
   };
 }
@@ -407,8 +418,10 @@ export interface DeclaredShot {
   narration: string;
   /** The shot's keyframe: one it names, else its chosen (or newest) image step, by shot then by prompt. */
   picture: StudioArtifactRef | null;
-  /** The shot's newest made clip and, once it exists, the clip's still. */
-  clip: { artifact: StudioArtifactRef; poster: StudioArtifactRef | null } | null;
+  /** The image step that made `picture`, when one did. */
+  pictureStep: string | null;
+  /** The shot's newest made clip, its step and, once it exists, the clip's still. */
+  clip: { artifact: StudioArtifactRef; poster: StudioArtifactRef | null; stepKey: string } | null;
 }
 
 export interface DeclaredScene {
@@ -465,7 +478,7 @@ function clipsByShot(view: CodePlanView): Map<string, NonNullable<DeclaredShot["
     const artifact = step.kind === "video" && step.state === "succeeded" && step.shotId ? artifactRefOf(step.artifact) : null;
     if (!artifact || !step.shotId) continue;
     const current = newest.get(step.shotId);
-    if (!current || step.updatedAt > current.at) newest.set(step.shotId, { clip: { artifact, poster: artifactRefOf(step.poster) }, at: step.updatedAt });
+    if (!current || step.updatedAt > current.at) newest.set(step.shotId, { clip: { artifact, poster: artifactRefOf(step.poster), stepKey: step.key }, at: step.updatedAt });
   }
   return new Map([...newest].map(([shot, value]) => [shot, value.clip]));
 }
@@ -491,6 +504,7 @@ export function declaredPlan(view: CodePlanView): DeclaredPlan {
     const prompt = pick(row, ["prompt", "imagePrompt", "image"]);
     const own = artifactRefOf(row.keyframe) ?? artifactRefOf(row.picture);
     const key = idOf(row, ["id", "shotId", "key"]) || `shot-${index + 1}`;
+    const picture = own ?? byShot.get(key) ?? (prompt ? byPrompt.get(clip(prompt, 200)) ?? byPrompt.get(prompt.slice(0, 200)) ?? null : null);
     const shot: DeclaredShot = {
       key,
       label: pick(row, ["label"], 12) || (scene ? `${scene.ordinal}.${scene.shots.length + 1}` : String(loose.length + 1)),
@@ -500,7 +514,8 @@ export function declaredPlan(view: CodePlanView): DeclaredPlan {
       prompt,
       motion: pick(row, ["motion", "camera", "videoPrompt"], 500),
       narration: typeof row.narration === "string" ? text(row.narration) : isObject(row.narration) ? text(row.narration.text) : "",
-      picture: own ?? byShot.get(key) ?? (prompt ? byPrompt.get(clip(prompt, 200)) ?? byPrompt.get(prompt.slice(0, 200)) ?? null : null),
+      picture,
+      pictureStep: picture ? view.steps.find((step) => step.artifact?.artifactId === picture.artifactId)?.key ?? null : null,
       clip: clips.get(key) ?? null,
     };
     seconds += shot.seconds ?? 0;

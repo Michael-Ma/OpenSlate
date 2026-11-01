@@ -1,29 +1,29 @@
 /*
  * Code-plan films (experiment). Only :root tokens from ui/studio.css. Colour roles stay as everywhere else: amber is
- * the Director's (a choice the plan asks is the Director's question), white marks the chosen option and the primary
- * action, and run facts, spend, steps and diffs are neutral greys with an icon. Nothing here is green or red.
+ * the Director's (a choice the plan asks is the Director's question), teal is money, red a failure, and white marks the
+ * chosen option and the primary action.
  */
 
 /* ---------- the run strip, under the Director's header ---------- */
 .cp-run{flex:none;margin:10px 18px 2px;padding:9px 12px 10px;border:1px solid var(--hairline);background:var(--raised);border-radius:12px;font-size:12.5px;line-height:1.45;color:var(--text-2);display:flex;flex-direction:column;gap:7px}
 .cp-run-top{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;min-width:0}
 .cp-run-ver{color:var(--muted)}
-.cp-run-spend{margin-left:auto;color:var(--text);font-variant-numeric:tabular-nums;white-space:normal;text-align:right}
+.cp-run-spend{margin-left:auto;color:var(--money);font-variant-numeric:tabular-nums;white-space:normal;text-align:right}
 .cp-run .status,.cp-view .status{display:inline-flex;align-items:center;gap:5px}
-.cp-run .status.attn,.cp-view .status.attn{color:var(--text);border-color:var(--track);background:var(--raised-2)}
-.cp-run .status.busy,.cp-view .status.busy{color:var(--text)}
-.cp-spin{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--text-2);border-top-color:transparent;display:inline-block;animation:cp-spin 1s linear infinite;flex:none}
+.cp-spin{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--work);border-top-color:transparent;display:inline-block;animation:cp-spin 1s linear infinite;flex:none}
 @keyframes cp-spin{to{transform:rotate(360deg)}}
 .cp-meter{display:flex;height:4px;border-radius:2px;background:var(--track);overflow:hidden}
 .cp-meter i{display:block;height:100%}
-.cp-meter .spent{background:var(--text)}
-.cp-meter .reserved{background:repeating-linear-gradient(90deg,var(--text-2) 0 3px,transparent 3px 5px)}
+.cp-meter .spent{background:var(--money)}
+.cp-meter .reserved{background:repeating-linear-gradient(90deg,var(--money) 0 3px,transparent 3px 5px)}
+.cp-meter[data-level="high"] .spent{background:var(--amber)}
+.cp-meter[data-level="full"] .spent{background:var(--danger-solid)}
 .cp-run-note{margin:0;color:var(--text-2)}
 .cp-run[data-held="true"] .cp-run-note{color:var(--text)}
 .cp-run-error{display:flex;gap:9px;align-items:flex-start;border-top:1px solid var(--hairline);padding-top:8px;color:var(--text-2)}
-.cp-run-error .mark{flex:none;width:16px;height:16px;border-radius:50%;background:var(--select);color:var(--select-ink);display:grid;place-items:center;font-size:11px;font-weight:800;margin-top:1px}
+.cp-run-error .mark{flex:none;width:16px;height:16px;border-radius:50%;background:var(--danger-solid);color:var(--danger-ink);display:grid;place-items:center;font-size:11px;font-weight:800;margin-top:1px}
 .cp-run-error > div{min-width:0;display:flex;flex-direction:column;gap:4px}
-.cp-run-error b{color:var(--text);font-weight:600}
+.cp-run-error b{color:var(--danger);font-weight:600}
 .cp-error-text{margin:0;max-height:7.5em;overflow:auto;background:var(--sunken);border:1px solid var(--hairline);border-radius:8px;padding:6px 8px;font:12px/1.45 ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
 .cp-run-raise{display:flex;flex-direction:column;align-items:flex-start;gap:6px;border-top:1px solid var(--hairline);padding-top:8px}
 .cp-run-raise p{margin:0}
@@ -83,7 +83,7 @@ dialog.cp-compare::backdrop{background:rgba(8,9,10,.62)}
 .cp-group{display:flex;flex-direction:column;gap:8px}
 .cp-group-title{margin:0;font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--text-2)}
 .cp-group.history{border-top:1px solid var(--hairline);padding-top:12px}
-.cp-price{color:var(--text-2);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cp-price{color:var(--money);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
 
 /* Plan rows: the Plan view's rows, read only (no editor or menu columns) */
 .plan .shot-row.cp-shot-row{grid-template-columns:auto minmax(0,1.4fr) minmax(0,1fr)}
@@ -92,6 +92,7 @@ dialog.cp-compare::backdrop{background:rgba(8,9,10,.62)}
 .cp-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
 .cp-step{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-card);padding:8px 8px 10px;display:flex;flex-direction:column;gap:6px;min-width:0}
 .cp-step.chosen{border:2px solid var(--select);padding:7px 7px 9px}
+.cp-step[data-state="failed"]{border-color:var(--danger-line)}
 .cp-step.history{opacity:.55}
 .cp-step.history:hover,.cp-step.history:focus-within{opacity:.85}
 .cp-step-pic{position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--surface-stripe)}
@@ -117,6 +118,7 @@ button.cp-step-pic:hover .pic-img{filter:brightness(1.06)}
 .cp-render.sample .cp-hint{margin:0;padding:8px 12px}
 .cp-video{display:block;width:100%;height:100%;background:#000;object-fit:contain}
 .cp-player .cp-message{margin:0;align-self:stretch;max-width:960px}
+.cp-fit-note{margin:8px 0 0;max-width:960px;padding:8px 10px;border:1px solid var(--amber-line);background:var(--amber-surface);border-radius:10px;font-size:12.5px;line-height:1.45;color:var(--text)}
 .cp-rows{list-style:none;margin:0;padding:0;border:1px solid var(--hairline);border-radius:12px;background:var(--surface);max-width:960px}
 .cp-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid var(--hairline);font-size:12.5px}
 .cp-row:first-child{border-top:0}
@@ -137,8 +139,8 @@ button.cp-step-pic:hover .pic-img{filter:brightness(1.06)}
 .cp-facts li{display:flex;gap:7px;align-items:flex-start;min-width:0}
 .cp-facts li > span{min-width:0;overflow-wrap:anywhere}
 .cp-facts i{flex:none;width:15px;height:15px;border-radius:50%;display:grid;place-items:center;font-size:9.5px;font-weight:800;font-style:normal;border:1.5px solid var(--track);color:var(--text-2);margin-top:1px}
-.cp-facts li[data-tone="cost"]{color:var(--text)}
-.cp-facts li[data-tone="cost"] i{border-color:var(--text);color:var(--text)}
+.cp-facts li[data-tone="cost"]{color:var(--money)}
+.cp-facts li[data-tone="cost"] i{border-color:var(--money);color:var(--money)}
 .cp-facts li[data-fact="finding"]{color:var(--text)}
 .cp-facts li[data-fact="finding"] i{background:var(--select);border-color:var(--select);color:var(--select-ink)}
 .cp-facts code{font-size:11px;color:var(--muted)}
@@ -163,9 +165,9 @@ button.cp-step-pic:hover .pic-img{filter:brightness(1.06)}
 .cp-lines td.code code{font:inherit;white-space:pre;color:var(--text)}
 .cp-lines tr:first-child td{padding-top:8px}
 .cp-lines tr:last-child td{padding-bottom:8px}
-.cp-lines tr.added td{background:var(--raised-2)}
-.cp-lines tr.added td.mark{color:var(--text)}
-.cp-lines tr.removed td{background:var(--bar)}
+.cp-lines tr.added td{background:var(--green-surface)}
+.cp-lines tr.added td.mark{color:var(--green)}
+.cp-lines tr.removed td{background:var(--danger-surface)}
 .cp-lines tr.removed td.code code{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--track)}
 .cp-lines tr.skip td{color:var(--muted);font-family:var(--font);font-size:11.5px;padding:3px 12px;background:var(--bar);border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline)}
 
@@ -186,7 +188,7 @@ button.cp-step-pic:hover .pic-img{filter:brightness(1.06)}
 }
 
 /* A failed step in plain words, under its card or row; Retry when it can help */
-.cp-problem{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:2px;padding:8px 10px;border:1px solid var(--amber-line);background:var(--amber-surface);border-radius:10px;font-size:12px;line-height:1.45;color:var(--text)}
+.cp-problem{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:2px;padding:8px 10px;border:1px solid var(--danger-line);background:var(--danger-surface);border-radius:10px;font-size:12px;line-height:1.45;color:var(--text)}
 .cp-problem p{margin:0}
 .cp-problem .cp-problem-retry{color:var(--text-2)}
 .cp-problem .pill{margin-top:4px}

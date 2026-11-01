@@ -82,8 +82,8 @@ function shotMedia(plan: DeclaredPlan): ViewerItem[] {
   const items: ViewerItem[] = [];
   for (const shot of [...plan.scenes.flatMap((scene) => scene.shots), ...plan.loose]) {
     const title = shot.purpose || shot.label;
-    if (shot.picture) items.push({ key: `${shot.key}:frame`, artifact: shot.picture, title });
-    if (shot.clip) items.push({ key: `${shot.key}:clip`, artifact: shot.clip.artifact, title });
+    if (shot.picture) items.push({ key: `${shot.key}:frame`, artifact: shot.picture, title, ...(shot.pictureStep ? { stepKey: shot.pictureStep } : {}) });
+    if (shot.clip) items.push({ key: `${shot.key}:clip`, artifact: shot.clip.artifact, title, stepKey: shot.clip.stepKey, ...(shot.clip.poster ? { poster: shot.clip.poster } : {}) });
   }
   return items;
 }
@@ -138,7 +138,7 @@ export function CodePlanKeyframesView() {
 
 /** Made steps with media, for the viewer: the label as its title, its model and status underneath. */
 export function viewerItems(rows: StepRow[], t: ReturnType<typeof useI18n>["t"], tm: ReturnType<typeof useI18n>["tm"]): ViewerItem[] {
-  return rows.flatMap((row) => (row.artifact ? [{ key: row.key, artifact: row.artifact, title: stepLabel(row, t), detail: [row.model, tm(row.status)].filter(Boolean).join(" · ") }] : []));
+  return rows.flatMap((row) => (row.artifact ? [{ key: row.key, artifact: row.artifact, title: stepLabel(row, t), detail: [row.model, tm(row.status)].filter(Boolean).join(" · "), stepKey: row.key, ...(row.poster ? { poster: row.poster } : {}) }] : []));
 }
 
 function StepGroups({ rows, still = true, onOpen }: { rows: { current: StepRow[]; history: StepRow[] }; still?: boolean; onOpen?: ((key: string) => void) | undefined }) {
@@ -180,6 +180,7 @@ export function CodePlanFilmView() {
         <CodePlanMedia>
           <section className="cp-player" aria-label={t("codeplan.film.player")}>
             {film.latest ? <RenderPlayer row={film.latest} /> : <ViewMessage title={t("codeplan.film.none_title")} body={t("codeplan.film.none_body")} />}
+            {film.latest?.fitWarning ? <p className="cp-fit-note" role="note">{t("codeplan.film.fit_warning", { clips: film.latest.fitWarning.clips, kept: film.latest.fitWarning.keptPercent })}</p> : null}
           </section>
           {film.renders.current.length || film.renders.history.length ? (
             <section className="cp-group" aria-label={t("codeplan.film.renders")}>
