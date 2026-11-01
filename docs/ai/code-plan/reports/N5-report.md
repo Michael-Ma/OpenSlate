@@ -75,3 +75,7 @@ File list: all six added and nine changed files listed above.
 - Render warnings require explicit positive render width/height and a known clip poster. Missing metadata is left unknown; inspection does not backfill, render or call a provider.
 - `call` reports retained attempt intent and, when present, the exact recorded transport description. Its presence is not independent evidence that a request was accepted or charged. No missing task/crop/response is fabricated.
 - No browser, real provider/native-model call, external network access, protected `.env*`/`secrets`/`.openslate` read, port-3001 listener, commit or push was performed. Tests use temporary state and fake transports, plus local FFmpeg/ffprobe. The pinned media tools were already installed; setup required no download.
+
+## Lead review
+
+Accepted as written. The secrets filter is an allow list, and the crop arithmetic matches the Tofu film (32%). Checked on a copy of the owner's Tofu film: 10 keyframes, 5 clips and 1 export, posters no longer listed as keyframes, shots grouped, every picture loads, and Film reports 5 clips at 32%. That check found one web bug outside this card: portrait pictures overflowed the shared viewer. It is fixed in the web commit after this merge.
