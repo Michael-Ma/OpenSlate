@@ -3,6 +3,6 @@
   "version": "2.0.0",
   "entry": "SKILL.md",
   "files": ["SKILL.md", "references/studio.d.ts", "references/example-plan.ts"],
-  "compatibility": { "toolContract": "0.2.0", "planLanguage": "1.0.0", "workflowContract": "1.0.0" },
-  "requiredToolIds": ["read_film", "submit_plan", "set_spend_limit", "retry_step"]
+  "compatibility": { "toolContract": "0.3.0", "planLanguage": "1.0.0", "workflowContract": "1.0.0" },
+  "requiredToolIds": ["read_film", "submit_plan", "set_spend_limit", "retry_step", "read_clip_frames"]
 }

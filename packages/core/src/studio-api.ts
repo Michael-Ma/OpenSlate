@@ -763,7 +763,7 @@ export interface InstallationStatus {
 /** Chosen at project creation. Absent means graph. */
 export type PlanMode = "graph" | "code";
 /** `done_with_failures`: the program returned, but at least one step it reached failed or stayed unknown. */
-export type CodePlanRunState = "empty" | "running" | "waiting" | "error" | "paused_budget" | "done" | "done_with_failures";
+export type CodePlanRunState = "empty" | "running" | "waiting" | "reviewing" | "error" | "paused_budget" | "done" | "done_with_failures";
 export type CodePlanStepKind = "image" | "video" | "speech" | "music" | "render";
 export type CodePlanStepState = "absent" | "in_flight" | "unknown" | "succeeded" | "failed" | "cancelled";
 
@@ -868,6 +868,8 @@ export interface CodePlanVersionItem {
   diff: CodePlanDiff;
 }
 
+export interface CodePlanReviewView { id: string; note: string; state: "waiting" | "watching" | "done" | "failed"; clipCount: number; updatedAt: string }
+
 /** GET /api/projects/:projectId/code-plan */
 export interface CodePlanView {
   projectId: string;
@@ -886,6 +888,8 @@ export interface CodePlanView {
   steps: CodePlanStepView[];
   /** Unanswered first, then answered, each in first-seen order. */
   choices: CodePlanChoiceView[];
+  /** First seen first, latest pass only. Absent on older clients/fixtures. */
+  reviews?: CodePlanReviewView[];
   /** Newest first, at most 50. */
   versions: CodePlanVersionItem[];
   logs: string[];
