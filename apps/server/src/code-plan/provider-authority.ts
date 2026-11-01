@@ -15,7 +15,7 @@ export type CodePlanAuthorityStore = Pick<Store, "get" | "getProject" | "db">;
 export interface CodePlanProviderAdmission {
   attempt: Attempt; candidate: null; grant: null; codePlan: CodePlanExecutionRecord;
   profile: ProviderProfile; capabilityLock: CodePlanCapabilityLock;
-  /** Measured owned PNG dimensions, resolved by the host from the first-frame reference. */
+  /** Measured owned PNG dimensions, resolved by the host from the first-frame or first-reference image. */
   priceFrame?: { width: number; height: number };
   /** Adapter receipt projection of the step reservation, never a graph reservation row. */
   reservation: { id: string; projectId: string; attemptId: string; micros: string; state: string };
@@ -41,9 +41,9 @@ export function assertCodePlanProviderAdmission(value: CodePlanProviderAdmission
     && request.profile?.id === profile.id && request.profile.revision === profile.revision && request.profile.digest === args.profileDigest
     && canonical(request.profile.configuration) === canonical(profile.configuration)
     && Object.entries(args).every(([key, item]) => canonical(request.args[key]) === canonical(item))
-    && canonical(request.args) === canonical(codePlanProviderArgs(profile, record.normalizedInput))
+    && canonical(request.args) === canonical(codePlanProviderArgs(profile, record.normalizedInput, request.args.enhance === false ? { enhance: false } : {}))
     && record.normalizedInput.profileDefinitionDigest === digest(profile)
-    && record.priceMicros === modelPrice({ kind: request.kind as "image" | "video" | "speech" | "music", priceMicros: profile.unitCostMicros, profile }, record.normalizedInput, value.priceFrame)
+    && record.priceMicros === (profile.adapter === "viggle-h3" && request.args.enhance === undefined ? profile.unitCostMicros : modelPrice({ kind: request.kind as "image" | "video" | "speech" | "music", priceMicros: profile.unitCostMicros, profile }, record.normalizedInput, value.priceFrame))
     && ["reserved", "charged", "released"].includes(record.liability)
     && value.reservation.id === attempt.id && value.reservation.attemptId === attempt.id && value.reservation.projectId === attempt.projectId
     && value.reservation.micros === record.priceMicros && value.reservation.state === record.liability);
@@ -70,7 +70,7 @@ export function codePlanAdmissionFromAttempt(store: Pick<Store, "get">, attempt:
   check(record && lock && profile);
   const result: CodePlanProviderAdmission = { attempt, candidate: null, grant: null, codePlan: record!, profile: profile!, capabilityLock: lock!,
     reservation: { id: attempt.id, projectId: attempt.projectId, attemptId: attempt.id, micros: record!.priceMicros!, state: record!.liability } };
-  const frame = attempt.request.inputs.find(row => row.kind === "image" && row.sha256 === attempt.request.args.firstFrameSha256);
+  const frame = attempt.request.inputs.find(row => row.kind === "image" && row.sha256 === (attempt.request.args.firstFrameSha256 ?? (Array.isArray(attempt.request.args.references) ? attempt.request.args.references[0] : undefined)));
   const artifact = frame ? store.get<{ projectId: string; width: number; height: number; artifact: { sha256: string } }>("artifact", frame.artifactId) : undefined;
   if (artifact?.projectId === attempt.projectId && artifact.artifact.sha256 === frame?.sha256) result.priceFrame = { width: artifact.width, height: artifact.height };
   assertCodePlanProviderAdmission(result);

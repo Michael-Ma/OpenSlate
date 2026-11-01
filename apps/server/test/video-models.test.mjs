@@ -210,3 +210,18 @@ test('a new code film can use every ready video model, the selected one first; a
  const graphLock=f.store.get('capability_lock',graph.capabilityLockId);
  assert.deepEqual(graphLock.profiles.filter(row=>row.kind==='video').map(row=>row.id),[videoProfile.id]);
 });
+
+for(const mode of ['reference','text','first_last_frame'])test(`Seedance ${mode} persists its exact input, price and mode and recovers after restart`,async t=>{
+ const f=await fixture(t,{mode:'pending'});
+ const source=f.source.replace('firstFrame:image.artifact',mode==='reference'?'references:[image.artifact,image.artifact]':mode==='text'?"aspectRatio:'9:16'":'firstFrame:image.artifact,lastFrame:image.artifact');
+ await f.submit(source);for(let i=0;i<8&&!videoAttempt(f);i++)await f.tick();
+ const attempt=videoAttempt(f);assert.ok(attempt);assert.equal(f.state.creates,1);
+ const body=f.state.bodies[0];assert.deepEqual(body.content.map(item=>item.role??item.type),mode==='reference'?['text','reference_image','reference_image']:mode==='text'?['text']:['text','first_frame','last_frame']);
+ const mapping=f.store.get('video_i2v_mapping',attempt.id);assert.equal(mapping.mode,mode);assert.equal(!!mapping.firstFrame,mode==='first_last_frame');
+ if(mode==='reference')assert.deepEqual(mapping.references.map(image=>[image.width,image.height]),[[360,640],[360,640]]);
+ assert.equal(resolveCodePlanProviderAdmission(f.store,attempt.request).reservation.micros,'378000');
+ await f.restart();f.state.mode='complete';await f.finish();
+ assert.equal(f.state.creates,1);assert.equal(f.execution.liability(attempt.id),'charged');assert.equal(f.plans.view(f.project.id).spentMicros,'378000');
+ const detail=f.plans.stepDetail(f.project.id,f.plans.steps(f.project.id).find(step=>step.kind==='video').key);
+ assert.equal(detail.mode,mode);assert.equal(detail.call.settings.mode,mode);assert.equal(detail.references?.length,mode==='reference'?2:undefined);
+});

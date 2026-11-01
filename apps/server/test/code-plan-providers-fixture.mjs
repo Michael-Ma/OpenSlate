@@ -61,7 +61,8 @@ export async function realCodeFixture(t, changes = {}) {
       assert.equal(f.store.get('code_plan_execution', attempt.id).requestDigest, digest(attempt.request));
       assert.ok(f.plans.steps(f.project.id).some(step => step.attemptId === attempt.id));
       const form = await new Request(url, {method:'POST',headers:init.headers,body:init.body}).formData();
-      f.firstFrame = Buffer.from(await form.get('first_frame_image').arrayBuffer());
+      f.form = form;
+      if(form.has('first_frame_image')) f.firstFrame = Buffer.from(await form.get('first_frame_image').arrayBuffer());
       return accepted();
     }
     f.calls.poll++; return completed();

@@ -29,9 +29,10 @@ const save = (f, id, source, key = randomUUID()) => f.ok("POST", `/api/projects/
 const done = (f, id) => f.until(id, view => view.state === "done", "finished film");
 
 for (const kind of ["image", "video", "speech"]) test(`${kind}: shot is bounded metadata excluded from identity`, () => {
-  const plain = normalizeStepInput(kind, { prompt: "x" });
+  const input = { prompt: "x", ...(kind === "video" ? { aspectRatio: "16:9" } : {}) };
+  const plain = normalizeStepInput(kind, input);
   for (const shot of ["opening", "another", "x".repeat(120)]) {
-    const annotated = normalizeStepInput(kind, { prompt: "x", shot });
+    const annotated = normalizeStepInput(kind, { ...input, shot });
     assert.deepEqual(annotated, plain);
     assert.equal(stepKey(kind, annotated), stepKey(kind, plain));
   }
@@ -92,7 +93,7 @@ test("ingested clip and render get owned, probed first-frame posters at their ex
   const f=await realCodeFixture(t); wireCodePlans(f.service,f.plans);
   await f.submit(realSource); await f.finish();
   const token='n4-offline-poster-content-token',app=createApp({service:f.service,codePlans:f.plans,localToken:token});t.after(()=>app.close());
-  const view=f.plans.view(f.project.id); assert.equal(view.steps.length,3); assert.equal(view.spentMicros,"100000");
+  const view=f.plans.view(f.project.id); assert.equal(view.steps.length,3); assert.equal(view.spentMicros,"60000");
   assert.equal(f.execution.attempts(f.project.id).length,3);
   const movies=view.steps.filter(s=>s.kind==='video'||s.kind==='render'); assert.equal(movies.length,2);
   for(const step of movies) {
@@ -122,7 +123,7 @@ test("a poster tool failure leaves both clip and render succeeded and is not ret
   f.mediaRuntime.localMedia.poster=async()=>{calls++;throw new DomainError('MEDIA_TOOL_FAILED','Synthetic poster failure');};
   await f.submit(realSource);await f.finish();const view=f.plans.view(f.project.id);
   assert.equal(view.state,'done');assert.ok(view.steps.every(s=>s.state==='succeeded'));assert.ok(view.steps.every(s=>!s.poster));
-  assert.equal(calls,2);await f.tick();assert.equal(calls,2);assert.equal(view.spentMicros,'100000');
+  assert.equal(calls,2);await f.tick();assert.equal(calls,2);assert.equal(view.spentMicros,'60000');
 });
 
 test("historical poster backfill attempts at most one clip per tick across films, and skips durable failures", async t => {

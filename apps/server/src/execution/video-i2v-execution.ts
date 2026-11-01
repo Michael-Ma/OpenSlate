@@ -18,7 +18,7 @@ import { ProtectedVideoDownloader } from "./video-download.js";
 
 type Submit = VideoSubmit;
 interface Identity { id: string; projectId: string; attemptId: string; requestDigest: string }
-interface Mapping extends Identity { bodySha256: string; firstFrame: { sha256: string; width: number; height: number }; lastFrameSha256: string | null }
+interface Mapping extends Identity { bodySha256: string; firstFrame?: { sha256: string; width: number; height: number }; lastFrameSha256: string | null; references?: { sha256: string; width: number; height: number }[]; mode?: string }
 interface Dispatch extends Identity { mappingDigest: string; createdAt: number }
 interface Submission extends Identity { dispatchDigest: string | null; observation: Submit }
 interface Terminal extends Identity { dispatchDigest: string; taskId: string; result: { kind: "completed"; outputReceiptId: string; lastFrame: { locator: string; expiresAt: string } | null; completionTokens: number | null; actualCostMicros: string | null }
@@ -83,17 +83,21 @@ export class VideoI2vExecution implements ExecutionProvider {
     let body: string, mapping: Mapping, transport: SeedanceProvider | FalVideoProvider;
     try {
       stopped(signal); assertCodePlanFirstDispatch(this.store,attempt,options.expectedLease);
-      check(request.inputs.length >= 1 && request.inputs.length <= 2 && request.inputs.every(row => row.kind === "image"
-        && (row.sha256 === request.args.firstFrameSha256 || row.sha256 === request.args.lastFrameSha256)));
-      const firstFrame = await this.frame(attempt,String(request.args.firstFrameSha256),signal);
+      const referenceHashes = Array.isArray(request.args.references) ? request.args.references as string[] : undefined;
+      const hashes = [request.args.firstFrameSha256, request.args.lastFrameSha256, ...(referenceHashes ?? [])].filter((hash): hash is string => typeof hash === "string");
+      check(request.inputs.length === new Set(hashes).size && request.inputs.every(row => row.kind === "image" && hashes.includes(row.sha256)));
+      const firstFrame = request.args.firstFrameSha256 ? await this.frame(attempt,String(request.args.firstFrameSha256),signal) : undefined;
       const lastFrame = request.args.lastFrameSha256 ? await this.frame(attempt,String(request.args.lastFrameSha256),signal) : undefined;
+      const references = referenceHashes ? await Promise.all(referenceHashes.map(hash => this.frame(attempt, hash, signal))) : undefined;
       const model = request.profile!.configuration.model, settings = request.args.settings as never;
-      body = this.adapter === "seedance" ? seedanceBody({ model, prompt:String(request.args.prompt), seconds:Number(request.args.durationFrames)/30, settings, firstFrame,
-        ...(lastFrame ? {lastFrame} : {}), ...(request.args.seed === undefined ? {} : {seed:Number(request.args.seed)}) })
+      body = this.adapter === "seedance" ? seedanceBody({ model, prompt:String(request.args.prompt), seconds:Number(request.args.durationFrames)/30, settings,
+        ...(firstFrame ? {firstFrame} : {}), ...(references ? {references} : {}), ...(lastFrame ? {lastFrame} : {}), ...(request.args.seed === undefined ? {} : {seed:Number(request.args.seed)}) })
         : falVideoBody({ model, prompt:String(request.args.prompt), seconds:Number(request.args.durationFrames)/30, settings,
-          imageUrl:`data:image/png;base64,${firstFrame.bytes.toString("base64")}`, ...(lastFrame ? {lastFrameUrl:`data:image/png;base64,${lastFrame.bytes.toString("base64")}`} : {}),
+          imageUrl:`data:image/png;base64,${firstFrame!.bytes.toString("base64")}`, ...(lastFrame ? {lastFrameUrl:`data:image/png;base64,${lastFrame.bytes.toString("base64")}`} : {}),
           ...(request.args.seed === undefined ? {} : {seed:Number(request.args.seed)}) });
-      mapping = { ...this.identity(attempt), bodySha256: hash(body), firstFrame: { sha256:String(request.args.firstFrameSha256), width:firstFrame.width,height:firstFrame.height }, lastFrameSha256: request.args.lastFrameSha256 as string ?? null };
+      mapping = { ...this.identity(attempt), bodySha256: hash(body), ...(firstFrame ? {firstFrame: { sha256:String(request.args.firstFrameSha256), width:firstFrame.width,height:firstFrame.height }} : {}),
+        ...(references ? {references: references.map((image, index) => ({sha256:referenceHashes![index]!, width:image.width, height:image.height}))} : {}),
+        lastFrameSha256: request.args.lastFrameSha256 as string ?? null, mode: references ? "reference" : lastFrame ? "first_last_frame" : firstFrame ? "first_frame" : "text" };
       transport = this.transport(request); stopped(signal);
     } catch { return this.refuse(attempt,options,signal?.aborted ? "VIDEO_NOT_SUBMITTED" : "VIDEO_INPUT_OR_CREDENTIAL_INVALID"); }
     let claimed = false;

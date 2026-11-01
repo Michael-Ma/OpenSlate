@@ -1,3 +1,4 @@
+import { viggleFreeFailure } from "../execution/viggle-h3-execution.js";
 import { videoI2vFailure } from "../execution/video-i2v-execution.js";
 import { createHash } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
@@ -68,12 +69,15 @@ export class CodePlanExecution {
   models(projectId: string): Record<string, CodePlanModel> { return projectModels(this.store, projectId, this.catalog); }
 
   normalizeVideoInput(projectId: string, input: JsonObject, model: CodePlanModel): JsonObject {
+    const records = this.store.list<ArtifactRecord>("artifact", projectId);
+    const refs = [input.firstFrame, input.lastFrame, ...(Array.isArray(input.references) ? input.references : [])].filter(ref => ref !== undefined);
+    const owned = refs.map(ref => {
+      const frame = ref && typeof ref === "object" && !Array.isArray(ref) && records
+        .find(row => row.projectId === projectId && row.artifact.kind === "image" && row.artifact.sha256 === ref.sha256);
+      invariant(frame, "CODE_PLAN_ARTIFACT_INVALID", "Video requires owned images of this film"); return frame;
+    });
     if (!model.profile) return input;
-    const ref = input.firstFrame;
-    const frame = ref && typeof ref === "object" && !Array.isArray(ref) && this.store.list<ArtifactRecord>("artifact", projectId)
-      .find(row => row.artifact.kind === "image" && row.artifact.sha256 === ref.sha256);
-    invariant(frame, "CODE_PLAN_ARTIFACT_INVALID", "Video requires an owned first frame");
-    return videoAspect(input, model.profile, frame);
+    return videoAspect(input, model.profile, owned[0]);
   }
 
   private ready(projectId: string, input: JsonObject, kind: CodePlanMediaKind): CodePlanModel {
@@ -140,7 +144,7 @@ export class CodePlanExecution {
     const input = structuredClone(normalizedInput), model = this.ready(projectId, input, kind);
     const profile = model.profile;
     const lock = profile ? this.store.get<CodePlanCapabilityLock>("capability_lock", this.store.getProject(projectId).capabilityLockId)! : undefined;
-    const args = profile ? codePlanProviderArgs(profile, input) : input;
+    const args = profile ? codePlanProviderArgs(profile, input, { enhance: false }) : input;
     const realRender = kind === "render" && this.store.get<CodePlanCapabilityLock>("capability_lock", this.store.getProject(projectId).capabilityLockId)?.profiles.some(row => row.adapter !== "fake");
     invariant(!realRender || this.localExecutor, "CODE_PLAN_RENDER_UNAVAILABLE", "Real projects require the installed local media executor");
     const prepared = this.store.transaction(() => {
@@ -316,12 +320,16 @@ export class CodePlanExecution {
         { attemptId: id, outcome, outcomeDigest: evidenceDigest, recordedAt: new Date().toISOString() });
       const phase = outcome.type === "completed" ? "ingesting" : outcome.type === "accepted" ? "remote_pending"
         : outcome.type === "unknown" ? "submission_unknown" : "failed";
-      const freeFailure = outcome.type === "failed" ? (() => { const row = videoI2vFailure(this.store, attempt); return row?.free ? row : null; })() : null;
+      const freeFailure = outcome.type === "failed" ? (() => {
+        const row = videoI2vFailure(this.store, attempt);
+        if (row?.free) return row;
+        return viggleFreeFailure(this.store, attempt) ? { code: "VIGGLE_TASK_FAILED", free: true } : null;
+      })() : null;
       const failure = outcome.type === "failed" || outcome.type === "rejected" ? { id: outcome.failureId, technical: outcome.technical,
         // A free vendor failure (not a content refusal) cannot charge twice, so it may retry as safely as a rejection.
         retryAllowed: outcome.type === "rejected" ? outcome.retryAllowed : !!freeFailure && !/FACE|MODERATION/.test(freeFailure.code),
         source: `${attempt.request.execution.adapter}_provider` } : null;
-      // Rejections and request-bound Seedance free-task failures positively release liability.
+      // Rejections and validated free terminal tasks positively release liability.
       const liability: CodePlanLiability = outcome.type === "rejected" || freeFailure ? "released"
         : outcome.type === "completed" || outcome.type === "failed" ? "charged" : record.liability;
       this.store.put("code_plan_execution", id, attempt.projectId, { ...record, liability, outcome, outcomeDigest: digest(outcome), updatedAt: new Date().toISOString() });

@@ -24,7 +24,7 @@ export function codePlanAssets(store: Store, project: ProjectRecord): AssetItem[
   const scenes = new Map((run?.declarations.scenes ?? []).map(scene => [scene.id, scene]));
   const produced = new Map(steps.filter(step => step.state === "succeeded" && step.result?.ok)
     .flatMap(step => step.result?.ok ? [step.result.artifact, ...step.result.artifacts].map(ref => [ref.artifactId, step] as const) : []));
-  const videoFrames = new Set(steps.filter(step => step.kind === "video" && reached.has(step.key)).map(step => object(step.input.firstFrame).sha256));
+  const videoFrames = new Set(steps.filter(step => step.kind === "video" && reached.has(step.key)).flatMap(step => [step.input.firstFrame, ...(Array.isArray(step.input.references) ? step.input.references : [])].map(frame => object(frame).sha256)));
   const labels = new Map(store.list<AudioLabel>("audio_library_label", projectId).map(row => [row.id, row]));
   const metadata = new Map(store.list<{ id: string; createdAt: string }>("asset_metadata", projectId).map(row => [row.id, row.createdAt]));
   const audio = new Map(store.list<NarrationAudio>("narration_audio", projectId).map(row => [row.id, row]));
@@ -42,7 +42,7 @@ export function codePlanAssets(store: Store, project: ProjectRecord): AssetItem[
     const group = `${shotId ?? ""}:${role}`, numbered = role === "keyframe" || role === "clip", takeIndex = (counts.get(group) ?? 0) + 1;
     if (numbered) counts.set(group, takeIndex);
     const ref = record.artifact, frameChoices = step?.kind === "image" ? choices.filter(choice => choice.options.some(option => sameImage(option, { ...ref }))) : [];
-    const current = !!step && reached.has(step.key) && (step.kind !== "image" || frameChoices.length === 0
+    const current = ref.kind === "image" && videoFrames.has(ref.sha256) || !!step && reached.has(step.key) && (step.kind !== "image" || frameChoices.length === 0
       || frameChoices.some(choice => sameImage(choice.answer, { ...ref })) || videoFrames.has(ref.sha256));
     const poster = media.posters.get(record.id), size = pictureSize(ref.kind === "image" ? record : poster);
     const document = role === "document" ? record as SuppliedDocumentArtifact : undefined;

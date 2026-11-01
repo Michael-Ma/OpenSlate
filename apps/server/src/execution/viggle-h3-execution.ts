@@ -54,6 +54,19 @@ export function completedViggleTask(store: Store, attempt: Attempt): string | nu
   } catch { /* Invalid historical metadata cannot supply evidence of completion. */ }
   return null;
 }
+/** Only a validated failed/cancelled vendor task releases its code-plan liability. */
+export function viggleFreeFailure(store: Store, attempt: Attempt): boolean {
+  if (attempt.request.execution.adapter !== "viggle-h3") return false;
+  const mapping = store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id);
+  const dispatch = store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id);
+  const submit = store.get<ViggleH3ExecutionSubmit>("viggle_h3_execution_submit", attempt.id);
+  if (!mapping || !dispatch || !submit || completedViggleTask(store, attempt)) return false;
+  assertViggleMappingAdmission(resolveViggleAdmission(store, attempt.request, mapping), mapping);
+  return viggleObservations(store, attempt).some(row => {
+    if (!["failed", "cancelled"].includes(row.observation.kind)) return false;
+    assertViggleH3ExecutionObservation(attempt, mapping, dispatch, submit, row); return true;
+  });
+}
 export function viggleHasCompletedObservation(store: Store, attempt: Attempt): boolean {
   return completedViggleTask(store, attempt) !== null;
 }
@@ -92,12 +105,12 @@ export class ViggleH3Execution implements ExecutionProvider {
     let prepared: ViggleH3Request, mapping: ViggleH3ExecutionMapping;
     try {
       const savedMapping = this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id);
-      const admission = resolveViggleAdmission(this.#store, request, savedMapping), frame = resolveViggleFrame(this.#store, attempt, savedMapping?.firstFrame);
-      stopped(signal); const preparation = await this.prepare(attempt, signal, frame); stopped(signal);
+      const admission = resolveViggleAdmission(this.#store, request, savedMapping);
+      stopped(signal); const preparation = await this.prepare(attempt, signal); stopped(signal);
       prepared = preparation.request;
       const proposed: ViggleH3ExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
         profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile, capabilityLockId: admission.capabilityLock.id,
-        capabilityLockDigest: digest(admission.capabilityLock), estimatedMicros: admission.reservation.micros, firstFrame: viggleFramePin(frame),
+        capabilityLockDigest: digest(admission.capabilityLock), estimatedMicros: admission.reservation.micros, ...preparation.pins,
         ...(preparation.crop ? { firstFrameCrop: preparation.crop } : {}), transport: describeViggleH3Request(prepared) };
       assertViggleH3ExecutionMapping(attempt, proposed);
       mapping = this.#store.transaction(() => {
@@ -382,11 +395,7 @@ export class ViggleH3Execution implements ExecutionProvider {
     return { type: "accepted", taskId: observation.taskId };
   }
 
-  private async prepare(attempt: Attempt, signal: AbortSignal | undefined, captured: ViggleFrameEvidence): Promise<{ request: ViggleH3Request; crop?: PngCenterCrop }> {
-    const request = attempt.request, configuration = request.profile!.configuration;
-    const admission = resolveViggleAdmission(this.#store, request, this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id));
-    assertViggleH3OperationOptions(admission.profile, request.args);
-    const reference = request.inputs[0]!, record = structuredClone(captured.artifact);
+  private async readImage(record: ViggleFrameEvidence["artifact"], signal?: AbortSignal): Promise<Buffer> {
     invariant(isAbsolute(record.path), "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG must have an owned absolute path");
     const path = await realpath(record.path), child = relative(this.#root, path);
     invariant(path === record.path && child.length > 0 && child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child),
@@ -396,21 +405,45 @@ export class ViggleH3Execution implements ExecutionProvider {
       const stat = await file.stat(); invariant(stat.isFile() && stat.size === record.byteLength, "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG size changed");
       bytes = Buffer.alloc(stat.size + 1); let size = 0;
       while (size < bytes.length) { stopped(signal); const read = await file.read(bytes, size, bytes.length - size, null); if (!read.bytesRead) break; size += read.bytesRead; }
-      invariant(size === stat.size && createHash("sha256").update(bytes.subarray(0, size)).digest("hex") === reference.sha256,
+      invariant(size === stat.size && createHash("sha256").update(bytes.subarray(0, size)).digest("hex") === record.artifact.sha256,
         "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG bytes changed"); bytes = bytes.subarray(0, size);
     } finally { await file.close(); }
     stopped(signal);
     invariant(bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
       && bytes.readUInt32BE(16) === record.width && bytes.readUInt32BE(20) === record.height,
     "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG dimensions differ from their validated record");
-    assertViggleH3FirstFrameAspect(request.args, record.width, record.height);
+    return bytes;
+  }
+
+  private async prepare(attempt: Attempt, signal?: AbortSignal): Promise<{ request: ViggleH3Request; crop?: PngCenterCrop;
+    pins: Pick<ViggleH3ExecutionMapping, "firstFrame" | "lastFrame" | "references"> }> {
+    const request = attempt.request, configuration = request.profile!.configuration;
+    const admission = resolveViggleAdmission(this.#store, request, this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id));
+    assertViggleH3OperationOptions(admission.profile, request.args);
     const aspectRatio = viggleH3RequestAspect(request.args, request.profile!);
-    const upload = centerCropPng(bytes, aspectRatio);
-    const width = upload.crop?.width ?? record.width!, height = upload.crop?.height ?? record.height!;
-    return { ...(upload.crop ? { crop: upload.crop } : {}), request: { prompt: String(request.args.prompt), durationSeconds: Number(request.args.durationFrames) / 30,
+    const pins: Pick<ViggleH3ExecutionMapping, "firstFrame" | "lastFrame" | "references"> = {};
+    let crop: PngCenterCrop | undefined;
+    const image = async (sha256: string, first = false) => {
+      const ref = request.inputs.find(row => row.kind === "image" && row.sha256 === sha256);
+      invariant(ref, "VIGGLE_H3_EXECUTION_CONFLICT", "Missing owned image input");
+      const frame = resolveViggleFrame(this.#store, attempt, undefined, ref), record = frame.artifact;
+      const bytes = await this.readImage(record, signal);
+      if (first) assertViggleH3FirstFrameAspect(request.args, record.width, record.height);
+      const upload = first ? centerCropPng(bytes, aspectRatio) : { bytes };
+      if ("crop" in upload) crop = upload.crop;
+      return { pin: viggleFramePin(frame), upload: { bytes: upload.bytes, sha256: createHash("sha256").update(upload.bytes).digest("hex"),
+        width: first && crop ? crop.width : record.width!, height: first && crop ? crop.height : record.height!, byteLength: upload.bytes.length, mediaType: "image/png" as const } };
+    };
+    const prepared: ViggleH3Request = { prompt: String(request.args.prompt), durationSeconds: Number(request.args.durationFrames) / 30,
       resolution: configuration.settings!.resolution as ViggleH3Resolution, quality: configuration.settings!.quality as ViggleH3Quality,
-      aspectRatio, watermark: false,
-      firstFrame: { bytes: upload.bytes, sha256: createHash("sha256").update(upload.bytes).digest("hex"), width, height,
-        byteLength: upload.bytes.length, mediaType: "image/png" } } };
+      aspectRatio, watermark: false, ...(request.args.enhance === false ? { enhance: false } : {}) };
+    if (Array.isArray(request.args.references)) {
+      pins.references = []; prepared.references = [];
+      for (const hash of request.args.references) { const result = await image(String(hash)); pins.references.push(result.pin); prepared.references.push(result.upload); }
+    } else if (request.inputs.length) {
+      const first = await image(request.inputs[0]!.sha256, true); pins.firstFrame = first.pin; prepared.firstFrame = first.upload;
+      if (request.args.lastFrameSha256) { const last = await image(String(request.args.lastFrameSha256)); pins.lastFrame = last.pin; prepared.lastFrame = last.upload; }
+    }
+    return { request: prepared, pins, ...(crop ? { crop } : {}) };
   }
 }
