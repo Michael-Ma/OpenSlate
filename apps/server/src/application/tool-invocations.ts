@@ -1,3 +1,4 @@
+import { readClipFrames, type ClipFramesInput } from "../code-plan/clip-frames.js";
 import type { DirectorGenerationEffectRecord } from "./director-generation-effects.js";
 import { hasDirectorAudioAttachment, startDirectorAttachmentTranscription, readDirectorAttachmentTranscription, type DirectorAttachmentTranscriptionRecord } from "./director-attachment-transcription.js";
 import { makeDirectorKeyframes, type DirectorKeyframesReceipt } from "./director-keyframes.js";
@@ -263,17 +264,30 @@ export class ToolInvocationService {
       return null;
     });
     if (existing) {
-      if (existing.state === "succeeded") return existing.result;
+      if (existing.state === "succeeded") {
+        if (parsed.name === "read_clip_frames") {
+          const rebuilt = await readClipFrames(store, projectId, parsed.arguments as unknown as ClipFramesInput, { ...(signal ? { signal } : {}) });
+          this.service.assertActor(projectId, actor);
+          return { content: rebuilt.content };
+        }
+        return existing.result;
+      }
       if (existing.state === "failed" && existing.error) throw new DomainError(existing.error.code, existing.error.message, existing.error.details);
       throw new DomainError("TOOL_CALL_UNRESOLVED", "Earlier tool work may have taken effect; reconcile application receipts before continuing");
     }
 
     let value: unknown;
+    let imageContent: Awaited<ReturnType<typeof readClipFrames>>["content"] | undefined;
     try {
       stopped();
       if (store.get("plan_import", actor.requestId)) invariant(["read_context", "prepare_change", "inspect_artifact", "control_execution", "read_guidance"].includes(parsed.name),
         "IMPORT_REVIEW_REQUIRED", "Interpret supplied material with prepare_change, then wait for human confirmation in Film plan. Other mutations and generation proposals are unavailable for this request.");
       switch (parsed.name) {
+        case "read_clip_frames": {
+          const sheet = await readClipFrames(store, projectId, parsed.arguments as unknown as ClipFramesInput, { ...(signal ? { signal } : {}) });
+          stopped(); this.service.assertActor(projectId, actor);
+          value = sheet.metadata; imageContent = sheet.content; break;
+        }
         case "read_film": value = readCodeFilm(this.service, projectId); break;
         case "set_spend_limit": case "retry_step":
           value = changeCodeFilm(this.service, projectId, actor, id, parsed.name, parsed.arguments as unknown as { quote: string; ceilingMicros?: string; stepKey?: string }); break;
@@ -401,7 +415,7 @@ export class ToolInvocationService {
       invariant(Buffer.byteLength(encoded) <= TOOL_RESULT_MAX_BYTES, "TOOL_RESULT_TOO_LARGE", "Tool result exceeds the transport receipt limit");
       const result = JSON.parse(encoded) as JsonValue;
       this.finish(id, projectId, "succeeded", result, null);
-      return result;
+      return imageContent ? { content: imageContent } : result;
     } catch {
       // The domain command may already have committed. Never automatically replay it.
       this.finish(id, projectId, "unresolved", null, { code: "TOOL_CALL_UNRESOLVED", message: "Result could not be recorded; reconcile domain receipts" });
@@ -421,7 +435,7 @@ export class ToolInvocationService {
           this.reconcileCodePlan(projectId, call, epoch); continue;
         }
         let receipt: unknown = null;
-        if ((call.tool === "set_spend_limit" || call.tool === "retry_step") && call.toolContractVersion === "0.2.0") {
+        if ((call.tool === "set_spend_limit" || call.tool === "retry_step") && isCodePlanToolContract(call.toolContractVersion)) {
           const saved = store.get<{ projectId: string; requestId: string; epochId: string; tool: string; argumentsDigest: string; result: unknown }>("code_plan_director_change", call.id);
           if (saved?.projectId === projectId && saved.requestId === epoch.requestId && saved.epochId === epochId
             && saved.tool === call.tool && saved.argumentsDigest === call.argumentsDigest) receipt = saved.result;

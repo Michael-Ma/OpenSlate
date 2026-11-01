@@ -527,3 +527,18 @@ for (const version of ['5.0.0', '6.0.0']) test(`${version} stdio ${version === '
   }
   assert.equal(f.calls.length, version === '6.0.0' ? 2 : 0, 'only the two exact current-contract inputs reach the application');
 });
+
+
+test('0.3.0 stdio transports real text plus JPEG image blocks through the loopback bridge', async t => {
+  const content = [{ type: 'text', text: JSON.stringify({ frames: [0, 15], sheet: { sha256: 'a'.repeat(64), byteLength: 4 } }) },
+    { type: 'image', mimeType: 'image/jpeg', data: Buffer.from([255, 216, 255, 217]).toString('base64') }];
+  const f = await fixture(t, (_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ content })); });
+  const child = await childFixture(t, { ...f.options, toolContractVersion: '0.3.0' });
+  await child.initialize();
+  const list = await child.request('tools/list', {}).response;
+  assert.deepEqual(list.result.tools.map(tool => tool.name), toolCatalog('0.3.0').names);
+  const response = await child.request('tools/call', { name: 'read_clip_frames', arguments: { artifactId: 'clip', everyFrames: 15 } }).response;
+  assert.equal(response.result.isError, false); assert.deepEqual(response.result.content, content);
+  assert.equal(f.calls.length, 1); assert.deepEqual(f.calls[0].body, { artifactId: 'clip', everyFrames: 15 });
+  for (const version of ['0.1.0', '0.2.0']) assert.throws(() => parseToolArguments('read_clip_frames', { artifactId: 'clip' }, version), { code: 'NOT_FOUND' });
+});
