@@ -82,10 +82,7 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
               <button key={option.index} type="button" className={`cp-thumb${option.chosen ? " chosen" : ""}`} data-kind={option.artifact.kind}
                 data-act="code-plan-look" data-option={option.index} aria-pressed={option.chosen}
                 aria-label={t(card.answered ? "codeplan.choice.look_done" : "codeplan.choice.look", { option: name })} onClick={() => setComparing(option.index)}>
-                <span className="cp-thumb-pic">
-                  {option.artifact.kind !== "video" ? <Picture artifact={option.artifact} alt="" /> : option.poster ? <Picture artifact={option.poster} alt="" /> : null}
-                  {option.artifact.kind === "video" ? <span className="cp-thumb-play" aria-hidden="true">▶</span> : null}
-                </span>
+                <ThumbPicture artifact={option.artifact} poster={option.poster} />
                 <span className="cp-thumb-label">{name}</span>
                 {option.chosen ? <span className="cp-chosen-mark" aria-hidden="true">✓ {t("codeplan.choice.chosen")}</span> : null}
               </button>
@@ -156,6 +153,18 @@ function ChoiceCompare({ card, focus, off, offTitle, onChoose, onClose }: {
         })}
       </div>
     </Modal>
+  );
+}
+
+/** A portrait frame fills its thumbnail instead of sitting small between bars. */
+function ThumbPicture({ artifact, poster }: { artifact: NonNullable<ChoiceOption["artifact"]>; poster: ChoiceOption["poster"] }) {
+  const shape = useNaturalAspect();
+  const picture = artifact.kind !== "video" ? artifact : poster;
+  return (
+    <span className="cp-thumb-pic" style={shape.style}>
+      {picture ? <Picture artifact={picture} alt="" onDecoded={shape.onDecoded} /> : null}
+      {artifact.kind === "video" ? <span className="cp-thumb-play" aria-hidden="true">▶</span> : null}
+    </span>
   );
 }
 

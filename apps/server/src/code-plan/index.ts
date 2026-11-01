@@ -10,6 +10,7 @@ import { InstallationRecoveryGuard } from "../application/installation-recovery.
 import { CodePlanExecution } from "./execution.js";
 import { CODE_PLAN_MODELS, normalizeStepInput, stepKey } from "./identity.js";
 import type { CodePlanMediaKind, CodePlanModel } from "./identity.js";
+import { CODE_PLAN_REVIEW_TURNS } from "./records.js";
 import type { CodePlanChoice, CodePlanReview, CodePlanHold, CodePlanInvocation, CodePlanRun, CodePlanSettings, CodePlanStep, CodePlanVersion } from "./records.js";
 import { runSandbox, SANDBOX_PENDING } from "./sandbox.js";
 import type { SandboxResult } from "./sandbox.js";
@@ -364,7 +365,7 @@ export class CodePlanRuntime implements CodePlanPort {
         const clipsDigest = digest(owned), id = entityId(projectId, digest({ reviewId, clipsDigest }));
         if (!reviewKeys.includes(id)) reviewKeys.push(id);
         let review = this.store.get<CodePlanReview>("code_plan_review", id);
-        const capped = this.store.list<CodePlanReview>("code_plan_review", projectId).filter(row => row.requestId).length >= 3;
+        const capped = this.store.list<CodePlanReview>("code_plan_review", projectId).filter(row => row.requestId).length >= CODE_PLAN_REVIEW_TURNS;
         if (!review) {
           review = { id, projectId, reviewId, clipsDigest, clips: owned, note, state: capped ? "done" : "waiting",
             ...(capped ? { skipped: true } : {}), createdAt: stamp(), updatedAt: stamp() };
@@ -373,7 +374,7 @@ export class CodePlanRuntime implements CodePlanPort {
           review = { ...review, note, updatedAt: stamp() };
           this.store.put("code_plan_review", id, projectId, review);
         }
-        const line = review.skipped ? `Review ${reviewId} skipped: three review turns already used.`
+        const line = review.skipped ? `Review ${reviewId} skipped: all ${CODE_PLAN_REVIEW_TURNS} review turns already used.`
           : review.state === "failed" ? `Review ${reviewId} failed; continuing the film.` : undefined;
         if (line && !logs.includes(line)) logs.push(line);
         return review.state === "done" || review.state === "failed" ? null : SANDBOX_PENDING;

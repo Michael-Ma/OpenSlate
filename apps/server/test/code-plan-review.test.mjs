@@ -60,17 +60,17 @@ test('review stops execution, starts one fake turn, transports pictures, trims, 
   assert.equal(f.store.list('code_plan_review_request', id).length, 1); assert.equal(purchases(f).length, bought);
 });
 
-test('retakes get new review identities; only three turns are allowed and the fourth logs and continues', async t => {
+test('retakes get new review identities; only four turns are allowed and the fifth logs and continues', async t => {
   const { f, id } = await fixture(t); let turns = 0;
   f.director.fake.runtime.start = async input => { turns++; return completed(input); };
-  for (let take = 1; take <= 4; take++) {
+  for (let take = 1; take <= 5; take++) {
     await submit(f, id, plan(String(take)));
     const view = await f.until(id, view => view.state === 'done', `take ${take}`);
     assert.equal(view.reviews.length, 1, 'only the latest pass');
-    if (take === 4) assert.equal(view.logs.filter(line => line.includes('three review turns')).length, 1);
+    if (take === 5) assert.equal(view.logs.filter(line => line.includes('all 4 review turns')).length, 1);
   }
-  assert.equal(turns, 3); assert.equal(f.store.list('code_plan_review', id).length, 4);
-  assert.equal(purchases(f).length, 5, 'one reused image and four videos');
+  assert.equal(turns, 4); assert.equal(f.store.list('code_plan_review', id).length, 5);
+  assert.equal(purchases(f).length, 6, 'one reused image and five videos');
 });
 
 test('a repeated read_clip_frames call rebuilds its image but keeps only one metadata receipt', async t => {

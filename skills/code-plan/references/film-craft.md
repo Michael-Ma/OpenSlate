@@ -36,7 +36,7 @@ Models spread action across the whole clip and run late: 1.33 seconds on average
 
 ## References or frames
 
-References stay the video default; describe camera and action because they do not fix the opening. Only where the exact pose is the joke, use `firstFrame`, with `lastFrame` if the landing pose matters, without asking. Honour explicit frame requests too. Use advertised modes; references cannot combine with first/last frames. Preserve unchanged saved calls to reuse media.
+References stay the video default; describe camera and action because they do not fix the opening. Only where the exact pose is the joke, use `firstFrame`, with `lastFrame` if the landing pose matters, without asking. References can also re-frame a shot: in the Tofu test the dog slid to the screen edge and lost half its body. If that happens, retake from the same keyframe with `firstFrame`, which holds the framing and costs less. Honour explicit frame requests too. Use advertised modes; references cannot combine with first/last frames. Preserve unchanged saved calls to reuse media.
 
 ## Watching and cutting
 
@@ -52,7 +52,7 @@ Score each shot and the assembled sequence on five items, 0–2 each: 0 missing/
 | Cut and rhythm | Movement welcomes the cut; the payoff completes and breathes. |
 | Picture integrity | Anatomy, composition and image stability support the beat. |
 
-Repair with a better range or cut first. Retake only for missing action, character drift or no usable range: at most one per shot and two per film. A low score alone does not license generation. Use a stable new variant for quality retakes of completed clips. Failed or unknown submissions follow SKILL.md's failure/consent rules; never disguise retries as retakes. Then render and review the render once for story, cuts, sound and words. Report observed flaws.
+Repair with a better range or cut first. Retake only for missing action, character drift, a subject cut off by the framing, or no usable range: at most one per shot and two per film. A low score alone does not license generation. Use a stable new variant for quality retakes of completed clips. Failed or unknown submissions follow SKILL.md's failure/consent rules; never disguise retries as retakes. Then render and review the render once for story, cuts, sound and words. Report observed flaws.
 
 Use review, frame-reading, captions and sounds only when exposed by the installed contract. Report missing capabilities; never claim to have watched unseen media.
 
