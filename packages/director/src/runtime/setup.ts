@@ -103,7 +103,7 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
     [await realpath(process.execPath)]: "read" }, network: { enabled: false } };
   const config: Record<string, CodexConfigValue> = {
     default_permissions: PROFILE, permissions: { [PROFILE]: profile }, sqlite_home: state, log_dir: logs,
-    model: input.model, model_provider: "openai", model_reasoning_effort: "low", approval_policy: "never", web_search: "disabled",
+    model: input.model, model_provider: "openai", model_reasoning_effort: "high", approval_policy: "never", web_search: "disabled",
     project_doc_max_bytes: 0, "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none",
     "skills.bundled.enabled": false,
     check_for_update_on_startup: false, "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
@@ -191,7 +191,7 @@ async function readModelChoices(rpc: (method: string, params: unknown) => Promis
   let cursor: string | undefined, selected: Record<string, unknown> | undefined;
   const seen = new Set<string>(), identities = new Set<string>(), choices: LocalCodexModelChoice[] = [];
   const supported = (item: Record<string, unknown>) => Array.isArray(item.supportedReasoningEfforts)
-    && item.supportedReasoningEfforts.some(effort => object(effort).reasoningEffort === "low")
+    && item.supportedReasoningEfforts.some(effort => object(effort).reasoningEffort === "high")
     && (item.inputModalities === undefined || Array.isArray(item.inputModalities) && item.inputModalities.includes("text"));
   for (let page = 0; page < 20; page++) {
     const value = object(await rpc("model/list", { limit: 100, includeHidden: true, ...(cursor ? { cursor } : {}) }));
@@ -257,7 +257,7 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
       checking = "model";
       const models = await readModelChoices(rpc, runtime.model); readiness.modelChoices = models.choices;
       requireRuntime(models.selected, "SETUP_MODEL_UNAVAILABLE", "Selected model is absent from the native model catalog");
-      requireRuntime(models.selectedSupported, "SETUP_MODEL_UNSUPPORTED", "Selected model does not advertise the adapter's text and low-effort contract");
+      requireRuntime(models.selectedSupported, "SETUP_MODEL_UNSUPPORTED", "Selected model does not advertise the adapter's text and high-effort contract");
       readiness.checks.model = "passed";
     });
     await session(runtime, cancellation.signal, async rpc => {
@@ -267,7 +267,7 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
       requireRuntime(config.default_permissions === PROFILE && isDeepStrictEqual(normalizePermissionProfile(object(config.permissions)[PROFILE]), normalizePermissionProfile(expected)),
         "SETUP_POLICY_MISMATCH", "Native permission profile differs from the exact local policy");
       requireRuntime(config.model === runtime.model && config.model_provider === "openai" && config.approval_policy === "never" &&
-        config.model_reasoning_effort === "low" && config.web_search === "disabled" && config.check_for_update_on_startup === false &&
+        config.model_reasoning_effort === "high" && config.web_search === "disabled" && config.check_for_update_on_startup === false &&
         object(config.analytics).enabled === false && object(config.feedback).enabled === false && object(config.history).persistence === "none" &&
         config.sqlite_home === runtime.policy.config.sqlite_home && config.log_dir === runtime.policy.config.log_dir &&
         config.project_doc_max_bytes === 0 && object(config.features).code_mode_host === true && object(config.features).skip_host_skill_discovery === true &&

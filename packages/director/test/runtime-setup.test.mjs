@@ -40,6 +40,7 @@ test("setup generates exact local policy using two no-turn sessions and private 
   assert.deepEqual(policy.config.permissions.openslate_local, { network: { enabled: false }, filesystem: {
     ":root": "deny", ":minimal": "read", [f.input.directories.projection]: "read", [f.input.directories.snapshots]: "read",
     [await realpath(process.execPath)]: "read" } });
+  assert.equal(policy.config.model_reasoning_effort, "high");
   assert.equal(policy.config.sqlite_home, join(f.input.directories.storage, "native-state"));
   assert.equal(policy.config["features.default_mode_request_user_input"], true);
   assert.equal(policy.config["skills.bundled.enabled"], false);
@@ -215,7 +216,7 @@ for (const [scenario, code] of [
   ["effort", "SETUP_MODEL_UNSUPPORTED"], ["cursor-loop", "SETUP_MODEL_CATALOG_INVALID"], ["policy", "SETUP_POLICY_MISMATCH"],
   ["mcp-drift", "SETUP_MCP_UNEXPECTED"], ["skill-drift", "SETUP_SKILLS_UNEXPECTED"], ["feature-drift", "SETUP_CONFIG_MISMATCH"],
   ["search-drift", "SETUP_CONFIG_MISMATCH"], ["question-feature-drift", "SETUP_CONFIG_MISMATCH"],
-  ["bundled-skills-drift", "SETUP_CONFIG_MISMATCH"],
+  ["bundled-skills-drift", "SETUP_CONFIG_MISMATCH"], ["effort-drift", "SETUP_CONFIG_MISMATCH"],
   ["skill-error", "SETUP_SKILLS_INVALID"], ["invalid-mcp-name", "SETUP_CATALOG_INVALID"], ["rpc-error", "RUNTIME_RPC_REJECTED"],
   ["hang", "RUNTIME_RPC_TIMEOUT"], ["approval", "SETUP_INTERACTIVE_DENIED"],
   ["duplicate-model", "SETUP_MODEL_CATALOG_INVALID"], ["late-cursor-loop", "SETUP_MODEL_CATALOG_INVALID"],

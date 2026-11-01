@@ -112,6 +112,8 @@ test("fixed launch, exact skills, canonical context and complete lifecycle are m
   const starts = records.filter(row => row.method === "turn/start"); assert.equal(starts.length, 1);
   assert.deepEqual(starts[0].params.input, [{ type: "text", text: f.input.text }, { type: "skill", ...f.input.skills[0] }]);
   assert.equal(starts[0].params.additionalContext, undefined);
+  assert.equal(launch.codeProfile.effort, "high");
+  assert.equal(starts[0].params.effort, "high");
   assert.ok(records.find(row => row.method === "thread/start").params.developerInstructions.endsWith(f.input.context));
   assert.equal(starts[0].params.permissions, "fixture"); assert.equal(starts[0].params.approvalPolicy, "never");
 });
@@ -132,7 +134,8 @@ test("code native launch discovers only its two tools and refuses the graph cata
   assert.equal((await deadline(f.runtime.start(f.input))).status, "completed");
   const records = await f.records();
   const profile = records.find(row => row.kind === "launch").codeProfile;
-  assert.equal(profile.effort, "low");
+  assert.equal(profile.effort, "high");
+  assert.equal(records.find(row => row.method === "turn/start").params.effort, "high");
   assert.deepEqual(profile.tools.sort(), ["read_film", "submit_plan"]);
   assert.equal(profile.shell, false);
   const legacy = await fixture(t, "catalog-legacy");
