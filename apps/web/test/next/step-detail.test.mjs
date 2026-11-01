@@ -32,6 +32,8 @@ test('the provider call lists its settings, the crop and the task for debugging'
     { label: 'firstFrameCrop', value: '941 × 1672 → 936 × 1664' }, { label: 'taskId', value: 'vid_1' }, { label: 'requestDigest', value: 'abc' },
   ]);
   assert.deepEqual(callFacts({ ...detail, call: undefined }), []);
+  const named = { ...detail, call: { adapter: 'codex-image', providerModel: 'gpt-6-astra', settings: { model: 'gpt-6-astra', width: 1024 } } };
+  assert.deepEqual(callFacts(named).map((row) => row.label), ['adapter', 'model', 'width'], 'the model is listed once');
 });
 
 test('money in a reply is picked out, and only money', () => {

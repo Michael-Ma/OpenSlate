@@ -35,7 +35,7 @@ export function callFacts(detail: CodePlanStepDetail): { label: string; value: s
   return [
     { label: "adapter", value: call.adapter },
     ...(call.providerModel ? [{ label: "model", value: call.providerModel }] : []),
-    ...Object.entries(call.settings).map(([label, value]) => ({ label, value: String(value) })),
+    ...Object.entries(call.settings).filter(([label, value]) => !(label === "model" && value === call.providerModel)).map(([label, value]) => ({ label, value: String(value) })),
     ...(crop ? [{ label: "firstFrameCrop", value: `${size(crop.sourceWidth, crop.sourceHeight)} → ${size(crop.width, crop.height)}` }] : []),
     ...(call.taskId ? [{ label: "taskId", value: call.taskId }] : []),
     ...(call.requestDigest ? [{ label: "requestDigest", value: call.requestDigest }] : []),
