@@ -160,7 +160,7 @@ test("imported references are available to compiler review without minting appro
 
 test("invalid format and truncated decode never produce a canonical artifact, and foreign storage is rejected", async t => {
   const f = await fixture(t);
-  for (const bytes of [Buffer.alloc(80), png.subarray(0, 40)]) await assert.rejects(f.app.importImage(f.project.id, f.human, f.input(newId(), bytes)), error => ["IMAGE_INPUT_INVALID", "MEDIA_TOOL_FAILED", "IMAGE_VALIDATION_FAILED"].includes(error.code));
+  for (const bytes of [Buffer.alloc(80), png.subarray(0, 40)]) await assert.rejects(f.app.importImage(f.project.id, f.human, f.input(newId(), bytes)), error => ["IMAGE_INPUT_INVALID", "IMAGE_FORMAT_UNSUPPORTED", "MEDIA_TOOL_FAILED", "IMAGE_VALIDATION_FAILED"].includes(error.code));
   noPublication(f); assert.deepEqual(await readdir(join(f.images.rootDir, "tmp")), []);
   const foreign = new LocalImageStore({ ...f.options, rootDir: join(f.dir, "outside-artifacts") });
   assert.throws(() => new ImageApplicationService(f.production, foreign), code("IMAGE_CONFIGURATION_INVALID"));

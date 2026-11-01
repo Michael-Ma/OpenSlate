@@ -98,12 +98,34 @@ test('concurrent same-image validations share one immutable publication and clea
   assert.deepEqual(await readdir(join(store.rootDir, 'tmp')), []);
 });
 
-test('upload dimensions are bounded before any frame-counting decode', async t => {
+test('uploads above 100 MP are refused before frame decoding', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'openslate-image-probe-limit-')), probe = join(directory, 'probe'), marker = join(directory, 'counted');
   t.after(() => rm(directory, { recursive: true, force: true }));
-  await writeFile(probe, `#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nif (!process.argv.includes('-max_pixels') || process.argv[process.argv.indexOf('-max_pixels') + 1] !== '8294400') process.exit(2);\nif (process.argv.includes('-count_frames')) { writeFileSync(${JSON.stringify(marker)}, 'decoded'); process.exit(1); }\nprocess.stdout.write(JSON.stringify({streams:[{codec_type:'video',width:4096,height:4096}]}));\n`, { mode: 0o700 });
+  await writeFile(probe, `#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nif (!process.argv.includes('-max_pixels') || process.argv[process.argv.indexOf('-max_pixels') + 1] !== '100000000') process.exit(2);\nif (process.argv.includes('-count_frames')) { writeFileSync(${JSON.stringify(marker)}, 'decoded'); process.exit(1); }\nprocess.stdout.write(JSON.stringify({streams:[{codec_type:'video',width:10001,height:10000}]}));\n`, { mode: 0o700 });
   const store = new LocalImageStore({ rootDir: join(directory, 'images'), ffmpegPath, ffprobePath: probe });
   await assert.rejects(store.normalizeUpload({ bytes: jpeg, sha256: sha(jpeg) }), error => error.code === 'IMAGE_VALIDATION_FAILED');
   assert.equal(existsSync(marker), false, 'over-limit image must be rejected before a decode-count probe');
   assert.deepEqual(await readdir(join(store.rootDir, 'blobs')), []); assert.deepEqual(await readdir(join(store.rootDir, 'tmp')), []);
+});
+
+test('upload format selection is content based and SVG is explicitly refused', async t => {
+  const store = await fixture(t);
+  const converted = await store.normalizeUpload({ bytes: jpeg, sha256: sha(jpeg) });
+  assert.equal(converted.mimeType, 'image/png'); assert.equal(converted.width, 320);
+  const exact = await store.normalizeUpload({ bytes: png, sha256: sha(png) });
+  assert.deepEqual(await readFile(exact.path), png);
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect width="20"/></svg>');
+  await assert.rejects(store.normalizeUpload({bytes:svg,sha256:sha(svg)}), error => error.code === 'IMAGE_FORMAT_UNSUPPORTED' && /SVG/.test(error.message));
+  const truncated = jpeg.subarray(0,jpeg.length-20);
+  await assert.rejects(store.normalizeUpload({bytes:truncated,sha256:sha(truncated)}), {code:'IMAGE_VALIDATION_FAILED'});
+});
+
+test('image magic and scaling limits cover every supported format', async () => {
+  const { imageFormat, imageInputArgs, imageSize } = await import('../dist/media/image-input.js');
+  for (const [bytes,name,demuxer] of [[png,'PNG','png_pipe'],[jpeg,'JPEG','jpeg_pipe'],[Buffer.from('GIF89a'),'GIF','gif'],[Buffer.from('BM'),'BMP','bmp_pipe'],[Buffer.from('49492a00','hex'),'TIFF','tiff_pipe']]) {
+    const format=imageFormat(bytes);assert.equal(format.name,name);assert.equal(format.demuxer,demuxer);assert.ok(imageInputArgs(format).includes('-f'));
+  }
+  const ftyp = brand => {const b=Buffer.alloc(24);b.writeUInt32BE(24);b.write('ftyp',4);b.write(brand,8);b.write('mif1',16);return b;};
+  for(const [brand,name] of [['avif','AVIF'],['heic','HEIC'],['mif1','HEIF']]) assert.equal(imageFormat(ftyp(brand)).name,name);
+  assert.deepEqual(imageSize(6000,4000),[3527,2351]);assert.deepEqual(imageSize(4000,6000),[2351,3527]);assert.deepEqual(imageSize(9000,100),[4096,45]);
 });

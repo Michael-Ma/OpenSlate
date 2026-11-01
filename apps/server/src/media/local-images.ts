@@ -4,6 +4,7 @@ import { chmod, link, lstat, mkdtemp, open, readFile, rm } from "node:fs/promise
 import { isAbsolute, join } from "node:path";
 import { DomainError, digest, invariant } from "@openslate/core";
 import { runMediaProcess } from "./process.js";
+import { imageFits, imageFormat, imageInputArgs, IMAGE_MAX_DECODE_PIXELS } from "./image-input.js";
 
 export interface ImageBytesInput {
   bytes: Uint8Array;
@@ -24,7 +25,7 @@ export interface StoredImage {
 }
 const MAX_BYTES = 32 * 1024 * 1024, MAX_PIXELS = 8_294_400;
 const PNG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-const INPUT = ["-protocol_whitelist", "file", "-format_whitelist", "png_pipe"];
+const INPUT = imageInputArgs({ name: "PNG", demuxer: "png_pipe" });
 function cancelled(signal?: AbortSignal): void { invariant(!signal?.aborted, "MEDIA_CANCELLED", "Image validation cancelled"); }
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
@@ -48,39 +49,76 @@ export class LocalImageStore {
   async normalizeUpload(input: { bytes: Uint8Array; sha256: string }, options: { signal?: AbortSignal } = {}): Promise<StoredImage> {
     const signal = options.signal;
     cancelled(signal);
-    invariant(input.bytes instanceof Uint8Array && input.bytes.byteLength > 0 && input.bytes.byteLength <= MAX_BYTES, "IMAGE_INPUT_INVALID", "Choose a PNG, JPEG, WebP or HEIC image of at most 32 MiB");
+    invariant(input.bytes instanceof Uint8Array && input.bytes.byteLength > 0 && input.bytes.byteLength <= MAX_BYTES, "IMAGE_INPUT_INVALID", "Choose a picture of at most 32 MiB");
     const bytes = Buffer.from(input.bytes), sha256 = input.sha256;
     invariant(/^[a-f0-9]{64}$/.test(sha256) && hash(bytes) === sha256, "IMAGE_DIGEST_MISMATCH", "Image bytes differ from the upload receipt");
-    if (bytes.length > 32 && bytes.subarray(0, 8).equals(PNG))
+    const format = imageFormat(bytes);
+    if (format.name === "PNG" && bytes.length > 32 && imageFits(bytes.readUInt32BE(16), bytes.readUInt32BE(20)))
       return this.ingest({ bytes, sha256, mimeType: "image/png", width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }, signal ? { signal } : {});
-    const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-    const webp = bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
-    const heic = bytes.length >= 16 && bytes.toString("ascii", 4, 8) === "ftyp" &&
-      /(?:heic|heix|hevc|hevx|mif1|msf1)/.test(bytes.toString("ascii", 8, Math.min(bytes.length, bytes.readUInt32BE(0), 256)));
-    invariant(jpeg || webp || heic, "IMAGE_INPUT_INVALID", "Choose a PNG, JPEG, WebP or HEIC image");
+    // A missing JPEG EOI can otherwise be silently repaired by the decoder.
+    invariant(format.name !== "JPEG" || bytes.lastIndexOf(Buffer.from([255, 217])) >= 2, "IMAGE_VALIDATION_FAILED", "This JPEG is incomplete. Export it again and retry.");
     const directory = await mkdtemp(join(this.rootDir, "tmp", "normalize-"));
     try {
-      const source = join(directory, `source.${jpeg ? "jpg" : webp ? "webp" : "heic"}`), destination = join(directory, "normalized.png");
+      const source = join(directory, "source"), destination = join(directory, "normalized.png");
       const handle = await open(source, "wx", 0o600);
       try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
-      const inputArgs = ["-protocol_whitelist", "file", "-format_whitelist", jpeg ? "jpeg_pipe" : webp ? "webp_pipe" : "mov,heif", "-max_pixels", String(MAX_PIXELS)];
-      const processOptions = { cwd: directory, timeoutMs: this.timeoutMs, maxOutputBytes: 16384, ...(signal ? { signal } : {}) };
+      const inputArgs = [...imageInputArgs(format), "-max_pixels", String(IMAGE_MAX_DECODE_PIXELS)];
+      const processOptions = { cwd: directory, timeoutMs: this.timeoutMs, maxOutputBytes: 262144, ...(signal ? { signal } : {}) };
       try {
-        // Probe dimensions before frame counting: counting decodes the compressed
-        // image and must not happen for an image beyond the allocation limits.
-        const header = await runMediaProcess(this.ffprobe, ["-v", "error", "-threads", "1", ...inputArgs, "-show_entries", "stream=codec_type,width,height", "-of", "json", source], processOptions);
-        const decoded = JSON.parse(header) as { streams?: Array<{ codec_type?: string; width?: number; height?: number; nb_read_frames?: string }> };
-        const streams = decoded.streams?.filter(stream => stream.codec_type === "video"), frame = streams?.[0];
-        invariant(streams?.length === 1 && frame && Number.isSafeInteger(frame.width) && Number.isSafeInteger(frame.height) &&
-          frame.width! > 0 && frame.height! > 0 && frame.width! <= 4096 && frame.height! <= 4096 && frame.width! * frame.height! <= MAX_PIXELS,
-        "IMAGE_VALIDATION_FAILED", "A reference must decode to one image within the supported dimensions");
-        const counted = JSON.parse(await runMediaProcess(this.ffprobe, ["-v", "error", "-threads", "1", ...inputArgs, "-count_frames", "-show_entries", "stream=codec_type,width,height,nb_read_frames", "-of", "json", source], processOptions)) as typeof decoded;
-        invariant(counted.streams?.length === 1 && counted.streams[0]?.codec_type === "video" && counted.streams[0].width === frame.width && counted.streams[0].height === frame.height && counted.streams[0].nb_read_frames === "1",
-        "IMAGE_VALIDATION_FAILED", "A reference must decode to exactly one image at its probed dimensions");
-        await runMediaProcess(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...inputArgs, "-i", source, "-map", "0:v:0", "-frames:v", "2", "-threads", "1", "-c:v", "png", "-f", "image2", destination], processOptions);
+        // Metadata first: cap decoded allocation before requesting even one frame.
+        // Select only geometry: full per-tile stream metadata exhausts the output
+        // budget on ordinary phone grids containing dozens of tiles.
+        const header = JSON.parse(await runMediaProcess(this.ffprobe, ["-v", "error", "-threads", "1", ...inputArgs,
+          "-show_entries", "stream=index,codec_type,width,height:stream_disposition=default:stream_group=index,type:stream_group_disposition=default:stream_group_component=width,height,coded_width,coded_height,horizontal_offset,vertical_offset:subcomponent=stream_index,tile_horizontal_offset,tile_vertical_offset",
+          "-of", "json=compact=1", source], processOptions)) as {
+            streams?: Array<{ index: number; codec_type?: string; width?: number; height?: number; disposition?: { default?: number } }>;
+            stream_groups?: Array<{ index: number; type?: string; disposition?: { default?: number }; components?: Array<{ width: number; height: number; coded_width: number; coded_height: number; horizontal_offset: number; vertical_offset: number; subcomponents: Array<{ stream_index: number; tile_horizontal_offset: number; tile_vertical_offset: number }> }> }>;
+          };
+        const streams = header.streams?.filter(stream => stream.codec_type === "video");
+        const frame = streams?.find(stream => stream.disposition?.default === 1) ?? streams?.[0];
+        // FFmpeg 8 exposes HEIF tile grids as a complete image stream group.
+        const grids = header.stream_groups?.filter(group => group.type === "Tile Grid");
+        const grid = grids?.find(group => group.disposition?.default === 1) ?? grids?.[0];
+        const geometry = grid?.components?.[0];
+        const width = geometry?.width ?? frame?.width, height = geometry?.height ?? frame?.height;
+        if ((!width || !height) && (format.animated || ["AVIF", "HEIC", "HEIF"].includes(format.name)))
+          throw new DomainError("IMAGE_FORMAT_UNSUPPORTED", `${format.name} pictures are not supported on this computer. Save the first picture as PNG or JPEG and try again.`);
+        invariant(frame && (grid || streams?.length === 1 || (["HEIC", "HEIF"].includes(format.name) && frame.disposition?.default === 1)) && Number.isSafeInteger(width) && Number.isSafeInteger(height) &&
+          width! > 0 && height! > 0 && width! * height! <= IMAGE_MAX_DECODE_PIXELS,
+        "IMAGE_VALIDATION_FAILED", "Pictures must be at most 100 million pixels. Export a smaller copy and retry.");
+        // Autorotation runs before this filter, so EXIF 6 swaps the stored axes.
+        const filter = `scale=w='max(1,floor(iw*min(1,min(4096/max(iw,ih),sqrt(${MAX_PIXELS}/(iw*ih))))))':h='max(1,floor(ih*min(1,min(4096/max(iw,ih),sqrt(${MAX_PIXELS}/(iw*ih))))))'`;
+        let mapping = ["-map", `0:${frame.index}`, "-vf", filter];
+        if (grid) {
+          invariant(geometry && geometry.subcomponents.length > 0 && geometry.subcomponents.length <= 256 &&
+            Number.isSafeInteger(geometry.coded_width) && Number.isSafeInteger(geometry.coded_height) && geometry.coded_width > 0 && geometry.coded_height > 0 &&
+            geometry.coded_width * geometry.coded_height <= IMAGE_MAX_DECODE_PIXELS &&
+            [geometry.horizontal_offset, geometry.vertical_offset].every(n => Number.isSafeInteger(n) && n >= 0) &&
+            geometry.horizontal_offset + width! <= geometry.coded_width && geometry.vertical_offset + height! <= geometry.coded_height,
+          "IMAGE_VALIDATION_FAILED", "This HEIF picture has an invalid or oversized tile grid. Export it as PNG and retry.");
+          const tiles = geometry.subcomponents;
+          for (const tile of tiles) {
+            const stream = streams?.find(s => s.index === tile.stream_index);
+            invariant(stream && Number.isSafeInteger(stream.width) && Number.isSafeInteger(stream.height) && stream.width! > 0 && stream.height! > 0 &&
+              [tile.tile_horizontal_offset, tile.tile_vertical_offset].every(n => Number.isSafeInteger(n) && n >= 0) &&
+              tile.tile_horizontal_offset + stream.width! <= geometry.coded_width && tile.tile_vertical_offset + stream.height! <= geometry.coded_height,
+            "IMAGE_VALIDATION_FAILED", "This HEIF picture has invalid tiles. Export it as PNG and retry.");
+          }
+          invariant(tiles.reduce((sum,t) => { const s = streams!.find(s => s.index === t.stream_index)!; return sum + s.width! * s.height!; },0) <= IMAGE_MAX_DECODE_PIXELS,
+            "IMAGE_VALIDATION_FAILED", "This HEIF picture has too many tile pixels. Export a smaller copy and retry.");
+          const inputs = tiles.map(t => `[0:${t.stream_index}]`).join("");
+          const stack = tiles.length === 1 ? `${inputs}null` : `${inputs}xstack=inputs=${tiles.length}:layout=${tiles.map(t => `${t.tile_horizontal_offset}_${t.tile_vertical_offset}`).join("|")}:fill=black`;
+          mapping = ["-filter_complex", `${stack},crop=${width}:${height}:${geometry.horizontal_offset}:${geometry.vertical_offset},${filter}[picture]`, "-map", "[picture]"];
+        }
+        await runMediaProcess(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1", ...inputArgs,
+          "-i", source, ...mapping, "-frames:v", "1", "-map_metadata", "-1", "-threads", "1", "-c:v", "png", "-f", "image2", destination], processOptions);
       } catch (error) {
-        if (heic && error instanceof DomainError && ["MEDIA_TOOL_FAILED", "IMAGE_VALIDATION_FAILED"].includes(error.code))
-          throw new DomainError("IMAGE_FORMAT_UNSUPPORTED", "This FFmpeg installation cannot decode this HEIC image; choose PNG, JPEG or WebP instead");
+        if (error instanceof DomainError && error.code === "MEDIA_TOOL_FAILED") {
+          const diagnostic = String((error.details as { diagnostic?: string } | undefined)?.diagnostic ?? "");
+          if (format.animated || ["AVIF", "HEIC", "HEIF"].includes(format.name) || /decoder.*not found|decoding.*not supported|unsupported codec/i.test(diagnostic))
+            throw new DomainError("IMAGE_FORMAT_UNSUPPORTED", `This computer cannot read ${format.name} pictures${format.animated ? " (animated WebP is not supported)" : ""}. Save the first picture as PNG or JPEG and try again.`);
+          throw new DomainError("IMAGE_VALIDATION_FAILED", `This ${format.name} picture could not be read. Export it again as PNG or JPEG and retry.`);
+        }
         throw error;
       }
       cancelled(signal);

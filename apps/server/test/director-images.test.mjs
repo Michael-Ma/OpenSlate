@@ -21,10 +21,13 @@ import { createApp } from '../dist/app.js';
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const ffmpegPath = realpathSync(process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync('/opt/homebrew/bin/ffmpeg') ? '/opt/homebrew/bin/ffmpeg' : '/usr/bin/ffmpeg'));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-let inputRoot, png, noisyPng;
+let inputRoot, png, noisyPng, noisyJpeg;
 before(async () => { inputRoot = mkdtempSync(join(tmpdir(), 'openslate-director-image-input-')); const path = join(inputRoot, 'red.png'); await promisify(execFile)(ffmpegPath, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=1280x720', '-frames:v', '1', '-threads', '1', path], { timeout: 15000 }); png = readFileSync(path);
   const noise = join(inputRoot, 'noise.png');
   await promisify(execFile)(ffmpegPath, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'nullsrc=s=768x768,geq=random(1)*255:random(2)*255:random(3)*255', '-frames:v', '1', '-threads', '1', noise], { timeout: 15000 }); noisyPng = readFileSync(noise);
+  const jpeg = join(inputRoot, 'noise.jpg');
+  await promisify(execFile)(ffmpegPath, ['-nostdin','-v','error','-i',noise,'-frames:v','1','-c:v','mjpeg','-q:v','2','-threads','1',jpeg], {timeout:15000});
+  noisyJpeg = readFileSync(jpeg); assert.ok(noisyJpeg.length > 200 * 1024);
 });
 after(() => rmSync(inputRoot, { recursive: true, force: true }));
 function writable(path) { chmodSync(path, 0o755); for (const item of readdirSync(path, { withFileTypes: true })) if (item.isDirectory()) writable(join(path, item.name)); }
@@ -288,4 +291,15 @@ test('a keyframe with disguised SVG bytes cannot select a different input demuxe
  const c=frameContext(f),prepared=await c.projector.prepare(c.input,c.bridge.actor,c.projection);
  assert.equal(prepared.images,undefined);assert.deepEqual(JSON.parse(prepared.context).attachedKeyframes.images,[]);
  assert.equal(JSON.parse(prepared.context).attachedKeyframes.described[0].reason,'image_projection_unavailable');
+});
+
+for (const count of [2, 5]) test(`large JPEG keyframes attach as ${count === 2 ? 'individual pictures' : 'a complete contact sheet'}`, async t => {
+  const f=fixture(t); keyframes(f,count);
+  for (const binding of f.store.list('node_binding',f.project.id)) {
+    const image=f.add(f.project.id,noisyJpeg,{mimeType:'image/jpeg',width:768,height:768});
+    f.store.put('node_binding',binding.id,f.project.id,{...binding,outputs:{image:f.store.get('artifact',image.artifactId).artifact}});
+  }
+  const c=frameContext(f),result=await c.projector.prepare(c.input,c.bridge.actor,c.projection),frames=JSON.parse(result.context).attachedKeyframes;
+  assert.equal(frames.images.length,count);assert.deepEqual(frames.described,[]);assert.equal(result.images.length,count===2?2:1);
+  assert.equal((await prepareDirectorImages(result.images,c.projection)).length,result.images.length);
 });
