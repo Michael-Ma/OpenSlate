@@ -3,7 +3,7 @@ import { msg, type Msg } from "./types.ts";
 
 /**
  * Importing a file into the film's assets through the existing upload routes:
- *   image     POST /images/uploads?expectedHeadVersion=N&name=     (PNG, JPEG, WebP or HEIC, up to 32 MiB)
+ *   image     POST /images/uploads?expectedHeadVersion=N&name=     (PNG, JPEG, WebP, GIF, BMP, TIFF, AVIF, HEIC or HEIF, up to 32 MiB)
  *   video     POST /media/uploads?expectedHeadVersion=N&name=      (up to 128 MiB)
  *   audio     POST /audio-library/uploads?role=music|upload&name=  (up to 128 MiB)
  *   document  POST /documents/uploads?expectedHeadVersion=N&name=  (PDF, TXT or MD, up to 32 MiB)
@@ -18,7 +18,7 @@ export type AudioUse = "music" | "upload";
 
 const MIB = 1024 * 1024;
 /** Everything the studio imports, for a file chooser; the composer takes the same files. */
-export const IMPORT_ACCEPT = "image/png,image/jpeg,image/webp,image/heic,image/heif,video/*,audio/*,application/pdf,text/plain,text/markdown,.png,.jpg,.jpeg,.webp,.heic,.heif,.mp4,.mov,.m4v,.webm,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.pdf,.txt,.md";
+export const IMPORT_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,image/avif,image/heic,image/heif,video/*,audio/*,application/pdf,text/plain,text/markdown,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,.avif,.heic,.heif,.mp4,.mov,.m4v,.webm,.mkv,.avi,.mpeg,.mpg,.flv,.wmv,.3gp,.wav,.mp3,.m4a,.aac,.flac,.ogg,.oga,.opus,.aif,.aiff,.weba,.pdf,.txt,.md";
 export const IMPORT_LIMITS: Readonly<Record<ImportKind, number>> = { image: 32 * MIB, video: 128 * MIB, audio: 128 * MIB, document: 32 * MIB };
 
 export interface ChosenFile {
@@ -59,12 +59,12 @@ export function capabilitiesFrom(images: CapabilityRead | null, audio: Capabilit
 }
 
 const ext = (name: string) => /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase() ?? "";
-const VIDEO_EXT = new Set(["mp4", "mov", "m4v", "webm", "mkv", "avi"]);
+const VIDEO_EXT = new Set(["mp4", "mov", "m4v", "webm", "mkv", "avi", "mpeg", "mpg", "flv", "wmv", "3gp"]);
 const AUDIO_EXT = new Set(["wav", "mp3", "m4a", "aac", "flac", "ogg", "oga", "opus", "aif", "aiff", "weba"]);
 /** Pictures the studio stores (as PNG); other picture formats are refused with a clear reason. */
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/pjpeg", "image/webp", "image/heic", "image/heif"]);
-const IMAGE_OK_EXT = new Set(["png", "jpg", "jpeg", "webp", "heic", "heif"]);
-const IMAGE_OTHER_EXT = new Set(["gif", "bmp", "tif", "tiff", "avif", "svg"]);
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/pjpeg", "image/webp", "image/heic", "image/heif", "image/gif", "image/bmp", "image/x-ms-bmp", "image/tiff", "image/avif"]);
+const IMAGE_OK_EXT = new Set(["png", "jpg", "jpeg", "webp", "heic", "heif", "gif", "bmp", "tif", "tiff", "avif"]);
+const IMAGE_OTHER_EXT = new Set(["svg", "svgz"]);
 const DOCUMENT_TYPES = new Set(["application/pdf", "text/plain", "text/markdown", "text/x-markdown"]);
 const DOCUMENT_EXT = new Set(["pdf", "txt", "md", "markdown"]);
 
@@ -72,8 +72,9 @@ const DOCUMENT_EXT = new Set(["pdf", "txt", "md", "markdown"]);
 export function importKind(file: Pick<ChosenFile, "name" | "type">): ImportKind | "other_image" | null {
   const type = file.type.toLowerCase();
   const extension = ext(file.name);
+  if (type === "image/svg+xml" || IMAGE_OTHER_EXT.has(extension)) return "other_image";
   if (IMAGE_TYPES.has(type) || ((!type || type === "application/octet-stream") && IMAGE_OK_EXT.has(extension))) return "image";
-  if (type.startsWith("image/") || (!type && IMAGE_OTHER_EXT.has(extension))) return "other_image";
+  if (type.startsWith("image/")) return "other_image";
   if (DOCUMENT_TYPES.has(type) || ((!type || type === "application/octet-stream") && DOCUMENT_EXT.has(extension))) return "document";
   if (type.startsWith("video/") || (!type && VIDEO_EXT.has(extension))) return "video";
   if (type.startsWith("audio/") || (!type && AUDIO_EXT.has(extension))) return "audio";
@@ -272,7 +273,7 @@ export function checkLength(kind: ImportKind, seconds: number | null): FileCheck
   return { ok: false, refusal: msg("assets.refusal.too_long_length", { length: clock(seconds) }) };
 }
 
-/** The studio takes PNG images of at most 4096 pixels on a side and 8 294 400 pixels in all (3840 × 2160). */
+/** Stored PNG limits; larger uploads up to 100 MP are scaled by the server. */
 export const PNG_MAX_SIDE = 4096;
 export const PNG_MAX_PIXELS = 8_294_400;
 /** How many bytes from the start of a PNG hold its signature and size. */
@@ -283,16 +284,18 @@ const u32 = (bytes: Uint8Array, at: number) => ((bytes[at]! << 24) >>> 0) + (byt
 
 /**
  * Checked before sending, from the first bytes of a chosen PNG: a real PNG signature and header, and a size in
- * pixels the studio takes. A file whose start cannot be read (null) is left to the studio.
+ * pixels up to the 100 MP decode limit. Non-PNG and unreadable headers are left to the studio.
  */
 export function checkPngHeader(header: Uint8Array | null): FileCheck {
   if (!header) return { ok: true, kind: "image" };
-  const signed = header.length >= PNG_HEADER_BYTES && PNG_SIGNATURE.every((byte, index) => header[index] === byte)
-    && u32(header, 8) === 13 && String.fromCharCode(header[12]!, header[13]!, header[14]!, header[15]!) === "IHDR";
+  // Empty browser MIME types occur for JPEG, HEIC and other supported pictures.
+  // This hook only checks PNG dimensions; content validation belongs to the server.
+  if (!PNG_SIGNATURE.every((byte, index) => header[index] === byte)) return { ok: true, kind: "image" };
+  const signed = header.length >= PNG_HEADER_BYTES && u32(header, 8) === 13 && String.fromCharCode(header[12]!, header[13]!, header[14]!, header[15]!) === "IHDR";
   if (!signed) return { ok: false, refusal: msg("assets.refusal.not_png") };
   const width = u32(header, 16), height = u32(header, 20);
   if (width <= 0 || height <= 0) return { ok: false, refusal: msg("assets.refusal.not_png") };
-  if (width > PNG_MAX_SIDE || height > PNG_MAX_SIDE || width * height > PNG_MAX_PIXELS)
+  if (width * height > 100_000_000)
     return { ok: false, refusal: msg("assets.refusal.png_pixels", { width, height }) };
   return { ok: true, kind: "image" };
 }
@@ -309,10 +312,12 @@ export function refusalMsg(code: string, kind?: ImportKind): Msg {
     case "MEDIA_INPUT_LIMIT":
     case "AUDIO_NORMALIZATION_INPUT_LIMIT":
       return msg("assets.refusal.too_large_server");
+    case "IMAGE_FORMAT_UNSUPPORTED":
+      return msg("assets.refusal.image_format");
     case "IMAGE_INPUT_INVALID":
     case "IMAGE_VALIDATION_FAILED":
     case "IMAGE_EXECUTION_INPUT_INVALID":
-      // The studio says the same for a damaged PNG and one too large in pixels.
+      // The server validates content and scales large pictures before storing PNG.
       return msg("assets.refusal.png_refused");
     case "IMAGE_DIGEST_MISMATCH":
       return msg("assets.refusal.corrupt");
