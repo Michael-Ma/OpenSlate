@@ -546,7 +546,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
           assertOutputReceiptIdentity(value as OutputReceipt, attempt as Attempt);
       } else if ((CODEX_IMAGE_RECORD_KINDS as readonly string[]).includes(row.kind)) {
         fail(value.id === row.id && value.projectId === row.project_id && value.attemptId === row.id, "Native receipt row identity differs"); await codexImage.records(row.id);
-      } else if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule"].includes(row.kind)) {
+      } else if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule", "viggle_h3_submission_settlement"].includes(row.kind)) {
         fail(value.id === row.id && value.projectId === row.project_id
           && (row.kind === "viggle_h3_execution_observation" || row.id === value.attemptId), "Viggle receipt row identity differs");
         await viggle.records(value.attemptId);

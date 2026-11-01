@@ -23,6 +23,8 @@ import type { TranscriptionAudioIntent, TranscriptionAudioReceipt, Transcription
 import { assertSpeechMappingAdmission, resolveSpeechAdmission } from "../execution/audio-execution-authority.js";
 import { assertSpeechSpoolLineage } from "../execution/audio-execution-lineage.js";
 import { assertViggleSpoolLineage } from "../execution/viggle-h3-lineage.js";
+import { VIGGLE_SETTLEMENT_KIND, assertViggleSettlement, assertViggleSettlementTransition, ownedViggleTasks } from "../execution/viggle-h3-settlement.js";
+import type { ViggleSubmissionSettlement } from "../execution/viggle-h3-settlement.js";
 import { assertFalLipSyncDispatch, assertFalLipSyncMapping, assertFalLipSyncObservation, assertFalLipSyncPollSchedule, assertFalLipSyncSubmit, FAL_LIPSYNC_KINDS } from "../execution/fal-lipsync-receipts.js";
 import type { FalLipSyncDispatch, FalLipSyncMapping, FalLipSyncObservation, FalLipSyncPollSchedule, FalLipSyncSubmit } from "../execution/fal-lipsync-receipts.js";
 import { resolveViggleAdmission, assertViggleMappingAdmission } from "../execution/viggle-h3-authority.js";
@@ -574,7 +576,7 @@ export class Store {
         }
       }
     }
-    if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule"].includes(kind)) {
+    if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule", VIGGLE_SETTLEMENT_KIND].includes(kind)) {
       reference("attempt", body.attemptId);
       const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
       const mapping = this.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id), dispatch = this.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id);
@@ -591,6 +593,11 @@ export class Store {
         invariant(!submit || !!dispatch, "VIGGLE_H3_EXECUTION_CONFLICT", "Closed H3 preparation cannot acquire a dispatch");
         assertViggleH3ExecutionDispatch(attempt, mapping!, value as unknown as ViggleH3ExecutionDispatch);
       } else if (kind === "viggle_h3_execution_submit") assertViggleH3ExecutionSubmit(attempt, mapping, dispatch, value as unknown as ViggleH3ExecutionSubmit);
+      else if (kind === VIGGLE_SETTLEMENT_KIND) {
+        reference("viggle_h3_execution_mapping", attempt.id); reference("viggle_h3_execution_dispatch", attempt.id); reference("viggle_h3_execution_submit", attempt.id);
+        assertViggleH3ExecutionSubmit(attempt, mapping, dispatch, submit!);
+        assertViggleSettlement(attempt, dispatch!, submit!, value as unknown as ViggleSubmissionSettlement, ownedViggleTasks(this));
+      }
       else {
         reference("viggle_h3_execution_mapping", attempt.id); reference("viggle_h3_execution_dispatch", attempt.id); reference("viggle_h3_execution_submit", attempt.id);
         if (kind === "viggle_h3_execution_observation") {
@@ -764,6 +771,7 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "H3 execution receipts are immutable");
       if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Viggle execution receipts are immutable");
+      if (kind === VIGGLE_SETTLEMENT_KIND) assertViggleSettlementTransition(JSON.parse(old.body) as ViggleSubmissionSettlement, JSON.parse(encoded) as ViggleSubmissionSettlement);
       if ((CODEX_IMAGE_RECORD_KINDS as readonly string[]).includes(kind)) invariant(old.body === encoded, "IMMUTABLE_RECORD", "Native image receipts are immutable");
       if (kind === "project_model_preview") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Model previews are immutable");
       if (kind === "narration_requested_shot_scope") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Requested shot narration scope is immutable");

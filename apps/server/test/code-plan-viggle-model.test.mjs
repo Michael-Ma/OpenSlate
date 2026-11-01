@@ -175,6 +175,21 @@ test('all four built-in Viggle modes accept both duration boundaries with the N6
   }
 });
 
+test('Viggle priceBasis exposes only the pinned resolution and scalar mode prices', () => {
+  for (const profile of [builtin, legacy, ...['1080p', '2k', '4k'].map(resolution => ({ ...builtin,
+    configuration: { ...builtin.configuration, settings: { ...builtin.configuration.settings, resolution } } }))]) {
+    const row = modelDescriptions({ pinned: { kind: 'video', profile, priceUnit: 'input' } })[0];
+    const resolution = profile.configuration.settings.resolution;
+    assert.equal(row.priceBasis.resolution, resolution); assert.equal(row.priceBasis.resolutions, undefined);
+    for (const [mode, credits] of Object.entries(row.priceBasis.creditsPer5Seconds)) {
+      assert.equal(typeof credits, 'number');
+      assert.equal(modelPrice({ kind: 'video', profile }, { durationSeconds: 5, ...(mode === 'reference' ? { references: [{}] }
+        : mode === 'first_last_frame' ? { firstFrame: {}, lastFrame: {} } : mode === 'first_frame' ? { firstFrame: {} } : {}) }), String(credits * 10000));
+    }
+    assert.equal(JSON.stringify(row.priceBasis).match(/480p|768p|1080p|2k|4k/g).length, 1);
+  }
+});
+
 test('graph selection and quotes retain the configured six-second profile and per-call price', async t => {
   const f = await realCodeFixture(t, { newFilm: true, profiles: [codexImageProfile, legacy] }), catalog = f.mediaRuntime.providerCatalog;
   const graph = f.service.createProject('Unchanged graph', catalog.select(catalog.digest, [codexImageProfile.id, legacy.id]), 'graph');

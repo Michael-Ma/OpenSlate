@@ -71,7 +71,8 @@ export function modelDescriptions(models: Readonly<Record<string, CodePlanModel>
     ...(model.profile?.adapter === "gemini-lyria" ? { note: "length is approximate; trim and fade at the cut", watermark: "SynthID" } : {}),
     ...(model.kind === "video" ? { videoModes: videoModes(model), ...videoCapabilities(model) } : {}),
     ...(model.priceUnit === "input" ? { priceBasis: model.profile?.adapter === "viggle-h3" ? { unit: "ceil_output_seconds", formula: "ceil(seconds) * creditsPer5Seconds / 5 * $0.01", enhance: false,
-      resolutions: ["480p", "768p", "1080p", "2k", "4k"], creditsPer5Seconds: Object.fromEntries(Object.entries(VIGGLE_PRICE_CREDITS).map(([mode, rates]) => [mode, rates.off])) }
+      resolution: model.profile.configuration!.settings!.resolution,
+      creditsPer5Seconds: Object.fromEntries(Object.entries(VIGGLE_PRICE_CREDITS).map(([mode, rates]) => [mode, rates.off[["480p", "768p", "1080p", "2k", "4k"].indexOf(String(model.profile!.configuration!.settings!.resolution))]])) }
       : model.profile?.adapter === "seedance" ? { unit: "output_tokens", formula: "seconds * width * height * 24 / 1024", usdPerMillionTokens: model.profile.configuration!.model.startsWith("seedance-1") ? "1.00" : model.profile.configuration!.model.includes("mini") ? "3.50" : "7.00 (1080p: 7.70)" }
       : { unit: "output_seconds", usdPerSecond: model.profile!.configuration!.model.includes("kling") ? "0.084 (silent)" : model.profile!.configuration!.model.includes("veo") ? "0.10 silent / 0.15 audio; 4k 0.30 / 0.35" : "480p 0.05 / 720p 0.10 / 1080p 0.20" }, modelId: model.profile!.configuration!.model } : {}),
     defaults: model.defaults ?? {}, ...(model.profile ? { minFrames: model.profile.minFrames ?? null, maxFrames: model.profile.maxFrames ?? null } : {}) }));

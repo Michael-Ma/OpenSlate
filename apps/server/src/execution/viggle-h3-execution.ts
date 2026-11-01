@@ -17,13 +17,15 @@ import type { ViggleH3ExecutionDispatch, ViggleH3ExecutionMapping, ViggleH3Execu
 import { assertViggleFirstDispatch, assertViggleDispatchLease, assertViggleMappingAdmission, resolveViggleAdmission, resolveViggleFrame, viggleFramePin, viggleRecord } from "./viggle-h3-authority.js";
 import type { ViggleFrameEvidence } from "./viggle-h3-authority.js";
 import { assertViggleSpoolLineage, viggleObservations } from "./viggle-h3-lineage.js";
+import { VIGGLE_SETTLEMENT_KIND, assertViggleSettlementTiming, settleViggleSubmission } from "./viggle-h3-settlement.js";
+import type { ViggleSettlementTiming } from "./viggle-h3-settlement.js";
 
 const unknown = (diagnostic: string, taskId?: string): ExecutionOutcome => ({ type: "unknown", diagnostic, ...(taskId ? { taskId } : {}) });
 /** Any host's POST is aborted by then, whatever timeout the original host used. */
 const MAX_SUBMIT_TIMEOUT_MS = 120000;
 /** Polling interval floor for a released (detached) task; liability and reconciliation continue. */
 export const DETACHED_POLL_MS = 300000;
-/** H3 has no way to find a task without its id. A lost POST reply is final, counted as spent, and only a human press may buy again. */
+/** Unsettled lost replies remain possible charges and require human consent. */
 export const SUBMISSION_RESPONSE_LOST = "SUBMISSION_RESPONSE_LOST";
 const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: SUBMISSION_RESPONSE_LOST, technical: true, retryAllowed: false });
 const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "VIGGLE_H3_EXECUTION_CANCELLED", "H3 operation was cancelled");
@@ -78,19 +80,23 @@ export class ViggleH3Execution implements ExecutionProvider {
   readonly #credentials: EnvironmentMediaCredentials; readonly #download: ProtectedVideoDownloader;
   readonly #fetch: typeof globalThis.fetch | undefined; readonly #timeout: number; readonly #now: () => number;
   readonly #policy: ViggleH3PollPolicy;
+  readonly #settlementTiming: ViggleSettlementTiming;
   constructor(options: { store: Store; outputStore: ExecutionOutputStore; artifactRoot: string;
     credentials: EnvironmentMediaCredentials; downloader: ProtectedVideoDownloader; fetch?: typeof globalThis.fetch; timeoutMs?: number;
-    pollPolicy?: { initialMs?: number; maximumMs?: number; retryAfterMaximumMs?: number }; now?: () => number }) {
+    pollPolicy?: { initialMs?: number; maximumMs?: number; retryAfterMaximumMs?: number }; now?: () => number;
+    settlementTiming?: ViggleSettlementTiming }) {
     invariant(options.outputStore.store === options.store && isAbsolute(options.artifactRoot) && options.artifactRoot !== "/",
       "VIGGLE_H3_EXECUTION_CONFIGURATION", "Use one application store and an owned artifact root");
     this.#store = options.store; this.#outputs = options.outputStore; this.#credentials = options.credentials; this.#download = options.downloader;
     this.#recovery = new InstallationRecoveryGuard(options.store);
-    this.#fetch = options.fetch; this.#timeout = options.timeoutMs ?? 30000; this.#now = options.now ?? Date.now;
+    this.#fetch = options.fetch; this.#timeout = options.timeoutMs ?? 30000; this.#now = options.now ?? (() => Date.now());
     invariant(Number.isSafeInteger(this.#timeout) && this.#timeout >= 1 && this.#timeout <= MAX_SUBMIT_TIMEOUT_MS,
       "VIGGLE_H3_EXECUTION_CONFIGURATION", "H3 request timeout must be bounded");
     this.#policy = Object.freeze({ initialMs: options.pollPolicy?.initialMs ?? 2000, maximumMs: options.pollPolicy?.maximumMs ?? 15000,
       retryAfterMaximumMs: options.pollPolicy?.retryAfterMaximumMs ?? 86400000, claimMs: this.#timeout + 301000 });
     assertViggleH3PollPolicy(this.#policy);
+    this.#settlementTiming = Object.freeze({ ...(options.settlementTiming ?? { firstMs: 10000, secondMs: 30000 }) });
+    assertViggleSettlementTiming(this.#settlementTiming);
     mkdirSync(options.artifactRoot, { recursive: true, mode: 0o700 }); this.#root = realpathSync(options.artifactRoot);
     registerExecutionProvider(this, { adapter: "viggle-h3", version: "1" });
   }
@@ -369,7 +375,16 @@ export class ViggleH3Execution implements ExecutionProvider {
       failureId: observation.kind === "rejected" ? observation.error.code : observation.code,
       technical: observation.kind === "not_dispatched" || observation.error.category === "transport",
       retryAllowed: observation.kind === "rejected" && observation.error.category === "transport" && observation.error.code.startsWith("CONNECT_") };
-    if (observation.kind === "unknown") return attempt.taskId ? unknown(`H3 submission unresolved: ${observation.error.code}`, attempt.taskId) : responseLost();
+    if (observation.kind === "unknown") {
+      if (attempt.taskId) return unknown(`H3 submission unresolved: ${observation.error.code}`, attempt.taskId);
+      if (isCodePlanAttempt(attempt) && observation.receipt.httpStatus === null
+        && (this.#store.get(VIGGLE_SETTLEMENT_KIND, attempt.id) || !["failed", "succeeded"].includes(attempt.phase))) {
+        const dispatch = this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id)!;
+        return settleViggleSubmission({ store: this.#store, attempt, dispatch, submit, timing: this.#settlementTiming,
+          claimMs: this.#timeout * 3 + 301000, now: () => this.now(), transport: () => this.transport(), ...(signal ? { signal } : {}) });
+      }
+      return responseLost();
+    }
     invariant(!attempt.taskId || attempt.taskId === observation.taskId, "VIGGLE_H3_EXECUTION_CONFLICT", "H3 accepted identity contradicts the saved task");
     const schedule = this.#store.transaction(() => this.schedule(attempt, submit));
     const completedTask = completedViggleTask(this.#store, attempt);

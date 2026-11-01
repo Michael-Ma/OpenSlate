@@ -263,3 +263,48 @@ test('historical first-frame digests omit new fields and retain the original sem
  assert.equal(d.requestDigest,sha(JSON.stringify(original)));assert.ok(!Object.hasOwn(d,'enhance'));assert.ok(!Object.hasOwn(d,'references'));
  assert.notEqual(describeViggleH3Request({...request,enhance:false}).requestDigest,d.requestDigest);
 });
+
+test('listVideos uses bounded authenticated call parsing and retains only task identity and UTC creation time', async () => {
+ let calls=0;
+ const p=new ViggleH3Provider({apiKey:key,fetch:async(url,init)=>{
+  calls++;assert.equal(url,'https://apis.viggle.ai/v1/videos?limit=12');assert.equal(init.method,'GET');assert.equal(init.body,undefined);
+  assert.equal(init.redirect,'manual');assert.equal(init.headers.Authorization,`Bearer ${key}`);
+  return json({has_more:true,items:[{id:'vid_new',created_at:'2026-11-01T10:00:00Z',status:'queued',secret:'ignore'},
+   {id:'vid_old',created_at:'2026-11-01T09:00:00Z'}],unrecognized:'ignore'});
+ }});
+ assert.deepEqual(await p.listVideos(12),{kind:'listed',hasMore:true,items:[{id:'vid_new',createdAt:'2026-11-01T10:00:00Z'},
+  {id:'vid_old',createdAt:'2026-11-01T09:00:00Z'}],receipt:{httpStatus:200,requestId:'req_trace'}});
+ for(const limit of [0,-1,101,1.5,'12',null])unknown(await p.listVideos(limit));assert.equal(calls,1);
+});
+
+test('malformed or failed list answers never become empty evidence and cancellation never calls the wire', async () => {
+ const item={id:'vid_listed',created_at:'2026-11-01T10:00:00Z'};
+ const bad=[{},[],{has_more:'false',items:[]},{has_more:false},{has_more:true,items:[]},
+  ...[{...item,id:'wrong_id'},{...item,id:'vid_'+key},{...item,created_at:null},{...item,created_at:'2026-02-30T10:00:00Z'},
+   {...item,created_at:'2026-11-01T10:00:00.000Z'}].map(value=>({has_more:false,items:[value]})),
+  {has_more:false,items:[item,item]}, {has_more:false,items:[{...item,created_at:'2026-11-01T09:00:00Z'},{...item,id:'vid_newer'}]},
+  {has_more:false,items:Array.from({length:13},(_,i)=>({...item,id:`vid_${i}`}))}];
+ for(const body of bad){const p=new ViggleH3Provider({apiKey:key,fetch:async()=>json(body)});unknown(await p.listVideos(12));}
+ for(const response of [()=>json({has_more:false,items:[]},500),()=>new Response('{}',{status:302,headers:{'content-type':'application/json'}}),
+  ()=>new Response('{',{headers:{'content-type':'application/json'}})]){
+  const p=new ViggleH3Provider({apiKey:key,fetch:async()=>response()});unknown(await p.listVideos(12));
+ }
+ let calls=0;const controller=new AbortController();controller.abort();
+ const p=new ViggleH3Provider({apiKey:key,fetch:async()=>{calls++;return json({has_more:false,items:[]});}});
+ unknown(await p.listVideos(12,{signal:controller.signal}));assert.equal(calls,0);
+ assert.deepEqual((await p.listVideos(12)).items,[]);
+});
+
+test('no-status diagnostics allow only error/cause tokens and never invoke error getters or retain messages', async () => {
+ const cause=Object.assign(new Error('private cause '+key),{code:'ECONNRESET',syscall:'read'});
+ const error=new TypeError('private message https://private.invalid '+key,{cause});
+ const p=new ViggleH3Provider({apiKey:key,fetch:async()=>{throw error;}}),result=await p.submit(base());
+ assert.deepEqual(result.error,{code:'VIGGLE_H3_TRANSPORT_OR_RESPONSE_LOSS',category:'protocol',errorName:'TypeError',causeCode:'ECONNRESET',causeName:'Error',causeSyscall:'read'});
+ assert.equal(JSON.stringify(result).includes('private'),false);assert.equal(JSON.stringify(result).includes(key),false);
+ let getters=0;const unsafe={name:'https://private.invalid',cause:{name:key,code:'has spaces',syscall:'read\nsecret'}};
+ const q=new ViggleH3Provider({apiKey:key,fetch:async()=>{throw unsafe;}});
+ assert.deepEqual((await q.submit(base())).error,{code:'VIGGLE_H3_TRANSPORT_OR_RESPONSE_LOSS',category:'protocol'});
+ const trapped=Object.defineProperty({},'name',{get(){getters++;throw Error('must not run');}});
+ Object.defineProperty(trapped,'cause',{get(){getters++;throw Error('must not run');}});
+ const r=new ViggleH3Provider({apiKey:key,fetch:async()=>{throw trapped;}});unknown(await r.submit(base()));assert.equal(getters,0);
+});
