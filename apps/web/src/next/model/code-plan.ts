@@ -330,9 +330,10 @@ export function attentionViews(view: CodePlanView | null): Set<"assets" | "film"
 export interface CodePlanAttentionItem { key: string; view: "assets" | "film"; badge: Msg; title: Msg; detail: Msg }
 
 export function codePlanAttentionItems(view: CodePlanView | null, locale: string): CodePlanAttentionItem[] {
-  return (view?.steps ?? []).filter(needsAttention).map((step) => {
+  if (!view) return [];
+  return view.steps.filter(needsAttention).map((step) => {
     const kind = step.kind === "image" ? "image" : step.kind === "render" ? "render" : step.kind === "music" ? "music" : "clip";
-    const label = text(step.label, 60);
+    const label = stepName(step, view, 60);
     const problem = stepProblem(step, locale);
     return {
       key: step.key, view: viewOfStep(step.kind), badge: msg(`codeplan.attention.badge_${kind}`),
@@ -390,6 +391,12 @@ export function chosenArtifacts(view: CodePlanView): Set<string> {
 /** Past this, a step that is still "making" is called out: vendors can sit on a task with no sign of failure. */
 export const SLOW_STEP_MS = 10 * 60 * 1000;
 
+/** A step's name for the person: its shot's title, since prompts are written in English for the models. */
+function stepName(step: Pick<CodePlanStepView, "label" | "shotId">, view: CodePlanView, max: number): string {
+  const shot = step.shotId ? view.declarations.shots.find((row) => isObject(row) && row.id === step.shotId) : undefined;
+  return (isObject(shot) ? pick(shot, ["title"], max) : "") || text(step.label, max);
+}
+
 export function stepRow(step: CodePlanStepView, view: CodePlanView, locale: string, chosen = chosenArtifacts(view), now = Date.now()): StepRow {
   const artifact = step.state === "succeeded" ? artifactRefOf(step.artifact) : null;
   const waited = step.state === "in_flight" ? now - new Date(step.updatedAt).getTime() : 0;
@@ -401,7 +408,7 @@ export function stepRow(step: CodePlanStepView, view: CodePlanView, locale: stri
     status: budget ? msg("codeplan.step.budget") : waited >= SLOW_STEP_MS ? msg("codeplan.step.slow", { minutes: Math.floor(waited / 60000) })
       : STEP_STATUS[step.state] ?? msg("codeplan.state.unknown", { state: String(step.state) }),
     tone: step.state === "in_flight" ? waited >= SLOW_STEP_MS ? "attention" : "busy" : step.state === "failed" || step.state === "unknown" ? "failed" : budget ? "attention" : step.state === "succeeded" ? "done" : "plain",
-    label: text(step.label, 200), model: text(step.model, 120),
+    label: stepName(step, view, 200), model: text(step.model, 120),
     price: price > 0n ? msg("codeplan.step.price", { price: formatMicros(String(price), locale) }) : null,
     artifact, reached: step.reached, chosen: !!artifact && chosen.has(artifact.artifactId),
     error: step.state === "failed" ? text(step.error?.code, 120) || null : null,

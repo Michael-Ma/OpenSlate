@@ -654,3 +654,10 @@ test('two options on one clip are one clip and two answers, with no broken thumb
   assert.equal(two.clip, null); assert.equal(two.media, true);
   assert.deepEqual(two.options.map((option) => option.poster), [still, null]);
 });
+
+test('a step goes by its shot title, not the English prompt the models read', () => {
+  const step = { key: 'k', kind: 'video', state: 'succeeded', model: 'viggle-h3', label: 'The low close camera watches Tofu', shotId: 'tofu-03', attempts: 1, priceMicros: '500000', reached: true, updatedAt: '2026-11-01T00:00:00.000Z' };
+  const titled = view({ declarations: { scenes: [], shots: [{ id: 'tofu-03', title: '检测到饭香' }] }, steps: [step] });
+  assert.equal(stepRow(step, titled, 'zh-CN').label, '检测到饭香');
+  assert.equal(stepRow({ ...step, shotId: undefined }, titled, 'zh-CN').label, 'The low close camera watches Tofu');
+});
