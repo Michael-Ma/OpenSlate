@@ -172,9 +172,11 @@ export async function runCodePlanOfflineFlow(f) {
   const initialKeys = new Set(view.steps.map(step => step.key)), beforeEdit = f.calls.submit.length;
   assert.equal(beforeEdit, 10);
 
-  const editInput = { source: editedSource, basedOnVersion: 1 };
+  // The example stops for a review: the scripted turn saved version 2 with the cut points it read from the clips.
+  assert.equal(view.planVersion, 2); assert.equal(view.reviews[0].state, "done");
+  const editInput = { source: editedSource, basedOnVersion: 2 };
   const receipt = await f.ok("POST", `${base}/source`, editInput, "motion-edit");
-  assert.equal(receipt.view.planVersion, 2);
+  assert.equal(receipt.view.planVersion, 3);
   // Shots run as concurrent pipelines, so the preview reaches the unchanged shot's frames, choice and clip; only the
   // render still waits for the new clip's result.
   assert.deepEqual(receipt.diff.newSteps.map(step => step.kind), ["video"]);

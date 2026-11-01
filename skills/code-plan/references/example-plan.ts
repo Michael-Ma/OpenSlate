@@ -34,8 +34,13 @@ export default async function film(ctx: Studio): Promise<void> {
   }));
   const ready = clips.filter((clip): clip is { artifact: Artifact; motion: string } => clip !== null);
   if (ready.length !== shots.length) return;
+  // Watch before cutting. The run stops here and a review turn opens: it submits a new version with the ranges it saw
+  // in place of these placeholders, and this review then returns at once.
+  await ctx.review("first-cut", { clips: ready.map(clip => clip.artifact), note: "Does each clip finish its action?" });
+  const cuts = [{ startFrame: 0, durationFrames: 150 }, { startFrame: 0, durationFrames: 150 }];
+  const timeline = ready.map((clip, index) => ({ ...clip, ...cuts[index], fit: "cover" as const }));
   // Make the score once the final cut length is known; adapt fake-music to an installed model from read_film.
-  const filmSamples = ready.length * 6 * 48000;
+  const filmSamples = cuts.reduce((sum, cut) => sum + cut.durationFrames, 0) * 1600;
   const music = await ctx.music({ model: "fake-music", prompt: "Warm, reflective piano and soft strings at a slow tempo", durationSeconds: filmSamples / 48000 });
   if (!music.ok) { await ctx.log("Music failed; choose how to continue before rendering."); return; }
   const leadIn = music.leadInSamples ?? 0;
@@ -43,7 +48,9 @@ export default async function film(ctx: Studio): Promise<void> {
     await ctx.log("The music is shorter than the film. Tell the person and make another track with a stable variant."); return;
   }
   await ctx.log("Generated music carries an inaudible SynthID watermark (this demo uses placeholder audio).");
-  const rendered = await ctx.render({ timeline: ready, audio: [{ artifact: music.artifact, atSample: 0, startSample: leadIn,
-    durationSamples: filmSamples, gainMilliDb: -6000, fadeOutSamples: Math.min(96000, filmSamples) }] });
+  const rendered = await ctx.render({ timeline,
+    captions: [{ text: "Morning", atFrame: 0, durationFrames: 30 }],
+    audio: [{ artifact: music.artifact, atSample: 0, startSample: leadIn, durationSamples: filmSamples, gainMilliDb: -6000,
+      fadeInSamples: 4800, fadeOutSamples: Math.min(96000, filmSamples) }, { sound: "ding", atSample: 48000, gainMilliDb: -9000 }] });
   await ctx.log(rendered.ok ? "Film rendered" : `Render failed: ${rendered.error.code}`);
 }

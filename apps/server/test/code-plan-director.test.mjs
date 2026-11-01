@@ -282,7 +282,8 @@ test('pinned example executes every ctx call through JSON, stable choices, varia
   assert.equal(calls.filter(c=>c.method==='image').length,6);
   assert.deepEqual(calls.filter(c=>c.method==='choose').map(c=>c.args[0]),['shot-1-keyframe','shot-2-keyframe','shot-1-retry','shot-2-retry']);
   assert.equal(calls.filter(c=>c.method==='music').length,1);
-  assert.deepEqual(calls.find(c=>c.method==='render').args[0].audio.map(row=>[row.startSample,row.durationSamples,row.fadeOutSamples]),[[12000,576000,96000]]);
+  assert.deepEqual(calls.find(c=>c.method==='render').args[0].audio.map(row=>[row.startSample,row.durationSamples,row.fadeOutSamples]),[[12000,480000,96000],[undefined,undefined,undefined]]);
+  assert.deepEqual(calls.filter(c=>c.method==='review').map(c=>c.args[0]),['first-cut']);
   const motions = [...example.matchAll(/motion: "([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(calls.filter(c=>c.method==='video').map(c=>c.args[0].prompt), [...motions, ...motions]);
   assert.ok(calls.filter(c=>c.method==='image').every(c=>!motions.includes(c.args[0].prompt)));

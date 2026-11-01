@@ -6,7 +6,7 @@ test("real HTTP code-plan stack goes from a human message to frame choices, moti
   const f = await codePlanFixture(); t.after(() => f.close());
   t.mock.method(globalThis, "fetch", () => assert.fail("The offline flow must not call the network"));
   const summary = await runCodePlanOfflineFlow(f);
-  assert.equal(summary.finalState, "done"); assert.deepEqual(summary.versions, [1, 2]);
+  assert.equal(summary.finalState, "done"); assert.deepEqual(summary.versions, [1, 2, 3, 4]);
   assert.deepEqual(summary.edit.newSteps, ["render", "video"]); assert.equal(summary.edit.reusedSteps, 8);
 });
 

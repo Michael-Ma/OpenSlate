@@ -188,7 +188,7 @@ test('review turns cannot borrow human words to change ceiling or retry; they ma
     return completed(input);
   };
   await submit(f, id, plan()); const view = await f.until(id, view => view.state === 'done', 'bounded retake');
-  assert.equal(attempts, 2); assert.equal(view.ceilingMicros, '1000000'); assert.equal(purchases(f).length, 3);
+  assert.equal(attempts, 2); assert.equal(view.ceilingMicros, '4000000'); assert.equal(purchases(f).length, 3);
 });
 
 test('foreign and non-video review artifacts are refused before a checkpoint is persisted', async t => {

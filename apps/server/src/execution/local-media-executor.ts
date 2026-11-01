@@ -1,12 +1,15 @@
 import { join, resolve } from "node:path";
-import { canonical, digest, invariant, snapshotLocalExecution } from "@openslate/core";
+import { canonical, CODE_PLAN_TOOL_CONTRACT, digest, invariant, snapshotLocalExecution } from "@openslate/core";
 import type { ArtifactRef, JsonObject, LocalExecutionIdentity } from "@openslate/core";
 import type { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { captureRender, captureTimeline, captureCodePlanRender } from "../media/timeline-capture.js";
 import { createLocalTimelineDocument, LocalTimelineStore, parseLocalTimelineDocument } from "../media/local-timeline.js";
-import type { LocalTimelineDocument, StoredLocalTimeline } from "../media/local-timeline.js";
+import { rowEdits, rowFrames, type LocalTimelineDocument, type StoredLocalTimeline, type RenderExtras, type SoundName } from "../media/local-timeline.js";
 import type { LocalMediaService } from "../media/local-media.js";
+import type { TimelineRenderInput, TimelineRenderManifest } from "../media/local-media.js";
+import { validateRenderInput } from "../code-plan/identity.js";
+import { validateCaptions } from "../media/captions.js";
 import { installManagedVideo } from "../media/managed-video.js";
 import type { RenderCompletion, FrozenRenderManifest } from "../media/types.js";
 import type { ArtifactRecord, Attempt, NodeBinding } from "./engine.js";
@@ -21,6 +24,61 @@ function freeze<T>(value: T): T {
 const timelineDocument = (capture: PreparedLocalExecution["capture"]): LocalTimelineDocument => createLocalTimelineDocument({
   projectId: capture.input.projectId, clips: capture.input.clips, audio: capture.input.audio ?? [],
 });
+function timelineInput(input: TimelineRenderInput): Parameters<typeof createLocalTimelineDocument>[0] {
+  return { projectId: input.projectId, clips: input.clips, audio: input.audio ?? [],
+    ...(input.captions === undefined ? {} : { captions: input.captions }), ...(input.mastering === undefined ? {} : { mastering: input.mastering }),
+    ...(input.sfxPackDigest === undefined ? {} : { sfxPackDigest: input.sfxPackDigest }) };
+}
+function timelineFromManifest(manifest: TimelineRenderManifest): LocalTimelineDocument {
+  const { captions, ...rest } = manifest;
+  return createLocalTimelineDocument(timelineInput({ ...rest, ...(captions === undefined ? {} : { captions: captions.map(({ font: _font, sha256: _sha, byteLength: _bytes, ...caption }) => caption) }) }));
+}
+
+/** Only code films enter this adapter. The graph capture and saved recipes retain their original shape. */
+export async function captureEditedCodePlanRender(store: Store, media: LocalMediaService, projectId: string, args: Record<string, unknown>, contract: string, options: { signal?: AbortSignal } = {}): Promise<TimelineRenderInput> {
+  check(options.signal);
+  args = structuredClone(args); validateRenderInput(args);
+  const rows = args.timeline as Record<string, unknown>[];
+  const additions = args.captions !== undefined || rows?.some(row => row.speed !== undefined || row.holdFrames !== undefined || row.zoom !== undefined)
+    || (args.audio as Record<string, unknown>[] | undefined)?.some(row => row.sound !== undefined || row.fadeInSamples !== undefined);
+  const mastering: RenderExtras = contract === "0.3.0" ? { mastering: "loudnorm-0.3.0" } : {};
+  if (!additions) return { ...captureCodePlanRender(store, projectId, args), ...mastering };
+  invariant(Object.keys(args).every(key => ["model", "timeline", "audio", "captions", "width", "height", "variant"].includes(key)), "CODE_PLAN_RENDER_INPUT", "Unsupported render parameters");
+  const project = store.getProject(projectId);
+  invariant(project.planMode === "code", "CODE_PLAN_RENDER_INPUT", "Edited rendering requires a code film");
+  // Reuse the existing ownership resolver, with one source frame so only the edited total is bounded.
+  const captured = rows.map((row, index) => {
+    try {
+      const edits = rowEdits(row, index), { speed: _speed, holdFrames: _hold, zoom: _zoom, ...plain } = row;
+      const capture = captureCodePlanRender(store, projectId, { timeline: [{ ...(row.artifact ? plain : { artifact: plain }), durationFrames: 1 }],
+        ...(args.width === undefined ? {} : { width: args.width }), ...(args.height === undefined ? {} : { height: args.height }) });
+      const clip = capture.clips[0]!;
+      return { capture, clip: { ...clip, durationFrames: (row.durationFrames ?? clip.source.probe.video!.frames) as number, ...edits } };
+    } catch (error) { if (error instanceof Error) error.message = `Row ${index + 1}: ${error.message}`; throw error; }
+  });
+  const clips = captured.map(item => item.clip), totalFrames = clips.reduce((sum, row) => sum + rowFrames(row), 0);
+  invariant(Number.isSafeInteger(totalFrames) && totalFrames > 0 && totalFrames <= project.maxFrames, "MEDIA_DURATION_MISMATCH", `Edited film length must be in 1–${project.maxFrames} frames`);
+  const audio: NonNullable<TimelineRenderInput["audio"]> = [], sounds = new Map<SoundName, Awaited<ReturnType<LocalMediaService["supplySound"]>>>();
+  let sfxPackDigest: string | undefined;
+  for (const [index, row] of ((args.audio ?? []) as Record<string, unknown>[]).entries()) {
+    if (row.sound !== undefined) {
+      const name = row.sound as SoundName;
+      let sound = sounds.get(name); if (!sound) { sound = await media.supplySound(name, options); sounds.set(name, sound); }
+      invariant(sfxPackDigest === undefined || sound.packDigest === sfxPackDigest, "MEDIA_INTEGRITY_ERROR", `Audio row ${index + 1}: sound pack changed during preparation`);
+      sfxPackDigest = sound.packDigest;
+      audio.push({ source: sound.source, startSample: 0, durationSamples: sound.source.probe.audio!.samples!, atSample: row.atSample as number,
+        ...(row.gainMilliDb === undefined ? {} : { gainMilliDb: row.gainMilliDb as number }) });
+    } else {
+      const { fadeInSamples, ...plain } = row;
+      try {
+        const capture = captureCodePlanRender(store, projectId, { timeline: [{ artifact: rows[0]!.artifact ?? rows[0], durationFrames: 1 }], audio: [plain] });
+        audio.push({ ...capture.audio![0]!, ...(fadeInSamples === undefined ? {} : { fadeInSamples: fadeInSamples as number }) });
+      } catch (error) { if (error instanceof Error) error.message = `Audio row ${index + 1}: ${error.message}`; throw error; }
+    }
+  }
+  return { ...captured[0]!.capture, clips, audio, ...mastering, ...(sfxPackDigest === undefined ? {} : { sfxPackDigest }),
+    ...(args.captions === undefined ? {} : { captions: validateCaptions(args.captions, totalFrames) }) };
+}
 
 /** Owned local assembly. Engine alone admits work, records dispatch and publishes SQL state. */
 export class LocalMediaExecutor implements LocalExecutionPort {
@@ -29,7 +87,9 @@ export class LocalMediaExecutor implements LocalExecutionPort {
   readonly maxOutputBytes: number;
   readonly artifactDir: string;
   readonly timelines: LocalTimelineStore;
-  constructor(readonly store: Store, readonly media: LocalMediaService, options: { artifactDir: string }) {
+  private readonly injectedContract: string | undefined;
+  constructor(readonly store: Store, readonly media: LocalMediaService, options: { artifactDir: string; codePlanContract?: string }) {
+    this.injectedContract = options.codePlanContract;
     this.recovery = new InstallationRecoveryGuard(store);
     this.artifactDir = resolve(options.artifactDir);
     this.maxOutputBytes = media.limits.maxOutputBytes;
@@ -139,7 +199,7 @@ export class LocalMediaExecutor implements LocalExecutionPort {
       "LOCAL_EXECUTION_LEASE_LOST", "Code-plan render lost its exact local intent or lease");
       return current;
     };
-    type Intent = { id: string; projectId: string; requestDigest: string; timeline: LocalTimelineDocument; recipe: FrozenRenderManifest; outputArtifactId: string };
+    type Intent = { id: string; projectId: string; requestDigest: string; timeline: LocalTimelineDocument; recipe: TimelineRenderManifest; outputArtifactId: string };
     owned();
     const lock = this.store.get<{ projectId: string; localExecution?: unknown }>("capability_lock", this.store.getProject(previous.projectId).capabilityLockId);
     invariant(lock?.projectId === previous.projectId, "LOCAL_EXECUTION_UNSUPPORTED", "Code-plan rendering requires its owned local runtime lock");
@@ -150,8 +210,12 @@ export class LocalMediaExecutor implements LocalExecutionPort {
       const record = this.store.get<{ planVersion: number }>("code_plan_execution", previous.id);
       invariant(record?.planVersion === this.store.get<{ planVersion: number }>("code_plan_run", previous.projectId)?.planVersion,
         "CODE_PLAN_SELECTION_CHANGED", "A newer plan fenced local render preparation");
-      const input = captureCodePlanRender(this.store, previous.projectId, previous.request.args);
-      const timeline = createLocalTimelineDocument({ projectId: previous.projectId, clips: input.clips, audio: input.audio ?? [] });
+      // The exact saved film lock wins over the build default. Q3 changes the imported constant, not this adapter.
+      const skill = this.store.list<{ lock: { compatibility: { toolContract: string } } }>("director_skill_lock", previous.projectId).at(-1);
+      const contract = this.injectedContract ?? skill?.lock.compatibility.toolContract ?? CODE_PLAN_TOOL_CONTRACT;
+      const input = await captureEditedCodePlanRender(this.store, this.media, previous.projectId, previous.request.args, contract, { signal });
+      check(signal);
+      const timeline = createLocalTimelineDocument(timelineInput(input));
       await this.timelines.put(timeline, { signal });
       const recipe = await this.media.freezeManifest(input, { signal });
       owned();
@@ -161,7 +225,7 @@ export class LocalMediaExecutor implements LocalExecutionPort {
         requestDigest: digest(previous.request), timeline, recipe, outputArtifactId: digest({ codePlanRender: previous.id }) });
     }
     invariant(intent.requestDigest === digest(previous.request) && intent.projectId === previous.projectId
-      && canonical(intent.timeline) === canonical(createLocalTimelineDocument({ projectId: intent.projectId, clips: intent.recipe.clips, audio: intent.recipe.audio })),
+      && canonical(intent.timeline) === canonical(timelineFromManifest(intent.recipe)),
     "LOCAL_EXECUTION_CONFLICT", "Code-plan render lost its exact frozen timeline");
     owned();
     // Manifest completions are durable filesystem receipts. Recovery never calls an external submitter.
