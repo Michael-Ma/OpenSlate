@@ -82,7 +82,7 @@ function fixture(t, { mode = 'code' } = {}) {
 }
 
 test('code catalog is isolated from every graph comparison and enforces source bytes, version and summary', () => {
-  assert.deepEqual(toolCatalog(CODE_PLAN_TOOL_CONTRACT).names, ['read_film','submit_plan','set_spend_limit','retry_step']);
+  assert.deepEqual(toolCatalog(CODE_PLAN_TOOL_CONTRACT).names, ['read_film','submit_plan','set_spend_limit','retry_step','read_clip_frames']);
   assert.ok(!SUPPORTED_TOOL_CONTRACTS.includes(CODE_PLAN_TOOL_CONTRACT));
   for (const version of SUPPORTED_TOOL_CONTRACTS) {
     assert.equal(toolContractAtLeast(CODE_PLAN_TOOL_CONTRACT, version), false);
@@ -409,4 +409,23 @@ test('quoted consent cannot override a read-only or superseded Director epoch',a
  f.service.beginRequest(f.project.id,'local-user','Use a different direction');
  await assert.rejects(calls.invoke(f.project.id,a.bridge.actor,'stale','set_spend_limit',{ceilingMicros:'3000000',quote:'Set the limit to $3'}),{code:'EPOCH_REVOKED'});
  assert.equal(f.store.list('code_plan_director_change',f.project.id).length,0);
+});
+
+
+test('0.2.0 films retain their guidance, tool handler and ctx API without new frame/review capabilities', async t => {
+  const { createDirectorSkillLock, CODE_PLAN_V2_GUIDANCE_DIGEST } = await import('../dist/application/director-capabilities.js');
+  const f = fixture(t), old = createDirectorSkillLock(f.config, '0.2.0').lock;
+  f.store.insert('director_skill_lock', old.id, f.project.id, { id: old.id, projectId: f.project.id, lock: old });
+  const a = f.turn('Keep the saved film');
+  assert.equal(a.input.bridge.toolContractVersion, '0.2.0');
+  assert.equal(toolHandlerId('0.2.0'), 'code-plan-tools@2');
+  assert.equal(old.skills[0].packageDigest, CODE_PLAN_V2_GUIDANCE_DIGEST);
+  assert.equal(skillPackageDigest(readSkillPackageFiles(join(repositoryRoot, 'skills/code-plan-v2'))), CODE_PLAN_V2_GUIDANCE_DIGEST);
+  const references = JSON.parse(a.input.context).references;
+  assert.equal(references.find(row => row.path === 'references/example-plan.ts').content,
+    readFileSync(join(repositoryRoot, 'skills/code-plan-v2/references/example-plan.ts'), 'utf8'));
+  assert.doesNotMatch(references.find(row => row.path === 'references/studio.d.ts').content, /review\(/);
+  assert.throws(() => parseToolArguments('read_clip_frames', { artifactId: 'clip' }, '0.2.0'), { code: 'NOT_FOUND' });
+  const result = await runSandbox({ source: 'export default async function(ctx) { if (typeof ctx.review !== "undefined") throw Error("leaked review"); }', now: 1, seed: 1, reviewEnabled: false, call: () => assert.fail('host call') });
+  assert.equal(result.state, 'done');
 });

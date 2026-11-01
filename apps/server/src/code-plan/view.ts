@@ -3,7 +3,7 @@ import { invariant } from "@openslate/core";
 import type { ArtifactRef } from "@openslate/core";
 import type { CodePlanExecution } from "./execution.js";
 import type { Store } from "../persistence/store.js";
-import type { CodePlanChoice, CodePlanHold, CodePlanRun, CodePlanStep, CodePlanVersion } from "./records.js";
+import type { CodePlanChoice, CodePlanHold, CodePlanRun, CodePlanReview, CodePlanStep, CodePlanVersion } from "./records.js";
 import { codePlanCeiling } from "./settings.js";
 import { codePlanShotLinks } from "./projection.js";
 import type { CodePlanPoster } from "./posters.js";
@@ -50,6 +50,9 @@ export function codePlanView(store: Store, execution: CodePlanExecution, project
       .sort((a, b) => Number(Object.hasOwn(a, "answer")) - Number(Object.hasOwn(b, "answer")))
       .map(({ choiceId, optionsDigest, question, options, answer, answeredAt }) => ({ choiceId, optionsDigest, question, options,
         ...(answer !== undefined ? { answer } : {}), ...(answeredAt ? { answeredAt } : {}) })),
+    reviews: store.list<CodePlanReview>("code_plan_review", projectId)
+      .filter(review => run?.reviewKeys?.includes(review.id))
+      .map(review => ({ id: review.reviewId, note: review.note, state: review.state, clipCount: review.clips.length, updatedAt: review.updatedAt })),
     versions: store.list<CodePlanVersion>("code_plan_version", projectId).sort((a, b) => b.version - a.version).slice(0, 50)
       .map(({ version, author, sha256, createdAt, diff }) => ({ version, author, sha256, createdAt, diff: diff ?? emptyDiff() })),
     logs: run?.logs ?? [], lastPassAt: run?.lastPassAt ?? null,

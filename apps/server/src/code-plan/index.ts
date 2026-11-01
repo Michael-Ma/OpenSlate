@@ -10,7 +10,7 @@ import { InstallationRecoveryGuard } from "../application/installation-recovery.
 import { CodePlanExecution } from "./execution.js";
 import { CODE_PLAN_MODELS, normalizeStepInput, stepKey } from "./identity.js";
 import type { CodePlanMediaKind, CodePlanModel } from "./identity.js";
-import type { CodePlanChoice, CodePlanHold, CodePlanInvocation, CodePlanRun, CodePlanSettings, CodePlanStep, CodePlanVersion } from "./records.js";
+import type { CodePlanChoice, CodePlanReview, CodePlanHold, CodePlanInvocation, CodePlanRun, CodePlanSettings, CodePlanStep, CodePlanVersion } from "./records.js";
 import { runSandbox, SANDBOX_PENDING } from "./sandbox.js";
 import type { SandboxResult } from "./sandbox.js";
 import type { CodePlanPort } from "./port.js";
@@ -60,6 +60,7 @@ export class CodePlanRuntime implements CodePlanPort {
 
   getRun(projectId: string): CodePlanRun | undefined { return this.store.get("code_plan_run", projectId); }
   steps(projectId: string): CodePlanStep[] { return this.store.list("code_plan_step", projectId); }
+  wakeReviews(projectId: string): void { this.queued.add(projectId); }
   choices(projectId: string): CodePlanChoice[] { return this.store.list("code_plan_choice", projectId); }
   availableModels(projectId: string): ReturnType<typeof modelDescriptions> {
     this.assertProject(projectId);
@@ -164,7 +165,7 @@ export class CodePlanRuntime implements CodePlanPort {
       const record: CodePlanVersion = { id: entityId(projectId, `version:${next}`), projectId, version: next, source,
         sha256: createHash("sha256").update(source).digest("hex"), author, createdAt: stamp(), ...(diff ? { diff } : {}) };
       this.store.put("code_plan_version", record.id, projectId, record);
-      const run: CodePlanRun = current ? { ...current, planVersion: next, state: "running", error: null, reachedStepKeys: [] }
+      const run: CodePlanRun = current ? { ...current, planVersion: next, state: "running", error: null, reachedStepKeys: [], reviewKeys: [] }
         : { id: projectId, projectId, planVersion: next, state: "running", now: clock?.now ?? Date.now(), seed: clock?.seed ?? randomInt(1, 0x7fffffff),
           ceilingMicros: codePlanCeiling(this.store, projectId), lastPassAt: null, error: null, reachedStepKeys: [], declarations: { scenes: [], shots: [] }, logs: [] };
       this.store.put("code_plan_run", projectId, projectId, run);
@@ -305,7 +306,7 @@ export class CodePlanRuntime implements CodePlanPort {
     const run = this.getRun(projectId); invariant(run, "CODE_PLAN_MISSING", "No code plan is saved");
     const version = this.store.get<CodePlanVersion>("code_plan_version", entityId(projectId, `version:${run.planVersion}`));
     invariant(version && version.sha256 === createHash("sha256").update(version.source).digest("hex"), "CODE_PLAN_JOURNAL", "Plan source identity differs");
-    const { outcome, reached, declarations, logs, budget } = await this.evaluate(projectId, version.source, false);
+    const { outcome, reached, declarations, logs, budget, reviewKeys } = await this.evaluate(projectId, version.source, false);
     // Leave outcomes from an obsolete pass in history; never overwrite the newer plan's run state.
     const current = this.getRun(projectId)!;
     if (current.planVersion !== run.planVersion) { this.queued.add(projectId); return current; }
@@ -313,8 +314,9 @@ export class CodePlanRuntime implements CodePlanPort {
       this.store.put("code_plan_step", step.id, projectId, { ...step, state: "cancelled", updatedAt: stamp() });
     const failed = this.steps(projectId).some(step => reached.has(step.key) && step.state === "failed" && step.retryAt === undefined);
     const result: CodePlanRun = { ...current, state: outcome.state === "error" ? "error" : budget ? "paused_budget"
+      : reviewKeys.some(id => ["waiting", "watching"].includes(this.store.get<CodePlanReview>("code_plan_review", id)?.state ?? "")) ? "reviewing"
       : outcome.state === "done" && failed ? "done_with_failures" : outcome.state,
-      lastPassAt: stamp(), error: outcome.error ?? null, reachedStepKeys: [...reached], declarations, logs };
+      lastPassAt: stamp(), error: outcome.error ?? null, reachedStepKeys: [...reached], reviewKeys, declarations, logs };
     this.store.put("code_plan_run", projectId, projectId, result); this.changed(projectId); return result;
   }
 
@@ -324,6 +326,9 @@ export class CodePlanRuntime implements CodePlanPort {
     const reached = new Set<string>(), declarations: CodePlanRun["declarations"] = { scenes: [], shots: [] }, logs: string[] = [];
     const journal = this.steps(projectId), virtual = new Map(journal.map(step => [step.key, step]));
     const diff = emptyDiff(), submissions: Promise<void>[] = [];
+    const reviewKeys: string[] = [];
+    const lock = this.store.list<{ lock: { compatibility: { toolContract: string } } }>("director_skill_lock", projectId).at(-1)?.lock;
+    const reviewEnabled = !lock || lock.compatibility.toolContract === "0.3.0";
     let budget = false, limited = false;
     const reused = new Set<string>(), fresh = new Set<string>();
     const call = (method: string, args: unknown[]): unknown => {
@@ -341,6 +346,38 @@ export class CodePlanRuntime implements CodePlanPort {
       }
       if (method === "log") { invariant(typeof args[0] === "string" && args[0].length <= 4096 && logs.length < 200,
         "CODE_PLAN_LOG", "Use at most 200 bounded log lines"); logs.push(args[0]); return null; }
+      if (method === "review") {
+        invariant(reviewEnabled, "CODE_PLAN_METHOD", "Review needs tool contract 0.3.0");
+        const [reviewId, raw] = args;
+        invariant(typeof reviewId === "string" && reviewId.length > 0 && reviewId.length <= 200 && raw && typeof raw === "object",
+          "CODE_PLAN_REVIEW", "Use a bounded review id and clips/note");
+        const { clips, note } = raw as Record<string, unknown>;
+        invariant(typeof note === "string" && note.length <= 4096 && Array.isArray(clips) && clips.length > 0 && clips.length <= 200,
+          "CODE_PLAN_REVIEW", "Review needs 1 to 200 owned video artifacts and a bounded note");
+        const owned = clips.map(ref => {
+          const value = ref as import("@openslate/core").ArtifactRef | null;
+          const record = value && this.store.get<import("../execution/engine.js").ArtifactRecord>("artifact", value.artifactId);
+          invariant(record?.projectId === projectId && record.artifact.kind === "video" && value?.kind === "video" && record.artifact.sha256 === value.sha256,
+            "CODE_PLAN_ARTIFACT_INVALID", "Review clips must be owned video artifacts");
+          return record.artifact;
+        });
+        const clipsDigest = digest(owned), id = entityId(projectId, digest({ reviewId, clipsDigest }));
+        if (!reviewKeys.includes(id)) reviewKeys.push(id);
+        let review = this.store.get<CodePlanReview>("code_plan_review", id);
+        const capped = this.store.list<CodePlanReview>("code_plan_review", projectId).filter(row => row.requestId).length >= 3;
+        if (!review) {
+          review = { id, projectId, reviewId, clipsDigest, clips: owned, note, state: capped ? "done" : "waiting",
+            ...(capped ? { skipped: true } : {}), createdAt: stamp(), updatedAt: stamp() };
+          if (!dry) this.store.put("code_plan_review", id, projectId, review);
+        } else if (!dry && review.note !== note) {
+          review = { ...review, note, updatedAt: stamp() };
+          this.store.put("code_plan_review", id, projectId, review);
+        }
+        const line = review.skipped ? `Review ${reviewId} skipped: three review turns already used.`
+          : review.state === "failed" ? `Review ${reviewId} failed; continuing the film.` : undefined;
+        if (line && !logs.includes(line)) logs.push(line);
+        return review.state === "done" || review.state === "failed" ? null : SANDBOX_PENDING;
+      }
       if (method === "choose") return this.choose(projectId, args, dry);
       invariant(method === "image" || method === "video" || method === "speech" || method === "music" || method === "render", "CODE_PLAN_METHOD", "Unknown Studio operation");
       const kind: CodePlanMediaKind = method;
@@ -413,7 +450,7 @@ export class CodePlanRuntime implements CodePlanPort {
     };
     let outcome: SandboxResult;
     try {
-      outcome = await runSandbox({ source, now: clock?.now ?? run?.now ?? Date.now(), seed: clock?.seed ?? run?.seed ?? 1, limits: this.limits, call });
+      outcome = await runSandbox({ source, reviewEnabled, now: clock?.now ?? run?.now ?? Date.now(), seed: clock?.seed ?? run?.seed ?? 1, limits: this.limits, call });
       const settled = await Promise.allSettled(submissions);
       const rejected = settled.find(result => result.status === "rejected");
       if (rejected?.status === "rejected") outcome = { state: "error", error: errorView(rejected.reason) };
@@ -428,7 +465,7 @@ export class CodePlanRuntime implements CodePlanPort {
     if (limited) diff.findings.push({ code: "STEP_LIMIT" });
     const liability = this.options.execution.accounting(projectId).total;
     if (moneyMicros(diff.certainMicros) > moneyMicros(codePlanCeiling(this.store, projectId)) - liability) diff.findings.push({ code: "CEILING" });
-    return { outcome, reached, declarations, logs, budget, diff };
+    return { outcome, reached, reviewKeys, declarations, logs, budget, diff };
   }
 
   private choose(projectId: string, args: unknown[], dry = false): unknown {
