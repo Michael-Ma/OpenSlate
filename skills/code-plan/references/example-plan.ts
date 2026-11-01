@@ -11,8 +11,8 @@ export default async function film(ctx: Studio): Promise<void> {
     const frames = await Promise.all(["a", "b", "c"].map(variant => ctx.image({ model: "fake-image", shot: id, prompt, variant })));
     const options = frames.flatMap(result => result.ok ? [result.artifact] : []);
     if (!options.length) { await ctx.log(`No frames for ${id}`); return null; }
-    const firstFrame = await ctx.choose(`${id}-keyframe`, { question: `Choose a frame for ${id}`, options });
-    const clip = await ctx.video({ model: "fake-video", shot: id, firstFrame, prompt: motion, durationSeconds: 6 });
+    const frame = await ctx.choose(`${id}-keyframe`, { question: `Choose a frame for ${id}`, options });
+    const clip = await ctx.video({ model: "fake-video", shot: id, references: [frame], prompt: `${prompt}. ${motion}.`, durationSeconds: 6 });
     // Fake clips share their bytes. Retain the actual motion in the fixture timeline too.
     if (clip.ok) return { artifact: clip.artifact, motion };
     // In real films, fill these amounts from read_film.models (the fixture video costs $0).
@@ -23,7 +23,7 @@ export default async function film(ctx: Studio): Promise<void> {
       question: `${cost}Retry this shot for an estimated additional $0.00 (offline fixture), or skip?`, options: ["retry", "skip"],
     });
     if (answer !== "retry") return null;
-    const retried = await ctx.video({ model: "fake-video", shot: id, firstFrame, prompt: motion, durationSeconds: 6, variant: "person-retry-1" });
+    const retried = await ctx.video({ model: "fake-video", shot: id, references: [frame], prompt: `${prompt}. ${motion}.`, durationSeconds: 6, variant: "person-retry-1" });
     if (!retried.ok) { await ctx.log(`The retried clip for ${id} also failed. Please choose how to continue in chat.`); return null; }
     return { artifact: retried.artifact, motion };
   }));

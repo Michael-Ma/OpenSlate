@@ -197,7 +197,7 @@ export async function runCodePlanOfflineFlow(f) {
   assert.equal(f.provider.acceptedCount(editedAttempt), 1);
   const newCalls = f.calls.submit.slice(beforeEdit);
   assert.deepEqual(newCalls.map(call => call.kind), ["video", "render"]);
-  assert.equal(newCalls[0].args.prompt, "Slow lateral pan");
+  assert.equal(newCalls[0].args.prompt, "Sunrise through a misty window. Slow lateral pan.");
   const newSteps = view.steps.filter(step => !initialKeys.has(step.key));
   assert.deepEqual(newSteps.map(step => step.kind).sort(), ["render", "video"]);
   assert.ok(newSteps.every(step => step.state === "succeeded"));

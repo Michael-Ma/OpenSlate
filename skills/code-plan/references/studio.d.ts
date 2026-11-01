@@ -9,7 +9,7 @@ interface Studio {
   scene<T extends { [key: string]: Json }>(declaration: T): Promise<T>;
   shot<T extends { [key: string]: Json }>(declaration: T): Promise<T>;
   image(input: ShotMediaInput & { prompt: string }): Promise<MediaResult>;
-  video(input: ShotMediaInput & { firstFrame: Artifact; prompt: string; durationSeconds?: number; lastFrame?: Artifact; resolution?: string; aspectRatio?: "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "21:9" | "adaptive"; generateAudio?: boolean; seed?: number }): Promise<MediaResult>;
+  video(input: ShotMediaInput & { references?: Artifact[]; firstFrame?: Artifact; prompt: string; durationSeconds?: number; lastFrame?: Artifact; resolution?: string; aspectRatio?: "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "21:9" | "adaptive"; generateAudio?: boolean; seed?: number }): Promise<MediaResult>;
   /** Use an installed read_film.models id. Real speech defaults to stock voice coral. */
   speech(input: ShotMediaInput & { text: string; voice?: string; instructions?: string }): Promise<MediaResult>;
   /** Music exposes measured leadInSamples and durationSamples at 48 kHz. Length is approximate; every Lyria file carries SynthID. */
