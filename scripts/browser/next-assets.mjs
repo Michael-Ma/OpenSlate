@@ -56,7 +56,59 @@ async function openAssets(page) {
 }
 
 const tile = (page, selector) => page.locator(`main[data-view='assets'] .tile${selector}`);
+const named = (page, name) => page.locator("main[data-view='assets'] .tile").filter({ hasText: name });
 const roleButton = (page, role) => page.locator(`[data-act='role-filter'][data-role='${role}']`);
+
+// A tile opens the shared media viewer: the title in its head, the picture or player on its stage, details and actions beside them.
+const VIEWER = "dialog.media-viewer";
+const VIEWER_TITLE = "#media-viewer-title";
+const DETAIL = `${VIEWER} aside.mv-side .detail`;
+
+/** Open a tile in the viewer and wait for its details. */
+async function openTile(page, locator, title) {
+  await locator.scrollIntoViewIfNeeded();
+  await locator.click();
+  await page.waitForSelector(DETAIL);
+  if (title) await expectText(page, VIEWER_TITLE, title);
+}
+
+async function closeViewer(page) {
+  await page.locator(`${VIEWER} [data-act='viewer-close']`).click();
+  await page.waitForSelector(VIEWER, { state: "detached" });
+}
+
+/** The viewer's stage shows the picture itself. */
+async function pictureShown(page, timeout) {
+  await page.waitForFunction((selector) => { const img = document.querySelector(selector); return img?.complete && img.naturalWidth > 0; }, `${VIEWER} .mv-stage img`, { timeout })
+    .catch(async () => { throw new Error(`The viewer shows no picture: ${JSON.stringify(await page.locator(`${VIEWER} .mv-stage`).innerText())}`); });
+}
+
+/** The toast is on top of the page: in the top layer over an open dialog, else what the pointer hits at its centre. */
+async function toastOnTop(page) {
+  const hit = await page.locator(".toast").evaluate((el) => {
+    // A modal dialog makes the page behind it inert, and hit testing skips inert elements, so ask the browser instead.
+    if (document.querySelector("dialog[open]")) return el.matches(":popover-open") ? null : "the open dialog";
+    const box = el.getBoundingClientRect();
+    const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return el.contains(top) ? null : `${top?.tagName.toLowerCase()}.${top?.className}`;
+  });
+  expect(hit === null, `The toast is covered by ${hit}`);
+}
+
+/** Focus reached the reply box and stayed there (a few frames later nothing has taken it back). */
+async function replyBoxKeepsFocus(page) {
+  await page.waitForFunction(() => document.activeElement?.matches("#director textarea[data-field='message']"), null, { timeout: 2000 }).catch(() => {});
+  await page.waitForTimeout(250);
+  const now = await focused(page);
+  expect(now?.field === "message", `Focus is on ${JSON.stringify(now)}, not the reply box`);
+}
+
+/**
+ * Run a check and keep its failure for the end of the scenario (see `settle`), so a product bug it finds does not stop
+ * the checks after it from running. The scenario still fails.
+ */
+const keep = (failures, check) => check().catch((error) => { failures.push(error.message); });
+const settle = (failures) => expect(!failures.length, failures.join("; "));
 
 /** A small valid PNG (solid colour), built here so nothing is read from disk. */
 function png(width, height, rgb) {
@@ -134,7 +186,7 @@ export const scenarios = [
       expect(groups.map((g) => g.replace(/\s+/g, " ").trim()).join(" / ") === "Whole film music, uploads and exports / 1 Closing time Scene 1 / 2 Harbour at dawn Scene 2 / 3 Departure Scene 3", `Groups read ${JSON.stringify(groups)}`);
       await expectText(page, "[data-group='film'] [data-empty='exports']", /No exports yet/);
       await expectText(page, "#av-set-shot-3-1", /Nothing made yet/);
-      await expectText(page, "main[data-view='assets'] aside.detail", /Select an asset to see where it is used/);
+      expect(await page.locator(`main[data-view='assets'] .detail, ${VIEWER}`).count() === 0, "An asset is open before a tile was pressed");
       // Pictures load near the screen first (a few at a time); scrolling the groups loads the rest. Keyframes, the two
       // sample uploads and the clips (which show their keyframe): 11 pictures.
       await page.waitForFunction(() => [...document.querySelectorAll("main[data-view='assets'] .tile img")].length >= 6, null, { timeout: 10000 });
@@ -148,14 +200,12 @@ export const scenarios = [
       }));
       expect(naming.alts.every((alt) => alt === ""), `Tile pictures have alt text ${JSON.stringify(naming.alts)}`);
       expect(naming.roleImg === 0, "A tile holds a named image");
-      // The study at 1440 × 900: header row, filters, groups beside a 300 px detail panel; the page does not scroll.
+      // At 1440 × 900: header row, filters, and the groups across the whole workspace; the page does not scroll.
       const head = await box(page, "main[data-view='assets'] .view-head h1");
       near("title left", head.left, 414); near("title top", head.top, 67, 8);
-      const detail = await box(page, "main[data-view='assets'] aside.detail");
-      near("detail width", detail.width, 300, 2); near("detail right", detail.right, 1418, 2); near("detail top", detail.top, 156, 8); near("detail bottom", detail.bottom, 882, 4);
       const groupsBox = await box(page, "main[data-view='assets'] .groups");
-      near("groups left", groupsBox.left, 414, 2); near("groups right", groupsBox.right, 1102, 4);
-      near("tile width", (await box(page, "[data-group='film'] .tile")).width, 155, 8);
+      near("groups left", groupsBox.left, 414, 2); near("groups right", groupsBox.right, 1418, 2); near("groups top", groupsBox.top, 156, 8); near("groups bottom", groupsBox.bottom, 882, 4);
+      near("tile width", (await box(page, "[data-group='film'] .tile")).width, 256, 8);
       const scroll = await page.evaluate(() => ({ height: document.scrollingElement.scrollHeight, inner: window.innerHeight }));
       expect(scroll.height <= scroll.inner, `The page scrolls: ${JSON.stringify(scroll)}`);
       await noSidewaysScroll(page);
@@ -182,6 +232,7 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await openAssets(page);
+      const failures = [];
       // Filters by role and scene.
       await roleButton(page, "voice").click();
       expect((await roleButton(page, "voice").getAttribute("aria-pressed")) === "true", "The Voice lines filter is not pressed");
@@ -201,51 +252,52 @@ export const scenarios = [
       await expectText(page, ".filters .count", /^Showing 16 of 16$/);
       await page.waitForFunction(() => document.activeElement?.matches("[data-act='role-filter'][data-role='all']"), null, { timeout: 2000 });
 
-      // Select the earlier voice line of 1.2 (the study's "selected" state).
+      // Open the earlier voice line of 1.2.
       const earlier = tile(page, "[data-role='voice'][data-current='false']");
-      await earlier.scrollIntoViewIfNeeded();
-      await earlier.click();
-      expect((await earlier.getAttribute("aria-pressed")) === "true", "The chosen tile is not pressed");
-      const rows = (await page.locator("aside.detail dl").innerText()).replace(/\s+/g, " ").trim();
+      await openTile(page, earlier, /^Voice line 1\.2$/);
+      const rows = (await page.locator(`${DETAIL} dl`).innerText()).replace(/\s+/g, " ").trim();
       // The sample library is dated in the past (the study's 10:20 is two hours and 24 minutes ago).
       expect(/^Kind Voice line Shot 1\.2 Medium Closing time In use No, an earlier take Source Generated Made (Today|\d{1,2} [A-Z][a-z]{2}) \d\d:\d\d Length 2\.6 s$/.test(rows), `Detail rows read ${JSON.stringify(rows)}`);
-      await expectText(page, "aside.detail h3", /^Voice line 1\.2$/);
-      await expectText(page, "aside.detail .av-note", /No sound in the sample film/);
+      await expectText(page, `${VIEWER} .av-note`, /No sound in the sample film/);
       await shot(page, "next-assets-1440-selected");
-      // Play moves the clock and its label says what the next press does (no pressed state); the selected tile border is white.
-      const play = page.locator("aside.detail [data-act='play-asset']");
+      // Play moves the clock and its label says what the next press does (no pressed state).
+      const play = page.locator(`${VIEWER} [data-act='play-asset']`);
       expect((await play.getAttribute("aria-label")) === "Play" && (await play.getAttribute("aria-pressed")) === null, "The play button reads as a toggle");
       await play.click();
-      await page.waitForFunction(() => document.querySelector("aside.detail .playrow span")?.textContent !== "0:00", null, { timeout: 4000 });
+      await page.waitForFunction((selector) => document.querySelector(selector)?.textContent !== "0:00", `${VIEWER} .playrow span`, { timeout: 4000 });
       expect((await play.getAttribute("aria-label")) === "Pause", "The play button does not offer Pause while playing");
-      const border = await earlier.evaluate((el) => getComputedStyle(el).borderTopColor);
-      expect(border === "rgb(236, 236, 238)", `The selected tile border is ${border}`);
-      // Download says what the studio would do in the sample film.
-      await page.locator("aside.detail [data-act='download']").click();
+      // Download says what the studio would do in the sample film, and that has to be seen from the viewer it is pressed in.
+      await page.locator(`${DETAIL} [data-act='download']`).click();
       await expectText(page, ".toast", /The sample film has no files to download/);
+      await keep(failures, () => toastOnTop(page));
+      // Point the Director at the asset's shot (assets cannot be named in a message yet): the viewer closes so the composer can be used.
+      await expectText(page, `${DETAIL} [data-act='point-director']`, /^Point the Director at 1\.2$/);
+      await page.locator(`${DETAIL} [data-act='point-director']`).click();
+      await page.waitForSelector(VIEWER, { state: "detached" });
+      await expectText(page, ".toast", /Pointing the Director at 1\.2\. Write your message in the composer\./);
       // Assets has no picture to sit over, so the toast sits at the top of the workspace, centred in it (never at the
-      // foot, over the tiles or the detail's buttons).
+      // foot, over the tiles).
       await page.locator(".toast").evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
       const toastBox = await box(page, ".toast");
       near("toast top", toastBox.top, 64, 4);
       near("toast centre", toastBox.left + toastBox.width / 2, 916, 4);
-      // Point the Director at the asset's shot (assets cannot be named in a message yet).
-      await expectText(page, "aside.detail [data-act='point-director']", /^Point the Director at 1\.2$/);
-      await page.locator("aside.detail [data-act='point-director']").click();
-      await expectText(page, ".toast", /Pointing the Director at 1\.2\. Write your message in the composer\./);
+      await toastOnTop(page);
       const composer = await page.locator("#director").innerText();
       expect(/1\.2/.test(composer), "The composer does not show the shot it points at");
-      await page.waitForFunction(() => document.activeElement?.matches("#director textarea[data-field='message']"), null, { timeout: 2000 });
+      await keep(failures, () => replyBoxKeepsFocus(page));
       // Whole-film assets cannot be pointed at.
-      await tile(page, "[data-role='music']").first().click();
-      expect(await page.locator("aside.detail [data-act='point-director']").count() === 0, "Music offers Point the Director");
-      await expectText(page, "aside.detail [data-act='open-in']", /^Open the music lane in Film$/);
-      // Open a keyframe in Keyframes: the tab and the shot follow.
-      await tile(page, "[data-role='keyframe']").nth(4).click();
-      await expectText(page, "aside.detail [data-act='open-in']", /^Open 2\.2 in Keyframes$/);
-      await page.locator("aside.detail [data-act='open-in']").click();
+      await openTile(page, tile(page, "[data-role='music']").first());
+      expect(await page.locator(`${DETAIL} [data-act='point-director']`).count() === 0, "Music offers Point the Director");
+      await expectText(page, `${DETAIL} [data-act='open-in']`, /^Open the music lane in Film$/);
+      await closeViewer(page);
+      // Open a keyframe in Keyframes: the viewer closes, the tab and the shot follow.
+      await openTile(page, tile(page, "[data-role='keyframe']").nth(4));
+      await expectText(page, `${DETAIL} [data-act='open-in']`, /^Open 2\.2 in Keyframes$/);
+      await page.locator(`${DETAIL} [data-act='open-in']`).click();
       await page.waitForFunction(() => document.querySelector(".topbar [data-view='keyframes']")?.getAttribute("aria-selected") === "true");
       await page.waitForSelector("main[data-view='keyframes'] .preview[data-shot='shot-2-2']", { timeout: 8000 });
+      expect(await page.locator(VIEWER).count() === 0, "The viewer stayed open over Keyframes");
+      settle(failures);
     },
   },
   {
@@ -254,6 +306,7 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await openAssets(page);
+      const failures = [];
       const opener = page.locator("[data-act='import']");
       await opener.click();
       const sheet = page.locator("dialog[data-act='import-sheet']");
@@ -261,22 +314,33 @@ export const scenarios = [
       await expectText(page, "dialog[data-act='import-sheet'] .sheet-foot", /Importing is free\./);
       expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on before a file is chosen");
       await shot(page, "next-assets-1440-import");
-      // Refused before sending: not a PNG.
-      await chooseFile(page, { name: "pier-sketch.gif", mimeType: "image/gif", buffer: Buffer.from("GIF89a") });
-      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This picture format can’t be imported\. Use PNG, JPEG, WebP or HEIC/);
+      // Refused before sending: an SVG, and a file of no kind the studio takes.
+      await chooseFile(page, { name: "pier-sketch.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>") });
+      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This picture format cannot be read here\. Export it as PNG or JPEG and try again\. SVG pictures must be exported first\./);
       expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on for a refused file");
-      // Refused before sending, from the file's first bytes: not a PNG, or more pixels than the studio takes.
-      await chooseFile(page, { name: "broken.png", mimeType: "image/png", buffer: Buffer.from("not a png") });
+      await chooseFile(page, { name: "cut-list.zip", mimeType: "application/zip", buffer: Buffer.from("PK") });
+      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This kind of file can’t be imported\. Choose a picture, video, audio, PDF or text file\./);
+      expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on for a file of an unknown kind");
+      // GIF, BMP, TIFF and AVIF pictures are not refused here: Import turns on, and the studio reads them.
+      for (const [name, mimeType] of [["pier-sketch.gif", "image/gif"], ["pier-sketch.bmp", "image/bmp"], ["pier-sketch.tiff", "image/tiff"], ["pier-sketch.avif", "image/avif"]]) {
+        await chooseFile(page, { name, mimeType, buffer: Buffer.alloc(64, 1) });
+        await page.waitForFunction(() => !document.querySelector("[data-act='import-go']")?.disabled, null, { timeout: 2000 });
+        expect((await page.locator("dialog[data-act='import-sheet'] .file-opt").getAttribute("data-kind")) === "image", `${name} is not taken as a picture`);
+        expect(await page.locator("dialog[data-act='import-sheet'] .av-refusal").count() === 0, `${name} is refused before sending`);
+      }
+      // Refused before sending, from a PNG's first bytes: a damaged header, or more pixels than the studio takes.
+      // (Bytes that don't start like a PNG are left to the studio: the browser's type is not always right.)
+      await chooseFile(page, { name: "broken.png", mimeType: "image/png", buffer: pngStart(0, 0) });
       await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This is not a PNG image the studio can read\./);
-      expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on for a file that is not a PNG");
-      await chooseFile(page, { name: "panorama.png", mimeType: "image/png", buffer: pngStart(5000, 1200, 64) });
-      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This image is 5000 × 1200 pixels\. The studio takes PNG images up to 3840 × 2160/);
+      expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on for a PNG with a damaged header");
+      await chooseFile(page, { name: "panorama.png", mimeType: "image/png", buffer: pngStart(20000, 6000, 64) });
+      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This picture is 20000 × 6000 pixels, over the 100 million pixel limit\. Export a smaller copy and try again\./);
       expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on for a PNG over the pixel limit");
       // Refused by the (simulated) studio: the refusal is final for this file, so there is no Try again and
       // the file loses its white "chosen" border until another file is chosen.
       await chooseFile(page, { name: "stub.png", mimeType: "image/png", buffer: pngStart(16, 9) });
       await page.locator("[data-act='import-go']").click();
-      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /The studio could not take this PNG\. It may be damaged, or larger than 3840 × 2160 pixels\./);
+      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This picture could not be read\. Export it again as PNG or JPEG, up to 100 million pixels\./);
       expect(await page.locator(".toast").count() === 0, "A refusal also showed as a toast");
       await expectText(page, "[data-act='import-go']", /^Import$/);
       expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on again after a final refusal");
@@ -297,17 +361,25 @@ export const scenarios = [
       expect(await sheet.count() === 0, "The import sheet stayed open");
       expect(await page.evaluate(() => document.activeElement?.getAttribute("data-act")) === "import", "Focus did not return to Import");
       await expectText(page, ".filters .count", /^Showing 17 of 17$/);
-      await expectText(page, "aside.detail h3", /^harbour-ambience\.wav$/);
-      await expectText(page, "aside.detail dl", /Upload[\s\S]*Not on a shot[\s\S]*Not in use[\s\S]*Imported[\s\S]*Length\s*1 s/);
-      // A PNG: it shows up as an imported image, with its picture.
+      await openTile(page, named(page, "harbour-ambience.wav"), /^harbour-ambience\.wav$/);
+      await expectText(page, `${DETAIL} dl`, /Upload[\s\S]*Not on a shot[\s\S]*Not in use[\s\S]*Imported[\s\S]*Length\s*1 s/);
+      await closeViewer(page);
+      // A PNG: it shows up as an imported image, with its picture, and the library scrolls to it.
+      await page.locator("main[data-view='assets'] .groups").evaluate((el) => { el.scrollTop = el.scrollHeight; });
       await opener.click();
       await sheet.waitFor();
       await chooseFile(page, { name: "pier.png", mimeType: "image/png", buffer: png(32, 18, [80, 110, 150]) });
       await page.locator("[data-act='import-go']").click();
       await expectText(page, ".toast", /Imported pier\.png\./, 8000);
+      await page.waitForFunction(() => {
+        const shown = [...document.querySelectorAll("main[data-view='assets'] .tile")].find((el) => el.textContent.includes("pier.png"))?.getBoundingClientRect();
+        const groups = document.querySelector("main[data-view='assets'] .groups").getBoundingClientRect();
+        return shown && shown.top >= groups.top && shown.bottom <= groups.bottom;
+      }, null, { timeout: 3000 });
       // An imported picture keeps the name it was imported with.
-      await expectText(page, "aside.detail h3", /^pier\.png$/);
-      await page.waitForFunction(() => { const img = document.querySelector("aside.detail .big-pic img"); return img?.complete && img.naturalWidth > 0; }, null, { timeout: 6000 });
+      await openTile(page, named(page, "pier.png"), /^pier\.png$/);
+      await keep(failures, () => pictureShown(page, 6000));
+      await closeViewer(page);
       await expectText(page, ".filters .count", /^Showing 18 of 18$/);
       // Once everything is sent, the sheet can be closed: the studio's check goes on in the background.
       await opener.click();
@@ -342,7 +414,7 @@ export const scenarios = [
       await page.evaluate(() => document.querySelector("dialog[data-act='import-sheet']").close());
       await page.waitForFunction(() => !document.querySelector("dialog[data-act='import-sheet']"), null, { timeout: 2000 });
       // Refused after the sheet closed: said in a toast that stays until dismissed.
-      await expectText(page, ".toast", /stub\.png was not imported\. The studio could not take this PNG\./, 8000);
+      await expectText(page, ".toast", /stub\.png was not imported\. This picture could not be read\./, 8000);
       expect((await page.locator(".toast").getAttribute("data-tone")) === "error", "A refusal after closing is not kept on screen");
       await page.locator("[data-act='toast-close']").click();
       await opener.click();
@@ -370,6 +442,7 @@ export const scenarios = [
       const uploads = await page.locator("main[data-view='assets'] .tile[data-role='upload'] b").allInnerTexts();
       expect(uploads.length === 6 && new Set(uploads).size === uploads.length, `Imported files share a name: ${JSON.stringify(uploads)}`);
       await shot(page, "next-assets-1440-imported");
+      settle(failures);
     },
   },
   {
@@ -379,7 +452,7 @@ export const scenarios = [
     async run({ page }) {
       await openAssets(page);
       await noSidewaysScroll(page);
-      expect(await page.locator("main[data-view='assets'] aside.detail").count() === 0, "The detail panel shows beside the tiles on a phone");
+      expect(await page.locator(`main[data-view='assets'] .detail, ${VIEWER}`).count() === 0, "An asset is open before a tile was pressed");
       // Two tiles a row.
       const tiles = page.locator("[data-group='film'] .tile");
       const [a, b] = [await tiles.nth(0).boundingBox(), await tiles.nth(1).boundingBox()];
@@ -388,24 +461,21 @@ export const scenarios = [
       const seg = await page.evaluate(() => { const el = document.querySelector("main[data-view='assets'] .segctl"); return { scroll: el.scrollWidth, client: el.clientWidth, right: el.getBoundingClientRect().right }; });
       expect(seg.right <= 390 - 15, `The filters reach ${seg.right}px`);
       await shot(page, "next-assets-390");
-      // A tile opens the detail as a sheet; Close returns focus to the tile.
+      // A tile opens the viewer, inside the window with its actions in reach; Close returns focus to the tile.
       const voice = tile(page, "[data-role='voice']").first();
-      await voice.scrollIntoViewIfNeeded();
-      await voice.click();
-      const sheet = page.locator("dialog[data-act='asset-sheet']");
-      await sheet.waitFor();
-      await expectText(page, "dialog[data-act='asset-sheet'] h3", /^Voice line 1\.2$/);
+      await openTile(page, voice, /^Voice line 1\.2$/);
       await noSidewaysScroll(page);
+      const opened = await box(page, VIEWER);
+      expect(opened.left >= 0 && opened.right <= 390, `The viewer reaches from ${opened.left} to ${opened.right}px`);
+      for (const act of ["download", "point-director", "open-in"]) await page.locator(`${DETAIL} [data-act='${act}']`).click({ trial: true, timeout: 3000 });
       await shot(page, "next-assets-390-sheet");
-      await page.locator("[data-act='close-asset']").click();
-      await page.waitForFunction(() => !document.querySelector("dialog[data-act='asset-sheet']"));
-      expect(await page.evaluate(() => document.activeElement?.getAttribute("data-role")) === "voice", "Focus did not return to the tile");
-      // Point the Director from the sheet opens the Director drawer.
-      await voice.click();
-      await sheet.waitFor();
-      await page.locator("dialog[data-act='asset-sheet'] [data-act='point-director']").click();
-      await page.waitForFunction(() => !document.querySelector("dialog[data-act='asset-sheet']") && document.querySelector(".app")?.classList.contains("dir-open"));
-      await page.waitForFunction(() => document.activeElement?.matches("#director textarea[data-field='message']"), null, { timeout: 2000 });
+      await closeViewer(page);
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-role") === "voice", null, { timeout: 2000 });
+      // Point the Director from the viewer opens the Director drawer.
+      await openTile(page, voice);
+      await page.locator(`${DETAIL} [data-act='point-director']`).click();
+      await page.waitForFunction((viewer) => !document.querySelector(viewer) && document.querySelector(".app")?.classList.contains("dir-open"), VIEWER);
+      await replyBoxKeepsFocus(page);
       await noSidewaysScroll(page);
     },
   },
@@ -416,8 +486,7 @@ export const scenarios = [
     async run({ page }) {
       await openAssets(page);
       await noSidewaysScroll(page);
-      // Between 900 and 1239 px the detail narrows to 260 px and shot names sit above their tiles.
-      near("detail width", (await box(page, "main[data-view='assets'] aside.detail")).width, 260, 2);
+      // Between 900 and 1239 px shot names sit above their tiles.
       const set = await page.locator("#av-set-shot-1-1").evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
       expect(set === 1, `Shot sets use ${set} columns`);
       // Tiles stay at least 150 px wide, so no title loses its take and the status stays on one line.
@@ -426,19 +495,18 @@ export const scenarios = [
         return el.getBoundingClientRect().width < 150 || title.scrollWidth > title.clientWidth + 1 || sub.getBoundingClientRect().height > 20;
       }).map((el) => el.querySelector("b").textContent));
       expect(!cut.length, `Cut-off tiles at 1024 px: ${cut.join(", ")}`);
-      await tile(page, "[data-role='keyframe']").first().click();
-      await expectText(page, "aside.detail h3", /^Keyframe 1\.1 · take 1$/);
+      await openTile(page, tile(page, "[data-role='keyframe']").first(), /^Keyframe 1\.1 · take 1$/);
       // The two Director actions say what each acts on: this picture, or the shot.
-      const director = await page.locator("aside.detail [data-act='show-director'], aside.detail [data-act='point-director']").allInnerTexts();
+      const director = await page.locator(`${DETAIL} [data-act='show-director'], ${DETAIL} [data-act='point-director']`).allInnerTexts();
       expect(director.join(" | ") === "Show the Director this picture | Point the Director at 1.1", `The Director actions read ${JSON.stringify(director)}`);
-      // Pictures on screen (and the detail's) load; the ones further down wait until they are near.
-      await page.waitForFunction(() => {
+      // Pictures on screen (and the viewer's) load; the ones further down wait until they are near.
+      await page.waitForFunction((viewer) => {
         const view = document.querySelector("main[data-view='assets'] .groups").getBoundingClientRect();
         const onScreen = [...document.querySelectorAll("main[data-view='assets'] .tile[data-role='keyframe'], main[data-view='assets'] .tile[data-role='clip']")]
           .filter((el) => { const b = el.getBoundingClientRect(); return b.bottom > view.top && b.top < view.bottom; });
         const loaded = (img) => img?.complete && img.naturalWidth > 0;
-        return onScreen.length > 0 && onScreen.every((el) => loaded(el.querySelector("img"))) && loaded(document.querySelector("aside.detail .big-pic img"));
-      }, null, { timeout: 6000 });
+        return onScreen.length > 0 && onScreen.every((el) => loaded(el.querySelector("img"))) && loaded(document.querySelector(`${viewer} .mv-stage img`));
+      }, VIEWER, { timeout: 6000 });
       await noSidewaysScroll(page);
       await shot(page, "next-assets-1024");
     },
@@ -452,8 +520,8 @@ export const scenarios = [
       await expectText(page, "main[data-view='assets'] .view-head", /素材[\s\S]*这部影片共 16 个素材，各自归在所属的镜头下[\s\S]*导入…/);
       await expectText(page, ".filters .count", /^显示 16\/16$/);
       await expectText(page, "#av-set-shot-2-2", /关键帧 2\.2 · 版本 1[\s\S]*当前/);
-      await tile(page, "[data-role='clip']").first().click();
-      await expectText(page, "aside.detail", /视频 1\.1 · 版本 1[\s\S]*类型[\s\S]*视频[\s\S]*在成片里打开 1\.1/);
+      await openTile(page, tile(page, "[data-role='clip']").first(), /^视频 1\.1 · 版本 1$/);
+      await expectText(page, DETAIL, /类型[\s\S]*视频[\s\S]*在成片里打开 1\.1/);
       const clipped = await page.evaluate(() => [...document.querySelectorAll("main[data-view='assets'] .segctl button, main[data-view='assets'] .detail .pill")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
       expect(!clipped.length, `Clipped labels: ${clipped.join(", ")}`);
       await shot(page, "next-assets-1440-zh");
@@ -476,27 +544,28 @@ export const scenarios = [
       await chooseFile(page, { name: "pier.png", mimeType: "image/png", buffer: png(64, 36, [40, 70, 110]) });
       await page.locator("[data-act='import-go']").click();
       await expectText(page, ".toast", /Imported pier\.png\./, 20000);
-      await expectText(page, "aside.detail h3", /^pier\.png$/, 10000);
-      await page.waitForFunction(() => { const img = document.querySelector("aside.detail .big-pic img"); return img?.complete && img.naturalWidth > 0; }, null, { timeout: 10000 });
+      await openTile(page, named(page, "pier.png"), /^pier\.png$/);
+      await pictureShown(page, 10000);
       // Download loads and checks the file when pressed, then saves it.
       const savedImage = page.waitForEvent("download", { timeout: 15000 });
-      await page.locator("aside.detail [data-act='download']").click();
+      await page.locator(`${DETAIL} [data-act='download']`).click();
       expect((await savedImage).suggestedFilename() === "pier.png", "The PNG downloads under the wrong name");
+      await closeViewer(page);
       // A WAV as music through POST /audio-library/uploads?role=music; it plays from the narration audio route.
       await page.locator("[data-act='import']").click();
       await chooseFile(page, { name: "low-tide.wav", mimeType: "audio/wav", buffer: wav(1) });
       await page.locator("[data-act='import-go']").click();
       // The film has no music yet, so imported music becomes its soundtrack.
       await expectText(page, ".toast", /Imported low-tide\.wav\. It is now the film's music\./, 30000);
-      await expectText(page, "aside.detail h3", /^low-tide\.wav$/, 10000);
-      await expectText(page, "aside.detail dl", /Music[\s\S]*Not on a shot[\s\S]*Imported/);
-      // Selecting it loads nothing yet; Play loads the recording from the narration audio route and plays it.
-      expect((await page.locator("aside.detail [data-act='download']").getAttribute("data-state")) === "idle", "Selecting the audio loaded its file");
-      await page.locator("aside.detail [data-act='play-asset']").click();
-      await page.waitForSelector("aside.detail .big-pic audio[src^='blob:']", { state: "attached", timeout: 15000 });
+      await openTile(page, named(page, "low-tide.wav"), /^low-tide\.wav$/);
+      await expectText(page, `${DETAIL} dl`, /Music[\s\S]*Not on a shot[\s\S]*Imported/);
+      // Opening it loads nothing yet; Play loads the recording from the narration audio route and plays it.
+      expect((await page.locator(`${DETAIL} [data-act='download']`).getAttribute("data-state")) === "idle", "Opening the audio loaded its file");
+      await page.locator(`${VIEWER} [data-act='play-asset']`).click();
+      await page.waitForSelector(`${VIEWER} .big-pic audio[src^='blob:']`, { state: "attached", timeout: 15000 });
       // Download finds the file Play loaded (one shared, checked copy) and saves it.
       const savedAudio = page.waitForEvent("download", { timeout: 15000 });
-      await page.locator("aside.detail [data-act='download']").click();
+      await page.locator(`${DETAIL} [data-act='download']`).click();
       expect((await savedAudio).suggestedFilename() === "low-tide.wav", "The recording downloads under the wrong name");
       await expectText(page, "[data-act='role-filter'][data-role='all'] .n", new RegExp(`^${before + 2}$`), 10000);
       await expectText(page, "[data-act='role-filter'][data-role='music'] .n", /^1$/);

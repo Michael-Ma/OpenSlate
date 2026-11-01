@@ -29,9 +29,25 @@ async function openAssets(page) {
   await page.locator('[data-act="tab"][data-view="assets"]').click();
   await page.waitForSelector('main.work[data-view="assets"][data-state="ready"]');
 }
-async function showAsset(page, key) {
+/** Open an asset in the media viewer and wait for its details and actions. */
+async function openAsset(page, key) {
   await page.locator(`[data-asset*="${key}"]`).first().click();
-  await page.locator('.detail [data-act="show-director"]').click();
+  await page.waitForSelector('dialog.media-viewer .detail [data-act="download"]');
+}
+/** Show the Director the asset. The viewer closes whether or not it is taken, so the toast that answers can be seen. */
+async function showAsset(page, key) {
+  await openAsset(page, key);
+  await page.locator('dialog.media-viewer .detail [data-act="show-director"]').click();
+  await page.waitForSelector("dialog.media-viewer", { state: "detached", timeout: 2000 }).catch(() => fail("The viewer stayed open over the Director's answer"));
+}
+/** The toast is on top of the page: what the pointer would hit at its centre is the toast. */
+async function toastOnTop(page) {
+  const hit = await page.locator(".toast").evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return node.contains(top) ? null : `${top?.tagName.toLowerCase()}.${top?.className}`;
+  });
+  if (hit) fail(`The toast is covered by ${hit}`);
 }
 /** Every × in the composer is at least 24 px square (WCAG 2.5.8). */
 async function removeTargets(page) {
@@ -120,8 +136,9 @@ export const scenarios = [
       await openAssets(page);
       await showAsset(page, "art-ref");
       await toast(page, /^Added to your message/);
-      await page.locator('.detail [data-act="show-director"]').click();
+      await showAsset(page, "art-ref");
       await toast(page, /already in your message/);
+      await toastOnTop(page);
       if ((await pictureNames(page)).join() !== "2.1 keyframe,Imported image") fail(`Pictures: ${await pictureNames(page)}`);
       // An earlier take cannot be shown: the Director only sees a shot's current keyframe (2.2 is made again first).
       await page.waitForFunction(() => [...document.querySelectorAll(".composer .pic-chip img")].length === 2, null, { timeout: 4000 }).catch(() => fail("The picture chips have no thumbnails"));
@@ -206,11 +223,14 @@ export const scenarios = [
       await page.screenshot({ path: shot("pictures-refused-1440") });
       // Clips and audio are not offered; a demo-free imported picture is, and refused for the same reason.
       await openAssets(page);
-      await page.locator('[data-asset*="art-music-low-tide"]').first().click();
+      await openAsset(page, "art-music-low-tide");
       if (await page.locator('.detail [data-act="show-director"]').count()) fail("Add to message is offered for music");
+      await page.locator('dialog.media-viewer [data-act="viewer-close"]').click();
+      await page.waitForSelector("dialog.media-viewer", { state: "detached" });
       await closeToast(page);
       await showAsset(page, "art-timetable");
       await toast(page, /scripted Director/);
+      await toastOnTop(page);
     },
   },
   {
@@ -249,12 +269,9 @@ export const scenarios = [
     async run({ page }) {
       await page.waitForSelector(".director .thread [data-entry]", { state: "attached", timeout: 20000 });
       await openAssets(page);
-      await page.locator('[data-asset*="art-ref"]').first().click();
-      await page.waitForSelector('[data-act="asset-sheet"], .av-detail-sheet');
-      await page.locator('.av-detail-sheet [data-act="show-director"]').click();
-      // The sheet closes and the Director's drawer opens with the picture in the message.
+      await showAsset(page, "art-ref");
+      // The viewer has closed and the Director's drawer opens with the picture in the message.
       await page.waitForFunction(() => document.querySelector(".app").classList.contains("dir-open"));
-      await page.waitForSelector(".av-detail-sheet", { state: "detached" });
       if ((await pictureNames(page)).join() !== "Imported image") fail(`Pictures: ${await pictureNames(page)}`);
       await page.waitForTimeout(300);
       // No toast over the reply box being typed in: the chip shows the picture, and the box's description names it.

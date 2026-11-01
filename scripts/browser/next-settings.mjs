@@ -328,8 +328,13 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await openSettings(page);
-      const rows = await page.locator("#set-computer .srow").evaluateAll((els) => els.map((el) => `${el.querySelector("b").textContent}: ${el.querySelector(".ready").textContent}`));
+      // What the computer has, each with its status; the two preferences under them have their own controls.
+      const rows = await page.locator("#set-computer .srow:has(.ready)").evaluateAll((els) => els.map((el) => `${el.querySelector("b").textContent}: ${el.querySelector(".ready").textContent}`));
       expect(rows.join("|") === "Codex: ✓ Found|FFmpeg: ✓ Found|OpenAI key: ✓ Set|MiniMax key: ✓ Set|Viggle key: Not set|Gemini key (song analysis): Not set", `This computer reads ${rows.join("|")}`);
+      const preferences = await page.locator("#set-computer .srow:not(:has(.ready))").evaluateAll((els) => els.map((el) => `${el.dataset.row}: ${el.querySelector("b").textContent}`));
+      expect(preferences.join("|") === "default-limit: Spend limit for new films|developer: Developer mode", `The preferences read ${preferences.join("|")}`);
+      expect(await page.locator("#set-computer [data-row='default-limit'] input[data-act='default-limit']").isVisible(), "The spend limit has no field");
+      expect(await page.locator("#set-computer [data-row='developer'] [role='switch'][data-act='developer-toggle']").isVisible(), "Developer mode has no switch");
       // Song analysis says up front that pressing it sends the song to Google.
       await expectText(page, "#set-computer [data-row='key-gemini']", /OPENSLATE_GEMINI_API_KEY · about \$0\.02 for a 3-minute song\. Analyze song in Assets sends that song to Google\./);
       await expectText(page, "#set-computer [data-row='key-openai']", /Used by keyframes, narration, transcription/);

@@ -68,9 +68,9 @@ export const scenarios = [
       await expectText(page, '.file-chip[data-kind="document"] .file-status', /^Document · /);
       await page.screenshot({ path: shot("chips-1440"), clip: { x: 0, y: 420, width: 400, height: 480 } });
       // A file the studio can't take is refused on its chip, and holds Send until it is removed.
-      await sendInPage(page, "drop", "animation.gif", "image/gif", PNG);
+      await sendInPage(page, "drop", "storyboard.svg", "image/svg+xml", Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>"));
       await page.waitForSelector('.file-chip[data-state="failed"]');
-      await expectText(page, '.file-chip[data-state="failed"] .file-status', /PNG, JPEG, WebP or HEIC/);
+      await expectText(page, '.file-chip[data-state="failed"] .file-status', /This picture format cannot be read here\. Export it as PNG or JPEG and try again\./);
       const box = page.locator('[data-field="message"]');
       await box.click();
       await box.pressSequentially("Here are the references and the treatment.");
