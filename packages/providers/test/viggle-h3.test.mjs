@@ -220,3 +220,46 @@ test('already-aborted known-job polling is local-only, while a safe reported see
  const controller=new AbortController();controller.abort();const stopped=await p.poll('vid_123abc',{signal:controller.signal});unknown(stopped);assert.equal(stopped.error.code,'VIGGLE_H3_CALL_ABORTED');assert.equal(calls,0);
  const result=await p.poll('vid_123abc');assert.equal(result.kind,'completed');assert.equal(result.reported.seed,Number.MAX_SAFE_INTEGER);assert.equal(calls,1);
 });
+
+test('reference multipart preserves ordered uncropped images, no frame fields and explicit enhance=false',async()=>{
+ const request={...base(),durationSeconds:6,resolution:'768p',aspectRatio:'9:16',references:[image(),image(90)],enhance:false};
+ const d=describeViggleH3Request(request);assert.equal(d.mode,'reference');assert.equal(d.enhance,false);
+ assert.notEqual(d.requestDigest,describeViggleH3Request({...request,references:[...request.references].reverse()}).requestDigest);
+ const p=new ViggleH3Provider({apiKey:key,fetch:async(url,init)=>{
+  const form=await new Request(url,{method:'POST',headers:init.headers,body:init.body}).formData();
+  assert.equal(form.get('enhance'),'false');assert.equal(form.has('first_frame_image'),false);assert.equal(form.has('last_frame_image'),false);
+  const images=form.getAll('reference_image');assert.equal(images.length,2);
+  for(let i=0;i<images.length;i++)assert.deepEqual(Buffer.from(await images[i].arrayBuffer()),request.references[i].bytes);
+  return accepted();
+ }});
+ assert.equal((await p.submit(request)).kind,'accepted');
+ for(const patch of [{firstFrame:image()},{lastFrame:image()},{references:[]},{references:Array(5).fill(image())},{durationSeconds:4.9},{enhance:'false'}])
+  assert.throws(()=>describeViggleH3Request({...request,...patch}),ViggleH3ValidationError);
+ const {requestDigest,bodySha256,bodyByteLength,...metadata}=d;
+ assert.equal(viggleH3MetadataDigest(request.prompt,metadata),requestDigest);
+ assert.notEqual(describeViggleH3Request({...request,enhance:true}).requestDigest,requestDigest);
+ const large={...image(),byteLength:20*1024*1024+1};
+ assert.throws(()=>viggleH3MetadataDigest(request.prompt,{...metadata,references:[large]}));
+});
+
+test('complete published Viggle price table and fractional-second rounding',async()=>{
+ const {vigglePriceMicros}=await import('../dist/index.js');
+ const expected={text:[[10,15,25,30,50],[10,15,25,30,50]],first_frame:[[20,25,35,40,60],[10,15,25,30,50]],
+  first_last_frame:[[25,30,40,45,65],[15,25,30,35,55]],reference:[[35,45,50,55,75],[15,25,30,35,55]]};
+ for(const [mode,rates]of Object.entries(expected))for(const [i,resolution]of ['480p','768p','1080p','2k','4k'].entries())for(const [j,enhance]of [true,false].entries())
+  assert.equal(vigglePriceMicros({mode,resolution,enhance,durationSeconds:6}),String(6*rates[j][i]*2000));
+ for(const [mode,price]of Object.entries({reference:'300000',first_frame:'180000',first_last_frame:'300000',text:'180000'}))
+  assert.equal(vigglePriceMicros({mode,resolution:'768p',enhance:false,durationSeconds:6}),price);
+ assert.equal(vigglePriceMicros({mode:'reference',resolution:'768p',enhance:false,durationSeconds:5.01}),'300000');
+ assert.equal(vigglePriceMicros({mode:'first_frame',resolution:'768p',durationSeconds:6}),'300000','omitted enhance preserves vendor default');
+ for(const patch of [{mode:'invalid'},{durationSeconds:NaN},{durationSeconds:16},{resolution:'720p'}])
+  assert.throws(()=>vigglePriceMicros({mode:'text',resolution:'768p',durationSeconds:6,...patch}));
+});
+
+test('historical first-frame digests omit new fields and retain the original semantic encoding',()=>{
+ const request={...base(),firstFrame:image()},d=describeViggleH3Request(request);
+ const original={adapterVersion:'1',model:'MiniMax-H3',mode:'first_frame',prompt:request.prompt,quality:request.quality,durationSeconds:3,
+  resolution:'480p',aspectRatio:'16:9',watermark:false,firstFrame:{sha256:request.firstFrame.sha256,byteLength:request.firstFrame.byteLength,width:1,height:1,mediaType:'image/png'}};
+ assert.equal(d.requestDigest,sha(JSON.stringify(original)));assert.ok(!Object.hasOwn(d,'enhance'));assert.ok(!Object.hasOwn(d,'references'));
+ assert.notEqual(describeViggleH3Request({...request,enhance:false}).requestDigest,d.requestDigest);
+});

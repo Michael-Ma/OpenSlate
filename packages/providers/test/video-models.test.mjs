@@ -91,3 +91,17 @@ test('Seedance polls queued/running/success/failed, reports token usage, cancels
  status='failed';const failed=await s.poll('task-1');assert.equal(failed.code,'SEEDANCE_FACE_REJECTED');assert.equal(failed.retry,'none');assert.equal(failed.free,true);
  assert.equal(await s.cancelQueued('task-1'),true);assert.equal(cancel,1);await assert.rejects(s.cancelQueued('../task'));
 });
+
+test('Seedance 2.x reference and text bodies select exclusive modes and price from the first reference shape',()=>{
+ for(const model of [seedance,mini]){
+  const body=JSON.parse(seedanceBody({model,prompt:'Orbit around a stylized city',seconds:6,settings,references:[image,image]}));
+  assert.deepEqual(body.content.map(row=>row.role??row.type),['text','reference_image','reference_image']);
+  assert.equal(seedancePriceMicros(model,settings,{seconds:6,firstFrame:image}),seedancePriceMicros(model,{...settings,ratio:'9:16'},{seconds:6}));
+  const text=JSON.parse(seedanceBody({model,prompt:'A crane shot of a city',seconds:6,settings:{...settings,ratio:'16:9'}}));
+  assert.deepEqual(text.content,[{type:'text',text:'A crane shot of a city'}]);
+  for(const patch of [{references:[]},{references:Array(10).fill(image)},{references:[image],firstFrame:image},{lastFrame:image},{references:[image],lastFrame:image}])
+   assert.throws(()=>seedanceBody({model,prompt:'Orbit',seconds:6,settings,...patch}));
+  assert.throws(()=>seedanceBody({model,prompt:'Orbit',seconds:6,settings}));
+ }
+ for(const input of [{references:[image]},{}])assert.throws(()=>seedanceBody({model:fast,prompt:'Orbit',seconds:6,settings:{...settings,ratio:'16:9'},...input}));
+});
