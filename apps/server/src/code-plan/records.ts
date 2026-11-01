@@ -24,11 +24,17 @@ export interface CodePlanChoice {
   id: string; projectId: string; choiceId: string; optionsDigest: string; question: string; options: JsonValue[];
   answer?: JsonValue; answeredAt?: string;
 }
+export interface CodePlanReview {
+  id: string; projectId: string; reviewId: string; clipsDigest: string;
+  clips: ArtifactRef[]; note: string; state: "waiting" | "watching" | "done" | "failed";
+  requestId?: string; skipped?: boolean; createdAt: string; updatedAt: string;
+}
 export interface CodePlanRun {
   id: string; projectId: string; planVersion: number;
-  state: "running" | "waiting" | "error" | "paused_budget" | "done" | "done_with_failures";
+  state: "running" | "waiting" | "reviewing" | "error" | "paused_budget" | "done" | "done_with_failures";
   now: number; seed: number; ceilingMicros: string; lastPassAt: string | null;
   error: { message: string; stack: string } | null;
   reachedStepKeys: string[];
+  reviewKeys?: string[];
   declarations: { scenes: JsonObject[]; shots: JsonObject[] }; logs: string[];
 }

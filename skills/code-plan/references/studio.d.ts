@@ -18,6 +18,7 @@ interface Studio {
    * optional audio placements use artifact,startSample,durationSamples,atSample,gainMilliDb,fadeOutSamples (at most 240000).
    * Cut-only, 30 fps, 48 kHz; at most 64 clips/65 audio placements/8 lanes/360 s. Demo output is a fixture. */
   render(timeline: Json[] | (MediaInput & { timeline: Json[]; audio?: Json[]; width?: number; height?: number })): Promise<MediaResult>;
+  review(id: string, input: { clips: Artifact[]; note: string }): Promise<null>;
   choose<T extends Json>(id: string, input: { question: string; options: T[] }): Promise<T>;
   log(text: string): Promise<null>;
 }

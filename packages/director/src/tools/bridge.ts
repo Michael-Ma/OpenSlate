@@ -13,7 +13,8 @@ export interface ToolBridgeOptions {
   /** May only tighten the production defaults. */
   limits?: Partial<BridgeLimits>;
 }
-export interface ToolBridgeResult { callId: string; isError: boolean; value: unknown }
+export type ToolContent = { type: "text"; text: string } | { type: "image"; mimeType: "image/jpeg"; data: string };
+export interface ToolBridgeResult { callId: string; isError: boolean; value: unknown; content?: ToolContent[] }
 export interface ToolInvoker { readonly toolContractVersion?: ToolContractVersion; call(name: string, input: unknown, signal?: AbortSignal): Promise<ToolBridgeResult> }
 
 function limit(value: number | undefined, maximum: number): number {
@@ -89,7 +90,12 @@ export class ToolBridge implements ToolInvoker {
       const applicationError = value !== null && typeof value === "object" && "error" in value;
       if (response.status >= 500) throw new Error("SERVER_OUTCOME_UNKNOWN");
       if (!response.ok && !applicationError) throw new Error("INVALID_TOOL_ERROR_RESPONSE");
-      return { callId, isError: !response.ok || applicationError, value };
+      const content = name === "read_clip_frames" && response.ok && !applicationError && value !== null && typeof value === "object" && "content" in value
+        ? value.content as ToolContent[] : undefined;
+      if (content) invariant(Array.isArray(content) && content.length === 2 && content[0]?.type === "text" && typeof content[0].text === "string"
+        && content[1]?.type === "image" && content[1].mimeType === "image/jpeg" && typeof content[1].data === "string"
+        && content[1].data.length <= 2 * 1024 * 1024, "INVALID_TOOL_RESPONSE", "Invalid clip sheet response");
+      return { callId, isError: !response.ok || applicationError, value, ...(content ? { content } : {}) };
     } catch {
       // Even a socket/timeout/response error can follow a successful server commit.
       return { callId, isError: true, value: { error: { code: "TOOL_CALL_UNRESOLVED", message: "Tool outcome is unknown. Reconcile this call with application state before retrying.", callId, outcome: "unknown" } } };

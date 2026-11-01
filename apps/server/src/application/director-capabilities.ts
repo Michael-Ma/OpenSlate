@@ -6,7 +6,8 @@ import { join } from "node:path";
 
 /** Immutable code-mode instructions; independent of shipped graph releases. */
 export const CODE_PLAN_V1_GUIDANCE_DIGEST = "d3811c72395713445f2167bb281273de28b058098189f9d8bec441d7b3d0052e";
-export const CODE_PLAN_GUIDANCE_DIGEST = "77857a4ceaa0ff3494b6ca5213c9e15080570c771ace1b03d70fcbb4753e186e";
+export const CODE_PLAN_V2_GUIDANCE_DIGEST = "5a3a2ff56de93f43df6b15ba4c6d285264335b32e6bc2545e88fdb671c260c26";
+export const CODE_PLAN_GUIDANCE_DIGEST = "48662760476119637fdd1f475cfdb2c52aed1a4de4d7cfeda1910a735a5ff940";
 
 export interface DirectorSkillConfiguration { repositoryRoot: string; snapshotRoot: string; runtimeId?: string }
 
@@ -28,8 +29,8 @@ export function directorSkillEnvironment(options: DirectorSkillConfiguration, ve
 export function createDirectorSkillLock(options: DirectorSkillConfiguration, version: ToolContractVersion = "6.0.0", guidanceVersion = toolContractAtLeast(version, "7.1.0") ? "8.1.0" : version === "7.0.0" ? "8" : version === "6.0.0" ? "7" : version === "5.0.0" ? "6" : version === "4.0.0" ? "5" : version.split(".")[0], expectedPackageDigests?: Readonly<Record<string, string>>): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
   const environment = directorSkillEnvironment(options, version);
   if (isCodePlanToolContract(version)) {
-    const catalog = loadSkillCatalog({ ...environment, packageRoots: [join(options.repositoryRoot, version === "0.1.0" ? "skills/code-plan-v1" : "skills/code-plan")],
-      expectedPackageDigests: { "code-plan": version === "0.1.0" ? CODE_PLAN_V1_GUIDANCE_DIGEST : CODE_PLAN_GUIDANCE_DIGEST } });
+    const catalog = loadSkillCatalog({ ...environment, packageRoots: [join(options.repositoryRoot, version === "0.1.0" ? "skills/code-plan-v1" : version === "0.2.0" ? "skills/code-plan-v2" : "skills/code-plan")],
+      expectedPackageDigests: { "code-plan": codePlanGuidanceDigest(version) } });
     return { environment, lock: createSkillLock(catalog, { selectedSkillIds: ["code-plan"], bindings: environment.bindings! }) };
   }
   if (Number((guidanceVersion ?? '').split('.')[0]) >= SKILL_RELEASE_MIN_MAJOR) return createDirectorReleaseLock(options, version, guidanceVersion!);
@@ -63,3 +64,5 @@ export function createDirectorReleaseLock(options: DirectorSkillConfiguration, v
   invariant(!guidanceVersion.includes(".") || release.release.release === guidanceVersion, "DIRECTOR_GUIDANCE_UNSUPPORTED", "The release directory holds another release version");
   return { environment, lock: createSkillReleaseLock(release, { bindings: environment.bindings!, prompts: stagePrompts() }) };
 }
+
+export const codePlanGuidanceDigest = (version: ToolContractVersion): string => version === "0.1.0" ? CODE_PLAN_V1_GUIDANCE_DIGEST : version === "0.2.0" ? CODE_PLAN_V2_GUIDANCE_DIGEST : CODE_PLAN_GUIDANCE_DIGEST;

@@ -1,4 +1,4 @@
-import { applyCreativePatch, DomainError, invariant, shotIntentDigest, toolContractAtLeast } from "@openslate/core";
+import { applyCreativePatch, digest, DomainError, invariant, shotIntentDigest, toolContractAtLeast } from "@openslate/core";
 import type { ChangeProposal, DirectorNote, ProjectRecord, ProposalReceipt } from "@openslate/core";
 import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorStartOptions } from "@openslate/director";
 import { DirectorStartRefusal } from "@openslate/director";
@@ -46,7 +46,23 @@ export class FakeWorkflowDirector implements DirectorRuntime {
       return calls.invoke(input.projectId, actor, `demo-${++ordinal}`, tool, args);
     };
     if (isCodePlanToolContract(input.bridge.toolContractVersion)) {
-      const film = await invoke("read_film", {}) as { planVersion: number | null };
+      const film = await invoke("read_film", {}) as { planVersion: number | null; source: string | null };
+      const review = JSON.parse(input.context).review as { clips: { artifactId: string }[] } | undefined;
+      if (review && film.source) {
+        const cuts: { artifactId: string; startFrame: number; durationFrames: number }[] = [];
+        for (const clip of review.clips) {
+          const result = await invoke("read_clip_frames", { artifactId: clip.artifactId }) as { content: { text?: string }[] };
+          const sheet = JSON.parse(result.content[0]!.text!) as { durationFrames: number };
+          const startFrame = Math.min(6, Math.max(0, sheet.durationFrames - 1));
+          cuts.push({ artifactId: clip.artifactId, startFrame, durationFrames: Math.max(1, sheet.durationFrames - startFrame - 3) });
+        }
+        // A bounded demo edit of literal cut fields only. Never evaluates model-authored source.
+        const source = trimFakeReviewPlan(film.source, cuts);
+        await invoke("submit_plan", { source, basedOnVersion: film.planVersion, summary: "Scripted clip review: trim source cut points; preserve generation inputs." });
+        const text = "Scripted review watched the contact sheets and saved trimmed cut points.";
+        await options.onEvent?.({ ...identity, kind: "assistant_message", text, phase: "final" });
+        return { ...identity, status: "completed", text, dispatched: true };
+      }
       const references = JSON.parse(input.context).references as { skillId: string; path: string; content: string }[];
       const example = references.find(row => row.skillId === "code-plan" && row.path === "references/example-plan.ts");
       invariant(example, "CAPABILITY_MISMATCH", "Code-plan example is missing from the pinned instructions");
@@ -186,4 +202,25 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     await options.onEvent?.({ ...identity, kind: "assistant_message", text, phase: "final" });
     return { ...identity, status: "completed", text, dispatched: true };
   }
+}
+
+/** Explicit demo wrapper: changes render cuts only, preserving every generation input byte. */
+export function trimFakeReviewPlan(source: string, cuts: { artifactId: string; startFrame: number; durationFrames: number }[]): string {
+  const name = `__reviewed_${digest(source).slice(0, 16)}`;
+  const saved = source.replace(/^export default (?=(?:async )?function\b)/m, `const ${name} = `);
+  invariant(saved !== source, "CODE_PLAN_FAKE_REVIEW", "The scripted review needs a default function fixture");
+  return `${saved}
+export default async function(ctx) {
+  const cuts = ${JSON.stringify(cuts)};
+  return ${name}({ ...ctx, render: input => {
+    const timeline = Array.isArray(input) ? input : input.timeline;
+    const trimmed = timeline.map(row => {
+      const artifact = row.artifact || row;
+      const cut = cuts.find(cut => cut.artifactId === artifact.artifactId);
+      return cut ? { ...(row.artifact ? row : { artifact }), startFrame: cut.startFrame, durationFrames: cut.durationFrames } : row;
+    });
+    return ctx.render(Array.isArray(input) ? trimmed : { ...input, timeline: trimmed });
+  } });
+}
+`;
 }

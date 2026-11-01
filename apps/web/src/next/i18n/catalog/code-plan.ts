@@ -13,6 +13,7 @@ export const codePlanMessages = {
   "codeplan.state.running": { en: "Running", zh: "运行中" },
   "codeplan.state.waiting": { en: "Waiting for results", zh: "等待结果" },
   "codeplan.state.waiting_choice": { en: "Waiting for your choice", zh: "等你选择" },
+  "codeplan.state.reviewing": { en: "Director is watching the clips", zh: "导演在看片" },
   "codeplan.state.error": { en: "Stopped by an error", zh: "因错误停止" },
   "codeplan.state.paused_budget": { en: "Paused at the spend limit", zh: "已到花费上限，暂停" },
   "codeplan.state.done": { en: "Done", zh: "已完成" },

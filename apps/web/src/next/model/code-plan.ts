@@ -117,6 +117,7 @@ const STATUS: Record<CodePlanRunState, Msg> = {
   paused_budget: msg("codeplan.state.paused_budget"),
   done: msg("codeplan.state.done"),
   done_with_failures: msg("codeplan.state.done_with_failures"),
+  reviewing: msg("codeplan.state.reviewing"),
 };
 
 const share = (part: bigint, whole: bigint) => (whole <= 0n ? 0 : Math.max(0, Math.min(1, Number((part * 10000n) / whole) / 10000)));

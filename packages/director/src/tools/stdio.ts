@@ -89,7 +89,7 @@ export async function runStdioToolBridge(options: StdioToolBridgeOptions): Promi
     try {
       const result = await options.bridge.call(params.name, params.arguments === undefined ? {} : params.arguments, controller.signal);
       const response = { jsonrpc: "2.0", id, result: {
-        isError: result.isError, content: [{ type: "text", text: JSON.stringify(result.value) }], _meta: { "openslate/callId": result.callId },
+        isError: result.isError, content: result.content ?? [{ type: "text", text: JSON.stringify(result.value) }], _meta: { "openslate/callId": result.callId },
       } };
       if (Buffer.byteLength(JSON.stringify(response)) + 1 > limits.outputBytes) {
         await toolError(id, "TOOL_CALL_UNRESOLVED", `Tool result exceeded the output limit. Reconcile call ${result.callId} before retrying.`);

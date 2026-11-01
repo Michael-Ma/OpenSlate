@@ -10,6 +10,7 @@ export const SANDBOX_PENDING = Symbol("code-plan-pending");
 
 export interface SandboxOptions {
   source: string;
+  reviewEnabled?: boolean;
   now: number;
   seed: number;
   limits?: { cpuMs?: number; memoryMb?: number };
@@ -29,7 +30,7 @@ const MAX_BRIDGE_CHARS = 1024 * 1024;
 const MAX_HOST_CALLS = 2_000;
 const MAX_ERROR_MESSAGE = 4_096;
 const MAX_ERROR_STACK = 16_384;
-const METHODS = new Set(["shot", "scene", "image", "video", "speech", "music", "render", "choose", "log"]);
+const METHODS = new Set(["shot", "scene", "image", "video", "speech", "music", "render", "choose", "review", "log"]);
 const WORKER_KIND = "openslate-code-plan-sandbox-v1";
 const SHARED_BYTES = MAX_BRIDGE_CHARS * 4 + 4;
 
@@ -269,7 +270,7 @@ async function runSandboxLocal(options: SandboxOptions): Promise<SandboxResult> 
       }, writable: false, configurable: false });
       Object.freeze(Math);
       const ctx = Object.create(null);
-      for (const method of ["shot", "scene", "image", "video", "speech", "music", "render", "choose", "log"]) {
+      for (const method of ${JSON.stringify([...METHODS].filter(method => method !== "review" || options.reviewEnabled !== false))}) {
         ctx[method] = (...args) => {
           const json = stringify(args);
           if (json.length > ${MAX_BRIDGE_CHARS}) throw new Error("Sandbox host arguments exceed 1 Mi characters");
