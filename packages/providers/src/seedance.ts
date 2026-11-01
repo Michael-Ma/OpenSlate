@@ -29,11 +29,12 @@ const DIMENSIONS: Record<string, number[][]> = {
   "2:720p": [[1280,720],[1112,834],[960,960],[834,1112],[720,1280],[1470,630]],
   "2:1080p": [[1920,1080],[1664,1248],[1440,1440],[1248,1664],[1080,1920],[2206,946]],
 };
-export function seedanceOutputSize(model: string, settings: SeedanceSettings, firstFrame: VideoImageSize): VideoImageSize {
+export function seedanceOutputSize(model: string, settings: SeedanceSettings, firstFrame?: VideoImageSize): VideoImageSize {
   validateSeedanceSettings(model, settings);
-  ensure(Number.isSafeInteger(firstFrame.width) && Number.isSafeInteger(firstFrame.height) && firstFrame.width >= 300 && firstFrame.width <= 6000
+  if (firstFrame) ensure(Number.isSafeInteger(firstFrame.width) && Number.isSafeInteger(firstFrame.height) && firstFrame.width >= 300 && firstFrame.width <= 6000
     && firstFrame.height >= 300 && firstFrame.height <= 6000 && firstFrame.width / firstFrame.height >= 0.4 && firstFrame.width / firstFrame.height <= 2.5, "SEEDANCE_IMAGE_LIMIT");
-  const inputRatio = firstFrame.width / firstFrame.height;
+  ensure(firstFrame || settings.ratio && settings.ratio !== "adaptive", "SEEDANCE_TEXT_RATIO_REQUIRED");
+  const inputRatio = firstFrame ? firstFrame.width / firstFrame.height : 1;
   const ratio = settings.ratio && settings.ratio !== "adaptive" ? settings.ratio : [...SEEDANCE_RATIOS].sort((a,b) => {
     const n = (s: string) => { const [w,h] = s.split(":").map(Number); return Math.abs(Math.log(w! / h! / inputRatio)); };
     return n(a) - n(b);
@@ -42,7 +43,7 @@ export function seedanceOutputSize(model: string, settings: SeedanceSettings, fi
   return { width: pair[0]!, height: pair[1]! };
 }
 /** Integer rational arithmetic, rounded up once to a micro. Same function prices reservations and reported usage. */
-export function seedancePriceMicros(model: string, settings: SeedanceSettings, input: { seconds: number; firstFrame: VideoImageSize } | { completionTokens: number }): string {
+export function seedancePriceMicros(model: string, settings: SeedanceSettings, input: { seconds: number; firstFrame?: VideoImageSize } | { completionTokens: number }): string {
   validateSeedanceSettings(model, settings);
   const rateTenths = model.startsWith("seedance-1") ? 10n : model.includes("mini") ? 35n : settings.resolution === "1080p" ? 77n : 70n;
   let numerator: bigint, denominator: bigint;
@@ -57,20 +58,27 @@ export function seedancePriceMicros(model: string, settings: SeedanceSettings, i
   return ((numerator + denominator - 1n) / denominator).toString();
 }
 export interface SeedanceRequest { model: string; prompt: string; seconds: number; settings: SeedanceSettings; seed?: number;
-  firstFrame: VideoImageSize & { bytes: Uint8Array }; lastFrame?: VideoImageSize & { bytes: Uint8Array } }
+  firstFrame?: VideoImageSize & { bytes: Uint8Array }; lastFrame?: VideoImageSize & { bytes: Uint8Array }; references?: (VideoImageSize & { bytes: Uint8Array })[] }
 export function seedanceBody(input: SeedanceRequest): string {
-  const row = seedanceModel(input.model); seedancePriceMicros(input.model, input.settings, { seconds: input.seconds, firstFrame: input.firstFrame });
+  const row = seedanceModel(input.model), references = input.references;
+  ensure(references === undefined || Array.isArray(references) && references.length >= 1 && references.length <= 9, "SEEDANCE_INPUT_INVALID");
+  ensure(!references || !input.firstFrame && !input.lastFrame, "SEEDANCE_INPUT_INVALID");
+  ensure(!input.lastFrame || input.firstFrame, "SEEDANCE_INPUT_INVALID");
+  ensure(!input.model.startsWith("seedance-1") || input.firstFrame && !references, "SEEDANCE_INPUT_INVALID");
+  ensure(input.firstFrame || references || input.settings.ratio && input.settings.ratio !== "adaptive", "SEEDANCE_TEXT_RATIO_REQUIRED");
+  const priceFrame = input.firstFrame ?? references?.[0];
+  seedancePriceMicros(input.model, input.settings, { seconds: input.seconds, ...(priceFrame ? { firstFrame: priceFrame } : {}) });
   ensure(typeof input.prompt === "string" && input.prompt.trim().length > 0 && Buffer.byteLength(input.prompt) <= 32768
     && (input.seed === undefined || Number.isSafeInteger(input.seed) && input.seed >= 0 && input.seed <= 2147483647)
     && (!input.lastFrame || row.lastFrame), "SEEDANCE_INPUT_INVALID");
-  const frame = (image: SeedanceRequest["firstFrame"], role: string) => {
+  const frame = (image: NonNullable<SeedanceRequest["firstFrame"]>, role: string) => {
     seedanceOutputSize(input.model, input.settings, image);
     ensure(image.bytes instanceof Uint8Array && image.bytes.length >= 33 && image.bytes.length < 30_000_000, "SEEDANCE_IMAGE_LIMIT");
     const bytes = Buffer.from(image.bytes);
     ensure(bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && bytes.readUInt32BE(16) === image.width && bytes.readUInt32BE(20) === image.height, "SEEDANCE_IMAGE_INVALID");
     return { type: "image_url", role, image_url: { url: `data:image/png;base64,${bytes.toString("base64")}` } };
   };
-  return JSON.stringify({ model: input.model, content: [{ type: "text", text: input.prompt }, frame(input.firstFrame,"first_frame"), ...(input.lastFrame ? [frame(input.lastFrame,"last_frame")] : [])],
+  return JSON.stringify({ model: input.model, content: [{ type: "text", text: input.prompt }, ...(input.firstFrame ? [frame(input.firstFrame,"first_frame")] : []), ...(references ?? []).map(image => frame(image,"reference_image")), ...(input.lastFrame ? [frame(input.lastFrame,"last_frame")] : [])],
     resolution: input.settings.resolution, ratio: input.settings.ratio ?? "adaptive", duration: input.seconds, generate_audio: input.settings.generateAudio ?? false,
     ...(input.seed === undefined ? {} : { seed: input.seed }), watermark: false, return_last_frame: true });
 }

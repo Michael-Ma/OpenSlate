@@ -2,13 +2,13 @@ import { connectFailureCode } from "./connect-failure.js";
 import { createHash } from "node:crypto";
 import { setImmediate as yieldEventLoop } from "node:timers/promises";
 
-/** Viggle V1 H3 text/first/last-frame contract; no reference or animation mode. */
+/** Viggle V1 H3 text, exact-frame and reference-image contract. */
 export const VIGGLE_H3_ADAPTER_VERSION = "1";
 /** Conservative host bounds, not a claim about the provider's maximum upload size. */
-export const VIGGLE_H3_LIMITS = Object.freeze({ imageBytes: 32 * 1024 * 1024, requestBytes: 65 * 1024 * 1024,
+export const VIGGLE_H3_LIMITS = Object.freeze({ imageBytes: 32 * 1024 * 1024, referenceImageBytes: 20 * 1024 * 1024, requestBytes: 81 * 1024 * 1024,
   promptBytes: 32 * 1024, responseBytes: 1024 * 1024, timeoutMs: 30_000 });
 export type ViggleH3Quality = "low" | "high";
-export type ViggleH3Resolution = "480p" | "768p" | "1080p";
+export type ViggleH3Resolution = "480p" | "768p" | "1080p" | "2k" | "4k";
 export type ViggleH3AspectRatio = "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "21:9";
 export interface ViggleH3ImageDescription { sha256: string; byteLength: number; width: number; height: number; mediaType: "image/png" }
 /** Bytes must come from owned, verified image ingestion; this transport does not decode pixels. */
@@ -16,12 +16,12 @@ export interface ViggleH3Image extends ViggleH3ImageDescription { bytes: Uint8Ar
 export interface ViggleH3Settings { quality: ViggleH3Quality; resolution: ViggleH3Resolution; aspectRatio: ViggleH3AspectRatio }
 export interface ViggleH3Request {
   prompt: string; quality: ViggleH3Quality; durationSeconds: number; resolution: ViggleH3Resolution;
-  aspectRatio: ViggleH3AspectRatio; watermark: false; seed?: number; firstFrame?: ViggleH3Image; lastFrame?: ViggleH3Image;
+  aspectRatio: ViggleH3AspectRatio; watermark: false; enhance?: boolean; seed?: number; references?: ViggleH3Image[]; firstFrame?: ViggleH3Image; lastFrame?: ViggleH3Image;
 }
 export interface ViggleH3Description {
-  adapterVersion: "1"; model: "MiniMax-H3"; mode: "text" | "first_frame" | "first_last_frame";
+  adapterVersion: "1"; model: "MiniMax-H3"; mode: "text" | "first_frame" | "first_last_frame" | "reference";
   quality: ViggleH3Quality; durationSeconds: number; resolution: ViggleH3Resolution; aspectRatio: ViggleH3AspectRatio;
-  watermark: false; seed?: number; firstFrame?: ViggleH3ImageDescription; lastFrame?: ViggleH3ImageDescription;
+  watermark: false; enhance?: boolean; seed?: number; references?: ViggleH3ImageDescription[]; firstFrame?: ViggleH3ImageDescription; lastFrame?: ViggleH3ImageDescription;
   requestDigest: string; bodySha256: string; bodyByteLength: number;
 }
 export interface ViggleH3Options { apiKey: string; fetch?: typeof globalThis.fetch; timeoutMs?: number; maxResponseBytes?: number }
@@ -105,14 +105,15 @@ export function validateViggleH3Settings(input: ViggleH3Settings): void {
   const row = own(input, ["quality", "resolution", "aspectRatio"]);
   settings({ ...row, durationSeconds: 3, watermark: false });
 }
-function settings(row: Record<string, unknown>): Pick<ViggleH3Description, "quality" | "durationSeconds" | "resolution" | "aspectRatio" | "watermark" | "seed"> {
+function settings(row: Record<string, unknown>): Pick<ViggleH3Description, "quality" | "durationSeconds" | "resolution" | "aspectRatio" | "watermark" | "seed" | "enhance"> {
   ensure(row.quality === "low" || row.quality === "high");
   ensure(typeof row.durationSeconds === "number" && Number.isFinite(row.durationSeconds) && row.durationSeconds >= 3 && row.durationSeconds <= 15);
-  ensure(row.resolution === "480p" || row.resolution === "768p" || row.resolution === "1080p");
+  ensure(typeof row.resolution === "string" && ["480p", "768p", "1080p", "2k", "4k"].includes(row.resolution));
+  ensure(row.enhance === undefined || typeof row.enhance === "boolean");
   ensure(typeof row.aspectRatio === "string" && ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"].includes(row.aspectRatio));
   ensure(row.watermark === false && (row.seed === undefined || Number.isSafeInteger(row.seed) && Number(row.seed) >= 0));
-  return { quality: row.quality, durationSeconds: row.durationSeconds, resolution: row.resolution,
-    aspectRatio: row.aspectRatio as ViggleH3AspectRatio, watermark: false, ...(row.seed === undefined ? {} : { seed: row.seed as number }) };
+  return { quality: row.quality, durationSeconds: row.durationSeconds, resolution: row.resolution as ViggleH3Resolution,
+    aspectRatio: row.aspectRatio as ViggleH3AspectRatio, watermark: false, ...(row.seed === undefined ? {} : { seed: row.seed as number }), ...(row.enhance === undefined ? {} : { enhance: row.enhance as boolean }) };
 }
 function promptText(value: unknown): string {
   ensure(typeof value === "string" && value.length <= VIGGLE_H3_LIMITS.promptBytes && value.trim().length > 0
@@ -120,35 +121,59 @@ function promptText(value: unknown): string {
     && Buffer.byteLength(value) <= VIGGLE_H3_LIMITS.promptBytes);
   return value;
 }
+function referenceImages<T extends ViggleH3ImageDescription>(value: unknown, convert: (value: unknown) => T): T[] | undefined {
+  if (value === undefined) return;
+  ensure(Array.isArray(value) && value.length >= 1 && value.length <= 4);
+  return value.map(image => { const result = convert(image); ensure(result.byteLength <= VIGGLE_H3_LIMITS.referenceImageBytes, "VIGGLE_H3_IMAGE_INVALID"); return result; });
+}
+/** Published credits per five generated seconds. Vendor-reported usage never overrides this table. */
+export const VIGGLE_PRICE_CREDITS = Object.freeze({
+  text: { on: [10,15,25,30,50], off: [10,15,25,30,50] },
+  first_frame: { on: [20,25,35,40,60], off: [10,15,25,30,50] },
+  first_last_frame: { on: [25,30,40,45,65], off: [15,25,30,35,55] },
+  reference: { on: [35,45,50,55,75], off: [15,25,30,35,55] },
+});
+export function vigglePriceMicros(input: { mode: ViggleH3Description["mode"]; resolution: ViggleH3Resolution; durationSeconds: number; enhance?: boolean }): string {
+  const index = ["480p","768p","1080p","2k","4k"].indexOf(input.resolution);
+  ensure(Object.hasOwn(VIGGLE_PRICE_CREDITS, input.mode) && index >= 0 && Number.isFinite(input.durationSeconds)
+    && input.durationSeconds >= (input.mode === "reference" ? 5 : 3) && input.durationSeconds <= 15
+    && (input.enhance === undefined || typeof input.enhance === "boolean"));
+  return (BigInt(Math.ceil(input.durationSeconds)) * BigInt(VIGGLE_PRICE_CREDITS[input.mode][input.enhance === false ? "off" : "on"][index]!) * 2000n).toString();
+}
 type DescriptionBase = Omit<ViggleH3Description, "requestDigest" | "bodySha256" | "bodyByteLength">;
 /** Metadata-only identity; exact upload bytes are bound independently by bodySha256. */
 export function viggleH3MetadataDigest(prompt: string, description: DescriptionBase): string {
-  const row = own(description, ["adapterVersion", "model", "mode", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "seed", "firstFrame", "lastFrame"]);
+  const row = own(description, ["adapterVersion", "model", "mode", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "seed", "firstFrame", "lastFrame", "references", "enhance"]);
   const text = promptText(prompt), values = settings(row);
   ensure(row.adapterVersion === VIGGLE_H3_ADAPTER_VERSION && row.model === "MiniMax-H3");
   const firstFrame = row.firstFrame === undefined ? undefined : imageMetadata(row.firstFrame);
   const lastFrame = row.lastFrame === undefined ? undefined : imageMetadata(row.lastFrame);
-  ensure(!lastFrame || firstFrame);
-  const mode = lastFrame ? "first_last_frame" : firstFrame ? "first_frame" : "text";
+  const references = referenceImages(row.references, imageMetadata);
+  ensure(!lastFrame || firstFrame); ensure(!references || !firstFrame && !lastFrame);
+  ensure(!references || values.durationSeconds >= 5);
+  const mode = references ? "reference" : lastFrame ? "first_last_frame" : firstFrame ? "first_frame" : "text";
   ensure(row.mode === mode);
   return sha(JSON.stringify({ adapterVersion: VIGGLE_H3_ADAPTER_VERSION, model: "MiniMax-H3", mode, prompt: text, ...values,
-    ...(firstFrame ? { firstFrame } : {}), ...(lastFrame ? { lastFrame } : {}) }));
+    ...(firstFrame ? { firstFrame } : {}), ...(lastFrame ? { lastFrame } : {}), ...(references ? { references } : {}) }));
 }
 function prepare(input: ViggleH3Request): { description: ViggleH3Description; body: Buffer; contentType: string } {
-  const row = own(input, ["prompt", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "seed", "firstFrame", "lastFrame"]);
+  const row = own(input, ["prompt", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "seed", "firstFrame", "lastFrame", "references", "enhance"]);
   const prompt = promptText(row.prompt), values = settings(row);
   const firstFrame = row.firstFrame === undefined ? undefined : prepareImage(row.firstFrame);
   const lastFrame = row.lastFrame === undefined ? undefined : prepareImage(row.lastFrame); ensure(!lastFrame || firstFrame);
+  const references = referenceImages(row.references, prepareImage);
+  ensure(!references || !firstFrame && !lastFrame); ensure(!references || values.durationSeconds >= 5);
   const describe = ({ bytes: _bytes, ...metadata }: ViggleH3Image): ViggleH3ImageDescription => metadata;
   const base: DescriptionBase = { adapterVersion: VIGGLE_H3_ADAPTER_VERSION, model: "MiniMax-H3",
-    mode: lastFrame ? "first_last_frame" : firstFrame ? "first_frame" : "text", ...values,
-    ...(firstFrame ? { firstFrame: describe(firstFrame) } : {}), ...(lastFrame ? { lastFrame: describe(lastFrame) } : {}) };
+    mode: references ? "reference" : lastFrame ? "first_last_frame" : firstFrame ? "first_frame" : "text", ...values,
+    ...(firstFrame ? { firstFrame: describe(firstFrame) } : {}), ...(lastFrame ? { lastFrame: describe(lastFrame) } : {}), ...(references ? { references: references.map(describe) } : {}) };
   const requestDigest = viggleH3MetadataDigest(prompt, base), boundary = `openslate-viggle-h3-${requestDigest}`;
   const parts: Buffer[] = [];
   const field = (name: string, value: string): void => { parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`)); };
   field("prompt", prompt); field("quality", values.quality); field("duration_s", String(values.durationSeconds)); field("resolution", values.resolution);
   field("aspect_ratio", values.aspectRatio); if (values.seed !== undefined) field("seed", String(values.seed)); field("watermark", "false");
-  for (const [name, image] of [["first_frame_image", firstFrame], ["last_frame_image", lastFrame]] as const) {
+  if (values.enhance !== undefined) field("enhance", String(values.enhance));
+  for (const [name, image] of [["first_frame_image", firstFrame], ["last_frame_image", lastFrame], ...(references ?? []).map(image => ["reference_image", image] as const)] as const) {
     if (image) {
       ensure(!Buffer.from(image.bytes).includes(Buffer.from(`--${boundary}`)), "VIGGLE_H3_MULTIPART_COLLISION");
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${name}.png"\r\nContent-Type: image/png\r\n\r\n`), Buffer.from(image.bytes), Buffer.from("\r\n"));

@@ -229,3 +229,18 @@ test('offline adapter execution publishes inspectable assets, actual call settin
   assert.deepEqual(projectAssets(f.service, f.store.getProject(f.project.id)), assets);
   assert.deepEqual(f.plans.stepDetail(f.project.id, steps.get('video').key), video); assert.deepEqual(f.calls, calls); f.noGraph();
 });
+
+test('reference clips link one unambiguous shot and keep consumed pictures current in Assets', t => {
+ const f=fixture(t),a=f.step('a','image',{}, {shotId:undefined}),b=f.step('b','image',{}, {shotId:undefined});
+ const clip=f.step('clip','video',{references:[{kind:'image',sha256:a.artifact.sha256}]},{shotId:undefined});
+ f.put('code_plan_choice','choice-a',{choiceId:'opening-keyframe',options:[a.artifact,b.artifact],answer:b.artifact});
+ f.run([b.key,clip.key]);
+ const assets=f.assets();assert.equal(assets.find(row=>row.stepKey===clip.key).shotId,'opening');
+ assert.equal(assets.find(row=>row.stepKey===a.key).current,true,'a reached reference counts even when its generating call is no longer reached');
+ const detail=f.runtime.stepDetail(f.projectId,clip.key);assert.equal(detail.mode,'reference');assert.deepEqual(detail.references,[a.artifact]);
+ const last=f.step('last','video',{firstFrame:a.artifact,lastFrame:b.artifact});
+ assert.deepEqual(f.runtime.stepDetail(f.projectId,last.key).lastFrame,b.artifact);
+ const ambiguous=f.step('ambiguous','video',{references:[a.artifact,b.artifact]},{shotId:undefined});
+ f.put('code_plan_choice','choice-b',{choiceId:'other-keyframe',options:[b.artifact],answer:b.artifact});
+ f.run([clip.key,ambiguous.key]);assert.equal(f.assets().find(row=>row.stepKey===ambiguous.key).shotId,undefined);
+});

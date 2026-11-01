@@ -2,7 +2,7 @@ import { assertCodePlanProviderAdmission, resolveCodePlanProviderAdmission, asse
 import type { CodePlanProviderAdmission } from "../code-plan/provider-authority.js";
 import { configuredProfileMatches, providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, effectiveNodeDigest, invariant, RECIPE_DIGEST, shotIntentDigest, shotVideoTiming } from "@openslate/core";
-import type { ProviderProfile } from "@openslate/core";
+import type { ArtifactRef, ProviderProfile } from "@openslate/core";
 import type { ExecutionCallOptions, ExecutionRequest } from "@openslate/providers";
 import type { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
@@ -19,7 +19,7 @@ interface GraphViggleAdmission {
 }
 interface ViggleApproval { id: string; projectId: string; snapshotId: string; videoNodeId: string; approvalDigest: string; authorityId: string }
 export type ViggleFrameEvidence = { artifact: ArtifactRecord; approval: ViggleApproval; snapshot: ReviewSnapshot } | { artifact: ArtifactRecord; codePlan: { attemptId: string; requestDigest: string } };
-export type ViggleAdmission = GraphViggleAdmission | (CodePlanProviderAdmission & { frame?: ViggleFrameEvidence });
+export type ViggleAdmission = GraphViggleAdmission | (CodePlanProviderAdmission & { frame?: ViggleFrameEvidence; lastFrame?: ViggleFrameEvidence; references?: ViggleFrameEvidence[] });
 export type ViggleProfilePin = Pick<ViggleH3ExecutionMapping, "capabilityLockId" | "capabilityLockDigest" | "profileDefinition">;
 export type ViggleAuthorityStore = Pick<Store, "get" | "getProject" | "db">;
 export const VIGGLE_H3_PROFILE_LOOKUP_LIMITS = Object.freeze({ lockBytes: 65536, profiles: 64 });
@@ -48,6 +48,17 @@ export function assertViggleMappingAdmission(admission: ViggleAdmission, mapping
   fail(mapping.capabilityLockId === admission.capabilityLock.id && mapping.capabilityLockDigest === digest(admission.capabilityLock)
     && canonical(mapping.profileDefinition) === canonical(admission.profile)
     && mapping.estimatedMicros === admission.reservation.micros, "Viggle mapping lost its exact retained admission evidence");
+  if ("codePlan" in admission && admission.attempt.request.args.enhance !== undefined) {
+    const checkFrame = (frame: ViggleFrameEvidence | undefined, pin: ViggleH3ExecutionMapping["firstFrame"], image: ViggleH3ExecutionMapping["transport"]["firstFrame"], crop = false) => {
+      fail(frame && pin && image && canonical(pin) === canonical(viggleFramePin(frame)) && (crop
+        ? mapping.firstFrameCrop!.sourceWidth === frame.artifact.width && mapping.firstFrameCrop!.sourceHeight === frame.artifact.height
+        : canonical(image) === canonical({ sha256: frame.artifact.artifact.sha256, byteLength: frame.artifact.byteLength, width: frame.artifact.width, height: frame.artifact.height, mediaType: "image/png" })), "Code Viggle image evidence changed");
+    };
+    if (mapping.firstFrame) checkFrame(admission.frame, mapping.firstFrame, mapping.transport.firstFrame, !!mapping.firstFrameCrop);
+    if (mapping.lastFrame) checkFrame(admission.lastFrame, mapping.lastFrame, mapping.transport.lastFrame);
+    mapping.references?.forEach((pin, index) => checkFrame(admission.references?.[index], pin, mapping.transport.references?.[index]));
+    return;
+  }
   const frame = admission.frame;
   fail(frame && canonical(mapping.firstFrame) === canonical(viggleFramePin(frame))
     && (mapping.firstFrameCrop
@@ -63,14 +74,13 @@ export function viggleRecord<T>(store: ViggleAuthorityStore, kind: string, id: s
   fail(meta.project_id === projectId && meta.bytes > 0 && meta.bytes <= maximum, "Viggle evidence is foreign or exceeds its byte bound");
   const value = store.get<T>(kind, id); fail(value, "Viggle evidence disappeared"); return value;
 }
-export function viggleFramePin(frame: ViggleFrameEvidence): ViggleH3ExecutionMapping["firstFrame"] {
+export function viggleFramePin(frame: ViggleFrameEvidence): NonNullable<ViggleH3ExecutionMapping["firstFrame"]> {
   if ("codePlan" in frame) return { artifactId: frame.artifact.id, artifactDigest: digest(frame.artifact), codePlanAttemptId: frame.codePlan.attemptId, codePlanRequestDigest: frame.codePlan.requestDigest };
   return { artifactId: frame.artifact.id, artifactDigest: digest(frame.artifact), approvalId: frame.approval.id,
     approvalDigest: digest(frame.approval), snapshotId: frame.snapshot.id, snapshotDigest: digest(frame.snapshot) };
 }
-export function resolveViggleFrame(store: ViggleAuthorityStore, attempt: Attempt, pin?: ViggleH3ExecutionMapping["firstFrame"]): ViggleFrameEvidence {
-  const reference = attempt.request.inputs[0];
-  fail(attempt.request.inputs.length === 1 && reference?.kind === "image", "Viggle requires exactly one reviewed image");
+export function resolveViggleFrame(store: ViggleAuthorityStore, attempt: Attempt, pin?: ViggleH3ExecutionMapping["firstFrame"], reference: ArtifactRef | undefined = attempt.request.inputs[0]): ViggleFrameEvidence {
+  fail((isCodePlanAttempt(attempt) || attempt.request.inputs.length === 1) && reference?.kind === "image", "Viggle requires exactly one reviewed image");
   const artifact = viggleRecord<ArtifactRecord>(store, "artifact", reference!.artifactId, attempt.projectId);
   fail(artifact && artifact.id === reference!.artifactId && artifact.projectId === attempt.projectId && canonical(artifact.artifact) === canonical(reference)
     && artifact.fixture === false && artifact.mimeType === "image/png" && typeof artifact.validationDigest === "string" && /^[a-f0-9]{64}$/.test(artifact.validationDigest)
@@ -124,11 +134,17 @@ export function resolveViggleFrame(store: ViggleAuthorityStore, attempt: Attempt
 }
 
 /** Resolve the exact original lock and full profile definition recorded at admission. */
-export function resolveViggleAdmission(store: ViggleAuthorityStore, input: Readonly<ExecutionRequest>, pinned?: ViggleProfilePin & Partial<Pick<ViggleH3ExecutionMapping, "firstFrame">>): ViggleAdmission {
+export function resolveViggleAdmission(store: ViggleAuthorityStore, input: Readonly<ExecutionRequest>, pinned?: ViggleProfilePin & Partial<Pick<ViggleH3ExecutionMapping, "firstFrame" | "lastFrame" | "references">>): ViggleAdmission {
   const code = resolveCodePlanProviderAdmission(store, input, pinned);
   if (code) {
-    const result: ViggleAdmission = code;
+    const result: CodePlanProviderAdmission & { frame?: ViggleFrameEvidence; lastFrame?: ViggleFrameEvidence; references?: ViggleFrameEvidence[] } = code;
     if (pinned?.firstFrame) result.frame = resolveViggleFrame(store, result.attempt, pinned.firstFrame);
+    const image = (hash: string, pin?: ViggleH3ExecutionMapping["firstFrame"]) => {
+      const ref = input.inputs.find(row => row.kind === "image" && row.sha256 === hash);
+      fail(ref, "Missing image input"); return resolveViggleFrame(store, result.attempt, pin, ref!);
+    };
+    if (pinned?.lastFrame) result.lastFrame = image(String(input.args.lastFrameSha256), pinned.lastFrame);
+    if (pinned?.references) result.references = (input.args.references as string[]).map((hash, index) => image(hash, pinned.references![index]));
     assertViggleAdmission(result); return result;
   }
   const request = structuredClone(input), attempt = store.get<Attempt>("attempt", request.attemptId);

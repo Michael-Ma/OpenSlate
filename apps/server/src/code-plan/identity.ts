@@ -2,6 +2,20 @@ import { canonical, digest, invariant } from "@openslate/core";
 import type { JsonObject, JsonValue, ProviderProfile } from "@openslate/core";
 
 export type CodePlanMediaKind = "image" | "video" | "speech" | "music" | "render";
+export type VideoMode = "reference" | "first_frame" | "first_last_frame" | "text";
+export function videoMode(input: Record<string, unknown>): VideoMode {
+  invariant(input.references === undefined || Array.isArray(input.references), "CODE_PLAN_INPUT", "Video references must be an image array");
+  const references = Array.isArray(input.references) && input.references.length > 0;
+  invariant(!references || !input.firstFrame && !input.lastFrame, "CODE_PLAN_INPUT", "References cannot be combined with firstFrame or lastFrame");
+  invariant(!input.lastFrame || input.firstFrame, "CODE_PLAN_INPUT", "lastFrame requires firstFrame");
+  return references ? "reference" : input.lastFrame ? "first_last_frame" : input.firstFrame ? "first_frame" : "text";
+}
+export function videoModes(model: CodePlanModel): VideoMode[] {
+  const profile = model.profile, adapter = profile?.adapter;
+  if (!profile || adapter === "viggle-h3" || adapter === "seedance" && !profile.configuration!.model.startsWith("seedance-1"))
+    return ["reference", "first_frame", "first_last_frame", "text"];
+  return adapter === "fal-video-i2v" && !profile.configuration!.model.includes("veo") ? ["first_frame", "first_last_frame"] : ["first_frame"];
+}
 export interface CodePlanModel { kind: CodePlanMediaKind; defaults?: JsonObject; priceMicros?: string; priceUnit?: "call" | "input"; profile?: ProviderProfile; profileDefinitionDigest?: string }
 export const CODE_PLAN_MODELS: Readonly<Record<string, CodePlanModel>> = Object.freeze({
   "fake-image": { kind: "image" },
@@ -29,6 +43,21 @@ export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
   const model = source.model ?? (models[defaultModel[kind]] ? defaultModel[kind] : Object.keys(models).find(id => models[id]?.kind === kind));
   invariant(typeof model === "string" && Object.hasOwn(models, model) && models[model]?.kind === kind,
     "CODE_PLAN_MODEL", "Use a configured model for this operation");
+  if (kind === "video") {
+    const mode = videoMode(media), modes = videoModes(models[model]!);
+    invariant(modes.includes(mode), "CODE_PLAN_INPUT", `${model} supports video modes: ${modes.join(", ")}`);
+    invariant(mode !== "text" || typeof media.aspectRatio === "string" && ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"].includes(media.aspectRatio),
+      "CODE_PLAN_INPUT", "Text video requires an explicit aspectRatio");
+    const references = media.references as unknown[] | undefined;
+    const maximum = models[model]!.profile?.adapter === "viggle-h3" ? 4 : 9;
+    invariant(!references || references.length <= maximum, "CODE_PLAN_INPUT", `${model} accepts at most ${maximum} reference images`);
+    for (const frame of [media.firstFrame, media.lastFrame, ...(references ?? [])].filter(value => value !== undefined))
+      invariant(frame && typeof frame === "object" && !Array.isArray(frame) && "kind" in frame && frame.kind === "image" && "sha256" in frame,
+        "CODE_PLAN_INPUT", "Video inputs must be owned image artifacts");
+    if (references?.length === 0) delete media.references;
+    invariant(models[model]!.profile?.adapter !== "viggle-h3" || mode !== "reference"
+      || Number(media.durationSeconds ?? models[model]!.defaults?.durationSeconds) >= 5, "CODE_PLAN_INPUT", "Viggle reference clips need 5–15 seconds");
+  }
   const normalize = (item: unknown, depth: number): JsonValue => {
     invariant(depth <= 40, "CODE_PLAN_INPUT", "Media input nesting exceeds its limit");
     if (item === null || typeof item === "string" || typeof item === "boolean") return item;

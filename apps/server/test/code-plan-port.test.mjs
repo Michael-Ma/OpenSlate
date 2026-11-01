@@ -230,7 +230,7 @@ test("read model caps version history, orders choices and bounds display labels"
   const f = fixture(t);
   for (let i = 0; i < 51; i++) f.runtime.submitPlan(f.projectId, film(`ctx.log("${i}");`));
   assert.equal(view(f).versions.length, 50); assert.equal(view(f).versions[0].version, 51); assert.equal(view(f).versions.at(-1).version, 2);
-  await submit(f, film(`await Promise.all([ctx.choose("first", { question: "A?", options: [null] }), ctx.choose("second", { question: "B?", options: [true] }), ctx.image({ prompt: "x".repeat(220), motion: "hidden" }), ctx.video({ motion: "pan" })]);`));
+  await submit(f, film(`await Promise.all([ctx.choose("first", { question: "A?", options: [null] }), ctx.choose("second", { question: "B?", options: [true] }), ctx.image({ prompt: "x".repeat(220), motion: "hidden" }), ctx.video({ motion: "pan", aspectRatio: "16:9" })]);`));
   await settle(f, "waiting");
   const choice = view(f).choices[0]; f.runtime.answer(f.projectId, { ...choice, answer: null });
   assert.deepEqual(view(f).choices.map(choice => choice.choiceId), ["second", "first"]);

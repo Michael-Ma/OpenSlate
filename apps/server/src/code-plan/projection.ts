@@ -27,11 +27,11 @@ export function codePlanShotLinks(steps: CodePlanStep[], choices: CodePlanChoice
   }
   const links = new Map<string, string>();
   for (const step of steps) {
-    const frame = step.input.firstFrame;
+    const images = [step.input.firstFrame, ...(Array.isArray(step.input.references) ? step.input.references : [])];
     const ids = step.kind === "image" && step.result?.ok
       ? frames.get(`${step.result.artifact.artifactId}:${step.result.artifact.sha256}`)
-      : step.kind === "video" && frame && typeof frame === "object" && !Array.isArray(frame) && typeof frame.sha256 === "string"
-        ? contents.get(frame.sha256) : undefined;
+      : step.kind === "video" ? new Set(images.flatMap(frame => frame && typeof frame === "object" && !Array.isArray(frame) && typeof frame.sha256 === "string"
+        ? [...(contents.get(frame.sha256) ?? [])] : [])) : undefined;
     const shot = step.shotId ?? (ids?.size === 1 ? [...ids][0] : undefined);
     if (shot) links.set(step.key, shot);
   }

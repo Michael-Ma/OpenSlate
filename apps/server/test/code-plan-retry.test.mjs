@@ -41,7 +41,7 @@ for(const mode of ['refused','dns'])test(`code-mode ${mode} connections release 
  // Explicit consent can retry once more, reusing the image and step key.
  f.viggleFetch=working;f.plans.retryStep(f.project.id,{stepKey:step.key,consent:{by:'person'}});await f.finish();
  assert.equal(f.videoStep().key,step.key);assert.equal(f.plans.view(f.project.id).steps.find(s=>s.kind==='video').attempts,4);
- assert.equal(f.calls.start,1);assert.equal(f.plans.view(f.project.id).spentMicros,'100000');
+ assert.equal(f.calls.start,1);assert.equal(f.plans.view(f.project.id).spentMicros,'60000');
 });
 
 test('safe automatic retry can succeed on its second intent without a new step or consent',async t=>{
@@ -49,7 +49,7 @@ test('safe automatic retry can succeed on its second intent without a new step o
  f.viggleFetch=async(...args)=>{if(args[1].method==='POST'&&++posts===1)throw new TypeError('fetch failed',{cause:Object.assign(new Error(),{code:'ECONNREFUSED'})});return working(...args);};
  await f.submit(f.source);await f.tick();await f.tick();f.makeDue();await f.finish();
  assert.equal(posts,2);assert.equal(f.plans.view(f.project.id).steps.find(s=>s.kind==='video').attempts,2);
- assert.equal(f.plans.view(f.project.id).spentMicros,'100000');
+ assert.equal(f.plans.view(f.project.id).spentMicros,'60000');
 });
 
 test('terminal lost-submit needs consent, keeps earlier liability, fences new dispatch with Stop/hold/ceiling and reuses other media',async t=>{
@@ -58,22 +58,22 @@ test('terminal lost-submit needs consent, keeps earlier liability, fences new di
  await f.submit(f.source);await failed(f);const key=f.videoStep().key, old=f.videoStep().attemptId;
  wireCodePlans(f.service,f.plans);const step=readCodeFilm(f.service,f.project.id).steps.find(s=>s.key===key);
  assert.deepEqual(step.error,{code:'SUBMISSION_RESPONSE_LOST',retry:'consent',mayHaveCharged:true});assert.equal(step.attempts,1);
- assert.equal(f.plans.view(f.project.id).spentMicros,'100000');
+ assert.equal(f.plans.view(f.project.id).spentMicros,'60000');
  await f.restart();for(let i=0;i<3;i++)await f.tick();assert.equal(f.execution.attempts(f.project.id).length,2);
- f.plans.setCeiling(f.project.id,{ceilingMicros:'100000',by:'person'});
+ f.plans.setCeiling(f.project.id,{ceilingMicros:'60000',by:'person'});
  const consent={by:'director',quote:'retry the tofu clip',invocationId:'retry-once'};
  const receipt=f.plans.retryStep(f.project.id,{stepKey:key,consent});
  f.viggleFetch=working;await f.tick();assert.equal(f.plans.view(f.project.id).state,'paused_budget');
- f.plans.setCeiling(f.project.id,{ceilingMicros:'200000',by:'person'});
+ f.plans.setCeiling(f.project.id,{ceilingMicros:'120000',by:'person'});
  f.service.engine.setPaused(f.project.id,true,'local-user');await f.tick();assert.equal(f.videoStep().attemptId,old);
  f.service.engine.setPaused(f.project.id,false,'local-user');f.plans.hold(f.project.id,'request');await f.tick();assert.equal(f.videoStep().attemptId,old);
  f.plans.release(f.project.id,'request');await f.finish();
  assert.notEqual(f.videoStep().attemptId,old);assert.equal(f.videoStep().key,key);assert.equal(f.calls.start,1);
- assert.equal(f.plans.view(f.project.id).spentMicros,'200000');assert.equal(f.execution.liability(old),'charged');
+ assert.equal(f.plans.view(f.project.id).spentMicros,'120000');assert.equal(f.execution.liability(old),'charged');
  assert.deepEqual(f.plans.retryStep(f.project.id,{stepKey:key,consent}),receipt,'lost mutation reply returns original receipt after success');
  assert.throws(()=>f.plans.retryStep(f.project.id,{stepKey:key,consent:{by:'person'}}),{code:'CODE_PLAN_RETRY'});
- assert.throws(()=>f.plans.setCeiling(f.project.id,{ceilingMicros:'199999',by:'person'}),e=>{
-  assert.equal(e.code,'CODE_PLAN_CEILING');assert.deepEqual(e.details,{ceilingMicros:'199999',chargedMicros:'100000',unknownMicros:'100000',inFlightMicros:'0',liabilityMicros:'200000'});return true;
+ assert.throws(()=>f.plans.setCeiling(f.project.id,{ceilingMicros:'119999',by:'person'}),e=>{
+  assert.equal(e.code,'CODE_PLAN_CEILING');assert.deepEqual(e.details,{ceilingMicros:'119999',chargedMicros:'60000',unknownMicros:'60000',inFlightMicros:'0',liabilityMicros:'120000'});return true;
  });
 });
 
@@ -136,11 +136,11 @@ test('historical default-ratio journals remain reused; an explicit ratio deliber
  const input=normalizeStepInput('video',{model:videoProfile.id,firstFrame:f.frame,prompt:'Tofu rising',durationSeconds:3},f.execution.models(f.project.id));
  const key=stepKey('video',input),id=digest({projectId:f.project.id,key}),at=new Date().toISOString();
  const attempt=f.execution.prepare(f.project.id,key,'video',input);
- f.store.put('code_plan_step',id,f.project.id,{id,projectId:f.project.id,key,kind:'video',input,state:'in_flight',attemptId:attempt.id,result:null,priceMicros:'100000',createdAt:at,updatedAt:at});
+ f.store.put('code_plan_step',id,f.project.id,{id,projectId:f.project.id,key,kind:'video',input,state:'in_flight',attemptId:attempt.id,result:null,priceMicros:'60000',createdAt:at,updatedAt:at});
  await f.execution.submit(attempt.id);await f.finish();assert.equal(f.calls.video,1);
  await f.restart();await f.finish();assert.equal(f.calls.video,1);assert.equal(f.videoStep().key,key);
  await f.submit(f.source.replace("durationSeconds:3","durationSeconds:3,aspectRatio:'1:1'"));await f.finish();
- assert.equal(f.calls.video,2);assert.equal(f.plans.view(f.project.id).spentMicros,'200000');
+ assert.equal(f.calls.video,2);assert.equal(f.plans.view(f.project.id).spentMicros,'120000');
 });
 
 test('pre-N1 saved failures project retry meaning before replay and can be retried after upgrading',async t=>{

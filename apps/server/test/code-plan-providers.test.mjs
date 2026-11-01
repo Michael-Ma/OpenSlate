@@ -26,11 +26,12 @@ test('installed locked models and their prices reach read_film; real projects ha
  const f=await realCodeFixture(t); wireCodePlans(f.service,f.plans);
  const models=readCodeFilm(f.service,f.project.id).models;
  assert.deepEqual(models.map(row=>row.id),['local-render',codexImageProfile.id,videoProfile.id]);
- assert.equal(models.find(row=>row.id===videoProfile.id).priceUnit,'call');
+ assert.equal(models.find(row=>row.id===videoProfile.id).priceUnit,'input');
  assert.equal(models.find(row=>row.id===codexImageProfile.id).subscription,'codex');
  const model=f.execution.models(f.project.id)[videoProfile.id];
- assert.equal(modelPrice(model),'100000');
- assert.equal(modelPrice({...model,priceMicros:'0'}),'0');
+ const input={firstFrame:{kind:'image',sha256:'a'.repeat(64)},durationSeconds:6};
+ assert.equal(modelPrice(model,input),'120000');
+ assert.equal(modelPrice({...model,priceMicros:'0'},input),'120000');
  assert.throws(()=>normalizeStepInput('image',{model:'fake-image',prompt:'x'},f.execution.models(f.project.id)),{code:'CODE_PLAN_MODEL'});
  const graph=f.service.createProject('graph'); assert.equal(graph.planMode,undefined); assert.ok(f.execution.models(graph.id)['fake-image']);
  f.noGraph();
@@ -49,7 +50,7 @@ test('Codex and Viggle steps retain intent → submit → lookup/poll → spool 
  const crop=f.store.list('viggle_h3_execution_mapping',f.project.id)[0];
  assert.equal(crop.firstFrameCrop,undefined); assert.equal(crop.transport.aspectRatio,'1:1'); assert.equal(f.firstFrame.readUInt32BE(16),320); assert.equal(f.firstFrame.readUInt32BE(20),320);
  assert.ok(crop.firstFrame.codePlanAttemptId); assert.equal(crop.firstFrame.approvalId,undefined);
- assert.equal(f.plans.view(f.project.id).spentMicros,'200000');
+ assert.equal(f.plans.view(f.project.id).spentMicros,'120000');
  const rendered=f.store.get('artifact',steps.find(step=>step.kind==='render').result.artifact.artifactId);
  assert.equal(rendered.fixture,false); assert.equal(rendered.origin,'local_render');
  const probe=JSON.parse((await promisify(execFile)(tool('ffprobe'),['-v','error','-show_streams','-show_format','-of','json',rendered.path])).stdout);
@@ -77,11 +78,12 @@ test('unknown native lookups retain the original reservation and never resubmit'
 });
 
 test('the ceiling and dry run use the real profile cost before any video submission', async t => {
- // Clips are priced per call (generation-quotes basis); one $1.50 clip alone crosses the $1 ceiling.
+ // The published duration table, independent of the legacy flat estimate, crosses a $0.25 ceiling.
  const f=await realCodeFixture(t,{profiles:[codexImageProfile,{...videoProfile,unitCostMicros:'1500000'}]}); await f.submit(imageSource); await f.finish();
+ f.plans.setCeiling(f.project.id,{ceilingMicros:'250000',by:'person'});
  const image=f.plans.steps(f.project.id)[0].result.artifact;
  const source=`export default async function(ctx) {await ctx.video({model:'${videoProfile.id}',firstFrame:${JSON.stringify(image)},prompt:'Push in',durationSeconds:15});}`;
- const receipt=await f.submit(source); assert.equal(receipt.diff.certainMicros,'1500000'); assert.ok(receipt.diff.findings.some(row=>row.code==='CEILING'));
+ const receipt=await f.submit(source); assert.equal(receipt.diff.certainMicros,'300000'); assert.ok(receipt.diff.findings.some(row=>row.code==='CEILING'));
  await f.tick(); assert.equal(f.plans.getRun(f.project.id).state,'paused_budget'); assert.equal(f.calls.video,0);
  assert.equal(f.plans.steps(f.project.id).find(step=>step.kind==='video').attemptId,null); f.noGraph();
 });
@@ -181,7 +183,7 @@ test('a terminal lost Viggle POST retains charged liability and never permits re
  await f.tick(); await f.tick(); const video=f.execution.attempts(f.project.id).find(row=>row.request.kind==='video');
  assert.equal(video.phase,'failed'); assert.equal(video.failure.id,'SUBMISSION_RESPONSE_LOST'); assert.equal(video.failure.retryAllowed,false); assert.equal(f.execution.liability(video.id),'charged');
  await f.restart();for(let i=0;i<3;i++)await f.tick();
- assert.equal(posts,1);assert.equal(f.plans.view(f.project.id).spentMicros,'100000');assert.equal(f.fake.acceptedCount(),0);f.noGraph();
+ assert.equal(posts,1);assert.equal(f.plans.view(f.project.id).spentMicros,'60000');assert.equal(f.fake.acceptedCount(),0);f.noGraph();
 });
 
 test('completed video ingestion can restart without another submit, poll or download',async t=>{
@@ -212,7 +214,7 @@ test('real rendering mixes an owned speech placement at 48 kHz and enforces time
  const rendered=f.store.get('artifact',f.plans.steps(f.project.id).find(row=>row.kind==='render').result.artifact.artifactId);
  const probe=JSON.parse((await promisify(execFile)(tool('ffprobe'),['-v','error','-show_streams','-of','json',rendered.path])).stdout);
  const audio=probe.streams.find(row=>row.codec_type==='audio');assert.equal(audio.codec_name,'aac');assert.equal(audio.sample_rate,'48000');assert.equal(audio.channels,2);
- assert.equal(f.plans.view(f.project.id).spentMicros,'210000');
+ assert.equal(f.plans.view(f.project.id).spentMicros,'130000');
  const {captureCodePlanRender}=await import('../dist/media/timeline-capture.js');
  const clip=f.plans.steps(f.project.id).find(row=>row.kind==='video').result.artifact;
  for(const args of [{timeline:Array(65).fill(clip)}, {timeline:[clip],audio:Array(66).fill({})}, {timeline:[clip],path:'/tmp/forbidden'},
@@ -221,13 +223,13 @@ test('real rendering mixes an owned speech placement at 48 kHz and enforces time
  f.noGraph();
 });
 
-test('unpriced real profiles stay explicitly unknown and duration defaults fit their saved bounds',async t=>{
+test('Viggle has a known input price even with a zero legacy estimate; duration defaults fit saved bounds',async t=>{
  const unpriced={...videoProfile,unitCostMicros:'0',minFrames:90,maxFrames:90};
  const f=await realCodeFixture(t,{profiles:[codexImageProfile,unpriced]});
  const model=f.plans.availableModels(f.project.id).find(row=>row.id===videoProfile.id);
- assert.equal(model.unitCostMicros,'0');assert.equal(model.priceUnknown,true);assert.equal(model.defaults.durationSeconds,3);
+ assert.equal(model.unitCostMicros,null);assert.equal(model.priceUnknown,false);assert.equal(model.defaults.durationSeconds,3);
  await f.submit(`export default async function(ctx){const frame=await ctx.image({prompt:'Tea'});if(frame.ok)await ctx.video({firstFrame:frame.artifact,prompt:'Slow camera'});}`);
- await f.finish();assert.equal(f.plans.view(f.project.id).spentMicros,'0');assert.equal(f.execution.attempts(f.project.id).length,2);assert.equal(f.calls.video,1);f.noGraph();
+ await f.finish();assert.equal(f.plans.view(f.project.id).spentMicros,'60000');assert.equal(f.execution.attempts(f.project.id).length,2);assert.equal(f.calls.video,1);f.noGraph();
 });
 
 test('accepted task evidence repairs a lost adapter receipt before polling the exact job',async t=>{

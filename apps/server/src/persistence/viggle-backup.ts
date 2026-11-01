@@ -26,17 +26,20 @@ export function viggleBackupClosure(reader: ViggleAuthorityStore, readJson: (pat
     assertViggleRecords(reader, attemptId);
     const mapping = reader.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attemptId);
     if (mapping) {
-      const frame = get<ArtifactRecord>("artifact", mapping.firstFrame.artifactId);
-      const bytes = await readArtifact(frame), transport = mapping.transport;
-      invariant(transport.firstFrame && !transport.lastFrame && transport.mode === "first_frame",
-        "BACKUP_REFERENCE_INVALID", "Initial Viggle application mapping requires its reviewed first frame");
-      // Backups retain the approved source and reproduce its current upload recipe, including legitimate no-crop inputs.
-      const upload = centerCropPng(bytes, transport.aspectRatio);
-      invariant(canonical(upload.crop ?? null) === canonical(mapping.firstFrameCrop ?? null),
-        "BACKUP_REFERENCE_INVALID", "Viggle crop recipe differs from its reviewed source bytes");
+      const transport = mapping.transport;
+      const image = async (pin: NonNullable<ViggleH3ExecutionMapping["firstFrame"]>, description: NonNullable<typeof transport.firstFrame>, first = false) => {
+        const bytes = await readArtifact(get<ArtifactRecord>("artifact", pin.artifactId));
+        const upload = first ? centerCropPng(bytes, transport.aspectRatio) : { bytes };
+        if (first) invariant(canonical(("crop" in upload ? upload.crop : undefined) ?? null) === canonical(mapping.firstFrameCrop ?? null),
+          "BACKUP_REFERENCE_INVALID", "Viggle crop recipe differs from its source bytes");
+        return { ...description, bytes: upload.bytes };
+      };
       const reconstructed = describeViggleH3Request({ prompt: String(attempt.request.args.prompt), quality: transport.quality,
         durationSeconds: transport.durationSeconds, resolution: transport.resolution, aspectRatio: transport.aspectRatio,
-        watermark: false, ...(transport.seed === undefined ? {} : { seed: transport.seed }), firstFrame: { ...transport.firstFrame, bytes: upload.bytes } });
+        watermark: false, ...(transport.enhance === undefined ? {} : { enhance: transport.enhance }), ...(transport.seed === undefined ? {} : { seed: transport.seed }),
+        ...(mapping.firstFrame ? { firstFrame: await image(mapping.firstFrame, transport.firstFrame!, true) } : {}),
+        ...(mapping.lastFrame ? { lastFrame: await image(mapping.lastFrame, transport.lastFrame!) } : {}),
+        ...(mapping.references ? { references: await Promise.all(mapping.references.map((pin, index) => image(pin, transport.references![index]!))) } : {}) });
       invariant(canonical(reconstructed) === canonical(transport), "BACKUP_REFERENCE_INVALID", "Viggle multipart bytes differ from the retained request");
     }
     checked.add(attemptId);

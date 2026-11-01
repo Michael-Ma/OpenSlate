@@ -583,7 +583,9 @@ export class Store {
       if (retainedMapping) assertViggleMappingAdmission(resolveViggleAdmission(this, attempt.request, retainedMapping), retainedMapping);
       if (kind === "viggle_h3_execution_mapping") {
         invariant(!submit || !!mapping, "VIGGLE_H3_EXECUTION_CONFLICT", "Closed H3 preparation cannot acquire a mapping");
-        assertViggleH3ExecutionMapping(attempt, value as unknown as ViggleH3ExecutionMapping); reference("artifact", (body.firstFrame as ViggleH3ExecutionMapping["firstFrame"]).artifactId);
+        assertViggleH3ExecutionMapping(attempt, value as unknown as ViggleH3ExecutionMapping);
+        const pins = value as unknown as ViggleH3ExecutionMapping;
+        for (const pin of [pins.firstFrame, pins.lastFrame, ...(pins.references ?? [])]) if (pin) reference("artifact", pin.artifactId);
       } else if (kind === "viggle_h3_execution_dispatch") {
         reference("viggle_h3_execution_mapping", attempt.id);
         invariant(!submit || !!dispatch, "VIGGLE_H3_EXECUTION_CONFLICT", "Closed H3 preparation cannot acquire a dispatch");
