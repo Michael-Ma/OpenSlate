@@ -736,6 +736,13 @@ export interface AssetItem {
   label: string;
   createdAt: string;
   durationSeconds?: number;
+  /** Pixel size of a picture, or of a clip's or render's still. Absent when unknown. */
+  width?: number;
+  height?: number;
+  /** A still of a clip or render, for thumbnails. Code-plan films only. */
+  poster?: StudioArtifactRef;
+  /** The code-plan step that made this asset; GET /code-plan/steps/:stepKey has its prompt and call. */
+  stepKey?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -782,10 +789,45 @@ export interface CodePlanStepView {
   shotId?: string;
   /** A still of a finished clip or render (its first frame), for thumbnails. */
   poster?: StudioArtifactRef;
+  /**
+   * A render only: `clips` of its clips were cropped to fill the frame, and the worst of them kept `keptPercent` of its
+   * picture. Present when that is below 90.
+   */
+  fitWarning?: { clips: number; keptPercent: number };
   priceMicros: Micros;
   /** Whether the latest pass reached this step. Unreached steps stay listed as history. */
   reached: boolean;
   updatedAt: string;
+}
+
+/** One step for a person debugging it: GET /code-plan/steps/:stepKey. Holds no credential, path or provider secret. */
+export interface CodePlanStepDetail {
+  key: string;
+  kind: CodePlanStepKind;
+  state: CodePlanStepState;
+  model: string;
+  /** The whole prompt as the plan sent it; a speech step's text. */
+  prompt?: string;
+  durationSeconds?: number;
+  aspectRatio?: string;
+  variant?: string;
+  firstFrame?: StudioArtifactRef;
+  /** The finished file. */
+  output?: { width?: number; height?: number; durationSeconds?: number };
+  priceMicros: Micros;
+  attempts: number;
+  createdAt: string;
+  /** What actually went to the provider, as far as this studio recorded it. Shown in Developer mode. */
+  call?: {
+    adapter: string;
+    providerModel?: string;
+    /** Allow-listed settings: resolution, quality, aspect ratio, duration, seed and the like. */
+    settings: Record<string, string | number | boolean>;
+    /** Present when the first frame was cropped to the provider's ratio before sending. */
+    firstFrameCrop?: { sourceWidth: number; sourceHeight: number; width: number; height: number };
+    taskId?: string;
+    requestDigest?: string;
+  };
 }
 
 export interface CodePlanChoiceView {
