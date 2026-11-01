@@ -76,6 +76,7 @@ test("restart keeps an unknown job reserved across unavailable lookups, then fin
 test("HTTP ceiling changes resume only blocked work and never resubmit admitted work", async t => {
   const f = await codePlanFixture({ imagePriceMicros: "600000" }); t.after(() => f.close());
   const project = await f.create(), base = `/api/projects/${project.id}/code-plan`;
+  await f.ok("POST", `${base}/ceiling`, { ceilingMicros: "1000000" }, "stored-one-dollar-limit");
   const input = { source: source('await Promise.all(["one", "two"].map(prompt => ctx.image({ prompt })));'), basedOnVersion: null };
   const receipt = await f.ok("POST", `${base}/source`, input, "budget");
   assert.ok(receipt.diff.findings.some(finding => finding.code === "CEILING"));

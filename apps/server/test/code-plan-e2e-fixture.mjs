@@ -18,7 +18,9 @@ import { StudioSessions } from "../dist/studio-sessions.js";
 const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const origin = "http://127.0.0.1:5173";
 export const exampleSource = readFileSync(join(repositoryRoot, "skills/code-plan/references/example-plan.ts"), "utf8");
-export const editedSource = exampleSource.replace('motion: "Slow gentle push in"', 'motion: "Slow lateral pan"');
+const motions = [...exampleSource.matchAll(/motion: "([^"]+)"/g)].map(match => match[1]);
+const editedMotion = motions[0].replace("Slow gentle push in", "Slow lateral pan");
+export const editedSource = exampleSource.replace(motions[0], editedMotion);
 assert.notEqual(editedSource, exampleSource, "The motion edit must change the pinned example");
 
 // These are explicit fixture prices, not provider quotes. Positive prices exercise holds and accounting.
@@ -197,13 +199,13 @@ export async function runCodePlanOfflineFlow(f) {
   assert.equal(f.provider.acceptedCount(editedAttempt), 1);
   const newCalls = f.calls.submit.slice(beforeEdit);
   assert.deepEqual(newCalls.map(call => call.kind), ["video", "render"]);
-  assert.equal(newCalls[0].args.prompt, "Sunrise through a misty window. Slow lateral pan.");
+  assert.equal(newCalls[0].args.prompt, editedMotion);
   const newSteps = view.steps.filter(step => !initialKeys.has(step.key));
   assert.deepEqual(newSteps.map(step => step.kind).sort(), ["render", "video"]);
   assert.ok(newSteps.every(step => step.state === "succeeded"));
   const reusedSteps = view.steps.filter(step => initialKeys.has(step.key) && step.reached).length;
   assert.equal(reusedSteps, 8);
-  assert.deepEqual(newCalls[1].args.timeline.map(row => row.motion), ["Slow lateral pan", "Locked camera, subtle steam"]);
+  assert.deepEqual(newCalls[1].args.timeline.map(row => row.motion), [editedMotion, motions[1]]);
   assert.equal(view.spentMicros, "440000"); assert.equal(view.reservedMicros, "0");
   assert.ok(BigInt(view.spentMicros) <= BigInt(view.ceilingMicros));
   const render = newSteps.find(step => step.kind === "render").artifact;
