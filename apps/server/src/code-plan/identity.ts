@@ -1,6 +1,8 @@
 import { canonical, digest, invariant } from "@openslate/core";
 import type { JsonObject, JsonValue, ProviderProfile } from "@openslate/core";
 import { videoRatios, assertProfileVideoDuration } from "./video-capabilities.js";
+import { rowEdits, rowFrames, SOUND_NAMES, fadeSamples } from "../media/local-timeline.js";
+import { layoutCaptions, validateCaptions, type FontLookup } from "../media/captions.js";
 
 export type CodePlanMediaKind = "image" | "video" | "speech" | "music" | "render";
 export type VideoMode = "reference" | "first_frame" | "first_last_frame" | "text";
@@ -27,12 +29,55 @@ export const CODE_PLAN_MODELS: Readonly<Record<string, CodePlanModel>> = Object.
 });
 const defaultModel = { image: "fake-image", video: "fake-video", speech: "fake-speech", music: "fake-music", render: "local-render" };
 
+/** Validate render additions without adding defaults to the journal identity of saved plans. */
+export function validateRenderInput(source: Record<string, unknown>, options: { fontLookup?: FontLookup } = {}): void {
+  // Historical fixture plans can carry opaque render inputs. Their identities stay intact.
+  if (source.timeline === undefined && source.captions === undefined) return;
+  invariant(Array.isArray(source.timeline) && source.timeline.length >= 1 && source.timeline.length <= 64,
+    "CODE_PLAN_RENDER_INPUT", "Use 1–64 timeline rows");
+  const number = (value: unknown, min: number, max: number, name: string) => invariant(Number.isSafeInteger(value) && Number(value) >= min && Number(value) <= max,
+    "CODE_PLAN_RENDER_INPUT", `${name} must be an integer in ${min}–${max}`);
+  let total = 0, measured = true;
+  source.timeline.forEach((raw, index) => {
+    invariant(raw && typeof raw === "object" && !Array.isArray(raw), "CODE_PLAN_RENDER_INPUT", `Row ${index + 1}: use a video artifact or timeline clip`);
+    const row = raw as Record<string, unknown>, edits = rowEdits(row, index);
+    if (row.startFrame !== undefined) number(row.startFrame, 0, 10799, `Row ${index + 1}: startFrame`);
+    if (row.durationFrames !== undefined) { number(row.durationFrames, 1, 10800, `Row ${index + 1}: durationFrames`); total += rowFrames({ durationFrames: row.durationFrames as number, ...edits }); }
+    else measured = false;
+    invariant(row.fit === undefined || row.fit === "contain" || row.fit === "cover", "CODE_PLAN_RENDER_INPUT", `Row ${index + 1}: fit must be contain or cover`);
+  });
+  invariant(!measured || total >= 1 && total <= 10800, "CODE_PLAN_RENDER_INPUT", "Edited film length must be in 1–10800 frames (360 seconds)");
+  if (source.audio !== undefined) {
+    invariant(Array.isArray(source.audio) && source.audio.length <= 65, "CODE_PLAN_RENDER_INPUT", "Use at most 65 audio placements, including sounds");
+    source.audio.forEach((raw, index) => {
+      invariant(raw && typeof raw === "object" && !Array.isArray(raw), "CODE_PLAN_RENDER_INPUT", `Audio row ${index + 1}: use an audio or sound placement`);
+      const row = raw as Record<string, unknown>;
+      if (row.sound !== undefined) {
+        invariant((SOUND_NAMES as readonly unknown[]).includes(row.sound) && Object.keys(row).every(key => ["sound", "atSample", "gainMilliDb"].includes(key)),
+          "CODE_PLAN_RENDER_INPUT", `Audio row ${index + 1}: sound must be one of ${SOUND_NAMES.join(", ")}, with atSample and optional gainMilliDb`);
+        number(row.atSample, 0, (measured ? total : 10800) * 1600 - 1, `Audio row ${index + 1}: atSample`);
+      }
+      for (const key of ["startSample", "atSample", "durationSamples"]) if (row[key] !== undefined) number(row[key], key === "durationSamples" ? 1 : 0, 17280000, `Audio row ${index + 1}: ${key}`);
+      if (row.gainMilliDb !== undefined) number(row.gainMilliDb, -60000, 12000, `Audio row ${index + 1}: gainMilliDb`);
+      for (const key of ["fadeInSamples", "fadeOutSamples"]) if (row[key] !== undefined) fadeSamples(row[key], Number(row.durationSamples ?? 240000), index, key);
+    });
+  }
+  for (const key of ["width", "height"]) if (source[key] !== undefined) {
+    number(source[key], 2, 1920, key); invariant(Number(source[key]) % 2 === 0, "CODE_PLAN_RENDER_INPUT", `${key} must be even, in 2–1920`);
+  }
+  // A missing dimension comes from the film aspect ratio at capture, not from a universal landscape default.
+  if (source.width !== undefined && source.height !== undefined)
+    invariant(Number(source.width) * Number(source.height) <= 1920 * 1080, "CODE_PLAN_RENDER_INPUT", "Output area must be at most 2073600 pixels");
+  if (source.captions !== undefined) layoutCaptions(validateCaptions(source.captions, measured ? total : 10800), Number(source.width ?? 1280), Number(source.height ?? 720), options.fontLookup);
+}
+
 /** Whitespace in creative strings is significant. Only object order, defaults and artifact identities normalize. */
 export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
   models: Readonly<Record<string, CodePlanModel>> = CODE_PLAN_MODELS): JsonObject {
   const input = kind === "render" && Array.isArray(value) ? { timeline: value } : value;
   invariant(input && typeof input === "object" && !Array.isArray(input), "CODE_PLAN_INPUT", "Media input must be an object");
   const source = input as Record<string, unknown>;
+  if (kind === "render") validateRenderInput(source);
   if (kind !== "render" && Object.hasOwn(source, "shot")) invariant(typeof source.shot === "string" && source.shot.length > 0 && source.shot.length <= 120,
     "CODE_PLAN_INPUT", "Use a shot annotation of 1 to 120 characters");
   const { shot: _shot, ...media } = source;
