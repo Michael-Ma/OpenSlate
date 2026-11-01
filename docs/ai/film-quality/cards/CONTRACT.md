@@ -42,7 +42,7 @@ Result, as MCP content:
 1. text: JSON `{ artifactId, stepKey, fps: 30, durationFrames, width, height, frames: number[], motion: number[], sheet: { columns, rows, sha256, byteLength } }`. `motion` is a 0–1 amount of change at each listed frame.
 2. image: a JPEG contact sheet (`mimeType: "image/jpeg"`), every cell labelled with its frame number and time (`f120 · 4.0s`), at most 36 cells, long side at most 2048 px, at most 1.5 MiB.
 
-It is free, read-only, consumes no step, and works on any video artifact this film owns, clips and renders alike. More than 36 cells is refused with a message giving the `everyFrames` that would fit.
+It is free, read-only, consumes no step, and works on any video artifact this film owns, clips and renders alike. Card U2 extends it to pictures: an owned image returns `{ artifactId, kind: "image", width, height, sheet: { sha256, byteLength } }` and one JPEG, long side at most 1536 px, and frame options are ignored. More than 36 cells is refused with a message giving the `everyFrames` that would fit.
 
 ## Review run state (Q3)
 
