@@ -117,7 +117,7 @@ async function runStripComponent({ locale = 'en', codePlan, s = store(), guard =
   return (await load('RunStrip.tsx', ['CodePlanRunStrip'], {
     useI18n: () => i18n(locale),
     numberLocale: (l) => (l === 'zh-CN' ? 'zh-CN' : 'en-US'),
-    CEILING_PRESS, runStrip, TONE_CLASS, TONE_GLYPH,
+    CEILING_PRESS, runStrip, TONE_CLASS, TONE_GLYPH, useState: (initial) => [initial, () => {}], LimitEditor: () => null,
     useGuarded: () => ({ ...guard, 'data-needs': 'run' }),
     useStore: () => s,
     useStudio: (select) => select({ pending: s.pending }),
@@ -282,4 +282,11 @@ test('a failed step says what happened in plain words; Retry asks first when it 
   assert.doesNotMatch(renderToStaticMarkup(React.createElement(StepProblemNote, { row: refused })), /code-plan-retry/);
   const sending = await parts(false, { [retryPress(row).pressId]: true });
   assert.match(renderToStaticMarkup(React.createElement(sending.StepProblemNote, { row })), /aria-busy="true"[^>]*disabled=""[^>]*>Retrying…/);
+});
+
+test('the spend limit is changed in the run strip', async () => {
+  const Strip = await runStripComponent({ codePlan: { view: view({ state: 'done' }) } });
+  const html = renderToStaticMarkup(React.createElement(Strip));
+  assert.match(html, /data-act="code-plan-limit-open"/);
+  assert.match(html, />Change<\/button>/);
 });

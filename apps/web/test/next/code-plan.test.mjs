@@ -6,7 +6,7 @@ import { StudioStore } from '../../src/next/store/store.ts';
 import { ApiError } from '../../src/next/api/client.ts';
 import { artifactContentPath, codePlanArtifactContentPath, codePlanVersionPath, CODE_PLAN_PATH } from '../../src/next/api/code-plan.ts';
 import {
-  TONE_CLASS, TONE_GLYPH, answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
+  TONE_CLASS, TONE_GLYPH, limitDraft, answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
   findingMsg, isCodeProject, latestRender, lineDiff, needsAttention, optionArtifact, optionLabel, placeByTime, previousVersion, problemCause, retryPress, runStrip,
   sourcePress, stepProblem, stepRow, stepRows, threadChoices, versionRows,
 } from '../../src/next/model/code-plan.ts';
@@ -616,4 +616,13 @@ test('the budget meter warns at 80% and turns red at the limit', () => {
   const under = runStrip(view({ spentMicros: '790000', ceilingMicros: '1000000' }), 'en').meter;
   const full = runStrip(view({ spentMicros: '1000000', ceilingMicros: '1000000' }), 'en').meter;
   assert.deepEqual([under.level, at80.level, full.level], [null, 'high', 'full']);
+});
+
+test('a typed limit must be an amount no lower than what is spent or started', () => {
+  const film = { ceilingMicros: '2000000', spentMicros: '600000', reservedMicros: '300000' };
+  assert.deepEqual(limitDraft('3', film), { micros: '3000000', problem: null, changed: true });
+  assert.deepEqual(limitDraft('2.00', film), { micros: '2000000', problem: null, changed: false });
+  assert.deepEqual(limitDraft('0.90', film), { micros: '900000', problem: null, changed: true });
+  assert.equal(limitDraft('0.89', film).problem, 'below');
+  assert.deepEqual(limitDraft('abc', film), { micros: null, problem: 'invalid', changed: false });
 });

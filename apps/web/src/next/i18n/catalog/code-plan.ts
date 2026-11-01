@@ -22,6 +22,13 @@ export const codePlanMessages = {
   // ---- the run strip ----
   "codeplan.run.label": { en: "Plan run", zh: "计划运行" },
   "codeplan.run.version": { en: "Version {version}", zh: "第 {version} 版" },
+  "codeplan.limit.open": { en: "Change", zh: "修改" },
+  "codeplan.limit.open_label": { en: "Change this film's spend limit", zh: "修改这部片子的花费上限" },
+  "codeplan.limit.label": { en: "Spend limit ($)", zh: "花费上限（美元）" },
+  "codeplan.limit.save": { en: "Save", zh: "保存" },
+  "codeplan.limit.cancel": { en: "Cancel", zh: "取消" },
+  "codeplan.limit.invalid": { en: "Enter an amount in dollars, such as 3 or 2.50.", zh: "请输入美元金额，比如 3 或 2.50。" },
+  "codeplan.limit.below": { en: "It cannot be below the {floor} already spent or started.", zh: "不能低于已花费或进行中的 {floor}。" },
   "codeplan.run.spend": { en: "Spent {spent} of {ceiling}", zh: "已花费 {spent}，上限 {ceiling}" },
   "codeplan.run.spend_pending": { en: "Spent {spent} (+{reserved} pending) of {ceiling}", zh: "已花费 {spent}（另有 {reserved} 待定），上限 {ceiling}" },
   "codeplan.run.held": { en: "The Director is updating the plan. New paid work waits; work already sent goes on.", zh: "导演正在更新计划。新的付费任务先等待，已发出的任务继续进行。" },

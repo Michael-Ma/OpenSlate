@@ -3,7 +3,7 @@ import type {
   CodePlanStepState, CodePlanStepView, CodePlanVersionItem, CodePlanView, Micros, StudioArtifactRef,
 } from "@openslate/core/public";
 import { canonicalJson } from "../store/press-keys.ts";
-import { formatMicros } from "./price.ts";
+import { formatMicros, microsFromDollars } from "./price.ts";
 import { msg, type Msg, type ProjectSnapshot } from "./types.ts";
 
 /**
@@ -83,6 +83,14 @@ export const TONE_GLYPH: Partial<Record<RunTone, string>> = { done: "✓", faile
 
 /** The share of the ceiling from which the meter warns. */
 export const HIGH_SPEND = 0.8;
+
+/** A typed spend limit: whether it can be saved, and what is wrong with it if not. */
+export function limitDraft(draft: string, view: Pick<CodePlanView, "ceilingMicros" | "spentMicros" | "reservedMicros">): { micros: string | null; problem: "invalid" | "below" | null; changed: boolean } {
+  const micros = microsFromDollars(draft);
+  if (micros === null) return { micros: null, problem: "invalid", changed: false };
+  const floor = BigInt(view.spentMicros) + BigInt(view.reservedMicros);
+  return { micros, problem: BigInt(micros) < floor ? "below" : null, changed: micros !== view.ceilingMicros };
+}
 
 export interface RunStrip {
   state: CodePlanRunState;

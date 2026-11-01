@@ -59,7 +59,8 @@ OPENSLATE_DATA_DIR="$HOME/openslate-code-20261029-2351" node --env-file=/Users/m
 1. Settings › This computer › **Spend limit for new films** 改成 `3`，点到别处保存。New film 里的 Code plan 说明应显示 **$3.00**；新建的片子上限也是 $3.00。
 2. 打开测试 1 的片子，Settings › Director › **This film's spend limit** 改成 `2` → Save：顶部进度条显示 $2.00。
 3. 同一处改成 `0.10`（低于已花的钱）→ 被拒绝，提示上限低于已花或已开始的金额。
-4. 在聊天里说「把这部片子的上限改到 $5」：出现回执 "Limit set to $5.00 at your request"。上限只有在你自己的消息里提出时才能改。
+4. 在导演栏顶部的运行条上点**修改**，输入金额后按回车保存，Esc 取消。输入低于已花金额时，保存按钮不可用，并提示最低金额。
+5. 在聊天里说「把这部片子的上限改到 $5」：出现回执 "Limit set to $5.00 at your request"。上限只有在你自己的消息里提出时才能改。
 
 ## 测试 4：失败提示和重试，用你那部失败的片子（约 $0.10）
 
