@@ -21,6 +21,8 @@ export function registerCodePlanRoutes(app: FastifyInstance, getService: () => P
   };
 
   app.get<{ Params: ProjectParams }>(base, async request => codePlans.view(request.params.projectId));
+  app.get<{ Params: ProjectParams & { stepKey: string } }>(`${base}/steps/:stepKey`, async request =>
+    codePlans.stepDetail(request.params.projectId, request.params.stepKey));
   app.get<{ Params: ProjectParams & { version: string } }>(`${base}/versions/:version`, {
     schema: { params: object({ projectId: { type: "string", minLength: 1 }, version: { type: "string", pattern: "^[1-9][0-9]{0,15}$" } }, ["projectId", "version"]) },
   }, async request => {

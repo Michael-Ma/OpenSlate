@@ -4,7 +4,7 @@ import { modelPrice, modelDescriptions, codePlanPriceFrame } from "./models.js";
 import { createHash, randomInt } from "node:crypto";
 import { canonical, digest, DomainError, invariant, moneyMicros } from "@openslate/core";
 import type { JsonObject, JsonValue } from "@openslate/core";
-import type { CodePlanDiff, CodePlanSourceView, CodePlanView } from "@openslate/core/public";
+import type { CodePlanDiff, CodePlanSourceView, CodePlanStepDetail, CodePlanView } from "@openslate/core/public";
 import type { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { CodePlanExecution } from "./execution.js";
@@ -16,6 +16,7 @@ import type { SandboxResult } from "./sandbox.js";
 import type { CodePlanPort } from "./port.js";
 import { codePlanView, emptyDiff, stepLabel } from "./view.js";
 import { codePlanCeiling } from "./settings.js";
+import { codePlanStepDetail } from "./step-detail.js";
 export { normalizeStepInput, stepKey } from "./identity.js";
 export type * from "./records.js";
 
@@ -66,6 +67,10 @@ export class CodePlanRuntime implements CodePlanPort {
   view(projectId: string): CodePlanView {
     this.assertProject(projectId);
     return codePlanView(this.store, this.options.execution, projectId);
+  }
+  stepDetail(projectId: string, stepKey: string): CodePlanStepDetail {
+    this.assertProject(projectId);
+    return codePlanStepDetail(this.store, projectId, stepKey, this.options.execution.attempts(projectId));
   }
   source(projectId: string, version: number): CodePlanSourceView {
     this.assertProject(projectId);

@@ -2,17 +2,20 @@ import type { FastifyInstance } from "fastify";
 import type { AssetItem, AssetRole, StudioArtifactRef } from "@openslate/core/public";
 import type { ProjectRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
-import type { ArtifactRecord, Attempt, NodeBinding } from "./execution/engine.js";
+import type { Attempt, NodeBinding } from "./execution/engine.js";
 import type { CanonicalNarration } from "./narration/canonical-types.js";
 import type { NarrationSpeechProposal } from "./narration/narration-speech-types.js";
 import type { NarrationAudio } from "./narration/types.js";
 import { audioLibraryRole, type AudioLabel } from "./narration/audio-library-role.js";
 import type { SuppliedDocumentArtifact } from "./media/document-application.js";
 import { characterSheetTakes, isApprovedSheet } from "./character-sheets.js";
+import { codePlanAssets } from "./code-plan/assets.js";
+import { codePlanArtifacts, pictureSize } from "./code-plan/artifacts.js";
 
 /** One project-scoped join per collection. Immutable history survives scene deletion and archive. */
 export function projectAssets(production: ProductionService, project: ProjectRecord): AssetItem[] {
   const store = production.store, projectId = project.id;
+  if (project.planMode === "code") return codePlanAssets(store, project);
   const bindings = new Map(store.list<NodeBinding>("node_binding", projectId).map(b => [b.id, b]));
   const attempts = new Map(store.list<Attempt>("attempt", projectId).map(a => [a.id, a]));
   const revisions = store.list<{ before: ProjectRecord }>("storyboard_edit", projectId).map(x => ({ project: x.before })).concat(store.list<{ project: ProjectRecord }>("project_revision", projectId));
@@ -47,7 +50,7 @@ export function projectAssets(production: ProductionService, project: ProjectRec
   const preview = store.get<{ artifact: { artifactId: string } }>("media_preview", projectId);
   if (preview) current.add(preview.artifact.artifactId);
   if (project.soundtrack) current.add(project.soundtrack.audioId);
-  const records = store.list<ArtifactRecord>("artifact", projectId);
+  const { records, posters } = codePlanArtifacts(store, projectId);
   const sheets = new Map(characterSheetTakes(store, projectId).map(take => [take.artifact.artifactId, take]));
   const characters = new Map((project.characters ?? []).map(character => [character.id, character]));
   const counts = new Map<string, number>();
@@ -64,7 +67,7 @@ export function projectAssets(production: ProductionService, project: ProjectRec
       items.push({ artifact: { artifactId: record.artifact.artifactId, sha256: record.artifact.sha256, kind: "image" }, role: "character_sheet",
         characterId: sheet.characterId, takeIndex, current: isApprovedSheet(project, sheet), source: record.fixture ? "demo" : sheet.attemptId ? "generated" : "imported",
         label: characters.get(sheet.characterId)?.name.trim() || "Former character",
-        createdAt: metadata.get(`artifact:${record.id}`) ?? sheet.createdAt });
+        createdAt: metadata.get(`artifact:${record.id}`) ?? sheet.createdAt, ...pictureSize(record) });
       continue;
     }
     const attempt = record.attemptId ? attempts.get(record.attemptId) : undefined;
@@ -85,7 +88,8 @@ export function projectAssets(production: ProductionService, project: ProjectRec
     items.push({ artifact: { artifactId: record.artifact.artifactId, sha256: record.artifact.sha256, kind: record.artifact.kind as StudioArtifactRef["kind"] }, role, ...(shotId ? { shotId } : {}), ...(shot ? { sceneId: shot.sceneId } : {}),
       ...(role === "keyframe" || role === "clip" ? { takeIndex } : {}), current: current.has(record.id), source, label,
       createdAt: metadata.get(`artifact:${record.id}`) ?? attempt?.createdAt ?? firstEvent,
-      ...(record.physicalDurationSeconds !== null ? { durationSeconds: record.physicalDurationSeconds } : {}) });
+      ...(record.physicalDurationSeconds !== null ? { durationSeconds: record.physicalDurationSeconds } : {}),
+      ...pictureSize(record.artifact.kind === "image" ? record : posters.get(record.id)) });
     audio.delete(record.id);
   }
   for (const recording of audio.values()) {
