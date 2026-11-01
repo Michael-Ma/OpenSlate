@@ -213,7 +213,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       dispatched = true;
       const started = object(await rpc("turn/start", { threadId: nativeThreadId,
         input: [{ type: "text", text: input.text }, ...input.skills.map(skill => ({ type: "skill", ...skill })), ...images],
-        effort: "low", permissions: config.policy.id, approvalPolicy: "never" }));
+        effort: "high", permissions: config.policy.id, approvalPolicy: "never" }));
       const turn = object(started.turn);
       requireRuntime(typeof turn.id === "string" && (nativeTurnId === undefined || nativeTurnId === turn.id), "RUNTIME_PROTOCOL_INVALID", "Native turn identity differs from notification");
       nativeTurnId = turn.id;
@@ -289,7 +289,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
   }
   private launchConfig(input: DirectorRunInput): Record<string, CodexConfigValue> {
     const config: Record<string, CodexConfigValue> = { ...this.#options.policy.config,
-      model: this.#options.model, model_reasoning_effort: "low", approval_policy: "never", web_search: "disabled", project_doc_max_bytes: 0,
+      model: this.#options.model, model_reasoning_effort: "high", approval_policy: "never", web_search: "disabled", project_doc_max_bytes: 0,
       "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none", check_for_update_on_startup: false,
       "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
       "features.code_mode_host": true, "features.skip_host_skill_discovery": true,

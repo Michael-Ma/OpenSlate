@@ -1,18 +1,23 @@
 export default async function film(ctx: Studio): Promise<void> {
   await ctx.scene({ id: "scene-1", title: "A quiet morning" });
   const shots = [
-    { id: "shot-1", prompt: "Sunrise through a misty window", motion: "Slow gentle push in" },
-    { id: "shot-2", prompt: "A cup of tea beside the window", motion: "Locked camera, subtle steam" },
+    { id: "shot-1", title: "The room wakes",
+      frame: "Wide view of a quiet kitchen at dawn. A misty window catches the first golden light, above a wooden sill with a white cup on its right end. A folded blue cloth rests beside the cup. The window and sill form a simple, still composition, with the pale sky visible through the glass.",
+      motion: "Slow gentle push in toward a misty kitchen window as dawn light reaches the sill. A breeze lifts the curtain, revealing a clear patch of glass with the sunrise beyond. The white cup remains on the right end of the sill, catching the new light. End with the curtain resting beside the window and the golden sky clearly visible through the glass." },
+    { id: "shot-2", title: "Tea is ready",
+      frame: "Close-up of the white tea cup on the right end of the wooden window sill. The folded blue cloth sits behind it, and soft morning light catches the rim. A narrow curl of steam hangs above the tea. The misty glass is softly out of focus behind the cup, with the curtain resting at its side.",
+      motion: "Locked camera beside a white cup of tea on a wooden window sill, framed in close-up. A curl of steam rises above the rim, then unfurls into the morning light. The blue cloth and softly blurred window stay still behind the cup. End with a thin trail of steam hanging over the tea and the bright rim remaining clearly visible in the foreground." },
   ];
-  for (const { id, prompt } of shots) await ctx.shot({ id, sceneId: "scene-1", title: prompt });
+  for (const { id, title } of shots) await ctx.shot({ id, sceneId: "scene-1", title });
+  // Small offline fixture: a real recurring cast/set first needs the shared references in film-craft.md.
   // Each shot is its own pipeline and all start together: a shot's choice appears as soon as its own frames exist,
   // and its clip runs while the person is still choosing for the next shot.
-  const clips = await Promise.all(shots.map(async ({ id, prompt, motion }) => {
-    const frames = await Promise.all(["a", "b", "c"].map(variant => ctx.image({ model: "fake-image", shot: id, prompt, variant })));
+  const clips = await Promise.all(shots.map(async ({ id, frame: framePrompt, motion }) => {
+    const frames = await Promise.all(["a", "b", "c"].map(variant => ctx.image({ model: "fake-image", shot: id, prompt: framePrompt, variant })));
     const options = frames.flatMap(result => result.ok ? [result.artifact] : []);
     if (!options.length) { await ctx.log(`No frames for ${id}`); return null; }
     const frame = await ctx.choose(`${id}-keyframe`, { question: `Choose a frame for ${id}`, options });
-    const clip = await ctx.video({ model: "fake-video", shot: id, references: [frame], prompt: `${prompt}. ${motion}.`, durationSeconds: 6 });
+    const clip = await ctx.video({ model: "fake-video", shot: id, references: [frame], prompt: motion, durationSeconds: 6 });
     // Fake clips share their bytes. Retain the actual motion in the fixture timeline too.
     if (clip.ok) return { artifact: clip.artifact, motion };
     // In real films, fill these amounts from read_film.models (the fixture video costs $0).
@@ -23,7 +28,7 @@ export default async function film(ctx: Studio): Promise<void> {
       question: `${cost}Retry this shot for an estimated additional $0.00 (offline fixture), or skip?`, options: ["retry", "skip"],
     });
     if (answer !== "retry") return null;
-    const retried = await ctx.video({ model: "fake-video", shot: id, references: [frame], prompt: `${prompt}. ${motion}.`, durationSeconds: 6, variant: "person-retry-1" });
+    const retried = await ctx.video({ model: "fake-video", shot: id, references: [frame], prompt: motion, durationSeconds: 6, variant: "person-retry-1" });
     if (!retried.ok) { await ctx.log(`The retried clip for ${id} also failed. Please choose how to continue in chat.`); return null; }
     return { artifact: retried.artifact, motion };
   }));

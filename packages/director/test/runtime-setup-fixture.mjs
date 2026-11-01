@@ -57,6 +57,7 @@ lines.on("line", line => {
     if (verifying && scenario === "feature-drift") config.features.plugins = true;
     if (verifying && scenario === "question-feature-drift") config.features.default_mode_request_user_input = false;
     if (verifying && scenario === "bundled-skills-drift") config.skills.bundled.enabled = true;
+    if (verifying && scenario === "effort-drift") config.model_reasoning_effort = "low";
     if (verifying && scenario === "search-drift") config.web_search = "live";
     if (scenario === "invalid-mcp-name") config.mcp_servers["contains.dot"] = { enabled: true };
     return respond(id, { config });
@@ -79,19 +80,19 @@ lines.on("line", line => {
     if (scenario === "cursor-loop") return respond(id, { data: [], nextCursor: "repeat-cursor" });
     if (scenario === "pagination" && !params.cursor) return respond(id, { data: [], nextCursor: "second-page" });
     if (scenario === "model-choices" || scenario === "duplicate-model" || scenario === "late-cursor-loop") {
-      const selected = { model: process.env.SETUP_FIXTURE_MODEL, displayName: 'GPT fixture', inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'low' }], privateMetadata: 'PRIVATE_MUST_NOT_LEAK' };
+      const selected = { model: process.env.SETUP_FIXTURE_MODEL, displayName: 'GPT fixture', inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'high' }], privateMetadata: 'PRIVATE_MUST_NOT_LEAK' };
       if (!params.cursor) return respond(id, { data: [selected], nextCursor: 'second-page' });
       if (scenario === 'duplicate-model') return respond(id, { data: [selected], nextCursor: null });
       if (scenario === 'late-cursor-loop') return respond(id, { data: [], nextCursor: 'second-page' });
       return respond(id, { data: [
-        { model: 'fixture-text', displayName: 'Other fixture model', inputModalities: ['text', 'image'], supportedReasoningEfforts: [{ reasoningEffort: 'low' }] },
-        { model: 'fixture-high', inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'high' }] },
-        { model: 'fixture-image', inputModalities: ['image'], supportedReasoningEfforts: [{ reasoningEffort: 'low' }] },
-        { model: 'fixture-hidden', hidden: true, inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'low' }] },
+        { model: 'fixture-text', displayName: 'Other fixture model', inputModalities: ['text', 'image'], supportedReasoningEfforts: [{ reasoningEffort: 'high' }] },
+        { model: 'fixture-low', inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'low' }] },
+        { model: 'fixture-image', inputModalities: ['image'], supportedReasoningEfforts: [{ reasoningEffort: 'high' }] },
+        { model: 'fixture-hidden', hidden: true, inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'high' }] },
       ], nextCursor: null });
     }
     return respond(id, { data: scenario === "model" ? [] : [{ model: process.env.SETUP_FIXTURE_MODEL,
-      inputModalities: ["text"], supportedReasoningEfforts: [{ reasoningEffort: scenario === "effort" ? "high" : "low" }] }], nextCursor: null });
+      inputModalities: ["text"], supportedReasoningEfforts: [{ reasoningEffort: scenario === "effort" ? "low" : "high" }] }], nextCursor: null });
   }
   // Any model or thread operation is an explicit fixture failure, never simulated success.
   log({ kind: "forbidden-method", method });

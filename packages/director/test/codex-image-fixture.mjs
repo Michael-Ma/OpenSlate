@@ -89,7 +89,7 @@ lines.on("line", line => {
     if (scenario === "cursor-loop") return respond(id, { data: [], nextCursor: "repeat-cursor" });
     if (scenario === "pagination" && !params.cursor) return respond(id, { data: [], nextCursor: "second-page" });
     return respond(id, { data: scenario === "model" ? [] : [{ model: process.env.SETUP_FIXTURE_MODEL,
-      inputModalities: ["text"], supportedReasoningEfforts: [{ reasoningEffort: scenario === "effort" ? "high" : "low" }] }], nextCursor: null });
+      inputModalities: ["text"], supportedReasoningEfforts: [{ reasoningEffort: scenario === "effort" ? "low" : "high" }] }], nextCursor: null });
   }
   if (method === "modelProvider/capabilities/read") return respond(id,{imageGeneration:imageScenario!=="capability",namespaceTools:true,webSearch:true});
   if (method === "thread/start") {
