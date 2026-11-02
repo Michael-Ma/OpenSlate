@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1520 1080" width="1520" height="1080" font-family="-apple-system, 'PingFang SC', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <style>
+      .t{font-size:15px;font-weight:700;fill:#0f172a}
+      .h{font-size:13px;font-weight:700;fill:#0f172a}
+      .s{font-size:11.5px;fill:#334155}
+      .m{font-size:10.5px;fill:#64748b}
+      .stage{fill:#f8fafc;stroke:#cbd5e1;stroke-width:1.2}
+      .box{fill:#ffffff;stroke:#94a3b8;stroke-width:1.2}
+      .new{fill:#fffbeb;stroke:#d97706;stroke-width:1.6;stroke-dasharray:5 3}
+      .ln{stroke:#475569;stroke-width:1.4;fill:none}
+      .free{fill:#dcfce7;stroke:#16a34a}
+      .card{fill:#dbeafe;stroke:#2563eb}
+      .human{fill:#fee2e2;stroke:#dc2626}
+      .tag{font-size:10px;font-weight:700}
+      .num{font-size:13px;font-weight:800;fill:#ffffff}
+    </style>
+  </defs>
+  <rect width="1520" height="1080" fill="#ffffff"/>
+  <text x="24" y="34" font-size="20" font-weight="800" fill="#0f172a">OpenSlate 业务逻辑构建图：从一句话到一部片</text>
+  <text x="24" y="56" class="m">每一层都建在上一层保存的结果上：类型决定加载哪些技能，技能决定怎么构思和拍，计划决定生成什么，生成结果再拼成影片。虚线橙框 = 这一轮新增。右上角色标 = 谁能做这一步。</text>
+
+  <!-- consent legend -->
+  <rect x="900" y="70" width="600" height="34" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <rect x="912" y="80" width="14" height="14" rx="3" class="free"/><text x="932" y="92" class="s">Director 直接做（免费、可撤销）</text>
+  <rect x="1128" y="80" width="14" height="14" rx="3" class="card"/><text x="1148" y="92" class="s">Director 提议，你确认</text>
+  <rect x="1300" y="80" width="14" height="14" rx="3" class="human"/><text x="1320" y="92" class="s">只能你来（批准 / 确认付费）</text>
+  <!-- Stage 0 input -->
+  <rect x="20" y="116" width="1480" height="74" rx="10" class="stage"/>
+  <circle cx="44" cy="153" r="14" fill="#0f172a"/><text x="39" y="158" class="num">0</text>
+  <text x="68" y="140" class="t">输入</text>
+  <text x="68" y="160" class="s">你在聊天里说一句话（"做一个 20 秒、发 IG 的搞笑视频"）· 上传歌曲 / 录音 / 文档 · 导入写好的计划 · 指向某场某镜头</text>
+  <text x="68" y="178" class="m">Director 每一轮都先 read_context：影片状态在应用里，不在对话里</text>
+
+  <!-- Stage 1 intake -->
+  <rect x="20" y="202" width="1480" height="118" rx="10" class="stage"/>
+  <circle cx="44" cy="239" r="14" fill="#0f172a"/><text x="39" y="244" class="num">1</text>
+  <text x="68" y="226" class="t">开场：这是什么片？（filmKind · film-kind@1）</text>
+  <rect x="68" y="236" width="700" height="74" rx="8" class="new"/>
+  <text x="80" y="255" class="h">kind · subtype · tones · format · audience · source</text>
+  <text x="80" y="272" class="s">例：social / skit / [comedy] / ig_reels · 9:16 · up_to_30s · 20 s / general / generated</text>
+  <text x="80" y="289" class="s">每个字段记 basis：stated（你说的）· asked（问来的）· inferred（推断）· default</text>
+  <text x="80" y="304" class="m">kind：narrative · music_video · commercial · social · explainer · documentary · showcase · trailer …</text>
+  <rect x="780" y="236" width="706" height="74" rx="8" class="new"/>
+  <text x="792" y="255" class="h">规划前必须定下 kind 和画面比例</text>
+  <text x="792" y="272" class="s">没说清 → kind 记成 undecided，一条问题问完：每个缺的字段 2–4 个选项，各带默认值</text>
+  <text x="792" y="289" class="s">说清了（如 IG 例子）→ 不问，直接往下走</text>
+  <rect x="1440" y="242" width="40" height="16" rx="3" class="free"/><text x="1446" y="254" class="tag" fill="#166534">直接</text>
+
+  <!-- Stage 2 routing -->
+  <rect x="20" y="332" width="1480" height="110" rx="10" class="stage"/>
+  <circle cx="44" cy="369" r="14" fill="#0f172a"/><text x="39" y="374" class="num">2</text>
+  <text x="68" y="356" class="t">选技能：filmKind → 加载哪些 skill（应用自动做，不靠模型自觉）</text>
+  <rect x="68" y="366" width="250" height="66" rx="8" class="box"/>
+  <text x="80" y="385" class="h">核心（每次都有）</text>
+  <text x="80" y="402" class="s">production：阶段、权限、tool 用法</text>
+  <text x="80" y="418" class="s">plan-authoring：时间线源</text>
+  <rect x="330" y="366" width="330" height="66" rx="8" class="new"/>
+  <text x="342" y="385" class="h">类型 skill（9 个，按 kind 选 1 个）</text>
+  <text x="342" y="402" class="s">type-social · type-music-video · type-commercial</text>
+  <text x="342" y="418" class="s">explainer · narrative · narrated-story · showcase …</text>
+  <rect x="672" y="366" width="220" height="66" rx="8" class="new"/>
+  <text x="684" y="385" class="h">格式修饰</text>
+  <text x="684" y="402" class="s">format-social-vertical</text>
+  <text x="684" y="418" class="s">（9:16 时加上）</text>
+  <rect x="904" y="366" width="582" height="66" rx="8" class="new"/>
+  <text x="916" y="385" class="h">共用 craft skill（类型声明需要哪些；有条件时才加）</text>
+  <text x="916" y="402" class="s">story（构思）· comedy · visual-style · style-prompting · shot-prompting · characters</text>
+  <text x="916" y="418" class="s">continuity-review · narration · music-timing · performance（唱 / 跳 / 乐器）</text>
+
+  <!-- Stage 3 creative development: four columns -->
+  <rect x="20" y="454" width="1480" height="196" rx="10" class="stage"/>
+  <circle cx="44" cy="491" r="14" fill="#0f172a"/><text x="39" y="496" class="num">3</text>
+  <text x="68" y="478" class="t">构思：故事 · 风格 · 角色 · 音乐（并行，各自保存进计划）</text>
+
+  <rect x="68" y="490" width="350" height="150" rx="8" class="box"/>
+  <text x="80" y="509" class="h">故事 / 概念（craft-story + 类型特化）</text>
+  <text x="80" y="527" class="s">brief → 前提 premise → 核心画面</text>
+  <text x="80" y="544" class="s">喜剧：先想笑点画面，再倒推铺垫；</text>
+  <text x="80" y="561" class="s">  几个 premise 打分挑一个</text>
+  <text x="80" y="578" class="s">MV：表演 / 叙事 / 概念比例，按段落分场</text>
+  <text x="80" y="595" class="s">广告：hook → 问题 → 方案 → CTA</text>
+  <text x="80" y="628" class="m">存进 brief / story / scene direction</text>
+  <rect x="368" y="496" width="40" height="16" rx="3" class="free"/><text x="374" y="508" class="tag" fill="#166534">直接</text>
+
+  <rect x="430" y="490" width="340" height="150" rx="8" class="new"/>
+  <text x="442" y="509" class="h">风格 Look（craft-visual-style）</text>
+  <text x="442" y="527" class="s">你指定了就用；没指定就推荐 2–3 个：</text>
+  <text x="442" y="544" class="s">稳妥 / 有区别 / 可选大胆，各写理由和风险</text>
+  <text x="442" y="561" class="s">propose_visual_style → 风格卡 → 你点 Choose</text>
+  <text x="442" y="578" class="s">存成 project.visualStyle，每个 prompt 都写进</text>
+  <text x="442" y="595" class="s">场景只能改时间、色调、光、天气</text>
+  <text x="442" y="628" class="m">约 25 种风格，按特征描述，不写艺术家名</text>
+  <rect x="720" y="496" width="40" height="16" rx="3" class="card"/><text x="726" y="508" class="tag" fill="#1e40af">确认</text>
+
+  <rect x="782" y="490" width="340" height="150" rx="8" class="new"/>
+  <text x="794" y="509" class="h">角色 Cast（craft-characters）</text>
+  <text x="794" y="527" class="s">每个角色：身份 + 每场一套服装</text>
+  <text x="794" y="544" class="s">出现多次 → 一张设定图（正 / 背 / 侧 + 脸）</text>
+  <text x="794" y="561" class="s">make_character_sheets → 你批准</text>
+  <text x="794" y="578" class="s">批准后设为该角色每个关键帧的第一张参考图，</text>
+  <text x="794" y="595" class="s">旧关键帧标记过期（不自动重做）</text>
+  <text x="794" y="628" class="m">Plan › Cast · 服装表 · 设定图审阅</text>
+  <rect x="1072" y="496" width="40" height="16" rx="3" class="human"/><text x="1078" y="508" class="tag" fill="#991b1b">批准</text>
+
+  <rect x="1134" y="490" width="352" height="150" rx="8" class="new"/>
+  <text x="1146" y="509" class="h">音乐（craft-music-timing）</text>
+  <text x="1146" y="527" class="s">导入的歌默认成为配乐（MV 0 dB，其他 -18 dB）</text>
+  <text x="1146" y="544" class="s">set_soundtrack：Director 也能换 / 去掉</text>
+  <text x="1146" y="561" class="s">analyze_music：本地 tempo / 拍点 / 段落</text>
+  <text x="1146" y="578" class="s">+ Gemini 段落名 / 人声 / 歌词（你按一次同意）</text>
+  <text x="1146" y="595" class="s">贴合歌曲：场在段落边界切，镜头在拍点切</text>
+  <text x="1146" y="628" class="m">Assets › 分析歌曲 · Film › Fit shots to song</text>
+  <rect x="1436" y="496" width="40" height="16" rx="3" class="free"/><text x="1442" y="508" class="tag" fill="#166534">直接</text>
+
+  <!-- Stage 4 plan -->
+  <rect x="20" y="662" width="1480" height="96" rx="10" class="stage"/>
+  <circle cx="44" cy="699" r="14" fill="#0f172a"/><text x="39" y="704" class="num">4</text>
+  <text x="68" y="686" class="t">计划：场景 → 镜头（prepare_change → apply_change；改已生成的镜头要走 proposal）</text>
+  <rect x="68" y="696" width="1418" height="52" rx="8" class="box"/>
+  <text x="80" y="716" class="s"><tspan class="h">每个镜头</tspan>：purpose（这一拍做什么）· framing · 时长 3–15 s · 运动 motion · keyframe prompt（风格 + 服装 + 安全区）· video prompt</text>
+  <text x="80" y="736" class="s"><tspan class="h" fill="#b45309">新字段</tspan>：characterIds（出场角色）· performance: singing（对口型）· clipAudio（保留原声）· 可移动、插入、删除（删除要确认）· 全部可撤销</text>
+
+  <!-- Stage 5-7 generation row -->
+  <rect x="20" y="770" width="1480" height="186" rx="10" class="stage"/>
+  <circle cx="44" cy="807" r="14" fill="#0f172a"/><text x="39" y="812" class="num">5</text>
+  <text x="68" y="794" class="t">生成与组装（engine 在对话之外 durable 地跑；付费的一律先报价、等你确认）</text>
+
+  <rect x="68" y="806" width="330" height="140" rx="8" class="box"/>
+  <text x="80" y="825" class="h">关键帧（Codex imagegen，$0）</text>
+  <text x="80" y="843" class="s">make_keyframes：按场景并行、每张单独记录</text>
+  <text x="80" y="860" class="s">尺寸跟画面比例（9:16 → 1024×1536）</text>
+  <text x="80" y="877" class="s">带角色设定图做参考</text>
+  <text x="80" y="894" class="s">Director 自动审图 → 笔记 → 修改 proposal</text>
+  <text x="80" y="911" class="s">→ 你接受 → 再生成（旧 take 保留可比较）</text>
+  <text x="80" y="934" class="m">卡住的任务：Give up / 丢弃 / 不再等待</text>
+  <rect x="348" y="812" width="40" height="16" rx="3" class="free"/><text x="354" y="824" class="tag" fill="#166534">直接</text>
+
+  <path d="M398 876 H418" class="ln" marker-end="url(#a)"/>
+
+  <rect x="420" y="806" width="350" height="140" rx="8" class="box"/>
+  <text x="432" y="825" class="h">视频（每个镜头一段）</text>
+  <text x="432" y="843" class="s">你打开本场所有关键帧 → 确认并看报价</text>
+  <text x="432" y="860" class="s">普通镜头：Viggle → MiniMax H3（约 $0.01/秒，</text>
+  <text x="432" y="877" class="s">  按画面比例，自带原声）</text>
+  <text x="432" y="894" class="s"><tspan fill="#b45309" font-weight="700">新</tspan>：唱歌镜头 → fal H3 Max lip-sync</text>
+  <text x="432" y="911" class="s">  （关键帧 + 本镜头歌曲片段，$0.08/秒）</text>
+  <text x="432" y="934" class="m">丢失的提交不重提；失败说明是否可能已扣费</text>
+  <rect x="720" y="812" width="40" height="16" rx="3" class="human"/><text x="726" y="824" class="tag" fill="#991b1b">确认</text>
+
+  <path d="M770 876 H790" class="ln" marker-end="url(#a)"/>
+
+  <rect x="792" y="806" width="340" height="140" rx="8" class="box"/>
+  <text x="804" y="825" class="h">声音</text>
+  <text x="804" y="843" class="s">旁白 / 配音：写稿 → TTS 或你的录音 → 对齐镜头</text>
+  <text x="804" y="860" class="s">配乐：选定的歌或音乐</text>
+  <text x="804" y="877" class="s"><tspan fill="#b45309" font-weight="700">新</tspan>：片段原声（社交 / 喜剧默认开，-6 dB）</text>
+  <text x="804" y="894" class="s">  旁白时自动压低 12 dB，MV 默认静音</text>
+  <text x="804" y="911" class="s">录音可转写；配音失败显示原因和是否扣费</text>
+  <text x="804" y="934" class="m">Film › 保留片段声音 · 音量</text>
+  <rect x="1082" y="812" width="40" height="16" rx="3" class="free"/><text x="1088" y="824" class="tag" fill="#166534">直接</text>
+
+  <path d="M1132 876 H1152" class="ln" marker-end="url(#a)"/>
+
+  <rect x="1154" y="806" width="332" height="140" rx="8" class="box"/>
+  <text x="1166" y="825" class="h">成片 Film → 导出</text>
+  <text x="1166" y="843" class="s">时间线：镜头顺序、长度可改（免费）</text>
+  <text x="1166" y="860" class="s">浏览器预览 = 导出的混音</text>
+  <text x="1166" y="877" class="s">start_export：本机 ffmpeg 渲染，免费</text>
+  <text x="1166" y="894" class="s"><tspan fill="#b45309" font-weight="700">新</tspan>：按比例出片（9:16 → 720×1280）</text>
+  <text x="1166" y="911" class="s">中断的渲染可以重来</text>
+  <text x="1166" y="934" class="m">验收片：Tiny Bodyguard，20 s，约 $0.40</text>
+  <rect x="1436" y="812" width="40" height="16" rx="3" class="free"/><text x="1442" y="824" class="tag" fill="#166534">直接</text>
+
+  <!-- stage connectors -->
+  <path d="M760 190 V202" class="ln" marker-end="url(#a)"/>
+  <path d="M760 320 V332" class="ln" marker-end="url(#a)"/>
+  <path d="M760 442 V454" class="ln" marker-end="url(#a)"/>
+  <path d="M760 650 V662" class="ln" marker-end="url(#a)"/>
+  <path d="M760 758 V770" class="ln" marker-end="url(#a)"/>
+
+  <!-- cross-cutting -->
+  <rect x="20" y="968" width="1480" height="100" rx="10" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="34" y="992" class="t">贯穿所有步骤的规则</text>
+  <text x="34" y="1014" class="s"><tspan class="h">同意</tspan>：免费且可撤销的 Director 直接做 · 花钱或不可逆的先出确认卡 · 批准设定图、确认视频、你的声音、密钥只归你</text>
+  <text x="34" y="1034" class="s"><tspan class="h">一致</tspan>：Director 的 tool 和你的按钮走同一套命令；请求范围 ≠ 选中范围；每次修改都有版本和 Undo；改了 prompt 的旧帧标"过期"而不是删掉</text>
+  <text x="34" y="1054" class="s"><tspan class="h">恢复</tspan>：没回应的任务能放弃，损坏的输出能丢弃，一直"运行中"能脱离，中断的渲染能重来；花费和历史都保留，不按时间猜失败或退款</text>
+</svg>

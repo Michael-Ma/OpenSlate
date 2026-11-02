@@ -1,0 +1,1304 @@
+{
+  "catalog": {
+    "version": "6.0.0",
+    "names": [
+      "read_context",
+      "prepare_change",
+      "apply_change",
+      "control_execution",
+      "inspect_artifact",
+      "revise_narration_draft",
+      "prepare_recording_transcription",
+      "prepare_narration_speech",
+      "record_notes",
+      "propose_change"
+    ],
+    "descriptors": [
+      {
+        "name": "read_context",
+        "description": "Read bounded project context. With no section, return overview. Select shots, scenes, plan, grants, or receipts and follow returned offsets for additional pages. Plan source is returned in chunks. Compare returned revision/version across pages; restart pagination if it changes. Select narration for draft sections, recording inventory and independently derived readiness. Select audio_operations for bounded owned recording identities, exact speech/transcription choices and saved proposals. Preparing an audio proposal never approves or starts generation. Select notes for open, resolved and stale notes and human resolutions.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "section": {
+              "enum": [
+                "overview",
+                "shots",
+                "scenes",
+                "plan",
+                "aliases",
+                "grants",
+                "receipts",
+                "narration",
+                "audio_operations",
+                "notes"
+              ]
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000000
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "prepare_change",
+        "description": "Validate and prepare a scoped workflow, creative, or plan change. Preparation does not apply the change. Save compact shot narration intent with createShots/updateShots.narration; this does not accept audio, timing or spending.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "variant": {
+              "enum": [
+                "workflow",
+                "project",
+                "plan"
+              ]
+            },
+            "expectedHeadVersion": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2097152
+            },
+            "requestNewTakes": {
+              "type": "array",
+              "maxItems": 400,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            },
+            "stages": {
+              "type": "array",
+              "maxItems": 400,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "stageId": {
+                    "enum": [
+                      "intake",
+                      "story",
+                      "scene_plan",
+                      "shot_plan",
+                      "narration",
+                      "storyboard",
+                      "video",
+                      "assembly",
+                      "review"
+                    ]
+                  },
+                  "scopeId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000
+                  },
+                  "gaps": {
+                    "type": "array",
+                    "maxItems": 400,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 16000
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "message"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "stageId",
+                  "scopeId",
+                  "reason"
+                ]
+              }
+            },
+            "creative": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "brief": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 16000
+                },
+                "story": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 16000
+                },
+                "createScenes": {
+                  "type": "array",
+                  "maxItems": 400,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 60,
+                        "pattern": "^\\S+(?: \\S+){0,5}(?![\\s\\S])"
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "purpose"
+                    ]
+                  }
+                },
+                "updateScenes": {
+                  "type": "array",
+                  "maxItems": 400,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 60,
+                        "pattern": "^\\S+(?: \\S+){0,5}(?![\\s\\S])"
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "minProperties": 2
+                  }
+                },
+                "createShots": {
+                  "type": "array",
+                  "maxItems": 400,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "sceneId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "action": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "framing": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40,
+                        "pattern": "^\\S+(?: \\S+){0,2}(?![\\s\\S])",
+                        "examples": [
+                          "Close-up",
+                          "Medium",
+                          "Wide"
+                        ]
+                      },
+                      "motion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "desiredFrames": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10800
+                      },
+                      "imagePrompt": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "videoPrompt": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "narration": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "mode": {
+                            "enum": [
+                              "undecided",
+                              "none",
+                              "generated",
+                              "uploaded"
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "maxLength": 16000
+                          },
+                          "voice": {
+                            "enum": [
+                              "stock",
+                              "personal"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "text",
+                          "voice"
+                        ]
+                      },
+                      "referenceArtifactIds": {
+                        "type": "array",
+                        "maxItems": 400,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        }
+                      },
+                      "cueId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "maxLength": 160
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "sceneId",
+                      "purpose",
+                      "action",
+                      "framing",
+                      "motion",
+                      "desiredFrames",
+                      "imagePrompt",
+                      "videoPrompt",
+                      "referenceArtifactIds",
+                      "cueId"
+                    ]
+                  }
+                },
+                "updateShots": {
+                  "type": "array",
+                  "maxItems": 400,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "action": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "framing": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40,
+                        "pattern": "^\\S+(?: \\S+){0,2}(?![\\s\\S])",
+                        "examples": [
+                          "Close-up",
+                          "Medium",
+                          "Wide"
+                        ]
+                      },
+                      "motion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "desiredFrames": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10800
+                      },
+                      "imagePrompt": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "videoPrompt": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "narration": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "mode": {
+                            "enum": [
+                              "undecided",
+                              "none",
+                              "generated",
+                              "uploaded"
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "maxLength": 16000
+                          },
+                          "voice": {
+                            "enum": [
+                              "stock",
+                              "personal"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "text",
+                          "voice"
+                        ]
+                      },
+                      "reauthorPrompts": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ]
+                  }
+                }
+              },
+              "required": []
+            }
+          },
+          "required": [
+            "variant",
+            "expectedHeadVersion"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "apply_change",
+        "description": "Apply an existing prepared change owned by this request. The application checks authority, versions, and generation grants.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "preparedId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          },
+          "required": [
+            "preparedId"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "control_execution",
+        "description": "Hold execution within this request's scope. Only a human command can resume execution.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "pause"
+              ]
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "inspect_artifact",
+        "description": "Inspect an artifact belonging to the current project using its saved artifact ID.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "artifactId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          },
+          "required": [
+            "artifactId"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "revise_narration_draft",
+        "description": "Atomically save requested narration script/source drafts at an exact narration version. Read narration context first. Changed sections lose their exact acceptances; unrelated sections remain intact. This does not accept text/audio/timing, attach audio, commit canonical cues, buy media, or release execution holds. Add first, then reorder with returned saved IDs.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "expectedVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "patch": {
+              "type": "object",
+              "properties": {
+                "add": {
+                  "type": "array",
+                  "maxItems": 400,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "maxLength": 16000
+                      },
+                      "textKind": {
+                        "enum": [
+                          "notes",
+                          "outline",
+                          "draft"
+                        ]
+                      },
+                      "language": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "meaning": {
+                        "type": "string",
+                        "maxLength": 4000
+                      },
+                      "source": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "const": "undecided"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "const": "uploaded"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "const": "generated"
+                              },
+                              "voice": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "minLength": 1,
+                                "maxLength": 160
+                              },
+                              "profileRevisionId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "minLength": 1,
+                                "maxLength": 160
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "voice",
+                              "profileRevisionId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "textKind",
+                      "language",
+                      "meaning",
+                      "source"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "update": {
+                  "type": "array",
+                  "maxItems": 400,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "segmentId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "draft": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "maxLength": 16000
+                          },
+                          "textKind": {
+                            "enum": [
+                              "notes",
+                              "outline",
+                              "draft"
+                            ]
+                          },
+                          "language": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "meaning": {
+                            "type": "string",
+                            "maxLength": 4000
+                          },
+                          "source": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "const": "undecided"
+                                  }
+                                },
+                                "required": [
+                                  "kind"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "const": "uploaded"
+                                  }
+                                },
+                                "required": [
+                                  "kind"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "const": "generated"
+                                  },
+                                  "voice": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "minLength": 1,
+                                    "maxLength": 160
+                                  },
+                                  "profileRevisionId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "minLength": 1,
+                                    "maxLength": 160
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "voice",
+                                  "profileRevisionId"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "text",
+                          "textKind",
+                          "language",
+                          "meaning",
+                          "source"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "segmentId",
+                      "draft"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "remove": {
+                  "type": "array",
+                  "maxItems": 400,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  }
+                },
+                "order": {
+                  "type": "array",
+                  "maxItems": 400,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  }
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "expectedVersion",
+            "patch"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "prepare_recording_transcription",
+        "description": "Save a pending transcription suggestion for an exact owned recording and optional section. Only a person's press on the audio request route starts paid work. This tool never transcribes, attaches or adopts text. No spending allowance or separate approval is needed.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "expectedHeadVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "audioId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "sourceRecordDigest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "profileId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "language": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "target": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "recording"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "section"
+                    },
+                    "segmentId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "segmentRevisionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "audioId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "segmentId",
+                    "segmentRevisionId",
+                    "audioId"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "expectedHeadVersion",
+            "audioId",
+            "sourceRecordDigest",
+            "profileId",
+            "language",
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "prepare_narration_speech",
+        "description": "Save a pending speech suggestion for an exact saved narration section. Only a person's press on the audio request route starts paid work. This tool never generates, attaches or accepts audio. No spending allowance or separate approval is needed.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "expectedHeadVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "segmentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "segmentRevisionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "profileId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "voice": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "instructions": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "expectedHeadVersion",
+            "segmentId",
+            "segmentRevisionId",
+            "profileId",
+            "voice",
+            "instructions"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "record_notes",
+        "description": "Record one point per shot-anchored note, including typed human choices. Use the returned app-assigned letters. Allowed in discuss-only turns. Notes never edit the film or start paid work. Never judge a picture absent from attachedKeyframes or re-raise settled notes.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "notes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "anchor": {
+                    "type": "object",
+                    "properties": {
+                      "sceneId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "shotIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 4,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        }
+                      }
+                    },
+                    "required": [],
+                    "additionalProperties": false,
+                    "anyOf": [
+                      {
+                        "required": [
+                          "sceneId"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "shotIds"
+                        ]
+                      }
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "observation",
+                      "recommendation"
+                    ]
+                  },
+                  "blocking": {
+                    "type": "boolean"
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 600
+                  },
+                  "seenKeyframe": {
+                    "type": "object",
+                    "properties": {
+                      "shotId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "shotId",
+                      "artifactId",
+                      "sha256"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "choices": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "const": "accept"
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "label"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "const": "proposal"
+                            },
+                            "proposalId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 160
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "proposalId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "const": "regenerate_keyframe"
+                            },
+                            "shotIds": {
+                              "type": "array",
+                              "minItems": 1,
+                              "maxItems": 4,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160
+                              }
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "shotIds"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "const": "edit_field"
+                            },
+                            "shotId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 160
+                            },
+                            "field": {
+                              "enum": [
+                                "narration",
+                                "imagePrompt",
+                                "motion"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "shotId",
+                            "field"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "const": "reply"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "anchor",
+                  "kind",
+                  "blocking",
+                  "text",
+                  "choices"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "notes"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "propose_change",
+        "description": "Hold one creative patch for human review with an application-computed Now/After preview. Allowed in discuss-only epochs. No holds, plan, grants or generation. Propose duration, narration and changes that outdate paid media; apply harmless text directly with a receipt.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "patch": {
+              "type": "object",
+              "properties": {
+                "updateShots": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 400,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "desiredFrames": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10800
+                      },
+                      "motion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "imagePrompt": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "videoPrompt": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "narration": {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "enum": [
+                              "undecided",
+                              "none",
+                              "generated",
+                              "uploaded"
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "maxLength": 16000
+                          },
+                          "voice": {
+                            "enum": [
+                              "stock",
+                              "personal"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "text",
+                          "voice"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "action": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      },
+                      "framing": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40,
+                        "pattern": "^\\S+(?: \\S+){0,2}(?![\\s\\S])",
+                        "examples": [
+                          "Close-up",
+                          "Medium",
+                          "Wide"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false,
+                    "minProperties": 2
+                  }
+                },
+                "updateScenes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 400,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 60,
+                        "pattern": "^\\S+(?: \\S+){0,5}(?![\\s\\S])"
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16000
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false,
+                    "minProperties": 2
+                  }
+                }
+              },
+              "required": [],
+              "additionalProperties": false,
+              "minProperties": 1
+            }
+          },
+          "required": [
+            "patch"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        }
+      }
+    ],
+    "digest": "282275ce2d97c274f0e064357dac77a8d06e57fd8a58de37e187faf79e5a97ec"
+  },
+  "files": {
+    "production/openslate.skill.json": "{\n  \"id\": \"production\",\n  \"version\": \"7.0.0\",\n  \"entry\": \"SKILL.md\",\n  \"files\": [\n    \"SKILL.md\",\n    \"references/current-contract.md\",\n    \"references/narration.md\",\n    \"references/continuity-review.md\",\n    \"references/stages/intake.md\",\n    \"references/stages/story.md\",\n    \"references/stages/scene_plan.md\",\n    \"references/stages/shot_plan.md\",\n    \"references/stages/narration.md\",\n    \"references/stages/storyboard.md\",\n    \"references/stages/video.md\",\n    \"references/stages/assembly.md\",\n    \"references/stages/review.md\",\n    \"references/audio-proposals.md\",\n    \"references/notes.md\"\n  ],\n  \"compatibility\": {\n    \"toolContract\": \"6.0.0\",\n    \"planLanguage\": \"1.0.0\",\n    \"workflowContract\": \"1.0.0\"\n  },\n  \"requiredToolIds\": [\n    \"read_context\",\n    \"prepare_change\",\n    \"apply_change\",\n    \"control_execution\",\n    \"inspect_artifact\",\n    \"revise_narration_draft\",\n    \"prepare_recording_transcription\",\n    \"prepare_narration_speech\",\n    \"record_notes\",\n    \"propose_change\"\n  ]\n}\n",
+    "production/SKILL.md": "---\nname: production\ndescription: Develop or revise an OpenSlate narrated video from saved intent and media evidence, proposing changes with media impact and guiding human scene confirmation within the requested scope.\n---\n\n# OpenSlate production\n\nTurn the current request into useful scoped creative work. Read the application context for settled decisions, allowed scope, revisions, existing media and pending requirements. A shot edit does not restart intake or the whole film. Stage labels never grant authority or bypass application checks.\n\nRead [notes and human decisions](references/notes.md) before any mutation and [the current contract](references/current-contract.md) before forming a payload. Use `read_context` and `inspect_artifact` for evidence, `record_notes` for anchored observations and choices, `propose_change` for changes with media impact, and `prepare_change`/`apply_change` for harmless writing. On a shot with current or retained media, purpose, action, framing, motion, prompts, duration and narration are media inputs, even if their values are text. Propose their changes together; the person accepts the app-computed Now/After preview. Pure text without media impact may apply directly with a receipt. A `PROPOSAL_REQUIRED` refusal means propose the named fields rather than bypassing the boundary.\n\nNever author image, review or video declarations (`p.image`, `p.humanReview`, `p.approvedImage`, `p.video`), and never use `requestNewTakes`. Scene actions build all keyframe and video work. Never combine creative edits with `source` in one `prepare_change`. `plan-authoring` covers separate timeline/render source only; ordinary creative planning needs no executable source.\n\nUse [narration decisions](references/narration.md) for script or audio coverage, [audio suggestions](references/audio-proposals.md) for explicitly requested recognition or speech, and [continuity and review](references/continuity-review.md) for assets and visual feedback. Audio tools save pending suggestions; only a human press starts paid work. Their identities cannot be passed to `apply_change`. Never invent actor, grant, acceptance, completion or measured timing fields.\n\nLoad only the stage prompts needed for the request:\n\n| Stage | Prompt reference | Read when |\n|---|---|---|\n| `intake` | [production/intake@1](references/stages/intake.md) | Interpreting a brief or supplied assets |\n| `story` | [production/story@1](references/stages/story.md) | Developing beats and visual direction |\n| `scene_plan` | [production/scene_plan@1](references/stages/scene_plan.md) | Separating scene names, direction and story coverage |\n| `shot_plan` | [production/shot_plan@1](references/stages/shot_plan.md) | Creating or revising shot intent and prompts |\n| `narration` | [production/narration@1](references/stages/narration.md) | Choosing script and audio work |\n| `storyboard` | [production/storyboard@1](references/stages/storyboard.md) | Preparing saved shot writing for keyframes |\n| `video` | [production/video@1](references/stages/video.md) | Explaining scene confirmation and requested takes |\n| `assembly` | [production/assembly@1](references/stages/assembly.md) | Reviewing clip order, narration and export |\n| `review` | [production/review@1](references/stages/review.md) | Explaining shown results and receiving decisions |\n\nName the studio views and actions by their labels. Plan contains brief, story, scenes and shots. In Keyframes the person presses \"Make keyframes\", then reviews exact returned frames, motion, narration and the actual video recipe and presses \"Confirm frames & generate video\" once. Listening and recording edits are optional. This scene confirmation saves exact script, recording and measured timing together; do not request separate per-section acceptance. Film contains current clips, soundtrack and export. Assets contains saved media.\n\nThese are two human generation decisions per scene. Returned clips need no further acceptance gate. Configured providers need no API-key approval, spending approval or usage allowance. An additional take still needs the person's scoped generation press. Never regenerate autonomously for quality or blindly resubmit an uncertain outcome. The executor owns technical retries and reconciliation.\n\nRespect resolved notes, settled choices, unaffected work and request-owned holds. Human edits can run alongside this turn; a field conflict requires fresh evidence, not overwriting the person's change. Save a small usable creative draft before expanding it. Report actual saved progress and remaining choices. Tool receipts establish saved work, not artistic quality; describe known fixture media as placeholders.\n",
+    "production/references/current-contract.md": "# Current contract\n\nGuidance package `7.0.0`, tool contract `6.0.0`, workflow and planning contracts `1.0.0`. The ten tools include `record_notes` and `propose_change`. The application owns authority, project state, execution and app-computed previews. Read [notes](notes.md) before choosing a mutation.\n\n## Reading current state\n\nCall `read_context` with `{}` for overview or `{ \"section\": \"shots\", \"offset\": 0 }` for a page. Sections are `overview`, `shots`, `scenes`, `plan`, `aliases`, `grants`, `receipts`, `narration`, `audio_operations` and `notes`. Follow `page.nextOffset` until null for each collection needed by the request. Overview has compact identities; read `shots` and `scenes` for full intent records. Never assume the first page is complete.\n\nCompare `guard.headVersion`, `revisionId`, `activePlanId`, `graphDigest`, `capabilityLockId` and `domainCursor` across reads, and `guard.dataDigest` within one section. Restart affected pagination if they change. The raw `cursor` tracks audit events and is not a content freshness guard. Missing context and size errors are not permission to guess.\n\nFor a separate timeline/render edit, read all `plan` source chunks in returned offset order (`utf16_characters`) and all `aliases` pages. Preserve current operation identities and untouched source. Historical aliases with `current: false` are not current operations. If retaining the saved source would require authoring image, review or video declarations, use the studio's Film/export controls instead of rebuilding generation work.\n\n`grants` explains recorded authority, not new authorization. `receipts` supplies compact outcome identities, not an automatic replay command. If a response is unresolved, preserve its original identity, inspect application evidence and stop dependent mutations if the outcome cannot be established. Never send a new creative interpretation or candidate to recover an unknown result.\n\n## Creative preparation and application\n\n`prepare_change` accepts a change with `variant` (`workflow`, `project` or `plan`), current integer `expectedHeadVersion`, and optional `stages`, `creative` or `source`. At least one stage, creative patch or source is required. Use the exposed schema for the transport shape.\n\nNever combine `creative` and `source` in one call. For ordinary writing use `variant: \"project\"`, `creative` and no source. Never author image, review or video declarations, and never use `requestNewTakes`. Scene actions build all keyframe and video work. Only separate timeline and render source may remain, where needed; Film exports do not require Director-authored source.\n\nA stage proposal has `stageId`, existing `scopeId`, concise `reason` and optional `gaps: [{key,message}]`. Do not add design-only mode, completion, severity, approval or authority fields. Application checks determine coverage.\n\nCreative fields in 6.0.0:\n\n- `brief` and `story`; global `narrationScript` and `narrationSource` are unavailable. Put scene coverage, timing and narration range in story.\n- `createScenes: [{key,title,purpose}]`. Use a short scene name for `title` (at most about 6 words or 60 characters), and direction for `purpose`. `updateScenes` takes `{id,title? ,purpose?}` with at least one changed value.\n- `createShots`: `key`, existing scene ID or same-patch creation key in `sceneId`, `purpose`, `action`, `framing`, `motion`, integer `desiredFrames`, `imagePrompt`, `videoPrompt`, `referenceArtifactIds` and `cueId` (existing ID or null); optional compact `narration` intent. Framing is a short 1–3-word label, at most 40 characters: Close-up, Medium, Wide. Put descriptive composition in purpose, action and prompts.\n- `updateShots`: existing `id` and changed `purpose`, `action`, `framing`, `motion`, `desiredFrames`, `imagePrompt`, `videoPrompt`, `narration`, or `reauthorPrompts: true`. When directly saving an eligible intent update, deliberately rewrite or reconfirm prompts against the changed direction before setting that flag. Reference and cue updates are unsupported by this patch.\n- Compact narration is `{mode:\"undecided\"|\"none\"|\"generated\"|\"uploaded\",text:string,voice:\"stock\"|\"personal\"}`. It saves writing intent, not measured audio or acceptance. Explicit none clears only that shot's cue through the application.\n\nOn shots with current or retained media, including retained voice or accepted cues, changes to purpose, action, framing, motion, prompts, duration or narration use `propose_change`. Pure text without media impact applies directly. Do not submit intent hashes, revisions, measured cue times, audio acceptance or grants. `PROPOSAL_REQUIRED` identifies a change that must use a human preview; never split an intended media edit into direct and proposed pieces to evade it.\n\n`prepare_change` returns compact `id`/`preparedId`, `proposalDigest`, `baseVersion`, `semanticChange`, `graphDigest`, `impactCounts` and `stageCount`. Preparation does not save the writing. Apply with `{ \"preparedId\": \"the returned identity\" }` while the request is current. Refresh context after a successful receipt and read service-issued IDs; do not guess IDs from creation keys.\n\nRefresh and reprepare after a revision conflict. Stop old-request mutations after revoked authority. Holds and pause remain application controls; never release another request's hold. A later human message may explicitly continue earlier work; the model cannot invent that continuation.\n\n## Held proposals and scene actions\n\n`propose_change` accepts `{patch:{updateShots?:[{id,purpose?,action?,framing?,motion?,desiredFrames?,imagePrompt?,videoPrompt?,narration?}],updateScenes?:[{id,title?,purpose?}]}}`. Each entry changes at least one field; omit unused fields and lists. Use the same short framing/title rules. It holds one coherent creative change, with no source, new takes or generation. Link the returned `proposalId` in a typed note choice; the person accepts the exact application-computed Now/After preview. A proposal does not apply itself.\n\nIn Plan save direction first. In Keyframes the person presses \"Make keyframes\", reviews returned frames, motion, narration and the actual video recipe, then presses \"Confirm frames & generate video\". One scene confirmation saves exact script, recording and timing together. Listening and recording edits are optional; no separate narration acceptance is required. Film holds clips, soundtrack and export; Assets holds saved media. Name these labels directly.\n\nAudio preparation tools save pending speech/transcription suggestions only. A person presses the existing audio action to start paid work. Suggestions cannot be applied with `apply_change`. Configured credentials need no separate key approval or usage allowance. The executor owns polling, technical retries and uncertain submissions; returned clips need no additional acceptance gate.\n",
+    "production/references/narration.md": "# Narration decisions\n\nDetermine what the person supplied: final recording, partial recording, approved script, rough text or an idea. Inspect registered evidence. A filename, attachment mention, desired duration or reading estimate is not measured timing and does not prove that you heard a recording.\n\nPreserve a final recording's words/performance and settled script, voice, language and pronunciation choices unless asked to change them. For partial material, identify missing passages without replacing settled passages. Ask only for a decision that affects the next useful step. Draft independent story work while a genuine audio gap remains.\n\nRead `narration` to distinguish writing, bound recordings and measured cues, including unbound recordings. If recognition of an owned recording is explicitly requested, read `audio_operations` and prepare that exact transcription suggestion; an independent recording needs no script section. Otherwise request missing words or draft a separate script without claiming to know an uninspected recording's transcript.\n\nNarration changes with current or retained media impact, including retained voice or accepted cues, use `propose_change` and a typed note linking its returned `proposalId`. Pure narration writing without media impact may apply directly with a receipt. Preserve unrelated shot/section identities and settled choices. Changing text or source can make saved audio/timing incompatible; the app computes the preview. A source preference does not attach audio, start speech or mark anything accepted.\n\nThe studio uses scene confirmation. In Keyframes the person reviews keyframes, motion, narration and the actual video recipe, then presses \"Confirm frames & generate video\" once. That confirmation saves the exact script, recording and measured timing together. Listening and recording edits are optional. Do not send the person through separate per-section script, audio or timing acceptance. \"Make keyframes\" prepares the scene's keyframes and configured narration work; the application reports actual audio readiness and fit choices.\n\nNo narration uses the planned visual duration with no cue. Compact within-shot voiceover may be shorter than its planned shot. At 30 fps, six seconds is 180 frames. Keep reading durations labeled as estimates; never fabricate accepted cues or change visual duration merely because a voiceover is short. If audio exceeds its slot, explain the app's actual fit choices; duration/narration changes remain proposals. Legacy evidence may retain audio-led timing, but it does not add acceptance steps to the current studio.\n\nPreserve exact audio/placement lineage for Film assembly. Changed words or pacing need compatible audio/timing established by the application; unchanged visual prompts alone prove no narration compatibility. For explicitly requested speech or transcription, [audio tools](audio-proposals.md) save pending suggestions only, and a human press starts paid work. Their returned media/words do not attach or adopt themselves. Preserve unresolved operation identity; never resubmit blindly. Configured credentials need no extra approval or usage allowance.\n",
+    "production/references/continuity-review.md": "# Continuity and human review\n\nFor each affected shot, compare relevant neighbors and shared references: subject identity, product details, wardrobe, setting, time of day, lighting and screen direction, camera distance and action progression. Preserve settled choices and propose changed continuity rules explicitly.\n\nSeparate image composition from intended video motion. Prefer a clear action and camera move that fit the duration. Use registered references; text alone does not guarantee identity consistency. Framing is a 1–3-word label, at most 40 characters (Close-up, Medium, Wide); put visual detail in purpose, action and prompts.\n\nOn shots with current or retained media, changes to purpose, action, framing, motion, prompts, duration or narration use `propose_change`, with its full 6.0.0 fields: `updateShots` accepts `id`, `purpose`, `action`, `framing`, `motion`, `desiredFrames`, `imagePrompt`, `videoPrompt` and `narration`; `updateScenes` accepts `id`, `title` and `purpose`. Omit unchanged fields. Include matching intent/prompt changes coherently and link the returned `proposalId` in a note choice. Do not offer an `edit_field` action for framing: its supported fields are narration, imagePrompt and motion. Pure text without media impact may apply directly with a receipt. Retained voice or accepted cues also establish media impact. Respect `PROPOSAL_REQUIRED` rather than bypassing it.\n\nScene actions build all keyframe and video work; never author image/review/video declarations or `requestNewTakes`. In Keyframes the person presses \"Make keyframes\", then reviews the exact returned frames, motion, narration and actual video recipe before \"Confirm frames & generate video\". Do not change frames invisibly afterward. One scene confirmation records the required narration/script/timing choices; listening and recording edits are optional.\n\nRetain neighboring choices and previous takes in history. Late results for replaced candidates are evidence, not instructions to restore old choices. Interpret aesthetic criticism as scoped creative feedback and direct an additional requested take to the scene controls. Never regenerate until your own quality judgment is satisfied. A technically valid ugly clip is not a technical failure; uncertain outcomes and technical retries belong to the executor.\n\nNever judge unseen pictures. Without attached images describe verified metadata or ask for human inspection. Known fixture previews are placeholders, and provider choice alone proves neither real nor fake output. Plan contains writing, Film contains clips/export, and Assets contains saved media; refer to view/action labels directly.\n",
+    "production/references/stages/intake.md": "# production/intake@1\n\nInterpret the current request in the context of the saved project. Identify its output, audience, approximate duration, aspect or delivery format, subject constraints, and supplied assets only as far as needed to start useful work. Distinguish a new film from an edit or review of existing work.\n\nPreserve explicit decisions and existing final material. Inspect available evidence instead of interviewing the user again. Propose a concise `brief` change when appropriate. Raise advisory gaps for choices that materially affect the next creative step; unknown implementation support should be described plainly.\n\nDo not invent IDs for attachments or import unregistered paths into a plan. Develop the creative plan, then use each scene's generation and media-review controls for the next visual step. Do not ask for a separate API-key or usage approval. Return supported stage proposals and useful draft content in one bounded proposal when possible.\n",
+    "production/references/stages/story.md": "# production/story@1\n\nDevelop a clear progression from the settled brief or narration: what the viewer understands first, what develops, and what the ending resolves or asks them to do. Give each beat a visible purpose. Keep claims consistent with supplied facts; do not invent product promises for dramatic effect.\n\nUse the supported `story` text to state the beats, emotional direction, and recurring visual idea. Match ambition to the duration and available assets. If a final narration already establishes the story, adapt its visual treatment rather than replacing its wording.\n\nDraft through nonessential uncertainty with stated assumptions. Ask about a material conflict between the user's goals. A structured story draft is useful evidence, not automatically an accepted screenplay or a requirement to run every earlier stage again.\n",
+    "production/references/stages/scene_plan.md": "# production/scene_plan@1\n\nGroup relevant beats or narration passages into scenes with distinct direction. Reuse existing scene IDs. Keep `title` and `purpose` separate: title is the short scene name shown in Plan, Keyframes and Assets (at most about 6 words or 60 characters); purpose describes the scene's direction. Example: title \"Dawn Crossing\", purpose \"Establish the ferry as the last route home\".\n\nUse `createScenes: [{key,title,purpose}]` or `updateScenes: [{id,title?,purpose?}]` with at least one changed field. Put story coverage, timing assumptions and narration range in `story`, not the title or a list of invented scene schema fields. Explain transitions and narration passages there. The application owns scene ordering and timing state.\n\nDraft scenes and narration together where useful. A purpose change can affect shots/media; use `propose_change` for changes with media impact and direct prepare/apply only for harmless text. Do not replace unrelated scenes or infer a generation dependency from scene order. Scene actions build all keyframe and video work.\n",
+    "production/references/stages/shot_plan.md": "# production/shot_plan@1\n\nWrite what each requested shot communicates, visible action, framing, motion, references and duration. Make neighboring shots complementary. Use scene purpose and narration meaning as constraints. Framing is a short 1–3-word label, at most 40 characters: Close-up, Medium, Wide. Put detailed composition in purpose, action and prompts.\n\nCreate shots through a creative-only patch, apply it and read service-issued IDs. Never author image, review or video declarations, and never use `requestNewTakes`; scene actions build all keyframe/video work. Never combine creative edits with `source` in one `prepare_change`.\n\nOn a shot with current or retained media, purpose, action, framing, motion, prompts, duration and narration are media inputs. Propose their coherent changes through `propose_change`. Retained voice or accepted cues also establish media impact. Its full 6.0.0 shape is `{patch:{updateShots:[{id,purpose?,action?,framing?,motion?,desiredFrames?,imagePrompt?,videoPrompt?,narration?}],updateScenes:[{id,title?,purpose?}]}}`, omitting unused fields/lists. Include matching intent/prompt changes so a Close-up label does not retain a contradictory Wide prompt. Link the returned proposalId in a note. `PROPOSAL_REQUIRED` means propose the named fields, never bypass with prepare/apply. Pure text without media impact may apply directly with a receipt. For direct eligible shot intent updates, deliberately reauthor/reconfirm prompts and set `reauthorPrompts: true`.\n\nPlanned visual duration uses integer frames at 30 fps. No narration uses it directly; compact voiceover can fit within it. In Keyframes the person presses \"Make keyframes\", reviews frames, motion, narration and video recipe, then \"Confirm frames & generate video\" once. Listening and recording edits are optional. Do not fabricate measured cues or add a separate narration acceptance step.\n",
+    "production/references/stages/narration.md": "# production/narration@1\n\nUse the [narration guide](../narration.md) to distinguish recordings, settled scripts, drafts and missing passages. On shots with current or retained media impact, including retained voice or accepted cues, propose narration changes with `propose_change` and link its proposalId in a note. Pure narration writing without media impact may apply directly with a receipt. Preserve unrelated identities and settled choices.\n\nThe person reviews keyframes, motion and narration in Keyframes, then presses \"Confirm frames & generate video\" once. Scene confirmation saves exact script, recording and measured timing together. Listening and recording edits are optional; do not ask for separate per-section acceptance.\n\nFor explicitly requested speech/transcription use [audio suggestions](../audio-proposals.md) with exact saved identities. Only a human press starts paid work; no separate spending approval is required. Never author audio declarations or invent measured timing. Describe known fixture output as placeholder media. Keep writing and audio readiness distinct and continue independent work through real gaps.\n",
+    "production/references/stages/storyboard.md": "# production/storyboard@1\n\nSave useful shot direction and registered references in Plan before preparing keyframes. Choose composition, subject visibility, lighting and framing that support the intended movement and neighboring shots. Preserve existing IDs and apply only eligible creative writing; use proposals for changes with media impact.\n\nNever author image, review or video declarations, and never use `requestNewTakes`. Scene actions build all keyframe and video work. Never combine creative edits with source in one preparation. In Keyframes the person presses \"Make keyframes\"; the application builds work from saved direction. An imported frame remains subject to current normalization and review requirements.\n\nReview the actual returned frames with motion, narration and the actual video recipe before \"Confirm frames & generate video\". Listening and recording edits are optional. Do not alter images invisibly after confirmation or create variants because you dislike a result. Application readiness checks remain authoritative.\n",
+    "production/references/stages/video.md": "# production/video@1\n\nExplain the saved shot motion, actual conditioning frames, duration, locked model and settings from current context. Never infer an installed provider from a model name. Scene actions build all keyframe and video work: never author image, review or video declarations, never use `requestNewTakes`, and never combine creative edits with source.\n\nIn Keyframes the person uses \"Make keyframes\", reviews the returned frames, motion, narration and actual video recipe, then presses \"Confirm frames & generate video\". One scene confirmation saves exact narration/script/timing together. Listening and recording edits are optional. The application checks current inputs, narration fit, pauses and the exact reviewed recipe before dispatch. No narration uses the planned duration; compact voiceover can fit inside it. Do not invent cues or remove review requirements.\n\nAn additional requested take uses the studio's existing human generation action, not a Director-authored source or new candidate. Preserve compatible work for ordinary continuation and prior takes in history. Unknown submissions and technical retries stay with the executor. Never retry for your own quality judgment. Returned clips need no extra acceptance gate, spending approval or usage allowance; Film contains the current clips and export, and Assets retains saved media.\n",
+    "production/references/stages/assembly.md": "# production/assembly@1\n\nUse Film to inspect the current storyboard-order clips, narration, soundtrack and export readiness. Use Assets for saved media. Preserve deliberate take selections and exact audio/placement lineage. Identify unresolved or outdated media instead of choosing whichever artifact finished last.\n\nFilm exports are assembled by the application; ordinary export needs no Director-authored plan. If separate timeline/render source is actually needed, use `plan-authoring` for only those operations over verified owned media. Never author image, review or video declarations or `requestNewTakes`, and never combine creative edits with source in one preparation. Keep unsupported overlays/transitions as future work rather than inventing helpers.\n\nThe executor handles scheduling, caching and recovery without per-shot reasoning loops. A successful fake preview does not establish a real export's duration, readiness or quality. Report actual artifact evidence.\n",
+    "production/references/stages/review.md": "# production/review@1\n\nSummarize the exact displayed scope. For keyframes, explain the shot, exact frame, motion, duration, narration and actual video recipe. In Keyframes the person reviews these together and presses \"Confirm frames & generate video\" once; listening and recording edits are optional. The application records confirmation, not a model's claim or an ambiguous chat reply. Returned clips have no additional acceptance gate.\n\nNever judge a picture absent from attachedKeyframes. For finished clips distinguish technical availability from creative observations supported by actual inspection. Known fixture footage remains a placeholder.\n\nInterpret feedback as a scoped proposal: what should improve, which shot/scene it affects, and which settled choices remain. On shots with media, purpose, action, framing, prompts, motion, duration and narration changes go through `propose_change`. Pure text without media impact may apply directly with a receipt. Respect notes and human field conflicts. Preserve prior takes and use scene controls for a human-requested additional take; never author generation declarations or `requestNewTakes`, or regenerate autonomously for quality.\n",
+    "production/references/audio-proposals.md": "# Audio suggestions\n\nRead narration and audio_operations for exact saved section or owned recording identities, supported profiles and outcomes. prepare_narration_speech and prepare_recording_transcription save pending suggestions only. They never publish paid work. A person presses the existing audio action to generate. Do not pass suggestion IDs to apply_change or publish speech/transcription in a plan. No separate spending approval or usage allowance is needed. Returned media and transcripts never attach, adopt or accept themselves. Unknown outcomes retain their original operation identity; never resubmit blindly.\n",
+    "production/references/notes.md": "# Notes and human decisions\n\nRead notes context first. Respect resolved notes and settled human decisions; stale notes describe old inputs. Use `record_notes` for one concrete point anchored to existing shot IDs or a scene, at most six notes per call. Use the returned app-assigned letters and app-rendered typed action labels. Every blocking note offers an accept choice that keeps the current result.\n\nAsk a concise question when required information is missing. Apply directly only pure text without media impact and retain the receipt. On a shot with current or retained media, purpose, action, framing, motion, imagePrompt, videoPrompt, desiredFrames and narration are media inputs, even when written as text. Their changes must use `propose_change`. Retained voice or accepted cues also establish media impact; pure narration writing without media impact may apply directly. A `PROPOSAL_REQUIRED` refusal names the fields to propose. Do not apply some fields directly while a related proposal is held.\n\nThe complete 6.0.0 proposal shape is `{patch:{updateShots:[{id,purpose?,action?,framing?,motion?,desiredFrames?,imagePrompt?,videoPrompt?,narration?}],updateScenes:[{id,title?,purpose?}]}}`. Omit unused fields and lists; each update changes at least one value. Keep framing a 1–3-word label of at most 40 characters (Close-up, Medium, Wide), title a short scene name of at most about 6 words or 60 characters, and purpose descriptive direction. Propose matching intent and prompt changes together. Do not invent `reauthorPrompts` in a proposal: the application derives prompt alignment.\n\nEach proposal is one coherent change with no plan, new takes or generation. The app computes the exact Now/After preview and `previewDigest`; the person decides whether to accept it. Link the returned `proposalId` in a typed note choice. Do not use prepare/apply to bypass this boundary. `HUMAN_EDITED_FIELD` means preserve the person's field and refresh evidence, never overwrite or blindly retry.\n\nNever judge a picture absent from exact `attachedKeyframes` evidence. Metadata, prompts and frame-view receipts are not visual access. Only copy `seenKeyframe` from an attached entry. Without images, discuss writing or ask the person to inspect the picture.\n\nNotes never start generation. In Keyframes the person uses \"Make keyframes\" and \"Confirm frames & generate video\" for the two scene decisions. Paid audio suggestions likewise need a human press. A person can keep, regenerate, edit or reply; the application resolves the note and stales it when anchored evidence changes. A resolution is not new authority to edit or spend.\n\n## Coherent media-edit example\n\nFor a saved shot with media, the following is a `propose_change` argument, not a direct creative update. Replace the example ID with the actual saved shot ID and include only the fields the requested change needs. This example deliberately exercises every 6.0.0 shot field; it does not imply that an ordinary close-up needs a duration or narration change.\n\n```json\n{\n  \"patch\": {\n    \"updateShots\": [{\n      \"id\": \"existing-shot-id\",\n      \"purpose\": \"Reveal the stitching detail\",\n      \"action\": \"The boot remains on the workshop bench\",\n      \"framing\": \"Close-up\",\n      \"motion\": \"Slow push toward the stitching\",\n      \"desiredFrames\": 180,\n      \"imagePrompt\": \"Close-up of the brown leather boot stitching on a workshop bench\",\n      \"videoPrompt\": \"Slow camera push toward the boot stitching; the boot remains still\",\n      \"narration\": { \"mode\": \"none\", \"text\": \"\", \"voice\": \"stock\" }\n    }],\n    \"updateScenes\": [{\n      \"id\": \"existing-scene-id\",\n      \"title\": \"Craftsmanship\",\n      \"purpose\": \"Reveal the care in the boot stitching\"\n    }]\n  }\n}\n```\n\nAfter the returned proposalId is linked in a note, wait for the person's preview decision. Do not apply any of these shot fields separately.\n",
+    "plan-authoring/openslate.skill.json": "{\n  \"id\": \"plan-authoring\",\n  \"version\": \"7.0.0\",\n  \"entry\": \"SKILL.md\",\n  \"files\": [\n    \"SKILL.md\",\n    \"references/grammar.md\",\n    \"references/example.md\",\n    \"references/example-context.json\"\n  ],\n  \"compatibility\": {\n    \"toolContract\": \"6.0.0\",\n    \"planLanguage\": \"1.0.0\",\n    \"workflowContract\": \"1.0.0\"\n  },\n  \"requiredToolIds\": [\n    \"read_context\",\n    \"prepare_change\",\n    \"apply_change\",\n    \"control_execution\",\n    \"inspect_artifact\",\n    \"prepare_recording_transcription\",\n    \"prepare_narration_speech\",\n    \"record_notes\",\n    \"propose_change\"\n  ]\n}\n",
+    "plan-authoring/SKILL.md": "---\nname: plan-authoring\ndescription: Save OpenSlate creative patches and, only when needed, separate restricted timeline/render source over owned media, preserving project identities and human scene decisions.\n---\n\n# OpenSlate plan authoring\n\nOrdinary creative planning saves writing, not executable generation source. Read [the current guidance](references/grammar.md) and [the creative-patch example](references/example.md). Obtain current head/revision, saved IDs, media and settled choices from paged context; do not invent identities.\n\nNever author image, review or video declarations (`p.image`, `p.humanReview`, `p.approvedImage`, `p.video`), and never use `requestNewTakes`. Scene actions build all keyframe and video work. Never combine creative edits with `source` in one `prepare_change`. Only separate timeline and render source remains available when actually needed; Film exports are assembled by the application without Director source.\n\nFor harmless writing, use `prepare_change` with `variant: \"project\"`, current `expectedHeadVersion` and `creative`, then apply its returned prepared ID. Create shots before reading their service-issued IDs. Use short scene `title` and descriptive `purpose`; put coverage, timing and narration range in `story`. Framing is a 1–3-word label of at most 40 characters (Close-up, Medium, Wide).\n\nOn shots with current or retained media, changes to purpose, action, framing, motion, prompts, duration or narration use `propose_change` and a note linking its proposalId. Retained voice or accepted cues also establish media impact. Pure text without media impact may apply directly with a receipt. Respect `PROPOSAL_REQUIRED` and human field conflicts, never split an edit to bypass them. The full 6.0.0 proposal fields are described in the grammar. Global canonical narration editing and invented acceptance/timing fields are unavailable.\n\nIn Plan save direction; in Keyframes the person presses \"Make keyframes\", reviews exact frames, motion, narration and video recipe, then presses \"Confirm frames & generate video\" once. Scene confirmation saves exact script, recording and measured timing together. Listening and recording edits are optional. Film contains clips, soundtrack and export; Assets contains saved media. Name these views/actions directly.\n\nFor explicitly requested recognition/speech use existing audio tools, which save pending suggestions only. A human press starts paid work; never declare new speech/transcription source or pass suggestions to `apply_change`. Configured keys need no approval or usage allowance.\n\nKeep unchanged work and operation identities. After an uncertain response inspect receipts using the original identity and stop dependent changes if unresolved; never resubmit blindly. Refresh/reprepare actual conflicts, stop after revoked authority and preserve request-owned holds. The executor owns scheduling, technical retries and unknown submission reconciliation. Tool success proves saved data, not artistic quality.\n",
+    "plan-authoring/references/grammar.md": "# Current writing and planning guidance\n\nGuidance package `7.0.0`, tool contract `6.0.0`, planning/workflow contracts `1.0.0`. Source is restricted declarative data and is never evaluated as JavaScript. Ordinary creative planning needs no source.\n\n## Read current evidence\n\n`read_context` accepts optional `section` and `offset`. `{}` reads overview; sections include shots, scenes, plan, aliases, grants, receipts, narration, audio_operations and notes. Follow `page.nextOffset` until null. Full shot records come from shots; overview is compact.\n\nCompare `guard.headVersion`, `revisionId`, `activePlanId`, `graphDigest`, `capabilityLockId` and `domainCursor` across reads, plus `guard.dataDigest` within a section. Restart affected pagination if they change. Raw audit `cursor` is not a content freshness guard. Missing evidence is not permission to invent IDs or outcomes.\n\nBefore a separate source edit, concatenate all plan source chunks in returned UTF-16 offset order and read all aliases. Preserve current aliases and untouched branches; `current: false` is historical. Use the current revision/head even if saved source has an older base. If keeping the plan would require authoring image, review or video declarations, prefer the studio's Film/export controls instead of rebuilding generation work.\n\n## Creative writing and proposals\n\nSave harmless writing with `{variant:\"project\",expectedHeadVersion:currentHead,creative:{...}}`, then `apply_change` with the returned preparedId. Never combine creative and source in one `prepare_change`. Never use `requestNewTakes`. Scene actions build all keyframe/video work.\n\nContract 6.0.0 supports `createScenes: [{key,title,purpose}]` and `updateScenes: [{id,title?,purpose?}]`, with at least one update value. A scene title is a short name of at most about 6 words or 60 characters; purpose is direction. Story holds coverage, timing and narration range. Shot framing is a 1–3-word label of at most 40 characters (Close-up, Medium, Wide); use purpose/action/prompts for longer composition. Create shots with all required intent, prompt, reference and cue fields; only the application issues permanent IDs. Compact narration saves intent, never measured cues or acceptance.\n\nOn shots with current or retained media, changes to purpose, action, framing, motion, prompts, duration or narration must be proposed. Retained voice or accepted cues also establish media impact. Pure text without media impact may apply directly with a receipt. `propose_change` accepts `{patch:{updateShots:[{id,purpose?,action?,framing?,motion?,desiredFrames?,imagePrompt?,videoPrompt?,narration?}],updateScenes:[{id,title?,purpose?}]}}`; omit unused fields/lists. Narration is `{mode:\"undecided\"|\"none\"|\"generated\"|\"uploaded\",text:string,voice:\"stock\"|\"personal\"}`. Include matching intent/prompt edits together; proposal prompt derivation is application-owned. Link the returned proposalId in a typed note and wait for the person's exact Now/After decision. Do not apply media fields separately. `PROPOSAL_REQUIRED` means use that path.\n\n## Separate timeline/render source only\n\nNever author image, review or video declarations (`p.image`, `p.humanReview`, `p.approvedImage`, `p.video`), nor new speech/transcription declarations. Scene actions and audio routes own generation. Only timeline and render operations remain available for source authoring when needed. Current Film/export controls already assemble storyboard-order clips and narration; do not manufacture source merely to export.\n\nThe source is one `definePlan({baseRevision:\"current revision\"}, (p) => { ... });` containing simple `const` bindings and one final return. Supported authoring helpers here are:\n\n| Helper | Inputs |\n|---|---|\n| `p.asset(id)` | Existing project-owned artifact ID; no file paths or URLs |\n| `p.timeline(alias, options)` | Required nonempty ordered `takes` of owned video references; optional `narration` owned audio, `transition:\"cut\"`, `cueRange` known cue/scene ID |\n| `p.render(alias, options)` | Required timeline operation, optional even `width`/`height` within 16–8192, `format:\"mp4\"` |\n\nUse finite literals, arrays, plain objects and earlier bindings. No imports, exports, loops, branches, arbitrary calls, assignments, arithmetic, spreads, destructuring, computed properties or executable model code. References must be previously declared or verified owned assets. A timeline or render cannot create human generation authority or accept media. The application validates ownership, canonical audio placements and current inputs.\n\nPreserve existing application-owned audio linkage; a noncanonical recording input cannot be repurposed into a timeline. Use separate audio tools for requested recognition or speech; they save pending suggestions, started only by a human press. Listen/edit recording choices are optional in the scene flow, not extra acceptance gates.\n\nRead diagnostics literally and refresh evidence on real conflicts. A refusal prepares nothing; report no saved change without an apply receipt. Preserve identity and inspect receipts for an unresolved response; never blindly retry. The executor owns scheduling and technical recovery.\n",
+    "plan-authoring/references/example.md": "# Offline creative-patch example\n\nThis replaces the previous executable generation example. The [context fixture](example-context.json) contains a synthetic empty film and expected values for an offline parser/application test. It contains no usable assets, grants or provider. In a real turn read the current head and IDs instead of copying fixture values.\n\nFor a new film with no media, prepare a creative-only draft:\n\n```json\n{\n  \"variant\": \"project\",\n  \"expectedHeadVersion\": 1,\n  \"creative\": {\n    \"brief\": \"A six-second craftsmanship study\",\n    \"story\": \"Craftsmanship covers the stitching detail in one six-second shot; no narration passage is used.\",\n    \"createScenes\": [{\n      \"key\": \"craftsmanship\",\n      \"title\": \"Craftsmanship\",\n      \"purpose\": \"Reveal the care in the boot stitching\"\n    }],\n    \"createShots\": [{\n      \"key\": \"stitching\",\n      \"sceneId\": \"craftsmanship\",\n      \"purpose\": \"Show the boot craftsmanship\",\n      \"action\": \"The boot rests on a workshop bench\",\n      \"framing\": \"Close-up\",\n      \"motion\": \"Slow push toward the stitching\",\n      \"desiredFrames\": 180,\n      \"imagePrompt\": \"Brown leather boot on a workshop bench, close-up of stitching\",\n      \"videoPrompt\": \"Slow camera push toward the boot stitching; the boot remains still\",\n      \"referenceArtifactIds\": [],\n      \"cueId\": null,\n      \"narration\": { \"mode\": \"none\", \"text\": \"\", \"voice\": \"stock\" }\n    }]\n  }\n}\n```\n\nThe regression test validates this payload with contract 6.0.0, applies the creative patch offline, and verifies the separate scene title and direction, short framing, narration choice and application-issued shot/scene link. There is no source, generation declaration or extra-take request. Preparation alone saves nothing: inspect its compact result, apply the returned preparedId and refresh context for the saved IDs.\n\nFor a close-up revision on a shot with media, use `propose_change` with coherent `framing`, `purpose`, `action` and prompt edits instead of this direct create example. Link its proposalId in a typed note; the person accepts the exact app-computed preview. Do not apply a framing change separately or combine creative writing with source.\n\nNext the person uses \"Make keyframes\" in Keyframes, reviews returned frames, motion, narration and actual video recipe, then \"Confirm frames & generate video\" once. Scene confirmation saves exact narration/script/timing together; listening and recording edits are optional. Plan contains writing, Film contains clips/export and Assets contains saved media. The example supplies no visual evidence or generation authority.\n",
+    "plan-authoring/references/example-context.json": "{\n  \"project\": {\n    \"id\": \"10000000-0000-4000-8000-000000000001\",\n    \"revisionId\": \"10000000-0000-4000-8000-000000000002\",\n    \"headVersion\": 1,\n    \"name\": \"Offline v7 creative fixture\",\n    \"brief\": \"\",\n    \"story\": \"\",\n    \"scenes\": [],\n    \"narration\": {\n      \"script\": \"\",\n      \"source\": \"undecided\"\n    },\n    \"maxFrames\": 10800,\n    \"capabilityLockId\": \"10000000-0000-4000-8000-000000000010\",\n    \"shots\": [],\n    \"cues\": [],\n    \"artifacts\": [],\n    \"activePlanId\": null\n  },\n  \"expected\": {\n    \"sceneTitle\": \"Craftsmanship\",\n    \"scenePurpose\": \"Reveal the care in the boot stitching\",\n    \"framing\": \"Close-up\",\n    \"desiredFrames\": 180\n  }\n}\n"
+  }
+}

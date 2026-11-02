@@ -4,10 +4,10 @@ import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, opendir, realpath, rename, rm, statfs } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonical, DomainError, invariant } from "@openslate/core";
-import { verifySkillSnapshot } from "@openslate/director";
+import { verifyPublishedSkillSnapshot } from "@openslate/director";
 import { acquireInstallationOwner } from "./installation-owner.js";
 import { snapshotDatabase, verifyDatabase } from "./database-snapshot.js";
-import { verifySchema } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, verifySchema } from "./schema.js";
 import { FIXTURE_SCHEMA, snapshotFixtureDatabase, verifyFixtureDatabase, verifyFixtureSchema } from "./fixture-database.js";
 import { verifyBackupClosure } from "./installation-backup-closure.js";
 import { assertInstallationRestoreComplete } from "./installation-restore-state.js";
@@ -47,11 +47,12 @@ export function installationBackupFileKind(path: string): BackupFileKind | null 
   if (path === "fake-provider.sqlite") return "fixture_db";
   if (new RegExp(`^artifacts/${ID}/${HASH}\\.(svg|wav|mp4|json)$`).test(path)
     || new RegExp(`^artifacts/images/blobs/${HASH}\\.png$`).test(path)
+    || new RegExp(`^artifacts/documents/blobs/${HASH}$`).test(path)
     || new RegExp(`^media/blobs/${HASH}\\.(source|wav|mp4)$`).test(path)
     || new RegExp(`^execution-output/blobs/${HASH}\\.blob$`).test(path)
     || new RegExp(`^audio-derivatives/blobs/${HASH}\\.wav$`).test(path)
     || new RegExp(`^(?:artifacts/${ID}/)?fixture-imports/(product-reference\\.svg|silent-narration-fixture\\.wav)$`).test(path)
-    || new RegExp(`^native/${ID}/workspace/image-attachments/${HASH}/[0-3]-${HASH}\\.jpg$`).test(path)) return "owned_media";
+    || new RegExp(`^native/${ID}/workspace/(image|material)-attachments/${HASH}/[0-7]-${HASH}\\.jpg$`).test(path)) return "owned_media";
   if (new RegExp(`^artifacts/local-timelines/documents/${HASH}\\.json$`).test(path)
     || new RegExp(`^media/(sources|manifests)/${HASH}\\.json$`).test(path)
     || new RegExp(`^media/completions/${HASH}-${HASH}\\.json$`).test(path)
@@ -94,10 +95,10 @@ async function enumerate(root: string, bound: InstallationBackupLimits, signal: 
     for await (const item of stream) {
       invariant(++entries <= bound.files * 4 + 64, "BACKUP_LIMIT_EXCEEDED", "Backup directory entry count exceeds its limit");
       const path = `${prefix}/${item.name}`;
-      if (!strict && (/^artifacts\/(?:images|local-timelines)\/tmp$/.test(path)
+      if (!strict && (/^artifacts\/(?:images|documents|local-timelines)\/tmp$/.test(path)
         || /^artifacts\/[^/]+\/(?:[^/]+\.partial|\.(?:media|narration)-[^/]+\.tmp)$/.test(path)
         || /^(?:skill-snapshots|native\/[^/]+\/workspace\/\.agents\/skills)\/\.[a-f0-9]{64}\.[^/]+\.tmp$/.test(path)
-        || /^native\/[^/]+\/workspace\/image-attachments\/[a-f0-9]{64}\/prepare-[^/]+$/.test(path))) continue;
+        || /^native\/[^/]+\/workspace\/(?:image|material)-attachments\/[a-f0-9]{64}\/prepare-[^/]+$/.test(path))) continue;
       await walk(path);
     }
   };
@@ -112,7 +113,7 @@ async function enumerate(root: string, bound: InstallationBackupLimits, signal: 
       for await (const entry of stream) {
         invariant(++entries <= bound.files * 4 + 64, "BACKUP_LIMIT_EXCEEDED", "Backup directory entry count exceeds its limit");
         invariant(new RegExp(`^${ID}$`).test(entry.name) && entry.isDirectory(), "BACKUP_PATH_INVALID", "Invalid native project directory");
-        for (const tail of [".agents/skills", "image-attachments"]) await walk(`native/${entry.name}/workspace/${tail}`);
+        for (const tail of [".agents/skills", "image-attachments", "material-attachments"]) await walk(`native/${entry.name}/workspace/${tail}`);
       }
     }
   }
@@ -161,7 +162,8 @@ async function skillDirectories(root: string, files: readonly BackupFile[], make
     for (let path = dirname(file.path); path === pkg || path.startsWith(`${pkg}/`); path = dirname(path)) dirs.add(path);
   }
   if (makeReadOnly) for (const path of [...dirs].sort().reverse()) await chmod(join(root, path), 0o555);
-  for (const pkg of packages) verifySkillSnapshot(join(root, dirname(pkg)), pkg.split("/").at(-1)!);
+  // Package snapshots and guidance release snapshots share the content-addressed snapshot directories.
+  for (const pkg of packages) verifyPublishedSkillSnapshot(join(root, dirname(pkg)), pkg.split("/").at(-1)!);
 }
 async function flushTree(root: string, files: readonly BackupFile[]): Promise<void> {
   const dirs = new Set<string>([root]);
@@ -184,7 +186,7 @@ async function validateContent(root: string, manifest: InstallationBackupManifes
   stopped(signal);
 }
 
-/** Offline only: acquires the real installation owner; it never starts or migrates services. */
+/** Offline only: acquires the real installation owner; it never starts services. */
 export async function createInstallationBackup(options: { sourceRoot: string; destination: string; signal?: AbortSignal; limits?: Partial<InstallationBackupLimits> }): Promise<VerifiedInstallationBackup> {
   const signal = options.signal, bound = limits(options.limits), sourceInput = options.sourceRoot, destinationInput = options.destination;
   stopped(signal); const source = await directory(sourceInput);
@@ -234,7 +236,7 @@ export async function createInstallationBackup(options: { sourceRoot: string; de
   finally { fixture?.close(); app?.close(); owner.close(); }
 }
 
-/** Full read-only verification; no migrations, media processes, auth setup or network. */
+/** Full read-only verification; no media processes, auth setup or network. */
 export async function inspectInstallationBackup(options: { directory: string; expectedSourceRoot?: string; signal?: AbortSignal; limits?: Partial<InstallationBackupLimits> }): Promise<VerifiedInstallationBackup> {
   const signal = options.signal, bound = limits(options.limits), input = options.directory, expectedRoot = options.expectedSourceRoot;
   stopped(signal); const root = await directory(input), bytes = await readBounded(root, INSTALLATION_BACKUP_MANIFEST, bound.manifestBytes, signal);
@@ -243,7 +245,8 @@ export async function inspectInstallationBackup(options: { directory: string; ex
   invariant(manifest?.version === 1 && /^[a-f0-9-]{36}$/.test(manifest.backupId) && typeof manifest.createdAt === "string"
     && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(manifest.createdAt) && Number.isFinite(Date.parse(manifest.createdAt))
     && typeof manifest.originalDataRoot === "string" && isAbsolute(manifest.originalDataRoot) && resolve(manifest.originalDataRoot) === manifest.originalDataRoot && manifest.originalDataRoot !== "/"
-    && canonical(manifest.fixtureSchema) === canonical(FIXTURE_SCHEMA) && Array.isArray(manifest.files) && manifest.files.length <= bound.files
+    && manifest.applicationSchemaVersion === CURRENT_SCHEMA_VERSION && canonical(manifest.fixtureSchema) === canonical(FIXTURE_SCHEMA)
+    && Array.isArray(manifest.files) && manifest.files.length <= bound.files
     && Object.keys(manifest).sort().join() === ["version", "backupId", "createdAt", "originalDataRoot", "applicationSchemaVersion", "fixtureSchema", "files"].sort().join()
     && canonical(manifest) === bytes.toString("utf8"), "BACKUP_MANIFEST_INVALID", "Unsupported or noncanonical backup manifest");
   if (expectedRoot !== undefined) invariant(resolve(expectedRoot) === manifest.originalDataRoot, "BACKUP_ROOT_MISMATCH", "This backup can only restore to its original local data directory");

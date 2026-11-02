@@ -16,7 +16,6 @@ export interface TranscriptionPreparationIntent {
   id: string; version: 1; projectId: string; attemptId: string; requestDigest: string;
   candidateId: string; candidateDigest: string; grantId: string; grantDigest: string;
   reservation: { id: string; micros: string };
-  allowanceId: string | null; allowanceDigest: string | null; consumptionDigest: string | null;
   capabilityLockId: string; capabilityLockDigest: string;
   profileDefinition: ProviderProfile; profileDefinitionDigest: string;
   sourceRecord: TranscriptionAudioIntent["sourceRecord"]; source: TranscriptionAudioIntent["source"];
@@ -73,9 +72,7 @@ function expectedIntent(store: TranscriptionAuthorityStore, attempt: Readonly<At
   const source = (selected.kind === "media_source" ? selected.record.source : selected.record.media)!;
   return { id: attempt.id, version: 1, projectId: attempt.projectId, attemptId: attempt.id, requestDigest: digest(attempt.request),
     candidateId: admission.candidate.id, candidateDigest: digest(admission.candidate), grantId: admission.grant.id, grantDigest: digest(admission.grant),
-    reservation: { id: admission.reservation.id, micros: admission.reservation.micros }, allowanceId: admission.allowance?.id ?? null,
-    allowanceDigest: admission.allowance ? digest(admission.allowance) : null, consumptionDigest: admission.consumption ? digest(admission.consumption) : null,
-    capabilityLockId: admission.capabilityLock.id, capabilityLockDigest: digest(admission.capabilityLock),
+    reservation: { id: admission.reservation.id, micros: admission.reservation.micros }, capabilityLockId: admission.capabilityLock.id, capabilityLockDigest: digest(admission.capabilityLock),
     profileDefinition: admission.profile, profileDefinitionDigest: digest(admission.profile),
     sourceRecord: { kind: selected.kind, id: selected.record.id, digest: digest(selected.record) }, source,
     sourceStartSample: 0, sourceEndSample: source.probe.audio!.samples! };
@@ -105,6 +102,8 @@ export function assertOwnedTranscriptionPreparation(store: Store, attempt: Reado
     && attempt.leaseOwner === lease.owner && attempt.leaseEpoch === lease.epoch && current.leaseExpiresAt > Date.now(),
   "SUBMISSION_PREPARATION_LEASE_LOST", "Preparation no longer owns its original active lease");
   const proof = resolveTranscriptionPreparationIntent(store, current);
+  invariant(!current.candidateId || !store.get("candidate_stop", current.candidateId),
+    "SUBMISSION_PREPARATION_OBSOLETE", "Stop ended this candidate's unstarted preparation authority");
   const reservation = store.get<{ state: string }>("reservation", proof.reservation.id);
   invariant(reservation?.state === "reserved", "SUBMISSION_PREPARATION_LEASE_LOST", "Preparation requires its original reserved liability");
   new InstallationRecoveryGuard(store).assertFirstSubmit(attempt.projectId, attempt.id);

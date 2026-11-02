@@ -1,8 +1,17 @@
 export * from "./types.js";
+export { DirectorStartRefusal } from "./validation.js";
 export { FakeDirectorRuntime } from "./fake.js";
 export type { FakeDirectorHandler, FakeDirectorOutcome } from "./fake.js";
 export { CodexDirectorRuntime } from "./codex.js";
-export { CODEX_PROTOCOL_VERSION, CODEX_RUNTIME_LIMITS } from "./policy.js";
+export { ClaudeCodeDirectorRuntime } from "./claude-code.js";
+export type { ClaudeCodeDirectorOptions } from "./claude-code.js";
+export { setupLocalClaudeCode } from "./claude-code-setup.js";
+export type { LocalClaudeCodeSetupInput, LocalClaudeCodeSetupResult, LocalClaudeCodeSetupOptions } from "./claude-code-setup.js";
+export { CLAUDE_CODE_VERSION, CLAUDE_CODE_MODELS } from "./claude-code-process.js";
+export type { ClaudeCodeModel } from "./claude-code-process.js";
+export { CODEX_PROTOCOL_VERSION, CODEX_RUNTIME_LIMITS, CODEX_MAX_RUN_TIMEOUT_MS, CODEX_MAX_STARTUP_TIMEOUT_MS } from "./policy.js";
+export { classifyNativeDiagnostic } from "./native-diagnostic.js";
+export type { NativeDiagnostic } from "./native-diagnostic.js";
 export type { CodexConfigValue, CodexDirectorOptions, CodexRuntimeLimits, LocalCodexPolicy } from "./policy.js";
 export { setupLocalCodex } from "./setup.js";
 export type { LocalCodexSetupInput, LocalCodexSetupOptions, LocalCodexSetupResult, LocalCodexReadiness, LocalCodexSetupCheck, LocalCodexModelChoice } from "./setup.js";

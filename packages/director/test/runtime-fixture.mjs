@@ -9,7 +9,7 @@ const mode = process.env.FIXTURE_SCENARIO ?? "complete";
 const log = value => appendFileSync(process.env.FIXTURE_LOG, JSON.stringify(value) + "\n");
 if (process.argv.includes("--version")) {
   log({ kind: "version", pid: process.pid });
-  process.stdout.write(mode === "version-wrong" ? "codex-cli 0.0.0\n" : "codex-cli 0.153.4\n");
+  process.stdout.write(mode === "version-wrong" ? "codex-cli 0.0.0\n" : "codex-cli 0.162.1\n");
   process.exit(0);
 }
 const config = {};
@@ -24,12 +24,13 @@ for (let i = 2; i < process.argv.length; i++) {
 const credential = config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_CREDENTIAL;
 log({ kind: "launch", pid: process.pid, parentSecretAbsent: !process.env.OPENSLATE_PARENT_SECRET,
   credentialDigest: createHash("sha256").update(credential).digest("hex"),
-  endpoint: config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_ENDPOINT });
+  endpoint: config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_ENDPOINT,
+  codeProfile: { effort: config.model_reasoning_effort, tools: Object.keys(config.mcp_servers.openslate.tools ?? {}), shell: config.features?.shell_tool, unknownReductionPresent: Object.hasOwn(config.features ?? {}, "unknown_disabled_reduction") } });
 const send = value => process.stdout.write(JSON.stringify(value) + "\n");
 const respond = (id, result) => send({ id, result });
-const notify = (method, params) => send({ method, params });
+const notify = (method, params) => send({ method, params: { ...(method === "item/started" ? { startedAtMs: 0 } : method === "item/completed" ? { completedAtMs: 1 } : {}), ...params } });
 let threadId = "native-thread-1", turnId = "native-turn-1";
-const completed = status => notify("turn/completed", { threadId, turn: { id: turnId, status } });
+const completed = status => notify("turn/completed", { threadId, turn: { id: turnId, status, items: [] } });
 const assistant = (text, id = "message-1") => notify("item/completed", { threadId, turnId,
   item: { id, type: "agentMessage", text, phase: "final_answer" } });
 const done = () => { assistant("Prepared safely. 你好 🟢"); completed("completed"); };
@@ -43,14 +44,15 @@ lines.on("line", line => {
   const message = JSON.parse(line);
   if (!message.method) { log({ kind: "server-response", response: message }); return; }
   const { id, method, params } = message;
-  log({ kind: "request", method, ...(method.startsWith("thread/") || method.startsWith("turn/") ? { params } : {}) });
+  log({ kind: "request", method, params });
   if (method === "initialize") {
     if (mode === "initialize-hang") return;
     if (mode === "missing-result") return send({ id });
-    return respond(id, { userAgent: "codex-cli/0.153.4" });
+    return respond(id, { userAgent: "codex-cli/0.162.1" });
   }
   if (method === "initialized") return;
   if (method === "config/read") {
+    if (mode === "bundled-skills-wrong") config.skills.bundled.enabled = true;
     if (mode === "question-feature-wrong") config.features.default_mode_request_user_input = false;
     if (mode === "bridge-wrong") config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_CREDENTIAL = "wrong-fixed-credential";
     if (mode === "permissions-wrong") config.permissions.fixture.network.enabled = true;
@@ -85,27 +87,33 @@ lines.on("line", line => {
   if (method === "thread/start" || method === "thread/resume") {
     threadId = params.threadId ?? threadId;
     return respond(id, { thread: { id: threadId }, activePermissionProfile: { id: "fixture" },
-      instructionSources: mode === "instructions-extra" ? [{ path: "/fake/AGENTS.md" }] : [] });
+      instructionSources: mode === "home-instructions" ? ["AGENTS.md", "AGENTS.override.md"].map(name => join(process.env.CODEX_HOME, name)).filter(existsSync)
+        : process.env.FIXTURE_INSTRUCTION_SOURCES ? JSON.parse(process.env.FIXTURE_INSTRUCTION_SOURCES)
+        : mode === "instructions-extra" ? [{ path: "/fake/AGENTS.md" }] : [] });
   }
   if (method === "mcpServerStatus/list") {
-    const tools = Object.fromEntries(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"].map(name => [name, { name }]));
-    if (["2.0.0", "3.0.0", "4.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") tools.revise_narration_draft = { name: "revise_narration_draft" };
-    if (["3.0.0", "4.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") { tools.prepare_recording_transcription = { name: "prepare_recording_transcription" }; tools.prepare_narration_speech = { name: "prepare_narration_speech" }; }
+    const names = config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT === "0.1.0" && mode !== "catalog-legacy"
+      ? ["read_film", "submit_plan"] : ["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"];
+    const tools = Object.fromEntries(names.map(name => [name, { name }]));
+    if (["2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") tools.revise_narration_draft = { name: "revise_narration_draft" };
+    if (["3.0.0", "4.0.0", "5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") { tools.prepare_recording_transcription = { name: "prepare_recording_transcription" }; tools.prepare_narration_speech = { name: "prepare_narration_speech" }; }
+    if (["5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") { tools.record_notes = { name: "record_notes" }; tools.propose_change = { name: "propose_change" }; }
+    if (config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT === "6.0.0" && mode !== "catalog-legacy") for (const name of ["make_keyframes", "accept_proposal", "reject_proposal"]) tools[name] = { name };
     if (mode === "catalog-extra") tools.extra = { name: "extra" };
     return respond(id, { data: [{ name: "openslate", runtimeStatus: "connected", tools }], nextCursor: null });
   }
   if (method === "turn/start") {
     if (mode === "start-rejected") return send({ id, error: { code: -1, message: credential } });
-    if (mode !== "early-events") notify("turn/started", { threadId, turn: { id: turnId, status: "inProgress" } });
+    if (mode !== "early-events") notify("turn/started", { threadId, turn: { id: turnId, status: "inProgress", items: [] } });
     if (mode === "early-events") done();
-    respond(id, { turn: { id: turnId, status: "inProgress" } });
+    respond(id, { turn: { id: turnId, status: "inProgress", items: [] } });
     if (mode === "early-events") return;
     if (mode === "crash") { process.stderr.write(`Bearer ${credential}\n`); return setTimeout(() => process.exit(2), 10); }
     if (mode === "invalid-utf8") return process.stdout.write(Buffer.from([0xff, 10]));
     if (mode === "flood") return process.stdout.write("x".repeat(100_000));
     if (mode === "stderr-flood") return process.stderr.write("x".repeat(100_000));
     if (mode === "question") return setTimeout(() => send({ id: "question-1", method: "item/tool/requestUserInput", params: {
-      threadId, turnId, questions: [{ id: "tone", header: "Tone", question: "Choose a tone", isSecret: false,
+      threadId, turnId, itemId: "question-item", isBlocking: true, questions: [{ id: "tone", header: "Tone", question: "Choose a tone", isSecret: false,
         options: [{ label: "Warm", description: "Friendly narration" }] }] } }), 10);
     if (mode === "approval") return setTimeout(() => send({ id: "approval-1", method: "item/commandExecution/requestApproval", params: { threadId, turnId } }), 10);
     if (["hang", "interrupt-unconfirmed", "ignore-shutdown"].includes(mode)) return;
@@ -121,6 +129,23 @@ lines.on("line", line => {
       return setTimeout(() => { process.stdout.write(row.subarray(split)); completed("completed"); }, 10);
     }
     if (mode === "secret-message") { assistant(`redact ${credential}`); return completed("completed"); }
+    if (mode === "activity") {
+      // Payloads intentionally include private content; only phase/state may leave the adapter.
+      for (const type of ["reasoning", "mcpToolCall", "dynamicToolCall", "codeModeToolCall"]) {
+        const item = { id: `activity-${type}`, type, text: `private ${credential}`, arguments: { secret: credential } };
+        notify("item/started", { threadId: "another-thread", turnId, item });
+        notify("item/started", { threadId, turnId: "another-turn", item });
+        notify("item/started", { threadId, turnId, item });
+        notify("item/completed", { threadId, turnId, item });
+      }
+    }
+    if (mode === "overlap-activity") {
+      const a = { id: 'outer', type: 'reasoning' }, b = { id: 'inner', type: 'mcpToolCall' };
+      notify('item/started', { threadId, turnId, item: a });
+      notify('item/started', { threadId, turnId, item: b });
+      notify('item/completed', { threadId, turnId, item: b });
+      notify('item/completed', { threadId, turnId, item: a });
+    }
     setTimeout(done, 10); return;
   }
   if (method === "turn/interrupt") {

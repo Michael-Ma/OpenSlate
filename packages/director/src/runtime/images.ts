@@ -10,10 +10,10 @@ export interface DirectorImageInput {
   sha256: string;
   mediaType: "image/png" | "image/jpeg" | "image/webp";
 }
-export const DIRECTOR_IMAGE_LIMITS = Object.freeze({ count: 4, totalBytes: 512 * 1024, dimension: 4096, pixels: 16_000_000 });
+export const DIRECTOR_IMAGE_LIMITS = Object.freeze({ count: 8, totalBytes: 1024 * 1024, dimension: 4096, pixels: 16_000_000 });
 export function validateDirectorImages(value: unknown): asserts value is readonly DirectorImageInput[] | undefined {
   requireRuntime(value === undefined || (Array.isArray(value) && value.length <= DIRECTOR_IMAGE_LIMITS.count),
-    "RUNTIME_IMAGES_INVALID", "Attach at most four bounded image references");
+    "RUNTIME_IMAGES_INVALID", "Attach at most eight bounded image references");
   const paths = new Set<string>();
   for (const image of value ?? []) {
     requireRuntime(image !== null && typeof image === "object" && !Array.isArray(image) &&

@@ -1,3 +1,4 @@
+import { SceneConfirmationRunner } from "./scene-confirmations.js";
 import { randomBytes } from "node:crypto";
 import { StudioSessions } from "./studio-sessions.js";
 import { openStudioBrowser, studioUrl } from "./studio-launcher.js";
@@ -5,12 +6,13 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FakeProvider } from "@openslate/providers";
-import { invariant } from "@openslate/core";
+import { DomainError, invariant } from "@openslate/core";
 import { createApp } from "./app.js";
 import { ProductionService } from "./application/service.js";
 import { Store } from "./persistence/store.js";
 import { LocalDirectorController } from "./application/local-director.js";
-import { ImageApplicationService, MediaApplicationService, PNG_IMPORT_MAX_BYTES } from "./media/index.js";
+import { readCodexStartupTimeout, readDirectorRunTimeout } from "./application/director-run-config.js";
+import { DocumentApplicationService, DOCUMENT_IMPORT_MAX_BYTES, ImageApplicationService, MediaApplicationService, PNG_IMPORT_MAX_BYTES } from "./media/index.js";
 import { NarrationService, NarrationCanonicalService } from "./narration/index.js";
 import { NarrationSpeechService } from "./narration/narration-speech-service.js";
 import { OwnedTranscriptionService } from "./narration/owned-transcription-service.js";
@@ -22,6 +24,9 @@ import { readMediaExecutionConfiguration } from "./application/media-execution-c
 import { createMediaExecutionRuntime } from "./application/media-execution-runtime.js";
 import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
 import { assertInstallationRestoreComplete } from "./persistence/installation-restore-state.js";
+import { createServerShutdown } from "./shutdown.js";
+import { CodePlanRuntime } from "./code-plan/index.js";
+import { CodePlanExecution } from "./code-plan/execution.js";
 
 const serveWeb = process.argv.includes("--serve-web");
 const directory = resolve(process.env.OPENSLATE_DATA_DIR ?? ".openslate");
@@ -29,6 +34,8 @@ const webDirectory = fileURLToPath(new URL("../../web/dist/", import.meta.url));
 const providerConfiguration = process.env.OPENSLATE_PROVIDER_CONFIG
   ? readInstalledProviderConfiguration(resolve(process.env.OPENSLATE_PROVIDER_CONFIG)) : undefined;
 const executionConfiguration = readMediaExecutionConfiguration(process.env);
+const directorRunTimeoutMs = readDirectorRunTimeout(process.env);
+const startupTimeoutMs = readCodexStartupTimeout(process.env);
 if (serveWeb) assertWebDataSeparation(webDirectory, directory);
 // Validate the production build before creating local application state.
 const webAssets = serveWeb ? (() => {
@@ -52,7 +59,12 @@ if (!localToken) {
   }
 }
 invariant(/^[A-Za-z0-9_-]{20,256}$/.test(localToken), "CONFIGURATION_ERROR", "Local session token must contain 20–256 URL-safe characters");
-const store = new Store(join(directory, "openslate.sqlite"));
+let store: Store;
+try { store = new Store(join(directory, "openslate.sqlite")); }
+catch (error) {
+  if (!(error instanceof DomainError) || !["DATABASE_VERSION_UNSUPPORTED", "DATABASE_SCHEMA_MISMATCH"].includes(error.code)) throw error;
+  process.stderr.write("This data directory was created by an earlier OpenSlate prototype and cannot be opened. Start with a new OPENSLATE_DATA_DIR.\n"); process.exit(1);
+}
 const recovery = new InstallationRecoveryGuard(store);
 const recoveryPending = recovery.isQuarantined();
 const provider = new FakeProvider(join(directory, "fake-provider.sqlite"));
@@ -62,37 +74,62 @@ const findMediaTool = (name: string, override?: string) => {
 };
 const ffmpegPath = findMediaTool("ffmpeg", process.env.OPENSLATE_FFMPEG), ffprobePath = findMediaTool("ffprobe", process.env.OPENSLATE_FFPROBE);
 const runtime = createMediaExecutionRuntime({ store, fakeProvider: provider, dataDirectory: directory, configuration: executionConfiguration,
-  ffmpegPath, ffprobePath, ...(providerConfiguration === undefined ? {} : { providerConfiguration }) });
+  ffmpegPath, ffprobePath, startupTimeoutMs, ...(providerConfiguration === undefined ? {} : { providerConfiguration }) });
 const { engine, localMedia, imageStore, providerCatalog, uploadDirectory } = runtime;
+// Code mode shares the installed adapters and owned media pipeline, with its own admission journal.
+const codePlans = new CodePlanRuntime(store, { execution: new CodePlanExecution(store, {
+  provider, registry: runtime.registry, catalog: providerCatalog, outputStore: runtime.outputStore,
+  outputIngestor: runtime.outputIngestor, ...(runtime.localExecutor ? { localExecutor: runtime.localExecutor } : {}),
+  providerTimeoutMs: 600000, artifactDir: join(directory, "artifacts"),
+}) });
 const service = new ProductionService(store, engine, undefined, runtime.productionOptions);
 const narration = new NarrationService(service, localMedia ?? undefined);
 // Each project starts in demo mode until its user chooses and checks local Codex.
-const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", ...(ffmpegPath ? { ffmpegPath } : {}) });
+const director = new LocalDirectorController(service, { codePlans, repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", runTimeoutMs: directorRunTimeoutMs, startupTimeoutMs, ...(ffmpegPath ? { ffmpegPath } : {}), ...(localMedia ? { media: localMedia } : {}) });
 const studioSessions = new StudioSessions();
-const app = createApp({ service, director, runtimeSettings: director, providerCatalog, localToken, studioSessions, logger: true,
-  allowanceRoutes: { service, allowances: runtime.allowances },
+const narrationSpeech = new NarrationSpeechService(narration), canonical = new NarrationCanonicalService(narration);
+const sceneCommands = new SceneConfirmationRunner(service, { narration, narrationSpeech, canonical });
+const app = createApp({ service, sceneCommands, director, runtimeSettings: director, providerCatalog, localToken, studioSessions, logger: true,
+  codePlans,
+  // Each refresh reads several routes; set OPENSLATE_LOG_REQUESTS=1 to see every request while debugging.
+  logRequests: process.env.OPENSLATE_LOG_REQUESTS === "1",
+  mediaToolPaths: { ffmpeg: ffmpegPath, ffprobe: ffprobePath },
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
     uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "images"), maxBytes: PNG_IMPORT_MAX_BYTES }) },
-  narrationRoutes: { production: service, narration, narrationSpeech: new NarrationSpeechService(narration), canonical: new NarrationCanonicalService(narration), uploadDirectory,
+  documentRoutes: { production: service, documents: new DocumentApplicationService(service),
+    uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "documents"), maxBytes: DOCUMENT_IMPORT_MAX_BYTES }) },
+  narrationRoutes: { production: service, narration, narrationSpeech, canonical, uploadDirectory,
     ...(localMedia ? { ownedTranscription: new OwnedTranscriptionService(narration, join(directory, "artifacts")) } : {}) },
   ...(localMedia ? { mediaRoutes: { production: service, media: new MediaApplicationService(service, localMedia), uploads: new ManagedUploadStore({ rootDir: uploadDirectory }) } } : {}) });
-let running = false;
+let running = false, stopping = false, activeWork: Promise<unknown> = Promise.resolve();
 const timer = setInterval(() => {
+  if (stopping) return;
   if (recovery.isQuarantined()) return;
   try { director.tick(); } catch (error) { app.log.error(error); }
   if (running) return;
   running = true;
-  void engine.reconcile().then(() => engine.runReady()).catch(error => app.log.error(error)).finally(() => { running = false; });
+  activeWork = engine.reconcile().then(() => { if (!stopping) return engine.runReady(); }).then(() => { if (!stopping) return sceneCommands.advance(); })
+    .then(() => { if (!stopping) return codePlans.tick(); })
+    .catch(error => app.log.error(error)).finally(() => { running = false; });
 }, 500);
-app.addHook("preClose", async () => { clearInterval(timer); await Promise.all([director.close(), runtime.close()]); });
-app.addHook("onClose", async () => {
-  while (running) await new Promise(resolve => setTimeout(resolve, 10));
-  store.close(); provider.close();
-  installation.close(); process.off("exit", releaseInstallation);
+const close = createServerShutdown(app, {
+  stop: () => { stopping = true; clearInterval(timer); engine.stop(); codePlans.stop(); },
+  cleanup: [
+    { name: "Director turns", close: () => director.close() },
+    { name: "native media workers", close: () => runtime.close() },
+    { name: "code-plan workers", close: () => codePlans.close() },
+    { name: "media reconciliation", close: () => activeWork },
+  ],
+  resources: [
+    { name: "project storage", close: () => store.close() },
+    { name: "fixture provider storage", close: () => provider.close() },
+    { name: "installation ownership", close: () => { installation.close(); process.off("exit", releaseInstallation); } },
+  ],
+  // Final storage/ownership cleanup and exit share one synchronous stack. A
+  // timed-out adapter cannot resume later against a replacement installation.
+  terminate: code => process.exit(process.exitCode || code),
 });
-let closing: Promise<void> | undefined;
-const close = () => closing ??= app.close();
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void close().catch(error => { app.log.error(error); process.exitCode = 1; }); });
 try {
   await app.listen({ host: "127.0.0.1", port: 3001 });
@@ -105,4 +142,4 @@ try {
     else process.stdout.write(`Open studio (valid for 60 seconds): ${url}\n`);
   }
 }
-catch (error) { clearInterval(timer); app.log.error(error); await close(); process.exitCode = 1; }
+catch (error) { app.log.error(error); process.exitCode = 1; await close(); }

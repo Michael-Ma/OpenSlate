@@ -17,7 +17,6 @@ import type { LocalMediaService, SuppliedMedia } from "../media/index.js";
 import { inspectPcmWave } from "../media/pcm-wave.js";
 import type { GeneratedNarrationEvidence, GeneratedNarrationSummary, NarrationAcceptance, NarrationAudio, NarrationCue, NarrationEntry, SegmentRevision, VerifiedGeneratedNarrationAudio } from "./types.js";
 import type { CanonicalNarration, GeneratedNarrationProvenance } from "./canonical-types.js";
-import { assertTranscriptCanonicalSegment, transcriptCanonicalProvenance } from "./transcript-selection.js";
 import { narrationAuthorScope, narrationScopeTarget } from "./narration-scope.js";
 
 export const GENERATED_NARRATION_LIMITS = Object.freeze({ recordBytes: 128 * 1024, sourceBytes: 32768, evidenceBytes: 8192, objectNodes: 8192 });
@@ -82,7 +81,8 @@ function generatedShape(input: unknown): VerifiedGeneratedNarrationAudio {
     "derivationReceiptDigest", "sourceDescriptorId", "sourceDigest", "normalizedSamples"]);
   fail(evidence.version === 1 && evidence.adapter === "openai-speech" && evidence.executionVersion === "1"
     && [OPENAI_SPEECH_MODEL, "gpt-4o-mini-tts"].includes(evidence.model as string)
-    && typeof evidence.voice === "string" && (OPENAI_SPEECH_VOICES as readonly string[]).includes(evidence.voice)
+    && typeof evidence.voice === "string" && ((OPENAI_SPEECH_VOICES as readonly string[]).includes(evidence.voice)
+      || /^openai-custom:voice_[A-Za-z0-9_-]{1,120}$/.test(evidence.voice))
     && id(evidence.attemptId) && id(evidence.reservationId) && evidence.artifactId === audio.id
     && ["artifactDigest", "artifactRecordDigest", "requestDigest", "reservationDigest", "mappingDigest", "dispatchDigest", "resultDigest",
       "outputReceiptId", "outputReceiptDigest", "outputSpoolId", "outputSpoolDigest", "derivationId", "derivationIntentDigest", "derivationReceiptDigest",
@@ -183,9 +183,8 @@ export function assertGeneratedNarrationProvenance(store: SpeechAuthorityStore, 
 export function assertGeneratedCanonicalNarrationSegment(store: SpeechAuthorityStore, projectId: string, input: unknown,
   selection: Pick<CanonicalNarration, "narrationRevisionId" | "narrationVersion">): void {
   const segment = snapshot(input), selected = snapshot(selection);
-  exact(segment, ["segmentId", "segmentRevisionId", "cue", "frameCoverage", "audioPlacement", "provenance", ...(segment !== null && typeof segment === "object" && Object.hasOwn(segment, "transcriptProvenance") ? ["transcriptProvenance"] : []), ...(segment !== null && typeof segment === "object" && Object.hasOwn(segment,"placementMode") ? ["placementMode"] : []), ...(segment !== null && typeof segment === "object" && Object.hasOwn(segment,"timingMode") ? ["timingMode"] : [])]);
-  const shotRelative = segment.placementMode === 'shot', withinShot = segment.timingMode === 'within_shot';
-  fail((!Object.hasOwn(segment,'placementMode') || shotRelative) && (!Object.hasOwn(segment,'timingMode') || shotRelative && withinShot), 'Unsupported canonical narration placement or timing mode');
+  exact(segment, ["segmentId", "segmentRevisionId", "cue", "frameCoverage", "audioPlacement", "provenance", "placementMode", "timingMode"]);
+  fail(segment.placementMode === "shot" && segment.timingMode === "within_shot", "Unsupported canonical narration placement or timing mode");
   exact(selected, ["narrationRevisionId", "narrationVersion"]);
   fail(id(segment.segmentId) && id(segment.segmentRevisionId) && id(selected.narrationRevisionId)
     && Number.isSafeInteger(selected.narrationVersion) && selected.narrationVersion > 0, "Canonical narration requires an exact saved revision");
@@ -218,10 +217,8 @@ export function assertGeneratedCanonicalNarrationSegment(store: SpeechAuthorityS
     && script.textKind === "draft" && typeof script.text === "string" && script.text.trim().length > 0
     && typeof script.meaning === "string" && script.meaning.trim().length > 0 && script.source?.kind === "generated", "Canonical generated script differs from its accepted section");
   const cue = record<NarrationCue>(store, "narration_cue", entry.cueId as string, projectId);
-  const transcriptProvenance = transcriptCanonicalProvenance(store, projectId, script, cue);
-  assertTranscriptCanonicalSegment(store, projectId, segment, selection);
   fail(cue.id === entry.cueId && cue.projectId === projectId && cue.segmentRevisionId === script.id && cue.audioId === audio.id
-    && (cue.method === "human" || cue.method === "transcript_selection" && transcriptProvenance?.timing) && cue.confidence === null && Number.isSafeInteger(cue.startSample) && cue.startSample >= 0
+    && cue.method === "human" && cue.confidence === null && Number.isSafeInteger(cue.startSample) && cue.startSample >= 0
     && Number.isSafeInteger(cue.endSample) && cue.endSample > cue.startSample && cue.endSample <= audio.generation.normalizedSamples,
   "Canonical generated cue differs from its measured recording");
   for (const kind of ["script", "audio", "timing"] as const) {
@@ -239,26 +236,22 @@ export function assertGeneratedCanonicalNarrationSegment(store: SpeechAuthorityS
       && request.editing === true && Array.isArray(request.scopeIds) && request.scopeIds.length <= 400,
     "Canonical generated acceptance lacks its human request evidence");
     const scopeIds = request.scopeIds as string[];
-    // Preserve project acceptance and additionally honor the existing compact-shot
-    // API only when its immutable human scope pins this exact section.
-    const narrowScope = !scopeIds.includes(projectId) && shotRelative
-      ? narrationAuthorScope(store, projectId, accepted.requestId, accepted.principalId, script.segmentId) : null;
-    fail(scopeIds.includes(projectId) || shotRelative && request.principalId === "local-user"
+    const narrowScope = narrationAuthorScope(store, projectId, accepted.requestId, accepted.principalId, script.segmentId);
+    fail(request.principalId === "local-user"
       && scopeIds.length === 1 && narrowScope && narrowScope.shotId === scopeIds[0]
       && narrationScopeTarget(store, narrowScope)?.segmentId === script.segmentId,
-    "Canonical generated acceptance lacks its exact human project or pinned shot request evidence");
+    "Canonical generated acceptance lacks its exact pinned human shot request evidence");
   }
   const durationSamples = cue.endSample - cue.startSample, atSample = Number(entry.atSample);
   const frame = (sample: number): number => Number((BigInt(sample) + 800n) / 1600n);
-  const relativeFrames = shotRelative ? Math.ceil(durationSamples / 1600) : frame(durationSamples);
+  const relativeFrames = Math.ceil(durationSamples / 1600);
   fail(atSample + durationSamples <= 48000 * 360 && relativeFrames >= 1, "Canonical narration exceeds its accepted timeline bounds");
   const expected = { segmentId: entry.segmentId, segmentRevisionId: script.id,
-    ...(shotRelative ? { placementMode: 'shot', ...(withinShot ? { timingMode: 'within_shot' } : {}) } : {}),
+    placementMode: "shot", timingMode: "within_shot",
     cue: { id: cue.id, meaning: script.meaning, placementFrames: frame(atSample), durationFrames: relativeFrames,
       audio: { artifactId: audio.id, sha256: audio.media.sha256, kind: "audio" }, accepted: true, measured: true },
-    frameCoverage: { startFrame: frame(atSample), endFrame: shotRelative ? frame(atSample) + relativeFrames : frame(atSample + durationSamples) },
-    audioPlacement: { source: audio.media, startSample: cue.startSample, durationSamples, atSample, gainMilliDb: 0 }, provenance,
-    ...(transcriptProvenance ? { transcriptProvenance } : {}) };
+    frameCoverage: { startFrame: frame(atSample), endFrame: frame(atSample) + relativeFrames },
+    audioPlacement: { source: audio.media, startSample: cue.startSample, durationSamples, atSample, gainMilliDb: 0 }, provenance };
   fail(canonical(segment) === canonical(expected), "Canonical generated section differs from its accepted script, cue, or placement");
 }
 /** A bounded saved-record projection, not a claim of fresh byte verification or narration acceptance. */

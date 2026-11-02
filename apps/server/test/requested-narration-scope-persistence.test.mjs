@@ -35,3 +35,11 @@ test('superseded request and later shot edits do not invalidate retained scope b
   const change=await f.production.prepare(project.id,request,{variant:'project',expectedHeadVersion:project.headVersion,creative:{updateShots:[{id:f.shot.id,purpose:'Updated purpose',reauthorPrompts:true}]}});f.production.apply(project.id,request,change.id);
   assert.equal(requestedNarrationShot(f.store,f.project.id,s.requestId,s.principalId,s.segmentId),f.shot.id);f.close();const backup=await f.backup();await inspectInstallationBackup({directory:backup.directory});assert.deepEqual(f.calls,{http:0,credentials:0});
 });
+
+test('host materialization for a keyframe press uses the project narrator default when no voice is supplied',async t=>{
+ const f=await fixture(t),before=f.store.getProject(f.project.id),{newId}=await import('@openslate/core');
+ const project=f.store.saveProject({...before,revisionId:newId(),narratorVoice:'sage'},before.headVersion);f.store.insert('project_revision',project.revisionId,project.id,{project});
+ const input={key:'keyframe-voice-default',expectedHeadVersion:project.headVersion,shotId:f.shot.id,intentDigest:digest({shotId:f.shot.id,narration:f.shot.narration}),profileRevisionId:f.profile.revision};
+ const result=f.narration.materializeRequestedShot(project.id,f.actor,input);assert.equal(f.store.get('narration_segment',result.segmentRevisionId).source.voice,'sage');
+ assert.deepEqual(f.narration.materializeRequestedShot(project.id,f.actor,input),result);assert.deepEqual(f.calls,{http:0,credentials:0});
+});

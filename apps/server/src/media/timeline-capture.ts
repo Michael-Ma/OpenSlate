@@ -4,6 +4,8 @@ import type { ShotAudioCut } from "../narration/audio-placement.js";
 import type { NarrationAudio } from "../narration/types.js";
 import {
   canonical,
+  EXPORT_SIZE,
+  projectAspect,
   invariant,
   shotIntentDigest,
   shotVideoTiming,
@@ -234,6 +236,7 @@ function timelineCapture(
       cueId: currentShot?.cueId ?? null,
       startFrame: timelineStartFrame,
       durationFrames: frames!,
+      ...(currentShot?.narrationFit ? { narrationFit: currentShot.narrationFit } : {}),
       ...(currentShot?.narrationTimingMode
         ? { timingMode: currentShot.narrationTimingMode }
         : {}),
@@ -441,5 +444,52 @@ export function captureRender(
         audio: captured.input.audio!,
       },
     };
+  });
+}
+
+/** Code mode captures exact owned media directly; it has no graph nodes, reviews or narration selections. */
+export function captureCodePlanRender(store: Store, projectId: string, args: Record<string, unknown>): RenderManifestInput {
+  return store.transaction(() => {
+    const project = store.getProject(projectId);
+    invariant(project.planMode === "code" && Object.keys(args).every(key => ["model", "timeline", "audio", "width", "height", "variant"].includes(key)),
+      "CODE_PLAN_RENDER_INPUT", "Use a code-plan timeline with supported render parameters");
+    invariant(Array.isArray(args.timeline) && args.timeline.length > 0 && args.timeline.length <= 64
+      && (args.audio === undefined || Array.isArray(args.audio) && args.audio.length <= 65), "CODE_PLAN_RENDER_INPUT", "Use 1–64 clips and at most 65 audio placements");
+    const source = (value: unknown, kind: "video" | "audio"): SuppliedMedia => {
+      invariant(value && typeof value === "object", "CODE_PLAN_RENDER_INPUT", "Timeline rows require media artifacts");
+      const ref = value as ArtifactRef;
+      const rows = store.list<Artifact & { id: string }>("artifact", projectId);
+      const artifact = rows.find(row => row.projectId === projectId && row.artifact.sha256 === ref.sha256 && row.artifact.kind === ref.kind);
+      const owned = artifact ? store.get<OwnedMediaSource>("media_source", artifact.id) : undefined;
+      invariant(ref.kind === kind && artifact?.fixture === false && owned?.projectId === projectId && owned.source.kind === kind
+        && owned.source.artifactId === artifact.id && owned.source.sha256 === artifact.artifact.sha256,
+      "MEDIA_SOURCE_UNAVAILABLE", "Render requires an exact owned, measured media source");
+      return structuredClone(owned.source);
+    };
+    const clips = args.timeline.map(value => {
+      invariant(value && typeof value === "object" && !Array.isArray(value), "CODE_PLAN_RENDER_INPUT", "Use clip objects or artifact references");
+      const row = value as Record<string, unknown>, descriptor = source(row.artifact ?? row, "video");
+      if (row.artifact) invariant(Object.keys(row).every(key => ["artifact", "startFrame", "durationFrames", "fit", "motion"].includes(key)),
+        "CODE_PLAN_RENDER_INPUT", "Unsupported clip parameters");
+      return { source: descriptor, startFrame: row.startFrame === undefined ? 0 : row.startFrame as number,
+        durationFrames: row.durationFrames === undefined ? descriptor.probe.video!.frames : row.durationFrames as number,
+        fit: (row.fit ?? "contain") as "contain" | "cover" };
+    });
+    const totalFrames = clips.reduce((sum, row) => sum + row.durationFrames, 0);
+    invariant(Number.isSafeInteger(totalFrames) && totalFrames > 0 && totalFrames <= project.maxFrames,
+      "MEDIA_DURATION_MISMATCH", "Render exceeds the film duration bound");
+    const audio = ((args.audio ?? []) as Record<string, unknown>[]).map(row => {
+      invariant(row && typeof row === "object" && !Array.isArray(row)
+        && Object.keys(row).every(key => ["artifact", "startSample", "durationSamples", "atSample", "gainMilliDb", "fadeOutSamples"].includes(key)),
+      "CODE_PLAN_RENDER_INPUT", "Unsupported audio placement parameters");
+      const descriptor = source(row.artifact, "audio");
+      return { source: descriptor, startSample: (row.startSample ?? 0) as number,
+        durationSamples: (row.durationSamples ?? descriptor.probe.audio!.samples) as number,
+        atSample: (row.atSample ?? 0) as number, gainMilliDb: (row.gainMilliDb ?? 0) as number,
+        ...(row.fadeOutSamples === undefined ? {} : { fadeOutSamples: row.fadeOutSamples as number }) };
+    });
+    const dimensions = EXPORT_SIZE[projectAspect(project)];
+    return { projectId, targetRevisionId: project.revisionId, width: (args.width ?? dimensions.width) as number,
+      height: (args.height ?? dimensions.height) as number, clips, audio };
   });
 }

@@ -2,15 +2,15 @@
 
 V0 remains one user on one computer. [Status](../implementation/STATUS.md) separates available behavior from acceptance work; [technical references](../technical/README.md) explain current ownership and contracts.
 
-## Delivered studio refinement
+## Delivered studio
 
-The supplied **Frame Studio Day/Night** is implemented with [Studio Day/Night](OPENSLATE-LIGHT.md) tokens and Radix components. The resizable Director conversation keeps drafts and explicit @ references. Plan/Keyframes/Assets/Film share canonical Scene → Shot state; a selected preview, inspector and scene shelves expose exact prompts/media and real scoped actions. Timeline persists shot order, plan timing and owned-music placement/gain/mute. Theme/view changes preserve selection and unsent input.
+The current studio is the only UI in `apps/web/src/next`, following the [Last Ferry design](../ai/prototypes/last-ferry/DESIGN.md). Plan, Keyframes, Assets, Film, Start and Settings use one store, normalized projections, per-control availability, explicit @ scope and English/Chinese message IDs. Dark shared CSS tokens and local Inter replace the retired Radix Day/Night presentation.
 
-The concise plan widget retains **Saved / Next** and priority recovery states from actual evidence. It offers an explicit scoped **Resume this edit** only for eligible unfinished edits; active work, questions, Stop, exact frame review and existing provider jobs determine the other next actions. It summarizes recorded direction without inventing which creative changes will be made or kept. The accepted media flow has two generation decisions per scene: create keyframes, then review their exact frames/motion/video recipe and start video. Returned videos can be inspected; green completion means media is saved. Configured provider usage has no separate key approval or allowance step.
+The [P0–P6/card delivery table](../implementation/STATUS.md) records source scope. The main additions are the generation overview/content-bound frame views (B2), scoped/alongside edits and human-field fencing (B3/B9), truthful Stop/Continue/release (B4), server-owned keyframes/voice/confirmation/fit (B7), retained current media/earlier frames/Undo (B8), structured notes/proposals and bounded picture review (B5/B9/B10), storyboard exports (B6), and project/assets/voice/setup/recovery parity (B11–B13). B14 retires caller-free classic adapters; B15/B16 cover subsequent integrity and integration fixes.
 
-**Models for this project** uses four main jobs and optional setup. The migration retains separate durable Director/media saves, exact zero-impact apply, human review for real pending-work impact and same-command recovery after lost responses. Earlier October 3 work supplied safe GFM Markdown, stable background updates, actual Director model choices and compatible fresh-turn guidance refresh.
+The accepted flow remains two generation decisions per scene: make keyframes, then inspect the returned frames, narration, timing and actual video recipe before confirming video. The durable server runner owns speech settlement and video submission. Configured providers need no separate key approval or usage allowance, and returned clips need no extra acceptance gate. Local storyboard export can run while stopped without authorizing paid work.
 
-The October 7 integrated check passed **2,376 tests, zero failures, one optional native skip**, with builds/typechecks under Node 24.15.0. The offline restart/edit demo and disposable desktop/390px browser review passed. [October 7 review](../implementation/OCTOBER-7-DAY-NIGHT-REVIEW.md) records current scope and independent fixes; earlier dated reviews remain evidence for their original scenarios. Subjective usability and full real production remain acceptance work below.
+`pnpm studio:fixture` starts a disposable fake First Light studio on port 3101; `--film last-ferry` selects the three-scene/eight-shot server seed. `?fixture=last-ferry` is a separate browser simulation. `pnpm check:browser` is the rendered next-UI gate and must run where system Chrome is supported; card sandboxes reserve it for the lead. [Status](../implementation/STATUS.md) keeps exact dated pass counts and outstanding replay separate from source completion. The October 7 gate remains evidence for the retired UI, not automatic verification of the replacement.
 
 ## Human production acceptance
 
@@ -23,7 +23,7 @@ The October 7 integrated check passed **2,376 tests, zero failures, one optional
 
 - **Personal voice enrollment:** choose an accessible provider/account, implement sample/consent upload and exact returned identity/revocation. Existing custom-ID synthesis does not create a clone.
 - **Distribution:** installer/bundled runtime, broader clean-machine/OS acceptance and operational release review.
-- **Later editing:** source trimming/splitting, redo/version adoption, waveforms, transitions, multiple independently arranged music/effect lanes, looping/fades/ducking and large-preview streaming.
+- **Later editing:** source trimming/splitting, general redo and clip-version adoption, waveforms, transitions, multiple independently arranged music/effect lanes, looping/fades/ducking and large-preview streaming.
 - **Later deployment:** same-machine local H3 inference. Multi-host/remote GPU/shared database support needs a separate decision.
 
 Implemented features do not imply all acceptance gates passed. Actual media quality, account access and a complete human production run remain acceptance evidence to establish separately.

@@ -167,3 +167,19 @@ test('generated timeline combines explicit silent planned timing with one accept
   const current = f.store.getProject(f.projectId); current.shots[0].narration.mode = 'undecided'; f.store.saveProject(current, current.headVersion);
   assert.throws(() => captureTimeline(f.store, f.projectId, f.timelineId), { code: 'MEDIA_NARRATION_REQUIRED' });
 });
+
+test('capturing a cut shot carries its fade into the actual export input', t => {
+  const f = fixture(t, { generated: true, narrated: true, mixed: true });
+  const project = f.store.getProject(f.projectId);
+  project.shots[1].narrationFit = 'cut_to_shot'; f.store.saveProject(project, project.headVersion);
+  const narration = structuredClone(f.narration);
+  narration.id = newId(); narration.segments[1].placementMode = 'shot';
+  f.store.insert('narration_canonical', narration.id, f.projectId, narration);
+  f.store.put('narration_canonical_head', f.projectId, f.projectId, { canonicalId: narration.id });
+  const captured = captureTimeline(f.store, f.projectId, f.timelineId);
+  assert.equal(captured.input.audio.length, 1);
+  assert.equal(captured.input.audio[0].durationSamples, 288000);
+  assert.equal(captured.input.audio[0].fadeOutSamples, 3840);
+  assert.equal(captured.input.audio[0].atSample, 288000);
+  assert.equal(narration.segments[1].audioPlacement.fadeOutSamples, undefined, 'accepted source history stays unchanged');
+});

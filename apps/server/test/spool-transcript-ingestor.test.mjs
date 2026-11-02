@@ -78,14 +78,22 @@ test("only the exact supported adapter and bounded raw JSON role can reach sourc
   assert.deepEqual(f.calls, { source: 0, upload: 0 }); unpublished(f);
 });
 
-test("mapping, dispatch, result and consumed authority are independently required before media reads", async t => {
-  const f = await fixture(t);
-  for (const kind of ["transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "external_allowance_consumption"]) {
-    const saved = f.store.db.prepare("SELECT body FROM entities WHERE kind=? AND id=?").get(kind, f.attempt.id);
-    f.store.db.prepare("UPDATE entities SET body='null' WHERE kind=? AND id=?").run(kind, f.attempt.id);
-    try { await assert.rejects(f.ingest()); } finally { f.store.db.prepare("UPDATE entities SET body=? WHERE kind=? AND id=?").run(saved.body, kind, f.attempt.id); }
+test("mapping, dispatch, result and pinned configured authority are independently required before media reads", async t => {
+  const f = await fixture(t), reservation = f.store.get("reservation", f.attempt.reservationId);
+  for (const [kind, id] of [["transcription_execution_mapping", f.attempt.id], ["transcription_execution_dispatch", f.attempt.id],
+    ["transcription_execution_result", f.attempt.id], ["capability_lock", f.request.providerUse.capabilityLockId], ["reservation", f.attempt.reservationId]]) {
+    const saved = f.store.db.prepare("SELECT body FROM entities WHERE kind=? AND id=?").get(kind, id);
+    f.store.db.prepare("UPDATE entities SET body='null' WHERE kind=? AND id=?").run(kind, id);
+    try { await assert.rejects(f.ingest()); } finally { f.store.db.prepare("UPDATE entities SET body=? WHERE kind=? AND id=?").run(saved.body, kind, id); }
   }
-  assert.deepEqual(f.calls, { source: 0, upload: 0 }); unpublished(f);
+  const saved = f.store.get("attempt", f.attempt.id);
+  for (const mutate of [request => { delete request.providerUse; }, request => { request.providerUse.profileDefinitionDigest = "f".repeat(64); }]) {
+    const attempt = structuredClone(saved); mutate(attempt.request); change(f, "attempt", attempt);
+    try { await assert.rejects(f.ingest({ ...f.input, attempt })); } finally { change(f, "attempt", saved); }
+  }
+  assert.deepEqual(f.store.get("reservation", f.attempt.reservationId), reservation); assert.equal(reservation.state, "reserved");
+  assert.deepEqual(f.calls, { source: 0, upload: 0 });
+  assert.deepEqual(f.providerCalls, { http: 1, credentials: 1, prepare: 1, upload: 1 }); unpublished(f);
 });
 
 test("matching raw bytes from a competing receipt cannot bypass exact observed lineage", async t => {

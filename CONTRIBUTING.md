@@ -18,11 +18,11 @@ The Node pin comes from `.nvmrc`, pnpm from `package.json`, and the media releas
 
 `pnpm check:toolchain` rejects drift before the full suite. The test runner passes the resolved absolute FFmpeg/ffprobe pair through both supported environment-variable conventions, including child-process tests. Explicit incompatible overrides fail instead of silently falling back. For a focused regression after building, use `node scripts/run-tests.mjs apps/server/test/media-audio-scale.test.mjs`. Raw `node --test` remains available for deliberately reproducing another toolchain, but is not the parity gate.
 
-`pnpm check` builds all workspaces, runs Node's test runner and checks TypeScript. Tests use isolated databases and need loopback-listener permission. Native probes are opt-in; real media tests need a current explicit allowance. Passing offline tests does not prove provider access or creative quality.
+`pnpm check` builds all workspaces, runs Node's test runner and checks TypeScript. Tests use isolated databases and need loopback-listener permission. Native probes are opt-in; real media tests need an explicitly authorized scope. Passing offline tests does not prove provider access or creative quality.
 
 ## Implementation boundaries
 
-- OpenSlate owns canonical state, requests, revisions, review, grants, budgets and execution. A model only proposes validated data.
+- OpenSlate owns canonical state, requests, revisions, review, grants and execution. A model only proposes validated data.
 - Never evaluate model-authored JavaScript. Keep the bounded parser and all plan validation paths.
 - Preserve immutable review inputs, one-use grants, candidate/attempt separation, persisted submission intent and unknown-outcome reconciliation.
 - Preserve request scope, edit-hold ownership and old epoch fencing. An unrelated request cannot borrow another edit's authority.

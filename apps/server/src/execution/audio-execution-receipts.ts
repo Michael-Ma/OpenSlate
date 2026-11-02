@@ -1,4 +1,4 @@
-import { configuredProviderUse, providerAdmissionRequest, allowanceMappingMatches } from "./provider-use.js";
+import { providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import type { ExecutionRequest, OpenAISpeechDescription, OpenAISpeechOutcome, OpenAISpeechRequest } from "@openslate/providers";
@@ -10,13 +10,13 @@ import { prepareSpeechOperationOptions } from "./audio-preflight.js";
 interface Identity { id: string; projectId: string; version: 1; attemptId: string; requestDigest: string }
 export interface SpeechExecutionMapping extends Identity {
   profileDigest: string; profileDefinitionDigest: string; profileDefinition: ProviderProfile;
-  /** A retained matching definition, not proof of the originating admission lock. */
+  /** Exact original admission lock and full profile definition. */
   capabilityLockId: string; capabilityLockDigest: string;
-  allowanceId: string | null; allowanceDigest: string | null; consumptionDigest: string | null; estimatedMicros: string;
+  estimatedMicros: string;
   transport: OpenAISpeechDescription; bodyByteLength: number;
 }
 export interface SpeechExecutionDispatch extends Identity {
-  mappingDigest: string; transportDigest: string; bodySha256: string; allowanceId: string | null; createdAt: string;
+  mappingDigest: string; transportDigest: string; bodySha256: string; createdAt: string;
 }
 type Completed = Extract<OpenAISpeechOutcome, { kind: "completed" }>;
 export type SpeechExecutionObservation = Exclude<OpenAISpeechOutcome, Completed>
@@ -44,7 +44,7 @@ function base(attempt: Attempt, value: Identity, extras: string[]): void {
 /** Speech-only operation validation is separate from admission so owned local input failures can be recorded. */
 export function prepareSpeechExecutionRequest(input: ExecutionRequest): { request: OpenAISpeechRequest; description: OpenAISpeechDescription; bodyByteLength: number } {
   const request = structuredClone(input);
-  speechFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", ...(configuredProviderUse(request) ? ["providerUse"] : ["externalAllowanceId"])]);
+  speechFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "providerUse"]);
   invariant(request.kind === "speech" && request.execution?.adapter === "openai-speech" && request.execution.version === "1"
     && request.inputs.length === 0, "SPEECH_EXECUTION_CONFLICT", "Speech has no media inputs or custom transport overrides");
   return prepareSpeechOperationOptions(request.profile!.configuration, request.args);
@@ -64,19 +64,19 @@ export function assertSpeechExecutionProfile(profile: ProviderProfile, attempt: 
 }
 export function assertSpeechExecutionMapping(attempt: Attempt, mapping: SpeechExecutionMapping): void {
   base(attempt, mapping, ["profileDigest", "profileDefinitionDigest", "profileDefinition", "capabilityLockId", "capabilityLockDigest",
-    "allowanceId", "allowanceDigest", "consumptionDigest", "estimatedMicros", "transport", "bodyByteLength"]);
+    "estimatedMicros", "transport", "bodyByteLength"]);
   assertSpeechExecutionProfile(mapping.profileDefinition, attempt);
   const prepared = prepareSpeechExecutionRequest(attempt.request);
   invariant(mapping.profileDigest === attempt.request.profile!.digest && mapping.profileDefinitionDigest === digest(mapping.profileDefinition)
-    && id(mapping.capabilityLockId) && hash(mapping.capabilityLockDigest) && allowanceMappingMatches(attempt.request, mapping) && mapping.estimatedMicros === mapping.profileDefinition.unitCostMicros
+    && id(mapping.capabilityLockId) && hash(mapping.capabilityLockDigest) && mapping.estimatedMicros === mapping.profileDefinition.unitCostMicros
     && canonical(mapping.transport) === canonical(prepared.description) && mapping.bodyByteLength === prepared.bodyByteLength,
   "SPEECH_EXECUTION_CONFLICT", "Speech mapping differs from its approved profile or exact wire payload");
 }
 export function assertSpeechExecutionDispatch(attempt: Attempt, mapping: SpeechExecutionMapping, dispatch: SpeechExecutionDispatch): void {
-  base(attempt, dispatch, ["mappingDigest", "transportDigest", "bodySha256", "allowanceId", "createdAt"]);
+  base(attempt, dispatch, ["mappingDigest", "transportDigest", "bodySha256", "createdAt"]);
   assertSpeechExecutionMapping(attempt, mapping);
   invariant(dispatch.mappingDigest === digest(mapping) && dispatch.transportDigest === mapping.transport.requestDigest
-    && dispatch.bodySha256 === mapping.transport.bodySha256 && dispatch.allowanceId === mapping.allowanceId
+    && dispatch.bodySha256 === mapping.transport.bodySha256
     && typeof dispatch.createdAt === "string" && dispatch.createdAt.length === 24 && Number.isFinite(Date.parse(dispatch.createdAt))
     && new Date(dispatch.createdAt).toISOString() === dispatch.createdAt, "SPEECH_EXECUTION_CONFLICT", "Speech dispatch differs from its exact mapping");
 }

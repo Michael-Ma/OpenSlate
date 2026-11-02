@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "id": "type-social",
+  "version": "8.1.0",
+  "role": "type",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/formats.md"
+  ],
+  "compatibility": {
+    "toolContract": "7.1.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "propose_visual_style",
+    "read_guidance",
+    "set_soundtrack"
+  ],
+  "routes": {
+    "kinds": [
+      "social"
+    ],
+    "subtypes": [
+      "skit",
+      "pov",
+      "meme",
+      "trend",
+      "day_in_the_life",
+      "storytime",
+      "tips",
+      "before_after",
+      "other"
+    ]
+  },
+  "requires": [
+    "craft-story",
+    "craft-comedy",
+    "craft-visual-style",
+    "craft-shot-prompting"
+  ],
+  "optional": [
+    {
+      "id": "craft-characters",
+      "when": "has_characters"
+    },
+    {
+      "id": "craft-music-timing",
+      "when": "has_soundtrack"
+    }
+  ]
+}

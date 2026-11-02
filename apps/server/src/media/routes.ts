@@ -1,12 +1,15 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { digest, DomainError, invariant } from "@openslate/core";
+import type { StartExportInput } from "@openslate/core/public";
 import type { ActorContext } from "@openslate/core";
 import type { ProductionService } from "../application/service.js";
 import type { ManagedUploadStore } from "../narration/managed-upload.js";
 import type { MediaApplicationService } from "./application.js";
 import type { MediaRenderJob, OwnedMediaSource } from "./application-types.js";
+import { uploadNameSchema } from "./upload-name.js";
+import { ExportLauncher } from "./export-launcher.js";
 
-interface RouteOptions { production: ProductionService; media: MediaApplicationService; uploads: ManagedUploadStore }
+interface RouteOptions { production: ProductionService; media: MediaApplicationService; uploads: ManagedUploadStore; launcher?: ExportLauncher }
 type ProjectParams = { projectId: string };
 type JobParams = ProjectParams & { jobId: string };
 const text = { type: "string", minLength: 1, maxLength: 160 };
@@ -17,8 +20,8 @@ const idempotencyKey = (request: FastifyRequest): string => {
 };
 const summary = (job: MediaRenderJob) => ({ id: job.id, state: job.state, artifact: job.artifact, errorCode: job.errorCode,
   cancelRequested: job.cancelRequested, totalFrames: job.manifest.totalFrames, manifestDigest: job.manifest.digest,
-  revisionId: job.target.revisionId, headVersion: job.target.headVersion, planId: job.target.planId, renderNodeId: job.target.renderNodeId,
-  createdAt: job.createdAt, finishedAt: job.finishedAt, fixture: false as const,
+  revisionId: job.target.revisionId, headVersion: job.target.headVersion, ...("planId" in job.target ? { planId: job.target.planId, renderNodeId: job.target.renderNodeId } : { targetKind: "storyboard" }),
+  createdAt: job.createdAt, finishedAt: job.finishedAt, fixture: "kind" in job.target && job.target.demo,
   canRun: job.state === "prepared" && !job.cancelRequested,
   canRecover: !["prepared", "published", "historical"].includes(job.state) && (!job.ownerToken || (job.leaseUntil ?? 0) <= Date.now()) });
 
@@ -26,58 +29,55 @@ const summary = (job: MediaRenderJob) => ({ id: job.id, state: job.state, artifa
 export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions): void {
   app.register(async scope => {
     const { production, media, uploads } = options;
-    const tasks = new Map<string, { abort: AbortController; promise: Promise<void> }>();
-    let closing = false;
+    const launcher = options.launcher ?? new ExportLauncher(production, media);
+    launcher.attachLog((details, message) => scope.log.warn(details, message));
+    const tasks = launcher.tasks;
     const currentJob = (projectId: string, jobId: string) => {
       const found = media.workspaceSnapshot(projectId).jobs.find(job => job.id === jobId);
       invariant(found, "NOT_FOUND", "Render does not belong to this project"); return found;
     };
-    const commandActor = (projectId: string, action: string, key: string, context: unknown): ActorContext =>
-      production.beginRequest(projectId, "local-user", action, { editing: false, key: `media:${key}`, contextDigest: digest(context) });
-    const launch = (job: MediaRenderJob, actor: ActorContext, action: "run" | "recover") => {
-      invariant(!closing, "SERVICE_UNAVAILABLE", "Renderer is shutting down");
-      if (tasks.has(job.id)) return;
-      const abort = new AbortController();
-      // Defer entry until the registry owns the task, including synchronous port failures.
-      const promise = Promise.resolve().then(async () => {
-        try { if (action === "run") await media.run(job.projectId, actor, job.id, { signal: abort.signal }); else await media.recover(job.projectId, actor, job.id); }
-        catch (error) {
-          // Admission can fail before the running transition. Keep it prepared,
-          // expose a bounded reason, and require an explicit later run request.
-          const code = error instanceof DomainError ? error.code : "MEDIA_RENDER_FAILED";
-          try {
-            production.store.transaction(() => {
-              const current = production.store.get<MediaRenderJob>("media_render", job.id);
-              if (current?.state === "prepared") production.store.put("media_render", job.id, job.projectId, { ...current, errorCode: code });
-            });
-          } catch { /* SQL unavailable: preserve existing durable intent for explicit recovery. */ }
-          scope.log.warn({ renderJobId: job.id, code }, "Local render did not complete");
-        } finally { tasks.delete(job.id); }
-      });
-      tasks.set(job.id, { abort, promise });
-    };
-    scope.addHook("onClose", async () => {
-      closing = true; const owned = [...tasks.values()]; owned.forEach(task => task.abort.abort());
-      await Promise.allSettled(owned.map(task => task.promise));
-    });
+    const commandActor = (projectId: string, action: string, key: string, context: unknown): ActorContext => launcher.commandActor(projectId, action, key, context);
+    const launch = (job: MediaRenderJob, actor: ActorContext, action: "run" | "recover") => launcher.launch(job, actor, action);
+    scope.addHook("onClose", async () => { await launcher.close(); });
     // Stream bodies without buffering or touching files before inherited auth.
     scope.addContentTypeParser("application/octet-stream", (_request, payload, done) => { done(null, payload); });
     scope.get<{ Params: ProjectParams }>("/api/projects/:projectId/media", async request => {
       const { projectId } = request.params, state = media.workspaceSnapshot(projectId);
-      return { jobs: state.jobs.slice(-40).reverse().map(summary), preview: state.preview,
+      return { jobs: state.jobs.slice(-40).reverse().map(summary), preview: state.preview, lastExport: state.lastExport,
         sources: production.store.list<OwnedMediaSource>("media_source", projectId).filter(record => record.source.kind === "video").map(record => ({ artifactId: record.source.artifactId, sha256: record.source.sha256,
           kind: record.source.kind, frames: record.source.probe.video?.frames ?? null, byteLength: record.source.byteLength, fixture: false })) };
     });
-    scope.post<{ Params: ProjectParams; Querystring: { expectedHeadVersion: string; requestId?: string; continuationRequestId?: string }; Body: AsyncIterable<Uint8Array> }>("/api/projects/:projectId/media/uploads", {
+    scope.get<{ Params: ProjectParams }>("/api/projects/:projectId/exports", async request => media.exportView(request.params.projectId));
+    scope.post<{ Params: ProjectParams; Body: StartExportInput }>("/api/projects/:projectId/exports", {
+      schema: { body: object({ expectedHeadVersion: { type: "integer", minimum: 0 } }, ["expectedHeadVersion"]) },
+    }, async (request, reply) => reply.code(202).send(await launcher.start(request.params.projectId, request.body, idempotencyKey(request))));
+    for (const action of ["cancel", "recover"] as const) {
+      scope.post<{ Params: ProjectParams & { exportId: string }; Body: Record<string, never> }>(`/api/projects/:projectId/exports/:exportId/${action}`, {
+        schema: { body: object({}) },
+      }, async (request, reply) => {
+        const { projectId, exportId } = request.params, key = idempotencyKey(request);
+        media.exportRecord(projectId, exportId);
+        const actor = commandActor(projectId, `${action} storyboard export`, `export-${action}:${key}`, { exportId });
+        if (action === "cancel") media.cancel(projectId, actor, exportId);
+        else {
+          invariant(!tasks.has(exportId), "MEDIA_RENDER_BUSY", "This server is still processing the export");
+          // Await receipt reconciliation, which never dispatches a renderer.
+          await media.recover(projectId, actor, exportId);
+        }
+        return reply.code(200).send(media.exportRecord(projectId, exportId));
+      });
+    }
+    scope.post<{ Params: ProjectParams; Querystring: { expectedHeadVersion: string; name?: string; requestId?: string; continuationRequestId?: string }; Body: AsyncIterable<Uint8Array> }>("/api/projects/:projectId/media/uploads", {
       bodyLimit: uploads.maxBytes,
-      schema: { querystring: object({ expectedHeadVersion: { type: "string", pattern: "^(0|[1-9][0-9]{0,14})$" }, requestId: text, continuationRequestId: text }, ["expectedHeadVersion"]) },
+      schema: { querystring: object({ expectedHeadVersion: { type: "string", pattern: "^(0|[1-9][0-9]{0,14})$" }, name: uploadNameSchema, requestId: text, continuationRequestId: text }, ["expectedHeadVersion"]) },
     }, async (request, reply) => {
       invariant(request.headers["content-type"]?.split(";")[0] === "application/octet-stream", "VALIDATION_ERROR", "Upload video bytes as application/octet-stream");
       const { projectId } = request.params, expectedHeadVersion = Number(request.query.expectedHeadVersion), key = idempotencyKey(request);
+      const name = request.query.name === undefined ? {} : { name: request.query.name };
       invariant(!(request.query.requestId && request.query.continuationRequestId), "VALIDATION_ERROR", "Choose one existing import request or an explicit continuation");
       const actor: ActorContext = request.query.requestId ? { kind: "human", principalId: "local-user", requestId: request.query.requestId }
-        : production.beginRequest(projectId, "local-user", "Import supplied video", { key: `video-upload:${key}`, editing: true,
-          ...(request.query.continuationRequestId ? { continuationRequestId: request.query.continuationRequestId } : {}), contextDigest: digest({ expectedHeadVersion }) });
+        : production.beginRequest(projectId, "local-user", "Import supplied video", { source: "app", key: `video-upload:${key}`, editing: true,
+          ...(request.query.continuationRequestId ? { continuationRequestId: request.query.continuationRequestId } : {}), contextDigest: digest({ expectedHeadVersion, ...name }) });
       const assertCurrent = () => {
         production.assertActor(projectId, actor, true);
         const message = production.store.get<{ scopeIds: string[] }>("message", actor.requestId);
@@ -86,7 +86,7 @@ export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions)
       assertCurrent();
       try {
         const uploaded = await uploads.receive(request.body, digest({ projectId, principalId: "local-user", key }), assertCurrent);
-        try { return { ...await media.importVideo(projectId, actor, { expectedHeadVersion, path: uploaded.path, key }), requestId: actor.requestId }; }
+        try { return { ...await media.importVideo(projectId, actor, { expectedHeadVersion, path: uploaded.path, key, ...name }), requestId: actor.requestId }; }
         finally { await uploaded.release(); }
       } catch (error) {
         if (!(error instanceof DomainError)) throw error;

@@ -10,6 +10,7 @@ import { Engine } from '../dist/execution/engine.js';
 import { ProductionService } from '../dist/application/service.js';
 import { DirectorSupervisor } from '../dist/application/director-supervisor.js';
 import { ToolInvocationService } from '../dist/application/tool-invocations.js';
+import { safeNativeDiagnostic } from '../dist/application/native-diagnostics.js';
 
 const identity = input => Object.fromEntries(['projectId','requestId','epochId','turnId'].map(key => [key,input[key]]));
 const completed = (input, text = 'Saved response') => ({...identity(input), status:'completed',text,dispatched:true});
@@ -41,6 +42,41 @@ test('messages queue exactly once and persist a final response without persistin
   assert.equal(f.store.get('epoch',input.epochId).state,'revoked');
   const bodies=f.store.db.prepare('SELECT body FROM entities').all().map(row=>row.body).join('\n');
   assert.ok(!bodies.includes(input.bridge.credential));
+});
+
+test('instruction-source refusal persists safe turn metadata and survives later requests without automatic replay', async t => {
+  let calls = 0;
+  const nativeDiagnostic = { category: 'native_instructions_unexpected', instructionFiles: ['~/.codex/AGENTS.md', '/tmp/AGENTS.override.md'],
+    contents: 'PRIVATE_INSTRUCTIONS', stderr: 'PRIVATE_NATIVE_OUTPUT' };
+  const f = fixture(t, async input => {
+    calls++;
+    return { ...identity(input), status: 'failed', text: '', dispatched: false,
+      error: { code: 'RUNTIME_INSTRUCTIONS_UNEXPECTED', message: 'PRIVATE_NATIVE_OUTPUT', nativeDiagnostic } };
+  });
+  const turn = f.enqueue(); f.supervisor.tick(); await f.supervisor.settle();
+  const expected = { category: nativeDiagnostic.category, instructionFiles: nativeDiagnostic.instructionFiles };
+  assert.deepEqual(f.store.get('director_turn', turn.id).nativeDiagnostic, expected);
+  assert.deepEqual(f.supervisor.status(f.project.id).turn.nativeDiagnostic, expected);
+  assert.deepEqual(f.service.snapshot(f.project.id).turns[0].nativeDiagnostic, expected);
+  assert.equal(f.store.get('director_turn', turn.id).dispatched, false);
+  f.supervisor.tick(); await f.supervisor.settle(); assert.equal(calls, 1);
+  f.enqueue('Try another request');
+  assert.deepEqual(f.service.snapshot(f.project.id).turns[0].nativeDiagnostic, expected);
+  assert.equal(f.store.list('attempt', f.project.id).length, 0);
+  const bodies = f.store.db.prepare('SELECT body FROM entities').all().map(row => row.body).join('\n');
+  assert.doesNotMatch(bodies, /PRIVATE_/);
+});
+
+test('turn status and snapshot sanitize historical instruction metadata at the API boundary', async t => {
+  const f = fixture(t), turn = f.enqueue();
+  f.store.put('director_turn', turn.id, f.project.id, { ...turn, state: 'failed', errorCode: 'RUNTIME_INSTRUCTIONS_UNEXPECTED',
+    nativeDiagnostic: { category: 'native_instructions_unexpected', instructionFiles: ['~/.codex/AGENTS.md', '../private', '/tmp/\u202eprivate', '/tmp/file\nPRIVATE'],
+      contents: 'PRIVATE_INSTRUCTIONS', token: 'PRIVATE_TOKEN' } });
+  const expected = { category: 'native_instructions_unexpected', instructionFiles: ['~/.codex/AGENTS.md'] };
+  assert.deepEqual(f.supervisor.status(f.project.id).turn.nativeDiagnostic, expected);
+  assert.deepEqual(f.service.snapshot(f.project.id).turns[0].nativeDiagnostic, expected);
+  assert.deepEqual(safeNativeDiagnostic({ category: 'native_protocol', instructionFiles: ['/tmp/PRIVATE'] }), { category: 'native_protocol' });
+  assert.equal(safeNativeDiagnostic({ category: 'PRIVATE_CATEGORY' }), undefined);
 });
 
 test('one active turn per project while separate projects may progress concurrently',async t=>{
@@ -209,7 +245,7 @@ test('lost tool completion is reconciled from the domain receipt without invokin
 });
 
 
-test('chat stop aborts reasoning, fences read-only queued work, and fresh direction continues saved holds', async t => {
+test('chat stop aborts reasoning, fences read-only queued work, and fresh direction owns fresh holds', async t => {
   const ready=deferred(); let calls=0;
   const f=fixture(t,async(input,options)=>{
     calls++;
@@ -228,7 +264,8 @@ test('chat stop aborts reasoning, fences read-only queued work, and fresh direct
   assert.equal(f.store.get('director_turn',readOnly.id).state,'interrupted');
   assert.equal(f.service.snapshot(f.project.id).control.paused,false);
   assert.ok(f.store.list('hold',f.project.id).filter(h=>h.active).every(h=>h.ownerId===next.requestId));
-  assert.ok(f.store.list('request_continuation',f.project.id).some(c=>c.fromRequestId===first.requestId&&c.toRequestId===next.requestId));
+  assert.ok(f.store.list('hold',f.project.id).filter(h=>h.ownerId===first.requestId).every(h=>!h.active));
+  assert.ok(!f.store.list('request_continuation',f.project.id).some(c=>c.fromRequestId===first.requestId&&c.toRequestId===next.requestId), 'retired holds do not transfer old authority');
   f.supervisor.tick();await f.supervisor.settle();assert.equal(calls,2);
 });
 
@@ -239,4 +276,131 @@ test('stop between claim and runtime dispatch prevents read-only model calls',as
   await f.supervisor.settle();assert.equal(calls,0);
   const restarted=f.make();restarted.tick();await restarted.settle();assert.equal(calls,0);
   assert.equal(f.service.snapshot(f.project.id).control.authorityId,stop.requestId);
+});
+
+test('terminal snapshot reports no reply, failed, timeout, owner lost and superseded honestly', async t => {
+  for (const [status, code, reason] of [['completed', null, 'no_reply'], ['failed', 'TEST_FAILURE', 'failed'], ['unknown', 'RUNTIME_RUN_TIMEOUT', 'timeout'], ['unknown', 'OWNER_LOST', 'owner_lost'], ['interrupted', 'REQUEST_SUPERSEDED', 'superseded']]) {
+    const f = fixture(t, async input => ({ ...completed(input, ''), status, ...(code ? { error: { code, message: 'test' } } : {}) }));
+    f.enqueue('Discuss only', { editing: false }); f.supervisor.tick(); await f.supervisor.settle();
+    const turn = f.service.snapshot(f.project.id).turns[0];
+    assert.equal(turn.reason, reason); assert.deepEqual(turn.effects, { notesCreated: 0, proposalsHeld: 0, changesApplied: 0, generation: [], blocked: [] });
+    assert.equal(f.service.snapshot(f.project.id).conversation.filter(m => m.role === 'assistant').length, 0);
+  }
+});
+test('structured question answers retain option index and label in saved context and reject unknown choices', async t => {
+  let received;
+  const f = fixture(t, async (input, { onEvent }) => {
+    received = input;
+    if (f.store.list('director_question', f.project.id).length === 0) await onEvent({ ...identity(input), kind: 'pending_input', nativeRequestId: 'q', questions: [{ id: 'tone', header: 'Tone', question: 'Which tone?', options: [{ label: 'Cool', description: '' }, { label: 'Warm', description: '' }] }] });
+    return completed(input);
+  });
+  f.enqueue('Discuss', { editing: false }); f.supervisor.tick(); await f.supervisor.settle();
+  const question = f.store.list('director_question', f.project.id)[0];
+  for (const answers of [[{ questionId: 'tone', optionIndex: 2 }], [{ questionId: 'tone', optionLabel: 'Unknown' }], [{ questionId: 'unknown', optionIndex: 0 }], [{ questionId: 'tone', optionIndex: 1, optionLabel: 'Cool' }]]) {
+    assert.throws(() => f.supervisor.answerQuestion(f.project.id, 'human', question.id, { answers }, JSON.stringify(answers)), { code: 'VALIDATION_ERROR' });
+  }
+  const answer = { answers: [{ questionId: 'tone', optionIndex: 1, text: 'Warm dawn' }] };
+  const actor = f.supervisor.answerQuestion(f.project.id, 'human', question.id, answer, 'structured');
+  assert.deepEqual(f.supervisor.answerQuestion(f.project.id, 'human', question.id, answer, 'structured'), actor);
+  f.supervisor.tick(); await f.supervisor.settle();
+  const saved = f.store.get('director_question', question.id);
+  assert.deepEqual(saved.answers, [{ questionId: 'tone', optionIndex: 1, optionLabel: 'Warm', text: 'Warm dawn' }]);
+  assert.match(received.context, /"optionIndex":1/);
+});
+test('conversation timestamps, user scopes and assistant runtime survive later runtime changes', async t => {
+  const f = fixture(t); const p = f.store.getProject(f.project.id);
+  f.store.saveProject({ ...p, scenes: [{ id: 'scene-test', revisionId: 'r', purpose: 'Scene' }] }, p.headVersion);
+  f.enqueue('Discuss scene', { scopeIds: ['scene-test'], editing: false }); f.supervisor.tick(); await f.supervisor.settle();
+  const second = new DirectorSupervisor(f.service, { id: 'codex-app-server', start: async input => completed(input, 'Live reply') }, { mode: 'native' });
+  const actor = f.service.beginRequest(f.project.id, 'human', 'Discuss film', { editing: false }); second.enqueue(f.project.id, actor); second.tick(); await second.settle(); await second.close();
+  const entries = f.service.snapshot(f.project.id).conversation;
+  assert.deepEqual(entries[0].scopeIds, ['scene-test']); assert.equal(entries[2].scopeIds, undefined);
+  assert.equal(entries[1].runtime, 'scripted'); assert.equal(entries[3].runtime, 'live'); assert.ok(entries.every(e => !Number.isNaN(Date.parse(e.at))));
+});
+
+test('a native reply without a phase tag is still reported as a reply',async t=>{
+ const f=fixture(t,async(input,{onEvent})=>{
+   await onEvent({...identity(input),kind:'assistant_message',phase:'unknown',text:'The review is saved.'});
+   return completed(input,'The review is saved.');
+ });
+ f.enqueue('Discuss',{editing:false});f.supervisor.tick();await f.supervisor.settle();
+ assert.equal(f.service.snapshot(f.project.id).turns[0].reason,null);
+ assert.equal(f.service.snapshot(f.project.id).conversation.at(-1).text,'The review is saved.');
+});
+
+test('turn effects count an idempotently replayed apply receipt once',async t=>{
+ const f=fixture(t,async input=>{
+   const actor=f.service.actorForBridge(input.projectId,input.bridge.credential),tools=new ToolInvocationService(f.service);
+   const prepared=await tools.invoke(input.projectId,actor,'prepare','prepare_change',{variant:'project',expectedHeadVersion:0,creative:{brief:'A saved brief'}});
+   for(const id of ['apply-first','apply-again'])await tools.invoke(input.projectId,actor,id,'apply_change',{preparedId:prepared.preparedId});
+   return completed(input);
+ });
+ f.enqueue();f.supervisor.tick();await f.supervisor.settle();
+ assert.equal(f.service.snapshot(f.project.id).turns[0].effects.changesApplied,1);
+ assert.equal(f.store.getProject(f.project.id).headVersion,1);
+});
+
+test('long turn publishes bounded phase metadata and retains diagnostic codes without private text', async t => {
+  const started = deferred(), release = deferred();
+  const f = fixture(t, async (input, { onEvent }) => {
+    await onEvent({ ...identity(input), kind: 'activity', phase: 'reasoning', state: 'started' });
+    await onEvent({ ...identity(input), kind: 'diagnostic', code: 'RUNTIME_STDERR', message: `private ${input.bridge.credential}` });
+    started.resolve(); await release.promise;
+    await onEvent({ ...identity(input), kind: 'activity', phase: 'reasoning', state: 'completed' });
+    return { ...completed(input, ''), status: 'interrupted', error: { code: 'RUNTIME_RUN_TIMEOUT', message: 'limit' } };
+  });
+  f.enqueue(); f.supervisor.tick(); await started.promise;
+  const running = f.service.snapshot(f.project.id).turns[0];
+  assert.equal(running.activity.phase, 'reasoning'); assert.equal(running.activity.state, 'started');
+  assert.ok(Number.isFinite(Date.parse(running.activity.at)));
+  release.resolve(); await f.supervisor.settle();
+  const ended = f.service.snapshot(f.project.id).turns[0];
+  assert.equal(ended.reason, 'timeout'); assert.equal(ended.activity.state, 'completed');
+  const events = f.store.readEvents(f.project.id), diagnostic = events.find(e => e.kind === 'director.diagnostic');
+  assert.equal(diagnostic.payload.code, 'RUNTIME_STDERR'); assert.equal(diagnostic.payload.message, undefined);
+  assert.ok(!JSON.stringify(events).includes('private'));
+});
+
+test('timeout preserves the first small saved change and never automatically replays it', async t => {
+  let calls = 0;
+  const f = fixture(t, async input => {
+    calls++;
+    const actor = f.service.actorForBridge(input.projectId, input.bridge.credential), tools = new ToolInvocationService(f.service);
+    const prepared = await tools.invoke(input.projectId, actor, 'early-prepare', 'prepare_change', { variant: 'project', expectedHeadVersion: 0, creative: { brief: 'Synthetic small first draft' } });
+    await tools.invoke(input.projectId, actor, 'early-save', 'apply_change', { preparedId: prepared.preparedId });
+    return { ...completed(input, ''), status: 'unknown', error: { code: 'RUNTIME_RUN_TIMEOUT', message: 'limit' } };
+  });
+  f.enqueue(); f.supervisor.tick(); await f.supervisor.settle();
+  assert.equal(f.store.getProject(f.project.id).brief, 'Synthetic small first draft');
+  const turn = f.service.snapshot(f.project.id).turns[0];
+  assert.equal(turn.reason, 'timeout'); assert.equal(turn.effects.changesApplied, 1);
+  for (let i = 0; i < 3; i++) f.supervisor.tick();
+  await f.supervisor.settle(); assert.equal(calls, 1);
+  assert.equal(f.store.list('attempt', f.project.id).length, 0);
+});
+
+test('no-op apply receipts do not count as saved Plan changes in timeout feedback', async t => {
+  const f = fixture(t, async input => {
+    const actor = f.service.actorForBridge(input.projectId, input.bridge.credential), tools = new ToolInvocationService(f.service);
+    const prepared = await tools.invoke(input.projectId, actor, 'noop-prepare', 'prepare_change', { variant: 'project', expectedHeadVersion: 0, creative: { brief: '' } });
+    await tools.invoke(input.projectId, actor, 'noop-apply', 'apply_change', { preparedId: prepared.preparedId });
+    return { ...completed(input, ''), status: 'interrupted', error: { code: 'RUNTIME_RUN_TIMEOUT', message: 'limit' } };
+  });
+  f.enqueue(); f.supervisor.tick(); await f.supervisor.settle();
+  assert.equal(f.store.getProject(f.project.id).headVersion, 0);
+  assert.equal(f.service.snapshot(f.project.id).turns[0].effects.changesApplied, 0);
+});
+
+test('an older running application tool stays visible when a newer concurrent call finishes', async t => {
+  const started = deferred(), release = deferred();
+  const f = fixture(t, async input => { started.resolve(input); await release.promise; return completed(input); });
+  const turn = f.enqueue(); f.supervisor.tick(); const input = await started.promise;
+  try {
+    f.store.put('tool_invocation', 'older-running', f.project.id, { id: 'older-running', projectId: f.project.id, requestId: input.requestId, epochId: input.epochId, tool: 'prepare_change', state: 'started' });
+    f.store.put('tool_invocation', 'newer-done', f.project.id, { id: 'newer-done', projectId: f.project.id, requestId: input.requestId, epochId: input.epochId, tool: 'read_context', state: 'succeeded' });
+    assert.deepEqual(f.service.snapshot(f.project.id).turns[0].progress, { tool: 'prepare_change', state: 'started' });
+    f.store.put('tool_invocation', 'older-running', f.project.id, { id: 'older-running', projectId: f.project.id, requestId: input.requestId, epochId: input.epochId, tool: 'prepare_change', state: 'succeeded' });
+  } finally { release.resolve(); }
+  await f.supervisor.settle();
+  assert.equal(f.store.get('director_turn', turn.id).state, 'completed');
 });

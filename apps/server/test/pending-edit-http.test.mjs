@@ -9,7 +9,7 @@ function fixture(t){const f=setup(t),service=new ProductionService(f.store,f.eng
  const post=(payload,key=randomUUID())=>app.inject({method:'POST',url:`/api/projects/${f.projectId}/messages`,headers:{host:'127.0.0.1',authorization:`Bearer ${token}`,'idempotency-key':key},payload});
  return{...f,service,post,enqueued};}
 test('fresh covering chat continues several reviewed edit owners once without generating permissions or jobs',async t=>{
- const f=fixture(t),a=f.service.beginRequest(f.projectId,'local-user','First edit',{scopeIds:['shot-0']}),b=f.service.beginRequest(f.projectId,'local-user','Second edit',{scopeIds:['shot-0']}),continueEdits=f.service.pendingEditContinuation(f.projectId,'local-user',['shot-0']);
+ const f=fixture(t),a=f.service.beginRequest(f.projectId,'local-user','First edit',{scopeIds:['shot-0']}),b=f.service.beginRequest(f.projectId,'local-user','Second edit',{scopeIds:['shot-0'],concurrency:'alongside'}),continueEdits=f.service.pendingEditContinuation(f.projectId,'local-user',['shot-0']);
  const body={text:'Continue these edits with a slower push.',scopeIds:['shot-0'],editing:true,continueEdits},key=randomUUID(),grants=f.store.list('grant',f.projectId).length;
  const response=await f.post(body,key);assert.equal(response.statusCode,200,response.body);const result=response.json();assert.equal(f.enqueued.length,1);
  assert.deepEqual(new Set(f.store.list('request_continuation',f.projectId).map(x=>x.fromRequestId)),new Set([a.requestId,b.requestId]));assert.ok(f.store.list('hold',f.projectId).filter(h=>h.active).every(h=>h.ownerId===result.requestId));

@@ -12,7 +12,7 @@ export function projectFixture(id = randomUUID(), count = 2) {
     id: `shot-${index}`, revisionId: randomUUID(), sceneId: `scene-${index}`, purpose: "Show the product",
     action: "A boot on a bench", framing: "Wide", motion: "Slow push", desiredFrames: 180,
     imagePrompt: `Boot angle ${index}`, videoPrompt: `Slow push angle ${index}`, referenceArtifactIds: [], cueId: null,
-    promptIntent: { image: "", video: "" },
+    promptIntent: { image: "", video: "" }, narration: { mode: "none", text: "", voice: "stock" },
   }));
   for (const shot of shots) refreshIntent(shot);
   return { id, revisionId: randomUUID(), headVersion: 0, name: "Fake execution", brief: "A labeled fake test", story: "Product study", scenes: shots.map(shot => ({ id: shot.sceneId, revisionId: randomUUID(), purpose: "Product" })), narration: { script: "", source: "undecided" }, maxFrames: 10800, capabilityLockId: randomUUID(), shots, cues: [], artifacts: [], activePlanId: null };
@@ -26,11 +26,11 @@ export function sourceFor(project, imagesOnly = false) {
   }
   return source + `return [${project.shots.map((_, index) => `${imagesOnly ? "image" : "video"}${index}`).join(",")}];});`;
 }
-export function setup(t, { count = 2, budgetMicros = "100000", profiles = DEFAULT_PROFILES, imagesOnly = false, leaseMs = 30000 } = {}) {
+export function setup(t, { count = 2, profiles = DEFAULT_PROFILES, imagesOnly = false, leaseMs = 30000 } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "openslate-execution-"));
   const dbPath = join(directory, "store.sqlite"); const providerPath = join(directory, "provider.sqlite"); const artifactDir = join(directory, "artifacts");
   const store = new Store(dbPath); const provider = new FakeProvider(providerPath);
-  const engine = new Engine(store, provider, { artifactDir, budgetMicros, profiles, leaseMs });
+  const engine = new Engine(store, provider, { artifactDir, profiles, leaseMs });
   const project = projectFixture(randomUUID(), count); store.createProject(project);
   const logicalIds = {};
   const compile = current => compilePlan(sourceFor(current, imagesOnly), { project: current, profiles, logicalIds, allocateId: randomUUID });
@@ -40,4 +40,8 @@ export function setup(t, { count = 2, budgetMicros = "100000", profiles = DEFAUL
   store.transaction(() => { engine.installPlan(project.id, planId, plan, grants); store.saveProject({ ...project, activePlanId: planId }, project.headVersion); });
   t.after(() => { if (store.db.open) store.close(); if (provider.db.open) provider.close(); rmSync(directory, { recursive: true, force: true }); });
   return { directory, dbPath, providerPath, artifactDir, store, provider, engine, projectId: project.id, plan, compile, logicalIds };
+}
+/** Simulates time passing beyond an unchanged-unknown backoff; it is mutable wakeup metadata, not evidence. */
+export function elapseUnknownBackoff(store, attemptId) {
+  const { unknownWait: _wait, ...attempt } = store.get("attempt", attemptId); store.put("attempt", attempt.id, attempt.projectId, attempt);
 }

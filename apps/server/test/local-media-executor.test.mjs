@@ -15,6 +15,7 @@ import { LocalMediaExecutor } from "../dist/execution/local-media-executor.js";
 import { ProductionService } from "../dist/application/service.js";
 import { LocalMediaService, MediaApplicationService } from "../dist/media/index.js";
 import { NarrationService, NarrationCanonicalService } from "../dist/narration/index.js";
+import { installNarrationAudio } from "../dist/narration/verified-audio.js";
 
 const execute = promisify(execFile);
 const ffmpeg = process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync("/opt/homebrew/bin/ffmpeg") ? "/opt/homebrew/bin/ffmpeg" : "/usr/bin/ffmpeg");
@@ -61,16 +62,28 @@ async function fixture(t) {
   const audio = await f.narration.importAudio(f.project.id, f.human, { path: voice, declaredOrigin: "uploaded", key: newId() });
   f.segmentId = f.view().segments[0].entry.segmentId;
   f.narration.bindAudio(f.project.id, f.human, f.view().state.version, newId(), f.segmentId, audio.id);
-  f.narration.recordHumanCue(f.project.id, f.human, f.view().state.version, newId(), { segmentId: f.segmentId, startSample: 12000, endSample: 84000 });
-  let segment = f.view().segments[0];
-  f.narration.accept(f.project.id, f.human, f.view().state.version, newId(), "script", [segment.script.id]);
-  f.narration.acceptAudio(f.project.id, f.human, f.view().state.version, newId(), [{ segmentRevisionId: segment.script.id, audioId: segment.audio.id }]);
-  segment = f.view().segments[0];
-  f.narration.accept(f.project.id, f.human, f.view().state.version, newId(), "timing", [segment.cue.id]);
+  const installed = await installNarrationAudio(f.media, f.artifactDir, f.project.id, audio.media);
+  f.store.insert("artifact", installed.id, f.project.id, installed);
+  // Plan-DSL asset takes have no shot mapping. Seed their accepted absolute
+  // fixture directly, as timeline-capture tests do; current narration writers
+  // require a dedicated shot and cannot author this out-of-scope planning shape.
   f.commitNarration = async atSample => {
-    f.narration.placeSegments(f.project.id, f.human, f.view().state.version, newId(), [{ segmentId: f.segmentId, atSample }]);
-    const prepared = f.canonical.prepare(f.project.id, f.human, { expectedHeadVersion: f.head().headVersion, expectedNarrationVersion: f.view().state.version, shotMappings: [], key: newId() });
-    return f.canonical.apply(f.project.id, f.human, prepared.id);
+    return f.store.transaction(() => {
+      const before = f.head(), cue = { id: newId(), meaning: "Crafted to last.", durationFrames: 45,
+        placementFrames: Math.round(atSample / 1600), audio: installed.artifact, accepted: true, measured: true };
+      const project = f.store.saveProject({ ...before, revisionId: newId(), cues: [cue],
+        narration: { script: "Crafted to last.", source: "uploaded" },
+        artifacts: [...f.clips, installed.artifact] }, before.headVersion);
+      f.store.insert("project_revision", project.revisionId, project.id, { project });
+      const record = { id: newId(), projectId: project.id, script: project.narration.script, shotMappings: [],
+        segments: [{ cue, audioPlacement: { source: audio.media, startSample: 12000, durationSamples: 72000, atSample, gainMilliDb: 0 } }] };
+      f.store.insert("narration_canonical", record.id, project.id, record);
+      f.store.put("narration_canonical_head", project.id, project.id, { canonicalId: record.id });
+      // The old project request owns only this test's explicit planning holds.
+      for (const hold of f.store.list("hold", project.id)) if (hold.active && hold.ownerId === f.human.requestId)
+        f.engine.releaseHold(project.id, hold.id, f.human.requestId);
+      return record;
+    });
   };
   await f.commitNarration(12000);
   f.plan = async ({ clips = f.clips, creative } = {}) => {

@@ -12,7 +12,7 @@ test("active immutable skills replace setup-discovered disabled records without 
   const skills = [{ name: "openslate-director", path: join(root, "SKILL.md") }];
   const runtime = new CodexDirectorRuntime({ command: { file: process.execPath, args: [fileURLToPath(new URL("runtime-fixture.mjs", import.meta.url))] },
     cwd: root, env: { FIXTURE_SCENARIO: "skills-config-dedup", FIXTURE_LOG: join(root, "log.jsonl"), FIXTURE_SKILLS: JSON.stringify(skills) },
-    model: "fake-model", runtimeVersion: "0.153.4", policy: { mode: "local", id: "fixture", runtimeVersion: "0.153.4", config: {
+    model: "fake-model", runtimeVersion: "0.162.1", policy: { mode: "local", id: "fixture", runtimeVersion: "0.162.1", config: {
       default_permissions: "fixture", permissions: { fixture: { filesystem: { "/": "none" }, network: { enabled: false } } },
       "skills.config": [{ path: skills[0].path, enabled: false }, { path: join(root, "inherited/SKILL.md"), enabled: false }],
     } }, limits: { ...PROTOCOL_FIXTURE_LIMITS } });

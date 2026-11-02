@@ -19,8 +19,8 @@ async function fixture(t, scenario = "complete") {
     bridge: { projectId: "project", endpoint: "http://127.0.0.1:12345", credential: "fixed-opaque-fixture-credential", entrypoint: join(root, "bridge.mjs") } };
   const log = join(root, "protocol.jsonl");
   const runtime = new CodexDirectorRuntime({ command: { file: process.execPath, args: [fileURLToPath(new URL("runtime-fixture.mjs", import.meta.url))] },
-    cwd: root, model: "fake-model", env: { FIXTURE_SCENARIO: scenario, FIXTURE_LOG: log }, runtimeVersion: "0.153.4",
-    policy: { mode: "local", id: "fixture", runtimeVersion: "0.153.4", config: { default_permissions: "fixture", permissions: { fixture: { filesystem: { "/": "none" }, network: { enabled: false } } } } },
+    cwd: root, model: "fake-model", env: { FIXTURE_SCENARIO: scenario, FIXTURE_LOG: log }, runtimeVersion: "0.162.1",
+    policy: { mode: "local", id: "fixture", runtimeVersion: "0.162.1", config: { default_permissions: "fixture", permissions: { fixture: { filesystem: { "/": "none" }, network: { enabled: false } } } } },
     limits: { ...PROTOCOL_FIXTURE_LIMITS } });
   return { root, path, image, input, runtime, log };
 }
@@ -55,11 +55,19 @@ test("modified hashes, disguised formats and oversized header dimensions fail be
 });
 test("image count, combined byte size and extra reference fields are bounded", async t => {
   const f = await fixture(t);
-  await assert.rejects(prepareDirectorImages(Array.from({ length: 5 }, () => f.image), f.root), error => error.code === "RUNTIME_IMAGES_INVALID");
+  await assert.rejects(prepareDirectorImages(Array.from({ length: 9 }, () => f.image), f.root), error => error.code === "RUNTIME_IMAGES_INVALID");
   await assert.rejects(prepareDirectorImages([{ ...f.image, projectId: "forged" }], f.root), error => error.code === "RUNTIME_IMAGES_INVALID");
   const bytes = Buffer.concat([png, Buffer.alloc(DIRECTOR_IMAGE_LIMITS.totalBytes / 2)]), refs = [];
   for (let i = 0; i < 2; i++) { const path = join(f.root, `large-${i}.png`); await writeFile(path, bytes); refs.push({ path, sha256: hash(bytes), mediaType: "image/png" }); }
   await assert.rejects(prepareDirectorImages(refs, f.root), error => error.code === "RUNTIME_IMAGE_LIMIT");
+});
+test("eight distinct bounded pictures are accepted with exactly the configured budget", async t => {
+  const f = await fixture(t), refs = [];
+  assert.equal(DIRECTOR_IMAGE_LIMITS.count, 8); assert.equal(DIRECTOR_IMAGE_LIMITS.totalBytes, 1024 * 1024);
+  for (let index = 0; index < 8; index++) {
+    const path = join(f.root, `picture-${index}.png`); await writeFile(path, png); refs.push({ ...f.image, path });
+  }
+  assert.equal((await prepareDirectorImages(refs, f.root)).length, 8);
 });
 test("JPEG and all supported WebP header forms apply dimension limits", async t => {
   const f = await fixture(t);

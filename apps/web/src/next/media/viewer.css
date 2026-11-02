@@ -1,0 +1,38 @@
+/* The shared media viewer: one picture or clip at full size (native <dialog> in the top layer) */
+dialog.media-viewer{color:var(--text);font:inherit;width:min(1400px,calc(100vw - 32px));max-width:calc(100vw - 32px);height:calc(100vh - 32px);max-height:calc(100vh - 32px);background:var(--bar);border:1px solid var(--track);border-radius:var(--r-big);padding:14px 16px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden}
+dialog.media-viewer::backdrop{background:rgba(8,9,10,.78)}
+.mv-body{display:flex;flex-direction:column;gap:10px;height:100%;min-height:0}
+.mv-head{display:flex;align-items:center;gap:12px}
+.mv-head h2{margin:0;flex:1;min-width:0;font-size:15px;font-weight:700;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mv-count{font-size:12.5px;color:var(--text-2);font-variant-numeric:tabular-nums}
+.mv-main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:14px}
+.mv-main[data-sided]{grid-template-columns:minmax(0,1fr) 340px}
+.mv-stage{position:relative;min-width:0;min-height:0;display:grid;place-items:center;background:#0b0c0d;border-radius:10px;overflow:hidden}
+/* Filling the stage with object-fit keeps every shape whole; a percentage max-height has nothing to resolve against here. */
+.mv-stage .pic-img,.mv-stage .mv-video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
+.mv-stage .pic-note{color:var(--text-2)}
+.mv-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:30px}
+.mv-detail{margin:0;font-size:12.5px;color:var(--text-2);line-height:1.45;min-width:0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.mv-nav{display:flex;gap:6px;flex:none}
+
+/* Beside the picture: the step's prompt and facts, or an asset's details */
+.mv-side{min-width:0;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:14px;font-size:13px;line-height:1.5}
+.mv-facts{display:flex;flex-direction:column;gap:14px;min-width:0}
+.mv-block{display:flex;flex-direction:column;gap:6px;min-width:0}
+.mv-block h3{margin:0;font-size:12px;font-weight:600;color:var(--text-2)}
+.mv-block-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.mv-prompt{margin:0;max-height:38vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--sunken);border:1px solid var(--hairline);border-radius:10px;padding:9px 11px;color:var(--text)}
+.mv-inputs{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.mv-inputs li{display:flex;flex-direction:column;gap:3px;width:72px;font-size:11.5px;color:var(--text-2)}
+.mv-input-pic{position:relative;display:block;height:96px;border-radius:6px;overflow:hidden;background:#0b0c0d;border:1px solid var(--hairline)}
+.mv-input-pic .pic-img,.mv-input-pic .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.mv-rows{margin:0;display:flex;flex-direction:column;gap:5px}
+.mv-rows > div{display:grid;grid-template-columns:72px minmax(0,1fr);gap:10px}
+.mv-rows dt{color:var(--text-2)}
+.mv-rows dd{margin:0;min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.mv-call > div{grid-template-columns:112px minmax(0,1fr)}
+.mv-call dt,.mv-call dd{font:12px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+.mv-note{margin:0;color:var(--text-2)}
+@media (max-width: 899px){
+  .mv-main[data-sided]{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
+}

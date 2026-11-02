@@ -3,11 +3,13 @@ import type { CodexRuntimeLimits } from "../runtime/policy.js";
 import { object, requireRuntime, RuntimeFault } from "../runtime/validation.js";
 
 const METHODS = new Set(["initialize", "config/read", "account/read", "modelProvider/capabilities/read", "thread/start", "thread/read", "turn/start", "turn/interrupt"]);
+import { nativeRpcFault, nativeTimeoutFault } from "../runtime/native-diagnostic.js";
+
 type Pending = { resolve(value: unknown): void; reject(error: RuntimeFault): void; dispose(): void };
 export interface RpcMessage { method: string; params: unknown; id?: string | number }
 export function timeout<T>(value: Promise<T>, ms: number, code: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new RuntimeFault(code, "Image worker operation exceeded its time limit")), ms);
+    const timer = setTimeout(() => reject(nativeTimeoutFault(code, "Image worker operation exceeded its time limit", ms)), ms);
     value.then(result => { clearTimeout(timer); resolve(result); }, error => { clearTimeout(timer); reject(error); });
   });
 }
@@ -35,12 +37,14 @@ export class ImageRpc {
   #onMessage: (message: RpcMessage) => void;
   #secrets: readonly string[];
   #methods: ReadonlySet<string>;
+  #startupDeadline: number | undefined;
 
   constructor(options: { command: string; args: string[]; cwd: string; env: Record<string, string>; limits: CodexRuntimeLimits;
     secrets: readonly string[]; allowedMethods?: readonly string[]; onMessage(message: RpcMessage): void }) {
     requireRuntime(options.allowedMethods === undefined || options.allowedMethods.every(method => METHODS.has(method)),
       "RUNTIME_METHOD_DENIED", "Native method is outside the runtime contract");
     this.#methods = new Set(options.allowedMethods ?? METHODS);
+    this.#startupDeadline = Date.now() + options.limits.startupTimeoutMs;
     this.#limits = options.limits; this.#onMessage = options.onMessage;
     this.#secrets = options.secrets.filter(value => value.length > 0).sort((a, b) => b.length - a.length);
     this.failed = new Promise(resolve => { this.#resolveFailure = resolve; });
@@ -88,6 +92,8 @@ export class ImageRpc {
   rejectServerRequest(id: string | number): void {
     this.send({ id, error: { code: -32601, message: "Interactive native requests are unavailable in this runtime" } });
   }
+  /** End the preparation phase before dispatch or an ordinary history read. */
+  finishStartup(): void { this.#startupDeadline = undefined; }
   request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
     requireRuntime(this.#methods.has(method), "RUNTIME_METHOD_DENIED", "Native method is outside the runtime contract");
     requireRuntime(!signal?.aborted, "RUNTIME_ABORTED", "Image worker run was cancelled");
@@ -100,7 +106,10 @@ export class ImageRpc {
         this.#pending.delete(id); this.#abandoned.add(id); pending.dispose(); reject(error);
       };
       const abort = () => abandon(new RuntimeFault("RUNTIME_ABORTED", "Image worker run was cancelled"));
-      const timer = setTimeout(() => abandon(new RuntimeFault("RUNTIME_RPC_TIMEOUT", "Native request timed out")), this.#limits.requestTimeoutMs);
+      const startup = this.#startupDeadline !== undefined && method !== "turn/start" && method !== "turn/interrupt";
+      const limitMs = startup ? this.#limits.startupTimeoutMs : this.#limits.requestTimeoutMs;
+      const remaining = startup ? Math.max(0, this.#startupDeadline! - Date.now()) : limitMs;
+      const timer = setTimeout(() => abandon(nativeTimeoutFault("RUNTIME_RPC_TIMEOUT", "Native request timed out", limitMs)), remaining);
       const dispose = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); };
       this.#pending.set(id, { resolve, reject, dispose });
       signal?.addEventListener("abort", abort, { once: true });
@@ -131,7 +140,7 @@ export class ImageRpc {
           requireRuntime(pending, "RUNTIME_PROTOCOL_INVALID", "Unexpected or duplicate native response");
           requireRuntime(message.error !== undefined || Object.hasOwn(message, "result"), "RUNTIME_PROTOCOL_INVALID", "Native response has no result");
           this.#pending.delete(message.id); pending.dispose();
-          if (message.error !== undefined) pending.reject(new RuntimeFault("RUNTIME_RPC_REJECTED", "Native runtime rejected the request"));
+          if (message.error !== undefined) pending.reject(nativeRpcFault(message.error));
           else pending.resolve(message.result);
         }
       }

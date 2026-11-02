@@ -195,6 +195,7 @@ test(`a final ${failure} failure rolls back artifact, source, proposal and comma
 test("a retained generated narration row keeps its speech and normalization provenance without a new call", async t => {
   const f = await generatedNarrationFixture(t, { extraProfiles: [structuredClone(transcriptionProfile)] });
   await f.narration.attachGeneratedAudio(f.project.id, f.human, selection(f));
+ f.human=f.production.beginRequest(f.project.id,'local-user','Transcribe this retained generated recording.');
   // This older fixture installs its speech plan directly through Engine. Establish
   // the current immutable application revision through a real application edit.
   const revision = await f.production.prepare(f.project.id, f.human, { variant: "project",

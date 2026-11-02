@@ -15,7 +15,7 @@ interface Work {nodeId:string;alias:string;kind:OperationKind;shotId:string|null
 export interface ProjectModelPreview {version:1;id:string;previewDigest:string;projectId:string;base:{headVersion:number;revisionId:string;capabilityLockId:string;selectionDigest:string;catalogDigest:string};
   selected:Selection;scope:ProjectModelScope;changes:Array<Work&{fromProfileId:string;toProfileId:string}>;
   preserved:Array<Work&{reason:'completed'|'in_flight'|'reviewed_audio'|'protected_dependency'|'outside_scope'|'unchanged'}>;
-  counts:{changed:number;preserved:number};generationApprovalRequired:boolean;allowanceRequired:boolean;notice:string}
+  counts:{changed:number;preserved:number};generationApprovalRequired:boolean;notice:string}
 export interface ProjectModelReceipt {previewId:string;previewDigest:string;projectId:string;headVersion:number;revisionId:string;capabilityLockId:string;activePlanId:string|null;changedNodeIds:string[];requestId:null}
 interface SavedPreview {id:string;projectId:string;version:1;input:ProjectModelPreviewInput;projectDigest:string;lockDigest:string;workDigest:string;logicalIds:Record<string,string>;
   profiles:ProviderProfile[];selected:Selection;compiled:CompiledPlan|null;resetNodeIds:string[];view:Omit<ProjectModelPreview,'previewDigest'>}
@@ -68,7 +68,8 @@ export class ProjectModelSettings {
     for(const nodeId of [...protectedReasons.keys()])protect(nodeId);
     const replacements:Array<{nodeId:string;profileId:string}>=[],preserved:ProjectModelPreview['preserved']=[];
     for(const binding of work.bindings){const node=binding.node;const brief={nodeId:node.id,alias:node.alias,kind:node.kind,shotId:node.shotId};
-      if(!kinds.includes(node.kind as MediaKind)){preserved.push({...brief,reason:protectedReasons.get(node.id)??'unchanged'});continue;}
+      // Lip-sync clips stay on their pinned lip-sync profile; the video choice applies to ordinary shots only.
+      if(!kinds.includes(node.kind as MediaKind)||node.args.adapter==='fal-h3-lipsync'){preserved.push({...brief,reason:protectedReasons.get(node.id)??'unchanged'});continue;}
       const outside=data.scope.kind==='shots'&&(!node.shotId||!data.scope.shotIds.includes(node.shotId));const preferred=selected[node.kind as MediaKind];
       const reason=protectedReasons.get(node.id)??(outside?'outside_scope':preferred===node.args.profileIdentity?'unchanged':null);
       if(reason||!preferred)preserved.push({...brief,reason:reason??'unchanged'});else replacements.push({nodeId:node.id,profileId:preferred});
@@ -90,7 +91,7 @@ export class ProjectModelSettings {
     const status=this.status(projectId);fail(status.headVersion===data.expectedHeadVersion&&this.work(projectId).digest===work.digest,'Work changed while preview was being prepared');
     return {version:1,projectId,input:data,projectDigest:digest(project),lockDigest:digest(lock),workDigest:work.digest,logicalIds,profiles,selected,compiled,resetNodeIds:[...reset],
       view:{version:1,projectId,base:{headVersion:project.headVersion,revisionId:project.revisionId,capabilityLockId:project.capabilityLockId,selectionDigest:status.selectionDigest,catalogDigest:this.catalog.digest},selected,scope:data.scope,
-        changes,preserved:kept,counts:{changed:changes.length,preserved:kept.length},generationApprovalRequired:changes.some(row=>["image","video"].includes(row.kind)),allowanceRequired:false,
+        changes,preserved:kept,counts:{changed:changes.length,preserved:kept.length},generationApprovalRequired:changes.some(row=>["image","video"].includes(row.kind)),
         notice:'Completed and in-flight work stays on its original model. Changed keyframes and videos need a fresh scene review. Model settings do not start generation.'}};
   }
   async preview(projectId:string,input:ProjectModelPreviewInput,options:{signal?:AbortSignal}={}):Promise<ProjectModelPreview>{

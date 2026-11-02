@@ -83,14 +83,20 @@ test('legacy assembly prevents incompatible pending H3 rewrite but still permits
   const f=await fixture(t,{local:false});await assert.rejects(f.preview({profileIds:[video.id]}),code('LOCAL_EXECUTION_UPGRADE_REQUIRED'));
   const empty=await fixture(t,{local:false,plan:false});const result=await empty.apply(await empty.preview({profileIds:[video.id]}));assert.equal(result.status.selected.video,video.id);
 });
-for(const mode of ['pending','unknown_after_accept'])test(`preserved ${mode} attempt recovers after another node changes without resubmission`,async t=>{
+for(const mode of ['pending','unknown_after_accept'])test(`preserved ${mode} attempt ${mode==='pending'?'recovers':'settles as a charged lost reply'} after another node changes without resubmission`,async t=>{
   const f=await fixture(t);f.provider.setMode(f.binding('image-0').id,mode);f.provider.setMode(f.binding('image-1').id,'reject_before_accept');await f.engine.runReady();
   const original=rows(f,'attempt').find(row=>row.nodeId===f.binding('image-0').id),count=f.provider.acceptedCount(),request=structuredClone(original.request),old=f.binding('image-0');
   const preview=await f.preview();assert.equal(preview.preserved.find(row=>row.nodeId===old.id).reason,'in_flight');await f.apply(preview);
   assert.equal(f.binding('image-0').candidateId,old.candidateId);assert.notEqual(f.binding('image-0').planId,old.planId);
   assert.deepEqual(f.store.get('attempt',original.id).request,request);if(mode==='pending')f.provider.complete(original.taskId);
-  await f.engine.reconcile();assert.equal(f.store.get('attempt',original.id).phase,'succeeded');assert.equal(f.provider.acceptedCount(),count);
-  assert.equal(f.store.get('reservation',original.reservationId).state,'charged');assert.equal(f.binding('image-0').outputs.image.artifactId,f.store.get('attempt',original.id).outputs.image.artifactId);
+  await f.engine.reconcile();const settled=f.store.get('attempt',original.id);assert.equal(settled.phase,mode==='pending'?'succeeded':'failed');assert.equal(f.provider.acceptedCount(),count);
+  assert.equal(f.store.get('reservation',original.reservationId).state,'charged');
+  if(mode==='pending')assert.equal(f.binding('image-0').outputs.image.artifactId,settled.outputs.image.artifactId);
+  else{
+    assert.equal(settled.failure.id,'SUBMISSION_RESPONSE_LOST');assert.equal(settled.failure.retryAllowed,false);assert.deepEqual(settled.outputs,{});assert.deepEqual(f.binding('image-0').outputs,{});
+    for(let cycle=0;cycle<3;cycle++){await f.engine.reconcile();await f.engine.runReady();}
+    assert.equal(f.provider.acceptedCount(),count);assert.equal(rows(f,'attempt').filter(row=>row.candidateId===original.candidateId).length,1);
+  }
 });
 test('completed downstream video protects its unfinished dependency ancestor',async t=>{
   const f=await fixture(t),imageBinding=f.binding('image-0'),videoBinding=f.binding('video-0');
@@ -170,6 +176,7 @@ test('configured-provider proof and an unknown native image retain their origina
   const f=codexImageFixture(t);f.build();t.after(()=>f.runtime.close());const selected=await f.seed();await f.runtime.engine.runReady();
   const attempt=f.store.list('attempt',selected.projectId)[0],families=['attempt','external_allowance','external_allowance_consumption','reservation','grant','candidate'],before=Object.fromEntries(families.map(kind=>[kind,f.store.list(kind,selected.projectId)]));assert.equal(attempt.phase,'submission_unknown');assert.equal(f.calls.start,1);
   const settings=new ProjectModelSettings(f.production,f.runtime.providerCatalog),status=settings.status(selected.projectId),preview=await settings.preview(selected.projectId,{expectedHeadVersion:status.headVersion,expectedSelectionDigest:status.selectionDigest,expectedCatalogDigest:status.catalogDigest,profileIds:[codexApiProfile.id],scope:{kind:'unfinished'}});
+  assert.equal(Object.hasOwn(preview,'allowanceRequired'),false);
   assert.equal(preview.changes.length,0);await settings.apply(selected.projectId,{previewId:preview.id,previewDigest:preview.previewDigest,key:'native-history'});assert.deepEqual(Object.fromEntries(families.map(kind=>[kind,f.store.list(kind,selected.projectId)])),before);
   await f.runtime.engine.reconcile();assert.equal(f.calls.start,1);assert.equal(f.calls.api,0);assert.equal(f.store.list('external_allowance_consumption',selected.projectId).length,0);assert.deepEqual(f.store.get('attempt',attempt.id).request,attempt.request);
   const pinnedLock=f.store.get('capability_lock',attempt.request.providerUse.capabilityLockId),pinnedProfile=pinnedLock.profiles.find(profile=>profile.id===attempt.request.profile.id);

@@ -1,5 +1,5 @@
 import type { DirectorImageInput } from "./images.js";
-import type { ToolContractVersion } from "@openslate/core";
+import type { NativeDiagnostic, ToolContractVersion } from "@openslate/core";
 export type { DirectorImageInput } from "./images.js";
 /** Application identities remain authoritative; native IDs are correlation hints only. */
 export interface DirectorRunIdentity {
@@ -39,6 +39,8 @@ export type DirectorRuntimeEvent = DirectorRunIdentity & (
   | { kind: "runtime_started"; nativeThreadId: string }
   | { kind: "turn_started"; nativeThreadId: string; nativeTurnId: string }
   | { kind: "assistant_message"; text: string; phase: "commentary" | "final" | "unknown" }
+  /** Phase metadata only: no reasoning text, tool arguments or native diagnostics. */
+  | { kind: "activity"; phase: "reasoning" | "tool"; state: "started" | "completed" }
   | { kind: "pending_input"; nativeRequestId: string; questions: readonly DirectorQuestion[] }
   | { kind: "diagnostic"; code: string; message: string }
 );
@@ -52,11 +54,13 @@ export interface DirectorRunResult extends DirectorRunIdentity {
   text: string;
   nativeThreadId?: string;
   nativeTurnId?: string;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; nativeDiagnostic?: NativeDiagnostic };
   /** True only after this adapter attempted to write turn/start. Never retry an unknown result. */
   dispatched: boolean;
 }
 export interface DirectorRuntime {
   readonly id: string;
   start(input: DirectorRunInput, options?: DirectorStartOptions): Promise<DirectorRunResult>;
+  /** Host shutdown fences new runs and closes owned native process groups. */
+  close?(): Promise<void>;
 }

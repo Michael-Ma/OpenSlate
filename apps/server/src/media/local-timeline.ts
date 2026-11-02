@@ -4,11 +4,48 @@ import { link, mkdtemp, open, rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { canonical, digest, invariant, snapshotLocalExecution, type LocalExecutionIdentity } from "@openslate/core";
 import type { SuppliedAudioPlacement, SuppliedClip, SuppliedMedia } from "./types.js";
+import { validateCaptions, type Caption } from "./captions.js";
 
-export interface LocalTimelineInput {
+export const SOUND_NAMES = ["pop", "thud", "whoosh", "ding", "tick", "boing"] as const;
+export type SoundName = typeof SOUND_NAMES[number];
+export interface RowEdits { speed?: 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2; holdFrames?: number; zoom?: { scale: number; x?: number; y?: number } }
+export type EditedClip = SuppliedClip & RowEdits;
+export type EditedAudioPlacement = SuppliedAudioPlacement & { fadeInSamples?: number };
+export interface RenderExtras { captions?: Caption[]; mastering?: "loudnorm-0.3.0"; sfxPackDigest?: string }
+
+export function rowEdits(row: Record<string, unknown>, index: number): RowEdits {
+  const name = `Row ${index + 1}`, result: RowEdits = {};
+  if (row.speed !== undefined) {
+    invariant([0.5, 0.75, 1, 1.25, 1.5, 2].includes(row.speed as number), "CODE_PLAN_RENDER_INPUT", `${name}: speed must be one of 0.5, 0.75, 1, 1.25, 1.5, 2`);
+    result.speed = row.speed as RowEdits["speed"] & number;
+  }
+  if (row.holdFrames !== undefined) {
+    invariant(Number.isSafeInteger(row.holdFrames) && Number(row.holdFrames) >= 1 && Number(row.holdFrames) <= 90,
+      "CODE_PLAN_RENDER_INPUT", `${name}: holdFrames must be an integer in 1–90`);
+    result.holdFrames = row.holdFrames as number;
+  }
+  if (row.zoom !== undefined) {
+    const zoom = row.zoom as Record<string, unknown>;
+    invariant(zoom && typeof zoom === "object" && !Array.isArray(zoom) && Object.keys(zoom).every(key => ["scale", "x", "y"].includes(key))
+      && typeof zoom.scale === "number" && Number.isFinite(zoom.scale) && zoom.scale > 1 && zoom.scale <= 1.4,
+    "CODE_PLAN_RENDER_INPUT", `${name}: zoom.scale must be greater than 1 and at most 1.4`);
+    for (const key of ["x", "y"]) invariant(zoom[key] === undefined || typeof zoom[key] === "number" && Number.isFinite(zoom[key]) && Number(zoom[key]) >= 0 && Number(zoom[key]) <= 1,
+      "CODE_PLAN_RENDER_INPUT", `${name}: zoom.${key} must be in 0–1 (default 0.5)`);
+    result.zoom = { scale: zoom.scale, ...(zoom.x === undefined ? {} : { x: zoom.x as number }), ...(zoom.y === undefined ? {} : { y: zoom.y as number }) };
+  }
+  return result;
+}
+export const rowFrames = (row: { durationFrames: number } & RowEdits): number => Math.round(row.durationFrames / (row.speed ?? 1)) + (row.holdFrames ?? 0);
+export function fadeSamples(value: unknown, duration: number, row: number, field: string): number {
+  const max = Math.min(240000, duration);
+  invariant(Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= max, "CODE_PLAN_RENDER_INPUT", `Audio row ${row + 1}: ${field} must be an integer in 1–${max}`);
+  return value as number;
+}
+
+export interface LocalTimelineInput extends RenderExtras {
   projectId: string;
-  clips: SuppliedClip[];
-  audio: SuppliedAudioPlacement[];
+  clips: EditedClip[];
+  audio: EditedAudioPlacement[];
 }
 export interface LocalTimelineDocument extends LocalTimelineInput {
   version: 1;
@@ -17,7 +54,7 @@ export interface LocalTimelineDocument extends LocalTimelineInput {
   frameRate: { numerator: 30; denominator: 1 };
   sampleRate: 48000;
   totalFrames: number;
-  audio: (SuppliedAudioPlacement & { gainMilliDb: number })[];
+  audio: (EditedAudioPlacement & { gainMilliDb: number })[];
   recipeDigest: string;
 }
 /** File bytes and recipe identity are different hashes; neither grants publication authority. */
@@ -34,6 +71,10 @@ interface SourceVerifier {
 const MAX_BYTES = 1024 * 1024, MAX_FRAMES = 10800, MAX_SAMPLES = MAX_FRAMES * 1600, MAX_SOURCE_BYTES = 1024 * 1024 * 1024;
 const HASH = /^[a-f0-9]{64}$/, ID = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 function invalid(value: unknown, message: string): asserts value { invariant(value, "LOCAL_TIMELINE_INVALID", message); }
+function rowContext<T>(label: string, action: () => T): T {
+  try { return action(); }
+  catch (error) { if (error instanceof Error && !error.message.startsWith(label)) error.message = `${label}: ${error.message}`; throw error; }
+}
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 function cancelled(signal?: AbortSignal): void { invariant(!signal?.aborted, "MEDIA_CANCELLED", "Timeline operation cancelled"); }
 function freeze<T>(value: T): T {
@@ -99,7 +140,7 @@ function source(value: unknown, kind: "video" | "audio"): SuppliedMedia {
   return s as unknown as SuppliedMedia;
 }
 function create(input: unknown): LocalTimelineDocument {
-  const value = object(input, ["projectId", "clips", "audio"]); identity(value.projectId, ID);
+  const value = object(input, ["projectId", "clips", "audio"], ["captions", "mastering", "sfxPackDigest"]); identity(value.projectId, ID);
   invalid(Array.isArray(value.clips) && value.clips.length > 0 && value.clips.length <= 64, "A timeline needs one to 64 clips");
   invalid(Array.isArray(value.audio) && value.audio.length <= 65, "A timeline supports at most 65 audio placements");
   const artifacts = new Map<string, string>();
@@ -107,32 +148,38 @@ function create(input: unknown): LocalTimelineDocument {
     invalid(!artifacts.has(media.artifactId) || artifacts.get(media.artifactId) === media.id, "One artifact cannot name different source descriptors");
     artifacts.set(media.artifactId, media.id); return media;
   };
-  const clips: SuppliedClip[] = value.clips.map(raw => {
-    const clip = object(raw, ["source", "startFrame", "durationFrames", "fit"]), media = remember(source(clip.source, "video"));
+  const clips: EditedClip[] = value.clips.map((raw, index) => rowContext(`Row ${index + 1}`, () => {
+    const clip = object(raw, ["source", "startFrame", "durationFrames", "fit"], ["speed", "holdFrames", "zoom"]), media = remember(source(clip.source, "video"));
     integer(clip.startFrame, 0, MAX_FRAMES); integer(clip.durationFrames, 1, MAX_FRAMES);
-    invalid(clip.startFrame + clip.durationFrames <= media.probe.video!.frames, "Clip exceeds measured source frames");
+    invalid(clip.startFrame + clip.durationFrames <= media.probe.video!.frames, `Row ${index + 1}: clip exceeds measured source frames (0–${media.probe.video!.frames - 1})`);
     invalid(clip.fit === "contain" || clip.fit === "cover", "Clip fit must be contain or cover");
-    return { source: media, startFrame: clip.startFrame, durationFrames: clip.durationFrames, fit: clip.fit };
-  });
-  const totalFrames = clips.reduce((sum, clip) => sum + clip.durationFrames, 0); integer(totalFrames, 1, MAX_FRAMES);
+    return { source: media, startFrame: clip.startFrame, durationFrames: clip.durationFrames, fit: clip.fit, ...rowEdits(clip, index) };
+  }));
+  const totalFrames = clips.reduce((sum, clip) => sum + rowFrames(clip), 0); integer(totalFrames, 1, MAX_FRAMES);
   const audioSources = new Set<string>();
-  const audio = value.audio.map(raw => {
-    const placement = object(raw, ["source", "startSample", "durationSamples", "atSample"], ["gainMilliDb"]), media = remember(source(placement.source, "audio"));
+  const audio = value.audio.map((raw, index) => rowContext(`Audio row ${index + 1}`, () => {
+    const placement = object(raw, ["source", "startSample", "durationSamples", "atSample"], ["gainMilliDb", "fadeOutSamples", "fadeInSamples"]), media = remember(source(placement.source, "audio"));
     integer(placement.startSample, 0, MAX_SAMPLES); integer(placement.durationSamples, 1, MAX_SAMPLES); integer(placement.atSample, 0, totalFrames * 1600);
     const gainMilliDb = Object.hasOwn(placement, "gainMilliDb") ? placement.gainMilliDb : 0; integer(gainMilliDb, -60000, 12000);
-    invalid(placement.startSample + placement.durationSamples <= media.probe.audio!.samples!, "Audio exceeds measured source samples");
-    invalid(placement.atSample + placement.durationSamples <= totalFrames * 1600, "Audio extends beyond the timeline");
+    invalid(placement.startSample + placement.durationSamples <= media.probe.audio!.samples!, `Audio row ${index + 1}: audio exceeds measured source samples (0–${media.probe.audio!.samples! - 1})`);
+    invalid(placement.atSample + placement.durationSamples <= totalFrames * 1600, `Audio row ${index + 1}: audio extends beyond the timeline (0–${totalFrames * 1600} samples)`);
+    if (placement.fadeOutSamples !== undefined) integer(placement.fadeOutSamples, 1, Math.min(240000, placement.durationSamples));
+    if (placement.fadeInSamples !== undefined) fadeSamples(placement.fadeInSamples, placement.durationSamples, index, "fadeInSamples");
     audioSources.add(media.sha256); invalid(audioSources.size <= 65, "Too many distinct audio sources");
-    return { source: media, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb };
-  });
+    return { source: media, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb, ...(placement.fadeOutSamples !== undefined ? { fadeOutSamples: placement.fadeOutSamples } : {}), ...(placement.fadeInSamples !== undefined ? { fadeInSamples: placement.fadeInSamples as number } : {}) };
+  }));
   const ends: number[] = [];
   for (const placement of [...audio].sort((a, b) => a.atSample - b.atSample)) {
     const lane = ends.findIndex(end => end <= placement.atSample);
     if (lane < 0) ends.push(placement.atSample + placement.durationSamples); else ends[lane] = placement.atSample + placement.durationSamples;
     invalid(ends.length <= 8, "Too many simultaneous audio placements");
   }
+  const extras: RenderExtras = {};
+  if (value.captions !== undefined) extras.captions = validateCaptions(value.captions, totalFrames);
+  if (value.mastering !== undefined) { invalid(value.mastering === "loudnorm-0.3.0", "Unsupported timeline mastering recipe"); extras.mastering = value.mastering; }
+  if (value.sfxPackDigest !== undefined) { identity(value.sfxPackDigest); extras.sfxPackDigest = value.sfxPackDigest; }
   const body = { version: 1 as const, localExecution: snapshotLocalExecution({ adapter: "local-media", version: "1" }), projectId: value.projectId,
-    transition: "cut" as const, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio };
+    transition: "cut" as const, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, ...extras };
   const document = { ...body, recipeDigest: digest(body) };
   invalid(Buffer.byteLength(canonical(document)) <= MAX_BYTES, "Timeline document exceeds its byte limit");
   return freeze(document);
@@ -141,8 +188,9 @@ function create(input: unknown): LocalTimelineDocument {
 /** Select projectId/clips/audio from the SQL capture; publication target remains with the caller. */
 export function createLocalTimelineDocument(input: LocalTimelineInput): LocalTimelineDocument { return create(snapshot(input)); }
 export function parseLocalTimelineDocument(input: unknown): LocalTimelineDocument {
-  const value = object(snapshot(input), ["version", "localExecution", "projectId", "transition", "frameRate", "sampleRate", "totalFrames", "clips", "audio", "recipeDigest"]);
-  const document = create({ projectId: value.projectId, clips: value.clips, audio: value.audio });
+  const value = object(snapshot(input), ["version", "localExecution", "projectId", "transition", "frameRate", "sampleRate", "totalFrames", "clips", "audio", "recipeDigest"], ["captions", "mastering", "sfxPackDigest"]);
+  const { version: _version, localExecution: _execution, transition: _transition, frameRate: _fps, sampleRate: _rate, totalFrames: _frames, recipeDigest: _digest, ...inputValue } = value;
+  const document = create(inputValue);
   invalid(canonical(value) === canonical(document), "Timeline document does not match its canonical recipe");
   return document;
 }

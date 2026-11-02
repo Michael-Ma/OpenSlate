@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { invariant, parseToolArguments, toolCatalog } from "@openslate/core";
+import { canonical, invariant, parseToolArguments, toolCatalog, toolContractAtLeast } from "@openslate/core";
 import type { ToolContractVersion } from "@openslate/core";
 
 export interface BridgeLimits { requestBytes: number; responseBytes: number; timeoutMs: number; concurrency: number }
@@ -13,7 +13,8 @@ export interface ToolBridgeOptions {
   /** May only tighten the production defaults. */
   limits?: Partial<BridgeLimits>;
 }
-export interface ToolBridgeResult { callId: string; isError: boolean; value: unknown }
+export type ToolContent = { type: "text"; text: string } | { type: "image"; mimeType: "image/jpeg"; data: string };
+export interface ToolBridgeResult { callId: string; isError: boolean; value: unknown; content?: ToolContent[] }
 export interface ToolInvoker { readonly toolContractVersion?: ToolContractVersion; call(name: string, input: unknown, signal?: AbortSignal): Promise<ToolBridgeResult> }
 
 function limit(value: number | undefined, maximum: number): number {
@@ -50,8 +51,13 @@ export class ToolBridge implements ToolInvoker {
   }
 
   async call(name: string, input: unknown, signal?: AbortSignal): Promise<ToolBridgeResult> {
-    const parsed = parseToolArguments(name, input, this.toolContractVersion);
-    const body = JSON.stringify(parsed.arguments);
+    // Notes have a durable application-owned refusal state. Let that server
+    // validator see the original JSON, including malformed note fields, so a
+    // failed review can explain itself to both the Director and the person.
+    // This changes transport only: the locked schema still governs writes.
+    const body = name === "record_notes" && toolContractAtLeast(this.toolContractVersion, "5.0.0")
+      ? canonical(input)
+      : JSON.stringify(parseToolArguments(name, input, this.toolContractVersion).arguments);
     invariant(Buffer.byteLength(body) <= this.#limits.requestBytes, "TOOL_ARGUMENTS_TOO_LARGE", "Tool arguments exceed the bridge request limit");
     invariant(this.#active < this.#limits.concurrency, "BRIDGE_BUSY", "Bridge has no free request slot");
     invariant(!signal?.aborted, "TOOL_CALL_CANCELLED", "Tool call was cancelled before dispatch");
@@ -63,7 +69,7 @@ export class ToolBridge implements ToolInvoker {
     this.#active++;
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
-      const response = await fetch(this.#endpoint + parsed.name, {
+      const response = await fetch(this.#endpoint + name, {
         method: "POST", redirect: "error", signal: controller.signal,
         headers: { "content-type": "application/json", authorization: `Bearer ${this.#credential}`, "x-openslate-tool-call-id": callId }, body,
       });
@@ -84,7 +90,12 @@ export class ToolBridge implements ToolInvoker {
       const applicationError = value !== null && typeof value === "object" && "error" in value;
       if (response.status >= 500) throw new Error("SERVER_OUTCOME_UNKNOWN");
       if (!response.ok && !applicationError) throw new Error("INVALID_TOOL_ERROR_RESPONSE");
-      return { callId, isError: !response.ok || applicationError, value };
+      const content = name === "read_clip_frames" && response.ok && !applicationError && value !== null && typeof value === "object" && "content" in value
+        ? value.content as ToolContent[] : undefined;
+      if (content) invariant(Array.isArray(content) && content.length === 2 && content[0]?.type === "text" && typeof content[0].text === "string"
+        && content[1]?.type === "image" && content[1].mimeType === "image/jpeg" && typeof content[1].data === "string"
+        && content[1].data.length <= 2 * 1024 * 1024, "INVALID_TOOL_RESPONSE", "Invalid clip sheet response");
+      return { callId, isError: !response.ok || applicationError, value, ...(content ? { content } : {}) };
     } catch {
       // Even a socket/timeout/response error can follow a successful server commit.
       return { callId, isError: true, value: { error: { code: "TOOL_CALL_UNRESOLVED", message: "Tool outcome is unknown. Reconcile this call with application state before retrying.", callId, outcome: "unknown" } } };

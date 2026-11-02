@@ -8,7 +8,7 @@ import { digest,canonical } from '@openslate/core';
 import { FakeProvider,registerExecutionProvider,OPENAI_IMAGE_MODEL } from '@openslate/providers';
 import { Store } from '../dist/persistence/store.js';
 import { Engine } from '../dist/execution/engine.js';
-import { ConfiguredExternalAdmission } from '../dist/execution/durable-external-admission.js';
+import { ConfiguredExternalAdmission } from '../dist/execution/configured-external-admission.js';
 import { assertConfiguredProviderAdmission } from '../dist/execution/provider-use.js';
 import { ProductionService } from '../dist/application/service.js';
 import { createInstallationBackup,inspectInstallationBackup } from '../dist/persistence/installation-backup.js';
@@ -39,11 +39,11 @@ test('configured admission inserts its exact pin before the reservation and then
   const attempt=f.admit();assert.equal(checked,true);assertConfiguredProviderAdmission(f.store,attempt);assert.equal(f.store.get('reservation',attempt.reservationId).micros,'123');assert.deepEqual(f.calls,[]);
 });
 
-for(const name of ['missing-proof','mixed-allowance','extra-proof-field','missing-lock','wrong-lock-digest','wrong-profile-digest','different-request-node'])test(`Store rejects ${name} before configured admission commits`,async t=>{
+for(const name of ['missing-proof','wrong-proof-kind','extra-proof-field','missing-lock','wrong-lock-digest','wrong-profile-digest','different-request-node'])test(`Store rejects ${name} before configured admission commits`,async t=>{
   const f=await fixture(t),insert=f.store.insert.bind(f.store);
   f.store.insert=(kind,id,projectId,input)=>{const body=structuredClone(input);if(kind==='attempt'){
     if(name==='missing-proof')delete body.request.providerUse;
-    else if(name==='mixed-allowance')body.request.externalAllowanceId='invented-allowance';
+    else if(name==='wrong-proof-kind')body.request.providerUse.kind='invented';
     else if(name==='extra-proof-field')body.request.providerUse.extra=true;
     else if(name==='missing-lock')body.request.providerUse.capabilityLockId='missing';
     else if(name==='wrong-lock-digest')body.request.providerUse.capabilityLockDigest='a'.repeat(64);
@@ -67,7 +67,7 @@ test('image receipt insertion checks the configured admission even before a mapp
   assert.throws(()=>f.store.insert('image_execution_result',attempt.id,f.project.id,result),conflict);assert.equal(f.store.get('image_execution_result',attempt.id),undefined);
 });
 
-for(const name of ['missing-proof','missing-lock','wrong-lock-digest','changed-reservation','missing-reservation','changed-grant','mixed-consumption','row-identity','foreign-lock-row','foreign-reservation-row'])test(`backup rejects configured ${name} before any bridge mapping exists`,async t=>{
+for(const name of ['missing-proof','missing-lock','wrong-lock-digest','changed-reservation','missing-reservation','changed-grant','changed-profile','row-identity','foreign-lock-row','foreign-reservation-row'])test(`backup rejects configured ${name} before any bridge mapping exists`,async t=>{
   const f=await fixture(t),attempt=f.admit();
   if(name==='missing-proof')rewrite(f,'attempt',attempt.id,row=>{delete row.request.providerUse;});
   else if(name==='missing-lock')f.store.db.prepare("DELETE FROM entities WHERE kind='capability_lock' AND id=?").run(attempt.request.providerUse.capabilityLockId);
@@ -75,7 +75,7 @@ for(const name of ['missing-proof','missing-lock','wrong-lock-digest','changed-r
   else if(name==='changed-reservation')rewrite(f,'reservation',attempt.reservationId,row=>{row.micros='0';});
   else if(name==='missing-reservation')f.store.db.prepare("DELETE FROM entities WHERE kind='reservation' AND id=?").run(attempt.reservationId);
   else if(name==='changed-grant')rewrite(f,'grant',f.store.get('candidate',attempt.candidateId).grantId,row=>{row.kind='video';});
-  else if(name==='mixed-consumption')f.store.db.prepare('INSERT INTO entities(kind,id,project_id,body) VALUES(?,?,?,?)').run('external_allowance_consumption',attempt.id,f.project.id,canonical({id:attempt.id,projectId:f.project.id}));
+  else if(name==='changed-profile')rewrite(f,'capability_lock',attempt.request.providerUse.capabilityLockId,row=>{row.profiles[0].maxConcurrency=2;});
   else if(name==='row-identity')f.store.db.prepare("UPDATE entities SET id=? WHERE kind='attempt' AND id=?").run('different-row',attempt.id);
   else {const foreign=f.production.createProject('Foreign proof row'),kind=name==='foreign-lock-row'?'capability_lock':'reservation',id=kind==='capability_lock'?attempt.request.providerUse.capabilityLockId:attempt.reservationId;
     f.store.db.prepare('UPDATE entities SET project_id=? WHERE kind=? AND id=?').run(foreign.id,kind,id);}
@@ -94,10 +94,9 @@ test('retained configured pins survive changed defaults, retired binding, Stop, 
   assert.throws(()=>engine.recovery.assertFirstSubmit(f.project.id,attempt.id),{code:'RESTORED_AUTHORITY_REQUIRES_NEW'});assert.deepEqual(f.calls,[]);
 });
 
-test('old allowance-shaped and unknown legacy attempt JSON remains unchanged',async t=>{
+test('an allowance-shaped external v1 attempt without providerUse is rejected',async t=>{
   const f=await fixture(t),attempt=f.admit(),historical={...attempt,id:'old-attempt',ordinal:2,reservationId:'old-reservation',request:{...attempt.request,attemptId:'old-attempt',externalAllowanceId:'old-allowance'}};delete historical.request.providerUse;
-  const saved=f.store.insert('attempt',historical.id,f.project.id,historical);assert.deepEqual(saved,historical);
-  assertConfiguredProviderAdmission(f.store,saved);assert.deepEqual(f.store.get('attempt',saved.id),historical);
-  const legacy={candidateId:null,workKey:'old-local',ordinal:1,request:{execution:{adapter:'old-custom',version:'1'}},phase:'submission_unknown'};
-  const old=f.store.insert('attempt','legacy-attempt',f.project.id,legacy);assert.deepEqual(old,{...legacy,id:'legacy-attempt',projectId:f.project.id});
+  assert.throws(()=>f.store.insert('attempt',historical.id,f.project.id,historical),conflict);
+  assert.equal(f.store.get('attempt',historical.id),undefined);assert.equal(f.store.list('attempt',f.project.id).length,1);
+  assert.equal(f.store.list('reservation',f.project.id).length,1);assert.deepEqual(f.calls,[]);
 });

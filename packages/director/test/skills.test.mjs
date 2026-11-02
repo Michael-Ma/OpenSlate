@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { compilePlan } from "@openslate/core";
-import { SKILL_LIMITS, SKILL_TOOL_IDS, loadSkillCatalog, verifySkillSnapshot, createSkillLock, verifySkillLock, activateSkills, readActivatedSkillFile } from "../dist/skills/index.js";
+import { SKILL_LIMITS, SKILL_TOOL_IDS, loadSkillCatalog, verifySkillSnapshot, createSkillLock, verifySkillLock, verifySkillLockSnapshots, activateSkills, readActivatedSkillFile } from "../dist/skills/index.js";
 
 const compatibility = { toolContract: "1.0.0", planLanguage: "1.0.0", workflowContract: "1.0.0" };
 const checksum = value => createHash("sha256").update(value).digest("hex");
@@ -93,6 +93,18 @@ test("corrupt or missing snapshots fail closed without replacing pinned bytes fr
   assert.throws(() => verifySkillLock(lock, f.environment), { code: "SKILL_SNAPSHOT_INVALID" });
 });
 
+test("historical snapshot verification retains lock integrity without requiring today's implementation bindings", t => {
+  const f = fixture(t), catalog = f.load();
+  const lock = createSkillLock(catalog, { selectedSkillIds: ["production"], bindings: [{ kind: "handler", id: "historical-handler", digest: checksum("old") }],
+    prompts: [{ id: "historical-prompt", skillId: "production", path: "references/guide.md" }] });
+  assert.equal(verifySkillLockSnapshots(lock, f.environment.snapshotRoot)[0].packageDigest, lock.skills[0].packageDigest);
+  assert.throws(() => verifySkillLock(lock, f.environment), { code: "SKILL_COMPATIBILITY_MISMATCH" });
+  assert.throws(() => verifySkillLockSnapshots({ ...lock, lockDigest: "0".repeat(64) }, f.environment.snapshotRoot), { code: "SKILL_LOCK_INVALID" });
+  const file = join(catalog.skills[0].immutableRoot, "references/guide.md");
+  chmodSync(file, 0o600); writeFileSync(file, "Corrupt historical instructions");
+  assert.throws(() => verifySkillLockSnapshots(lock, f.environment.snapshotRoot), { code: "SKILL_SNAPSHOT_INVALID" });
+});
+
 test("snapshot writable modes and extra files are rejected even when declared content hashes match", t => {
   const f = fixture(t); const skill = f.load().skills[0];
   chmodSync(skill.entryPath, 0o644);
@@ -165,6 +177,21 @@ test("references must exist, stay within the package, and be explicitly declared
   writeFileSync(join(f.source, "references/guide.md"), "Read [entry](../SKILL.md) and [official source](https://example.com/documentation).\n");
   assert.equal(f.load().skills.length, 1);
   writeFileSync(join(f.source, "undeclared.md"), "extra"); assert.throws(f.load, /missing or undeclared/);
+});
+
+test("TypeScript references are inert bounded instruction text and remain inside references", t => {
+  const f = fixture(t);
+  const source = 'throw new Error("Instruction text must never execute");\n';
+  writeFileSync(join(f.source, "references/example.ts"), source);
+  writeFileSync(join(f.source, "references/studio.d.ts"), 'interface Studio { log(text: string): Promise<null> }\n');
+  const files = [...f.manifest.files, "references/example.ts", "references/studio.d.ts"];
+  f.setManifest({ files });
+  const lock = lockFor(f), activation = activateSkills(lock, { ...f.environment, requestId: "typescript-reference",
+    contextDigest: checksum("code context"), selectedSkillIds: ["production"] });
+  assert.equal(readActivatedSkillFile(lock, activation, f.environment, { skillId: "production", path: "references/example.ts" }).content, source);
+  writeFileSync(join(f.source, "outside.ts"), source);
+  f.setManifest({ files: [...files, "outside.ts"] });
+  assert.throws(f.load, /TypeScript reference/);
 });
 
 for (const kind of ["file", "directory", "package-root"]) test(`symlink ${kind} cannot enter a trusted instruction snapshot`, t => {

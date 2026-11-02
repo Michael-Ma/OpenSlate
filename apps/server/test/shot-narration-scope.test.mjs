@@ -27,9 +27,9 @@ test('dedicated shot session pins exactly one section; cross-section writes, sec
   ()=>f.narration.reviseSegments(f.project.id,f.scoped,view().state.version,key(),{order:view().segments.map(s=>s.entry.segmentId)}),
   ()=>f.narration.accept(f.project.id,f.scoped,view().state.version,key(),'script',[f.other.script.id]),
   ()=>f.narration.placeSegments(f.project.id,f.scoped,view().state.version,key(),[{segmentId:f.other.entry.segmentId,atSample:0}]),
-  ()=>f.canonical.prepare(f.project.id,f.scoped,{expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedNarrationVersion:view().state.version,segmentIds:[f.segment.entry.segmentId],shotMappings:[{shotId:f.project.shots[1].id,segmentId:f.segment.entry.segmentId}],key:key()}),
+  ()=>f.canonical.prepare(f.project.id,f.scoped,{expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedNarrationVersion:view().state.version,segmentIds:[f.segment.entry.segmentId],shotRelativeSegmentIds:[f.segment.entry.segmentId],shotDurationMode:'preserve',shotMappings:[{shotId:f.project.shots[1].id,segmentId:f.segment.entry.segmentId}],key:key()}),
  ];
- for(const action of actions){const before=f.before();assert.throws(action);assert.equal(f.before(),before);}
+ for(const action of actions){const before=f.before();assert.throws(action,{code:'SCOPE_DENIED'});assert.equal(f.before(),before);}
  const loose=f.production.beginRequest(f.project.id,'local-user','An ordinary scoped conversation',{scopeIds:[f.project.shots[0].id]});
  assert.throws(()=>f.narration.reviseSegments(f.project.id,loose,view().state.version,key(),{update:[{segmentId:f.segment.entry.segmentId,draft}]}),{code:'SCOPE_DENIED'});
  assert.deepEqual(f.store.get('narration_shot_scope',scope.id),scope);assert.equal(narrationScopeTarget(f.store,scope).segmentId,f.segment.entry.segmentId);
@@ -69,5 +69,12 @@ test('opening a compact edit also holds its legacy project-authored speech while
  assert.equal(f.engine.held(current,firstNode),false);assert.equal(f.engine.held(current,secondNode),false);
  createShotNarrationSession(f.production,f.project.id,f.project.shots[0].id,key(),f.session.id);
  assert.equal(f.engine.held(f.store.getProject(f.project.id),firstNode),true);assert.equal(f.engine.held(f.store.getProject(f.project.id),secondNode),false);
- f.issue(two);const attempt=f.admit(two);assert.equal(attempt.nodeId,secondNode);assert.throws(()=>f.admit(one),{code:'EXECUTION_HELD'});assert.equal(f.calls.http,0);assert.equal(f.engine.attempts(f.project.id).length,1);
+ const attempt=f.admit(two);assert.equal(attempt.nodeId,secondNode);assert.throws(()=>f.admit(one),{code:'EXECUTION_HELD'});assert.equal(f.calls.http,0);assert.equal(f.engine.attempts(f.project.id).length,1);
+});
+test('explicit narration continuation retires only the old session capability and preserves the Director request',async t=>{
+ const f=await fixture(t),human=f.production.beginRequest(f.project.id,'local-user','Discuss without interrupting narration',{editing:false}),bridge=f.production.openEpoch(f.project.id,human);
+ const next=createShotNarrationSession(f.production,f.project.id,f.project.shots[0].id,key(),f.session.id);
+ assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'read_only');assert.equal(f.store.get('message',human.requestId).state,'active');assert.equal(f.store.get('message',f.session.requestId).state,'active');
+ assert.throws(()=>f.narration.accept(f.project.id,f.scoped,f.narration.workspaceSnapshot(f.project.id).state.version,key(),'script',[f.segment.script.id]),{code:'SCOPE_DENIED'});
+ const actor={kind:'human',principalId:'local-user',requestId:next.requestId};assert.doesNotThrow(()=>f.narration.accept(f.project.id,actor,f.narration.workspaceSnapshot(f.project.id).state.version,key(),'script',[f.segment.script.id]));
 });

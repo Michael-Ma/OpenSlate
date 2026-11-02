@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { digest, DomainError } from "../../../packages/core/dist/index.js";
+import { canonical, digest, DomainError } from "../../../packages/core/dist/index.js";
 import { parseOpenAITranscriptionResponse } from "../../../packages/providers/dist/index.js";
 import { OpenAITranscriptionExecution } from "../dist/execution/openai-transcription-execution.js";
 import { installRecoveryQuarantine, InstallationRecoveryGuard, releaseRecovery } from "../dist/application/installation-recovery.js";
@@ -17,10 +17,10 @@ test("accepted canonical audio and real consumed approval bind exact multipart a
   const large = Buffer.concat([Buffer.alloc(1200000, 32), raw, Buffer.alloc(1200000, 10)]);
   const f = await transcriptionFixture(t, { fetch: async (url, init) => {
     assert.equal(url, "https://api.openai.com/v1/audio/transcriptions"); assert.equal(init.method, "POST");
-    const mapping = rows(f, "transcription_execution_mapping")[0], marker = rows(f, "transcription_execution_dispatch")[0], consumption = rows(f, "external_allowance_consumption")[0];
+    const mapping = rows(f, "transcription_execution_mapping")[0], marker = rows(f, "transcription_execution_dispatch")[0];
     assert.equal(mapping.requestDigest, digest(f.request)); assert.notEqual(mapping.requestDigest, mapping.transport.requestDigest);
-    assert.equal(mapping.profileDefinitionDigest, digest(f.profile)); assert.equal(mapping.consumptionDigest, digest(consumption));
-    assert.equal(mapping.allowanceDigest, digest(f.allowance)); assert.equal(mapping.estimatedMicros, "100");
+    assert.equal(mapping.profileDefinitionDigest, digest(f.profile));
+    assert.equal(mapping.estimatedMicros, "100");
     assert.equal(mapping.capabilityLockDigest, digest(f.store.get("capability_lock", mapping.capabilityLockId)));
     assert.equal(marker.mappingDigest, digest(mapping)); assert.equal(marker.transportDigest, mapping.transport.requestDigest);
     assert.equal(marker.bodySha256, hash(init.body)); assert.equal(mapping.transport.bodyByteLength, init.body.byteLength);
@@ -72,9 +72,16 @@ test("language hint is exact while compiler's historical default segment timing 
   }
 });
 
-test("allowance ID cannot replace actual consumption, full approved profile and reserved cost", async t => {
-  for (const kind of ["external_allowance_consumption", "external_allowance", "candidate", "grant", "reservation"]) {
-    const f = await transcriptionFixture(t); f.store.db.prepare("DELETE FROM entities WHERE kind=?").run(kind);
+test("forged providerUse or a profile cannot substitute exact transcription admission evidence", async t => {
+  for (const kind of ["provider-use", "profile-definition", "candidate", "grant", "reservation"]) {
+    const f = await transcriptionFixture(t);
+    if (kind === "provider-use") {
+      f.request = { ...f.request, providerUse: { ...f.request.providerUse, profileDefinitionDigest: "f".repeat(64) } };
+      f.store.db.prepare("UPDATE entities SET body=? WHERE kind='attempt' AND id=?").run(canonical({ ...f.attempt, request: f.request }), f.attempt.id);
+    } else if (kind === "profile-definition") {
+      const lock = f.store.get("capability_lock", f.project.capabilityLockId);
+      f.store.db.prepare("UPDATE entities SET body=? WHERE kind='capability_lock' AND id=?").run(canonical({ ...lock, profiles: [{ ...f.profile, unitCostMicros: "101" }] }), lock.id);
+    } else f.store.db.prepare("DELETE FROM entities WHERE kind=?").run(kind);
     await assert.rejects(f.bridge.submit(f.request, context(f)), code("TRANSCRIPTION_EXECUTION_CONFLICT"));
     assert.deepEqual(f.calls, { http: 0, credentials: 0, prepare: 0, upload: 0 });
   }
@@ -86,6 +93,16 @@ test("first preparation requires original submitting owner and never borrows a r
   assert.equal(f.calls.prepare, 0); assert.equal(rows(f, "transcription_execution_result").length, 0);
 });
 
+test("a Stop fence installed after transcription preparation refuses the first irreversible dispatch", async t => {
+  let f;
+  f = await transcriptionFixture(t, { credential: () => {
+    f.store.insert("candidate_stop", f.attempt.candidateId, f.project.id, { stopId: "stop-before-transcription-marker" }); return key;
+  } });
+  await assert.rejects(f.bridge.submit(f.request, context(f)), { code: "TRANSCRIPTION_EXECUTION_NOT_DISPATCHABLE" });
+  assert.equal(f.calls.http, 0); assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
+  assert.equal(rows(f, "transcription_execution_result").length, 0);
+});
+
 test("owned MEDIA_BUSY is a definite local non-dispatch and never automatically prepares again", async t => {
   const f = await transcriptionFixture(t); let called = 0;
   f.preparation.prepare = async () => { called++; throw new DomainError("MEDIA_BUSY", "owned local worker busy"); };
@@ -93,7 +110,7 @@ test("owned MEDIA_BUSY is a definite local non-dispatch and never automatically 
   assert.equal(rows(f, "transcription_execution_result")[0].observation.code, "LOCAL_PREPARATION_BUSY");
   assert.deepEqual(await cloneBridge(f).submit(f.request, context(f)), result); assert.equal(called, 1); assert.equal(f.calls.http, 0);
   assert.equal(rows(f, "transcription_audio_intent").length, 0); assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
-  assert.equal(rows(f, "external_allowance_consumption").length, 1, "local failure never restores allowance attempt capacity");
+  assert.equal(rows(f, "reservation").length, 1, "local failure retains the original admitted reservation");
 });
 
 test("stale preparation failure does not install a local decision ahead of replacement", async t => {
@@ -266,4 +283,55 @@ test("released restoration never starts an imported attempt that had no dispatch
     expectedReceiptDigest: snapshot.receiptDigest, expectedSummaryDigest: snapshot.summaryDigest }, { principalId: "offline-human", commandId: randomUUID() });
   await assert.rejects(f.bridge.submit(f.request, context(f)), code("RESTORED_AUTHORITY_REQUIRES_NEW"));
   assert.equal((await f.bridge.lookup(f.attempt.id)).type, "unknown"); assert.deepEqual(f.calls, { http: 0, credentials: 0, prepare: 0, upload: 0 });
+});
+
+const transcriptionLostReply = { type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false };
+function expireTranscriptionDispatch(f, age, t) {
+  const marker = f.store.get("transcription_execution_dispatch", f.attempt.id);
+  t.mock.timers.setTime(Date.parse(marker.createdAt) + age);
+}
+function dueTranscription(f) {
+  const attempt = f.store.get("attempt", f.attempt.id);
+  f.store.put("attempt", attempt.id, f.project.id, { ...attempt, leaseExpiresAt: 0, unknownWait: { count: 0, nextEligibleAt: 0 } });
+}
+for (const receipt of [false, true]) test(`L1 transcription ${receipt ? "unknown receipt" : "missing reply"} waits the host-wide deadline, charges once and releases capacity`, async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = await transcriptionFixture(t, { fetch: async () => { throw Error("offline lost response"); }, timeoutMs: 1 });
+  assert.equal((await f.bridge.submit(f.request, context(f))).type, "unknown");
+  if (!receipt) f.store.db.prepare("DELETE FROM entities WHERE kind='transcription_execution_result' AND id=?").run(f.attempt.id);
+  expireTranscriptionDispatch(f, 179000, t);
+  assert.equal((await f.bridge.lookup(f.attempt.id)).type, "unknown", "a different host may still have its maximum 180s POST in flight");
+  expireTranscriptionDispatch(f, 180001, t);
+  assert.deepEqual(await f.bridge.lookup(f.attempt.id), transcriptionLostReply);
+  dueTranscription(f); await f.engine.reconcile();
+  const settled = f.store.get("attempt", f.attempt.id);
+  assert.equal(settled.phase, "failed"); assert.equal(settled.failure.id, "SUBMISSION_RESPONSE_LOST"); assert.equal(settled.failure.retryAllowed, false);
+  assert.equal(f.store.get("reservation", settled.reservationId).state, "charged");
+  for (let i = 0; i < 4; i++) { await f.engine.reconcile(); assert.equal((await f.engine.runReady()).dispatched, 0); }
+  assert.equal(f.calls.http, 1); assert.equal(rows(f, "attempt").length, 1);
+  assert.equal(rows(f, "attempt").filter(item => ["submitting", "submission_unknown", "remote_pending", "preparing"].includes(item.phase)).length, 0, "the failed attempt no longer occupies a provider concurrency slot");
+  assert.deepEqual(await f.bridge.submit(f.request), transcriptionLostReply);
+
+  const saved = await transcriptionFixture(t); assert.equal((await saved.bridge.submit(saved.request, context(saved))).type, "completed");
+  expireTranscriptionDispatch(saved, 180001, t);
+  assert.equal((await restart(saved).bridge.lookup(saved.attempt.id)).type, "completed", "saved raw JSON survives the lost-reply deadline");
+  assert.equal(saved.calls.http, 1);
+});
+
+test("L1 transcription absent dispatch requires a live fenced reconciliation lease and releases the uncharged reservation", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = await transcriptionFixture(t);
+  assert.equal((await f.bridge.lookup(f.attempt.id, f.request, context(f))).type, "unknown");
+  const stale = context(f), replacement = replaceLease(f);
+  const current = f.store.get("attempt", f.attempt.id);
+  f.store.put("attempt", current.id, f.project.id, { ...current, phase: "submission_unknown" });
+  assert.equal((await f.bridge.lookup(f.attempt.id, f.request, stale)).type, "unknown");
+  assert.equal(rows(f, "transcription_execution_result").length, 0);
+  dueTranscription(f); await f.engine.reconcile();
+  const settled = f.store.get("attempt", f.attempt.id);
+  assert.equal(settled.phase, "failed"); assert.equal(f.store.get("reservation", settled.reservationId).state, "released");
+  assert.equal(rows(f, "transcription_execution_result")[0].observation.kind, "not_dispatched");
+  assert.equal((await f.bridge.submit(f.request, stale)).type, "rejected");
+  for (let i = 0; i < 3; i++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.deepEqual(f.calls, { http: 0, credentials: 0, prepare: 0, upload: 0 });
 });

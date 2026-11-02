@@ -8,9 +8,10 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { canonical, digest } from "@openslate/core";
 import { FakeProvider } from "@openslate/providers";
-import { verifySkillSnapshot } from "@openslate/director";
+import { verifySkillReleaseSnapshot, verifySkillSnapshot } from "@openslate/director";
+import { contractSevenRepository } from "./helpers/contract-seven-fixture.mjs";
 import { Store } from "../dist/persistence/store.js";
-import { CURRENT_SCHEMA_VERSION, MIGRATIONS } from "../dist/persistence/schema.js";
+import { CURRENT_SCHEMA_VERSION } from "../dist/persistence/schema.js";
 import { createInstallationBackup, inspectInstallationBackup } from "../dist/persistence/installation-backup.js";
 import { verifyFixtureDatabase } from "../dist/persistence/fixture-database.js";
 import { acquireInstallationOwner } from "../dist/persistence/installation-owner.js";
@@ -21,6 +22,8 @@ import { runDemo, seedFixture } from "../dist/demo.js";
 import { Engine } from "../dist/execution/engine.js";
 import { ProductionService } from "../dist/application/service.js";
 import { projectFixture } from "./execution-fixture.mjs";
+import { DocumentApplicationService } from "../dist/media/document-application.js";
+import { attachmentMessageContext, DirectorImageProjector, imageMessageContext } from "../dist/application/director-images.js";
 
 const sha = bytes => createHash("sha256").update(bytes).digest("hex");
 function cleanup(path) { if (!existsSync(path)) return; const info = lstatSync(path); if (info.isDirectory()) {
@@ -58,7 +61,7 @@ test("offline export snapshots committed WAL in both databases and preserves pri
   f.store.db.pragma("wal_autocheckpoint=0"); f.fake.db.pragma("wal_autocheckpoint=0");
   f.store.db.prepare("INSERT INTO entities VALUES(?,?,?,?,?)").run("historic", "receipt", f.project.id, '{ "value" : "exact bytes", "locator":"https://private.invalid/result?signed=synthetic" }', 1);
   f.store.appendEvent(f.project.id, "saved", {}); f.store.command("human", "old", "digest", () => ({ saved: true }));
-  await f.fake.submit({ attemptId: "synthetic", nodeId: "node", kind: "image", fingerprint: "a".repeat(64) });
+  await f.fake.submit({ attemptId: "synthetic", nodeId: "node", kind: "image", fingerprint: "a".repeat(64), args: {}, inputs: [], execution: { adapter: "fake", version: "1" } });
   assert.ok(existsSync(join(f.source, "openslate.sqlite-wal"))); assert.ok(existsSync(join(f.source, "fake-provider.sqlite-wal")));
   const rows = savedRows(f.store.db), mainHash = sha(readFileSync(join(f.source, "openslate.sqlite")));
   const result = await f.backup(); assert.equal(result.manifest.applicationSchemaVersion, CURRENT_SCHEMA_VERSION);
@@ -73,16 +76,6 @@ test("offline export snapshots committed WAL in both databases and preserves pri
   assert.equal(result.manifest.files.some(file => /(?:-wal|-shm|installation-owner)/.test(file.path)), false);
 });
 
-test("historical V1 and missing later indexes remain V1 without a migration or source rewrite", async t => {
-  const dir = root(t), source = join(dir, "installation"), destination = join(dir, "backup"); mkdirSync(source);
-  const path = join(source, "openslate.sqlite"), db = new Database(path);
-  db.exec(readFileSync(new URL("schema-v1.sql.fixture", import.meta.url), "utf8")); db.pragma("user_version=1"); db.exec("DROP INDEX director_request_once; DROP INDEX director_running_once"); db.close();
-  new FakeProvider(join(source, "fake-provider.sqlite")).close(); const before = sha(readFileSync(path));
-  const result = await createInstallationBackup({ sourceRoot: source, destination }); assert.equal(result.manifest.applicationSchemaVersion, 1);
-  assert.equal(sha(readFileSync(path)), before); assert.equal(existsSync(`${path}.migration-backups`), false);
-  assert.equal((await inspectInstallationBackup({ directory: destination })).manifest.applicationSchemaVersion, 1);
-});
-
 test("owned artifact/demo files and fake execution remain usable after complete namespace copying", async t => {
   const dir = root(t), source = join(dir, "installation"), destination = join(dir, "backup");
   const demo = await runDemo(source), result = await createInstallationBackup({ sourceRoot: source, destination });
@@ -95,18 +88,18 @@ test("owned artifact/demo files and fake execution remain usable after complete 
 test("published render/source completions survive without SQL publication and temporary/private roots stay out", async t => {
   const f = fixture(t), media = mediaFixture(f);
   for (const path of ["local-session.token", "uploads/private.wav", "media/tmp/job-x/private.wav", "execution-output/tmp/unfinished",
-    "video-derivations/tmp/unfinished", "openslate.sqlite.migration-backups/old.sqlite", `native/${f.project.id}/runtime/native-state/auth.json`,
+    "video-derivations/tmp/unfinished", `native/${f.project.id}/runtime/native-state/auth.json`,
     `native/${f.project.id}/runtime/logs/session.log`, `native/${f.project.id}/workspace/arbitrary.txt`, "artifacts/images/tmp/validate-x/private.png"])
     write(f.source, path, "private data must be excluded");
   const result = await f.backup();
   assert.ok(result.manifest.files.some(file => file.path === media.completionPath));
   assert.ok(result.manifest.files.some(file => file.path.endsWith(".source")));
-  assert.equal(result.manifest.files.some(file => /private|runtime|uploads|tmp|migration-backups|token|arbitrary/.test(file.path)), false);
+  assert.equal(result.manifest.files.some(file => /private|runtime|uploads|tmp|token|arbitrary/.test(file.path)), false);
   await inspectInstallationBackup({ directory: f.destination });
 });
 
 test("filesystem-only winning spool keeps original storage identity, locator and unknown liability", async t => {
-  const f = fixture(t), request = { kind: "video", attemptId: "attempt", nodeId: "node" }, bytes = Buffer.from("synthetic raw MP4 storage fixture");
+  const f = fixture(t), request = { kind: "video", attemptId: "attempt", nodeId: "node", execution: { adapter: "fake", version: "1" } }, bytes = Buffer.from("synthetic raw MP4 storage fixture");
   f.store.insert("attempt", "attempt", f.project.id, { candidateId: null, workKey: "fixture", ordinal: 1, request, phase: "submission_unknown", taskId: null });
   f.store.insert("reservation", "reserved", f.project.id, { attemptId: "attempt", micros: "100000", state: "reserved" });
   const output = new ExecutionOutputStore(f.store, { rootDir: join(f.source, "execution-output") });
@@ -135,6 +128,78 @@ test("locked skills and request thumbnails copy exact bytes and reconstruct immu
     assert.equal(statSync(verified.immutableRoot).mode & 0o777, 0o555); assert.equal(statSync(verified.entryPath).mode & 0o777, 0o444);
   }
   assert.ok(result.manifest.files.some(file => file.path === thumbnailPath)); await inspectInstallationBackup({ directory: f.destination });
+});
+
+test("a release lock backs up every package and its release snapshot", async t => {
+  const f = fixture(t), root = join(f.source, "skill-snapshots"), checkout = contractSevenRepository(join(f.dir, "release-checkout"));
+  const { lock } = createDirectorSkillLock({ repositoryRoot: checkout, snapshotRoot: root }, "7.0.0");
+  assert.equal(lock.schemaVersion, 2);
+  f.store.insert("director_skill_lock", lock.id, f.project.id, { lock });
+  const result = await f.backup();
+  assert.ok(result.manifest.files.some(file => file.path === `skill-snapshots/${lock.release.releaseDigest}/release.json`));
+  assert.equal(verifySkillReleaseSnapshot(join(f.destination, "skill-snapshots"), lock.release.releaseDigest).release, "8.0.0");
+  for (const pin of lock.skills) assert.equal(verifySkillSnapshot(join(f.destination, "skill-snapshots"), pin.packageDigest).id, pin.id);
+  await inspectInstallationBackup({ directory: f.destination });
+});
+
+test("documents and all eight attachment picture slots retain their owned backup closure", async t => {
+  const f = fixture(t), engine = new Engine(f.store, f.fake, { artifactDir: join(f.source, "artifacts") }), service = new ProductionService(f.store, engine);
+  const project = service.createProject("Files in a discussion"), documents = new DocumentApplicationService(service);
+  const bytes = Buffer.from("人物与场景说明"), actor = service.beginRequest(project.id, "local-user", "Import document", { source: "app" });
+  const imported = await documents.importDocument(project.id, actor, { name: "人物.md", bytes, sha256: sha(bytes), expectedHeadVersion: project.headVersion, key: "document" });
+  const documentPath = `artifacts/documents/blobs/${sha(bytes)}`;
+  const refs = Array.from({ length: 8 }, (_, index) => {
+    const data = Buffer.from(`synthetic owned image ${index}`), id = randomUUID(), artifact = { artifactId: id, kind: "image", sha256: sha(data) };
+    f.store.insert("artifact", id, project.id, { artifact, path: write(f.source, `artifacts/images/blobs/${artifact.sha256}.png`, data), byteLength: data.length,
+      fixture: false, attemptId: null, mimeType: "image/png", origin: "supplied_image", physicalDurationSeconds: null });
+    return { artifactId: id, sha256: artifact.sha256 };
+  });
+  const referenceBytes = Buffer.from("synthetic reduced image reference"), referenceSha = sha(referenceBytes);
+  const sourceRef = { ...refs[0], kind: "image" }, referenceId = digest({ imageReference: sourceRef.artifactId, sha256: referenceSha });
+  const reference = { artifactId: referenceId, kind: "image", sha256: referenceSha };
+  const referencePath = `artifacts/images/blobs/${referenceSha}.png`;
+  f.store.insert("artifact", referenceId, project.id, { id: referenceId, projectId: project.id, artifact: reference,
+    path: write(f.source, referencePath, referenceBytes), byteLength: referenceBytes.length, mimeType: "image/png", width: 320, height: 180,
+    validationDigest: "a".repeat(64), fixture: false, attemptId: null, physicalDurationSeconds: null });
+  const referenceRow = { id: sourceRef.artifactId, projectId: project.id, source: sourceRef, reference };
+  f.store.insert("code_plan_image_reference", sourceRef.artifactId, project.id, referenceRow);
+  const saved = f.store.getProject(project.id);
+  f.store.saveProject({ ...saved, artifacts: [...saved.artifacts, ...refs.map(ref => ({ ...ref, kind: "image" }))] }, saved.headVersion);
+  const legacy = service.beginRequest(project.id, "local-user", "Eight references", { editing: false, contextDigest: imageMessageContext(refs) });
+  f.store.insert("request_image_selection", legacy.requestId, project.id, { requestId: legacy.requestId, images: refs, selectionDigest: digest(refs) });
+  const images = refs.map((ref, index) => {
+    const thumbnail = Buffer.from(`synthetic frozen JPEG ${index}`), thumbnailSha256 = sha(thumbnail);
+    write(f.source, `native/${project.id}/workspace/image-attachments/${digest({ requestId: legacy.requestId })}/${index}-${thumbnailSha256}.jpg`, thumbnail, 0o444);
+    return { ...ref, thumbnailSha256, byteLength: thumbnail.length, mediaType: "image/jpeg" };
+  });
+  f.store.insert("request_image_projection", legacy.requestId, project.id, { requestId: legacy.requestId, selectionDigest: digest(refs), recipeDigest: "a".repeat(64), toolchainDigest: "b".repeat(64), images });
+  const mixed = [refs[0], { artifactId: imported.artifact.artifactId, sha256: imported.artifact.sha256 }];
+  const message = service.beginRequest(project.id, "local-user", "Reference and writing", { editing: false, contextDigest: attachmentMessageContext(undefined, mixed) });
+  const projector = new DirectorImageProjector(service);
+  const selection = projector.recordAttachments(project.id, message, mixed);
+  const thumbnail = Buffer.from("synthetic frozen material JPEG"), thumbnailSha256 = sha(thumbnail);
+  const materialPath = `native/${project.id}/workspace/material-attachments/${digest({ requestId: message.requestId })}/0-${thumbnailSha256}.jpg`;
+  write(f.source, materialPath, thumbnail, 0o444);
+  f.store.insert("request_attachment_projection", message.requestId, project.id, { requestId: message.requestId, selectionDigest: selection.selectionDigest,
+    recipeDigest: "a".repeat(64), toolchainDigest: "b".repeat(64),
+    attachments: [{ artifact: { ...refs[0], kind: "image" }, name: "Reference", readable: true },
+      { artifact: imported.artifact, name: imported.name, readable: true, text: bytes.toString(), characters: bytes.toString().length, truncated: false }],
+    images: [{ ...refs[0], attachmentIndex: 0, thumbnailSha256, byteLength: thumbnail.length, mediaType: "image/jpeg" }] });
+  write(f.source, "artifacts/documents/tmp/import-incomplete/private", "unpublished");
+  write(f.source, `native/${project.id}/workspace/material-attachments/${digest({ requestId: message.requestId })}/prepare-incomplete/private`, "unpublished");
+  const result = await f.backup();
+  assert.deepEqual(readFileSync(join(f.destination, referencePath)), referenceBytes);
+  const savedDb = new Database(join(f.destination, "openslate.sqlite"), { readonly: true });
+  try {
+    assert.deepEqual(JSON.parse(savedDb.prepare("SELECT body FROM entities WHERE kind='code_plan_image_reference' AND id=?").get(sourceRef.artifactId).body), referenceRow);
+  } finally { savedDb.close(); }
+  assert.deepEqual(readFileSync(join(f.destination, documentPath)), bytes);
+  assert.ok(result.manifest.files.some(file => file.path === materialPath));
+  assert.ok(result.manifest.files.some(file => /\/7-[a-f0-9]{64}\.jpg$/.test(file.path)));
+  assert.ok(result.manifest.files.every(file => !file.path.includes("incomplete")));
+  await inspectInstallationBackup({ directory: f.destination });
+  unlinkSync(join(f.source, materialPath));
+  await assert.rejects(createInstallationBackup({ sourceRoot: f.source, destination: join(f.dir, "missing-material") }), { code: "BACKUP_REFERENCE_INVALID" });
 });
 
 test("export owns the real installation lock through asynchronous copying; cancellation cleans only its incomplete bundle", async t => {
@@ -168,13 +233,12 @@ test("missing or corrupt owned artifacts and metadata closures fail rather than 
   await assert.rejects(f.backup(), { code: "BACKUP_REFERENCE_INVALID" });
 });
 
-test("schema/checksum incompatibility is rejected before creating a bundle or mutating the source", async t => {
-  for (const problem of ["newer", "checksum", "fixture"]) {
+test("older schema export and incompatible databases are rejected before creating a bundle or mutating the source", async t => {
+  for (const problem of [1, 2, 3, 999, "fixture"]) {
     const f = fixture(t); f.close(); const path = join(f.source, problem === "fixture" ? "fake-provider.sqlite" : "openslate.sqlite"), db = new Database(path);
-    if (problem === "newer") db.pragma("user_version=999");
-    else if (problem === "checksum") db.exec("UPDATE schema_migrations SET checksum='" + "0".repeat(64) + "' WHERE version=1");
-    else db.exec("CREATE TABLE unexpected(value TEXT)"); db.close(); const before = sha(readFileSync(path));
-    await assert.rejects(f.backup(), { code: problem === "newer" ? "DATABASE_VERSION_UNSUPPORTED" : problem === "checksum" ? "DATABASE_MIGRATION_MISMATCH" : "FIXTURE_DATABASE_SCHEMA_MISMATCH" });
+    if (problem === "fixture") db.exec("CREATE TABLE unexpected(value TEXT)"); else db.pragma(`user_version=${problem}`);
+    db.close(); const before = sha(readFileSync(path));
+    await assert.rejects(f.backup(), { code: problem === "fixture" ? "FIXTURE_DATABASE_SCHEMA_MISMATCH" : "DATABASE_VERSION_UNSUPPORTED" });
     assert.equal(sha(readFileSync(path)), before); assert.equal(existsSync(f.destination), false);
   }
 });
@@ -218,7 +282,7 @@ test("fixture inspection is read-only, rejects unsupported versions and preserve
 
 test("generated-video derivation retains distinct exact raw and normalized identities before SQL completion", async t => {
   const f = fixture(t), id = videoDerivationId(f.project.id, "attempt"), media = mediaFixture(f, { artifactId: videoArtifactId(id) });
-  const request = { kind: "video", attemptId: "attempt", nodeId: "node", args: { durationFrames: 30 } };
+  const request = { kind: "video", attemptId: "attempt", nodeId: "node", args: { durationFrames: 30 }, execution: { adapter: "fake", version: "1" } };
   f.store.insert("attempt", "attempt", f.project.id, { candidateId: null, workKey: "fixture", ordinal: 1, request, taskId: null });
   const output = new ExecutionOutputStore(f.store, { rootDir: join(f.source, "execution-output") });
   const bytes = readFileSync(join(f.source, `media/blobs/${media.source.originalSha256}.source`));
@@ -234,16 +298,6 @@ test("generated-video derivation retains distinct exact raw and normalized ident
   assert.notEqual(derived.source.originalSha256, derived.source.sha256); await inspectInstallationBackup({ directory: f.destination });
   cleanup(f.destination); write(f.source, relative, canonical({ ...derived, intentDigest: "0".repeat(64) }));
   await assert.rejects(f.backup(), { code: "VIDEO_DERIVATION_CONFLICT" });
-});
-
-test("historical V2 remains V2 even when the running application supports a later schema", async t => {
-  const dir = root(t), source = join(dir, "installation"), destination = join(dir, "backup"); mkdirSync(source);
-  const path = join(source, "openslate.sqlite"), db = new Database(path);
-  for (const migration of MIGRATIONS.filter(m => m.version <= 2)) db.exec(migration.sql);
-  for (const migration of MIGRATIONS.filter(m => m.version <= 2)) db.prepare("INSERT INTO schema_migrations VALUES(?,?,?,?,?)").run(migration.version, migration.name, migration.checksum, new Date().toISOString(), "applied");
-  db.pragma("user_version=2"); db.close(); new FakeProvider(join(source, "fake-provider.sqlite")).close(); const before = sha(readFileSync(path));
-  const result = await createInstallationBackup({ sourceRoot: source, destination }); assert.equal(result.manifest.applicationSchemaVersion, 2);
-  assert.equal(sha(readFileSync(path)), before); await inspectInstallationBackup({ directory: destination });
 });
 
 test("a published hardlink surviving temporary cleanup is copied as independent exact bytes", async t => {

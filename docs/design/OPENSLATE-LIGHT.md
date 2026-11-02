@@ -1,73 +1,11 @@
-# OpenSlate Studio design system — Day & Night
+# Earlier Studio Day / Night design
 
-Current direction: October 7, 2026. The supplied Frame Studio Day/Night artifact is the implementation target. This document remains the existing design source of truth; the earlier Light-only presentation is historical.
+The October 7 Frame Studio Day/Night workbench has been retired on this branch. Its Radix controls, resizable conversation, inline tool cards, purple-blue actions and browser-owned scene sequence describe the earlier UI. Dated verification remains in the [October 7 review](../implementation/OCTOBER-7-DAY-NIGHT-REVIEW.md) and [October 9 authority/recovery review](AUTHORITY-AND-WORKFLOW-REVIEW.md); those checks do not verify the replacement UI.
 
-## References and product structure
+The current source is `apps/web/src/next`, booted directly from `apps/web/src/main.tsx`. It follows the [Last Ferry design](../ai/prototypes/last-ferry/DESIGN.md) and [UI implementation plan](../ai/UIUX-IMPLEMENTATION-PLAN.md), with delivery recorded in [status](../implementation/STATUS.md).
 
-- Exact layout/interaction reference: the supplied `frame-studio-day-night.zip`, `studio.html`, `DAY-NIGHT.md` and its Day/Night captures. The later Codex/Claude style variants are not part of this selected direction.
-- Design brief: [the supplied conversation](https://chatgpt.com/s/cx_6ac60628b4488191846d212aaa2f527e), which describes chat collaboration, project resources, Scene/Shot hierarchy, keyframe iteration and timeline editing.
-- Color/hierarchy inspiration: [Linear’s official UI redesign](https://linear.app/now/how-we-redesigned-the-linear-ui). OpenSlate’s hex values come from the supplied artifact; they are not claimed to be Linear’s official tokens.
-- Production remains React/Radix with application-owned state, authenticated commands and durable generation/recovery. The prototype’s sample perfume project, simulated generation, credits and silent animatic are not production behavior.
+Current presentation uses a dark token palette, local Inter, plain React controls, message-ID English/Chinese catalogs, a 52 px header and 392 px Director column with a narrow-screen drawer. White identifies the selected/primary action, amber identifies Director notes/proposals, and green identifies opened frames. Tokens and shared styles live in [studio.css](../../apps/web/src/next/ui/studio.css), with view-specific styles beside their components. The current tree does not use Radix Themes.
 
-The left resizable conversation contains chat, scoped resource references, concise plan/status widgets and inline editing/model/import/audio tools. The right has **Plan / Keyframes / Assets / Film** views. A large selected-shot preview, inspector and Scene → Shot shelves share the same saved project. Selecting a shot retains its stable ID and scopes further conversation; @ scene/shot references explicitly override preview selection. View or appearance changes do not submit work, clear drafts or change selected-shot identity.
+Plan, Keyframes, Assets, Film, Start and Settings all use the next tree. Explicit @ scope does not follow preview selection. Generation comes from the server overview and durable scene confirm rather than client checkpoints. Narration fit, takes, notes, proposals, storyboard exports and installation status use the [current application routes](../technical/APPLICATION-API.md).
 
-The new brief permits direct right-side editing/reference/regeneration shortcuts, as well as chat widgets. Those shortcuts invoke the same authenticated application operations. Current work remains inspectable across views; workflow progress does not append duplicate result galleries or switch the user’s selected view automatically.
-
-## Semantic system
-
-| Role | Day | Night |
-|---|---|---|
-| Conversation | `#e8e8ee` | `#131316` |
-| Workbench | `#ffffff` | `#27272f` |
-| Inspector | `#f0f0f5` | `#393941` |
-| Shelf | `#f5f5f8` | `#19191f` |
-| Composer zone | `#dcdce5` | `#0c0c10` |
-| Main text | `#191a20` | `#f2f2f5` |
-| Action fill | `#5e56d8` | `#6960d5` |
-
-Purple-blue identifies actions and selection; green identifies checked/saved results; amber identifies stale/pending/unknown work. Labels and geometry accompany color. Media viewing stays dark in both appearances and uses `object-fit: contain` so current frame review never crops the underlying artifact.
-
-Workspace navigation uses one selected surface on the outer Radix button. Its visible label and hidden width-measurement label share spacing and remain transparent; hover and keyboard focus also belong to the button. Selection must not add an inner plaque or change tab height in either appearance or language.
-
-`frame-theme.css` owns the palette, semantic/Radix aliases, inputs, dialogs, Markdown and states. Day auxiliary text and Night hover fills are adjusted slightly from the reference to preserve readable contrast. Root layout/components use `--zone-*`, `--ink`, `--muted`, `--line`, `--control`, `--selected`, `--action-*` and semantic status roles. Do not introduce another component palette.
-
-Bundled **Inter Variable** renders supported glyphs; system **PingFang SC**, Microsoft YaHei and system sans provide language fallbacks. No font/network request is required. Title 22px/630, body 14px, controls 12–13px, auxiliary metadata 10–11px. Icons use one rounded outline style, 1.85 strokes, round caps/joins. Shared shapes are 7–8px controls, 10px cards, 11px composer; spacing follows a 4px rhythm.
-
-## Interaction and authority
-
-- Appearance changes CSS/Radix theme context in place. Valid URL `mode=day|night` overrides stored appearance; default is Day. Mode and current `view` are reflected in the URL. Storage/history failures do not disable the workbench. React components remain mounted during mode changes.
-- @ offers searchable project, scene, shot, owned image/video and recording references. Keyboard arrows/Enter/Escape select/cancel; chips locate their objects. Messages contain readable local reference links with explicit scope IDs and bounded native image attachments when supported. Reference chips alone cannot submit a fresh editable request. A narrow referenced edit cannot silently resume a stopped whole project.
-- Current full keyframes must actually decode and be viewed; thumbnail prefetch, old takes and hidden panes never qualify. Viewing is recorded without a separate per-shot check button. One green **Confirm & generate** scene decision covers those exact keyframes, motion, duration, model/settings and narration writing/voice/recording/timing. Listening is optional. Changed frames or writing require a fresh scene decision; no separate narration review is presented.
-- A scoped image request can create missing frames or explicitly regenerate selected shots. New candidates retain sibling outputs and historical artifacts; unknown/in-progress jobs are inspected rather than blindly repeated. Regenerating an owned/shared conditioner rewires the affected video and review member to the new frame and defers its video candidate.
-- The combined scene action coordinates existing authenticated shot operations: generate or follow the exact narration job, verify and attach its returned take, save full measured within-shot timing, then publish the unchanged reviewed video recipe. It preserves planned picture duration; overlong narration asks for a script/range edit. Frozen per-operation retry keys, workspace versions, active-request checks and Stop prevent stale work or duplicate generation. Closing the tab keeps backend jobs/results and a bounded local checkpoint of the exact client sequence. Reopening restores an idle decision; an explicit same-request check reloads its checkpoint under a per-project browser lock and revalidates live state. Restoring local state never creates a new generation request. Optional per-shot recording/timing editing remains available.
-- Generation decisions close immediately after the exact command is claimed, regardless of response speed or completion. Workspace activity owns phase, failure, exact retry and Stop; project switching, read-only navigation and local drafting remain available. Conflicting writes wait for resolution or explicit Stop. Settings reads and settled uncertain voice saves do not trap their dialog. See [authority and workflow review](AUTHORITY-AND-WORKFLOW-REVIEW.md).
-- Plan/Prompt edits are normal human writing. Image prompt, video prompt, action, framing, purpose, motion and duration are revision checked; only the relevant visual work becomes stale. They do not dispatch media automatically.
-- Timeline video drag/order buttons and Alt+Arrow persist shot order. Saved 3–15s controls edit **shot plan timing**, which may require an affected video update. Music drag/keyboard, gain and mute persist actual placement; browser audition and local render share the same source-local sample calculation. Zoom, playhead and panel sizing are viewing state. Arbitrary source trim/split, redo/version adoption and multiple independently arranged music/effect lanes remain unsupported; omit inert controls.
-- Local recovery keeps one atomic composer draft (text, scopes, references, reply and continuation target), settings/editor/audio drafts and Timeline duration/music edits. Stale targets and changed canonical bases require an explicit keep/discard or new-message choice; they are never silently broadened. Browser cache is partitioned by installation/restore identity and project, with per-record conflict checks, bounds and expiry. Tokens, files and voice-consent checkboxes are excluded.
-- Protected saves block conflicting project/creation/chat/generation mutations. Unknown responses retain their exact request body/key. Background refresh preserves same-identity connected content and reading position; new messages do not force an older conversation to the bottom.
-
-## Interface language
-
-English and Simplified Chinese are available from the header and startup page. Preference precedence is valid URL `lang=en|zh-CN` (the `zh` alias is accepted), saved browser preference, supported browser language, then English. Switching changes React context and `html.lang` in place; it does not key/remount the app, submit a request, edit the project or replace pending command identity.
-
-Static copy uses explicit English/Chinese pairs, with parameter interpolation preserving inserted values. Controlled derived labels/errors use explicit exact whitelists and scoped presenters. Never apply translation to project/shot writing, native Director questions/answers, recording names, scripts, transcripts, model/provider names, IDs, hash values or command bodies. Unknown service diagnostics remain original unless they have a registered sanitized interface message. Scene/shot resource chips localize presentation around their stable identity; sent reference text remains the saved text.
-
-Use contextual pairs for singular/plural English labels; a shared Chinese term may represent multiple English nouns and cannot resolve context by reverse lookup alone. Longer copy must wrap within its owning control/tool. Language and theme selectors remain reachable at narrow widths.
-
-- `Locale.tsx`, `locale-model.ts`, `locale.css`: browser preference, in-place context, selector and metadata.
-- `locale-ui-messages.ts`, shell/error and workbench/settings/media catalogs: registered interface copy.
-- Settings/media/workbench presenters translate controlled dynamic feedback while preserving source records.
-
-## Responsive contract and source ownership
-
-Desktop retains a remembered/clamped Director divider, large preview, compact inspector and scrollable scene shelves. At narrow widths, explicit Conversation/Workspace navigation presents one pane at a time; inspector/actions stack without clipping, and major mobile controls target 44px. Appearance remains accessible in the header. Long metadata and prompts wrap or scroll within their owning area; reduced motion is respected.
-
-- `Appearance.tsx`, `appearance-model.ts`, `frame-theme.css`: modes, tokens, font and shared states.
-- `FrameWorkspace.tsx`, `frame-workspace-model.ts`, `frame-workspace.css`: Plan and selected-media/Scene/Shot workbench.
-- `ReferenceComposer.tsx`, `reference-model.ts`, `reference-composer.css`: composer and exact project references.
-- `FrameDecision.tsx`, `frame-decision-model.ts`, `ConversationActions.tsx`: actual scoped image and scene video decisions.
-- `Timeline.tsx`, `timeline-editor-model.ts`, `timeline-editor.css`: synchronized preview and supported direct edits.
-- `frame-shell.css`: shell, concise plan widget and final responsive integration.
-- `ui.tsx`: shared Radix controls and protected inline/modal tools. `main.tsx` registers production CSS in explicit order, with the shared theme followed by current workbench/layout sheets.
-
-Current verification belongs in the dated implementation review and status; passing model tests alone is not visual or real-provider acceptance.
+See the [current studio guide](STORYBOARD-STUDIO.md) and [UI component reference](../technical/REVIEW-UI.md) for behavior and source boundaries. The original artifact remains historical design input, not the current UI contract.

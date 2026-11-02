@@ -122,7 +122,7 @@ export async function runDemo(directory = mkdtempSync(join(tmpdir(), "openslate-
   let service = new ProductionService(store, engine);
   try {
     const project = seedFixture(service, destination); const projectId = project.id;
-    const human = service.beginRequest(projectId, "simulated-demo-human", "Approve this fake two-shot plan and its initial image/video allowance.");
+    const human = service.beginRequest(projectId, "simulated-demo-human", "Approve this fake two-shot plan and its initial image/video generation.");
     service.authorize(projectId, human, project.shots.flatMap(shot => [{ scopeId: shot.id, kind: "image" as const }, { scopeId: shot.id, kind: "video" as const }]), "initial-fake-slots", "initial_slot");
     const director = service.openEpoch(projectId, human).actor;
     const prepared = await service.prepare(projectId, director, { variant: "plan", expectedHeadVersion: project.headVersion, source: sourceFor(project) });
@@ -171,12 +171,22 @@ export async function runDemo(directory = mkdtempSync(join(tmpdir(), "openslate-
     const editReviewer = service.beginRequest(projectId, "simulated-demo-human", "Approve the displayed revised shot 1 keyframe and motion.", { scopeIds: [changedShotId], editing: false });
     service.approve(projectId, editReviewer, revisedReview.id, [editedVideo.id]);
 
-    // The fake backend durably accepts this job and deliberately loses its response.
-    provider.setMode(editedVideo.id, "unknown_after_accept");
+    // A real vendor's saved task id survives a temporary status outage. Restart
+    // may poll that exact job; it cannot discover a lost POST reply by attempt id.
+    provider.setMode(editedVideo.id, "pending");
     await engine.runReady();
+    const accepted = engine.attempts(projectId).find(attempt => attempt.nodeId === editedVideo.id && attempt.phase === "remote_pending");
+    expect(accepted && typeof accepted.taskId === "string", "The vendor task id must be saved before the status outage");
+    const recoveredTaskId = accepted.taskId, poll = provider.poll.bind(provider);
+    provider.poll = async taskId => taskId === recoveredTaskId
+      ? { type: "unknown", taskId, diagnostic: "Injected temporary status outage for the known vendor task" }
+      : poll(taskId);
+    await engine.reconcile();
     const unresolved = engine.attempts(projectId).find(attempt => attempt.nodeId === editedVideo.id && attempt.phase === "submission_unknown");
-    expect(unresolved && provider.acceptedCount() === 6, "Fault injection must leave exactly one uncertain accepted attempt");
+    expect(unresolved && unresolved.id === accepted.id && unresolved.taskId === recoveredTaskId && provider.acceptedCount() === 6,
+      "A temporary status outage must retain the original accepted task identity");
     const recoveredAttemptId = unresolved.id;
+    provider.poll = poll; provider.complete(recoveredTaskId);
     store.close(); provider.close();
 
     store = new Store(statePath); provider = new FakeProvider(providerPath);
@@ -185,7 +195,7 @@ export async function runDemo(directory = mkdtempSync(join(tmpdir(), "openslate-
     await finishReadyWork(engine, projectId);
     expect(service.snapshot(projectId).outputs.length === 6, "Restarted application did not reconstruct all six current outputs");
     const recovered = engine.attempts(projectId).find(attempt => attempt.id === recoveredAttemptId);
-    expect(recovered?.phase === "succeeded", "Restart did not reconcile the original uncertain attempt");
+    expect(recovered?.phase === "succeeded" && recovered.taskId === recoveredTaskId, "Restart did not poll the original known vendor task");
     expect(provider.acceptedCount() === 6 && provider.acceptedCount(recoveredAttemptId) === 1, "Restart duplicated a fake paid acceptance");
     const kept = binding(store, projectId, "shot-2/take");
     expect(kept.candidateId === preservedTake.candidateId && kept.outputs.video?.artifactId === preservedTake.outputs.video.artifactId, "Restart lost the untouched shot's selected execution output");
@@ -204,7 +214,7 @@ export async function runDemo(directory = mkdtempSync(join(tmpdir(), "openslate-
       mode: "fake", label: "FAKE integration demo: placeholder media, simulated human decisions, no model or network calls. The preview is a one-second fixture, not the planned commercial.",
       directory: destination, projectId, plannedDurationSeconds: 12, videoFixtureDurationSeconds: 1, networkCalls: 0,
       fakeAcceptances: { initial: 4, afterEditAndRestart: provider.acceptedCount(), duplicateAttempts },
-      fakeCommittedMicros: engine.budget(projectId).committedMicros, changedShotId,
+      fakeCommittedMicros: engine.committedMicros(projectId), changedShotId,
       preserved: { shotId: current.shots[1]!.id, candidateId: kept.candidateId!, artifactId: kept.outputs.video!.artifactId, sha256: kept.outputs.video!.sha256 },
       recoveredAttemptId, artifacts, previousKeyframePath, previewPath: preview.path, summaryPath: join(destination, "demo-summary.json"),
     };

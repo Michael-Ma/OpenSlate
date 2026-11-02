@@ -29,7 +29,11 @@ export async function installationCommand(args: string[], signal?: AbortSignal):
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const controller = new AbortController(), abort = () => controller.abort(); process.once("SIGINT", abort); process.once("SIGTERM", abort);
   try { process.stdout.write(`${JSON.stringify(await installationCommand(process.argv.slice(2), controller.signal))}\n`); }
-  catch (error) { process.stderr.write(`${JSON.stringify({ error: { code: error instanceof DomainError ? error.code : "INSTALLATION_OPERATION_FAILED",
-    message: error instanceof DomainError ? error.message : "Installation operation failed. No application workers were started." } })}\n`); process.exitCode = 1; }
+  catch (error) {
+    const message = error instanceof DomainError && ["DATABASE_VERSION_UNSUPPORTED", "DATABASE_SCHEMA_MISMATCH"].includes(error.code)
+      ? "This data directory was created by an earlier OpenSlate prototype and cannot be opened. Start with a new OPENSLATE_DATA_DIR."
+      : error instanceof DomainError ? error.message : "Installation operation failed. No application workers were started.";
+    process.stderr.write(`${JSON.stringify({ error: { code: error instanceof DomainError ? error.code : "INSTALLATION_OPERATION_FAILED", message } })}\n`); process.exitCode = 1;
+  }
   finally { process.removeListener("SIGINT", abort); process.removeListener("SIGTERM", abort); }
 }

@@ -1,0 +1,3 @@
+# Audio suggestions
+
+Read narration and audio_operations for exact saved section or owned recording identities, supported profiles and outcomes. prepare_narration_speech and prepare_recording_transcription save pending suggestions only. They never publish paid work. A person presses the existing audio action to generate. Do not pass suggestion IDs to apply_change or publish speech/transcription in a plan. No separate spending approval or usage allowance is needed. Returned media and transcripts never attach, adopt or accept themselves. Unknown outcomes retain their original operation identity; never resubmit blindly.

@@ -11,11 +11,10 @@ export interface SegmentDraft {
 }
 export interface SegmentRevision extends SegmentDraft {
   id: string; segmentId: string; projectId: string;
-  /** Present only on the exact successor authored by a human transcript selection. */
-  transcriptSelectionId?: string;
 }
 export interface SuppliedNarrationAudio {
   id: string; projectId: string; media: SuppliedMedia;
+  role?: "music" | "voice" | "upload";
   /** A human-declared origin for an already supplied recording; not provider evidence. */
   declaredOrigin: "uploaded" | "generated";
   requestId: string;
@@ -34,6 +33,7 @@ export interface GeneratedNarrationEvidence {
 /** An existing OpenSlate output, not an upload or a human-declared external recording. */
 export interface VerifiedGeneratedNarrationAudio {
   id: string; projectId: string; media: SuppliedMedia;
+  role?: "music" | "voice" | "upload";
   originEvidence: "verified_generated_audio"; generation: GeneratedNarrationEvidence;
 }
 export type NarrationAudio = SuppliedNarrationAudio | VerifiedGeneratedNarrationAudio;
@@ -48,14 +48,7 @@ export interface HumanNarrationCue {
   startSample: number; endSample: number;
   method: "human"; confidence: null;
 }
-export interface TranscriptNarrationCue extends Omit<HumanNarrationCue, "method"> {
-  method: "transcript_selection"; transcriptSelectionId: string;
-}
-export type NarrationCue = HumanNarrationCue | TranscriptNarrationCue;
-export interface TranscriptCanonicalProvenance {
-  writing?: { selectionId: string; selectionDigest: string };
-  timing?: { selectionId: string; selectionDigest: string };
-}
+export type NarrationCue = HumanNarrationCue;
 export interface NarrationEntry {
   segmentId: string; segmentRevisionId: string; audioId: string | null; cueId: string | null;
   /** Project position of this selected cue's start; never added to source coordinates. */
@@ -95,11 +88,4 @@ export interface NarrationProjection {
     audioPlacement: { source: SuppliedMedia; startSample: number; durationSamples: number; atSample: number; gainMilliDb: 0 };
   }>;
   gaps: NarrationGap[];
-}
-export interface NarrationImpact {
-  segmentId: string;
-  visual: "reuse" | "replan";
-  render: "reuse" | "replace";
-  reason: "added_or_removed" | "meaning_or_duration" | "audio_or_placement" | "unchanged";
-  readinessChanged: boolean;
 }

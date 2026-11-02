@@ -1,0 +1,11 @@
+/* The singing switch in the shot inspector (music video): a switch and the lip-sync price line under it. */
+.insp-sing{margin-top:10px;padding-top:9px;border-top:1px solid var(--hairline);display:flex;flex-direction:column;gap:4px}
+.insp .sing-switch{display:inline-flex;align-items:center;gap:9px;font-size:13.5px;font-weight:600;color:var(--text);cursor:pointer;align-self:flex-start}
+.insp .sing-switch input{position:absolute;opacity:0;width:1px;height:1px;margin:0;padding:0}
+.sing-switch .track{position:relative;width:32px;height:18px;border-radius:var(--r-pill);background:var(--track);flex:none;transition:background .15s}
+.sing-switch .track i{position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--text-2);transition:transform .15s,background .15s}
+.sing-switch input:checked + .track{background:var(--select)}
+.sing-switch input:checked + .track i{transform:translateX(14px);background:var(--select-ink)}
+.sing-switch input:focus-visible + .track{outline:2px solid var(--focus);outline-offset:2px}
+.sing-switch input:disabled + .track{opacity:.45}
+.insp-sing .insp-note{margin:0}

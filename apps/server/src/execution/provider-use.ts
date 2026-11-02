@@ -1,3 +1,4 @@
+import { codePlanAdmissionFromAttempt, isCodePlanAttempt } from "../code-plan/provider-authority.js";
 import { canonical, digest, invariant, providerProfileArguments } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import type { ExecutionRequest } from "@openslate/providers";
@@ -6,24 +7,16 @@ import type { Attempt, Candidate, Grant } from "./engine.js";
 
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
 const hash = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
-const externalV1 = new Set(["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription"]);
+const externalV1 = new Set(["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription", "fal-h3-lipsync", "seedance", "fal-video-i2v", "gemini-lyria"]);
 
-/** A recorded host policy, never inferred by deleting historical allowance evidence. */
+/** A recorded host policy binding the exact capability lock and full profile definition. */
 export function configuredProviderUse(request: ExecutionRequest): boolean {
   const use = request.providerUse;
-  return !!use && request.externalAllowanceId === undefined && use.kind === "configured"
+  return !!use && use.kind === "configured"
     && Object.keys(use).length === 4 && id(use.capabilityLockId) && hash(use.capabilityLockDigest) && hash(use.profileDefinitionDigest);
 }
 export function providerAdmissionRequest(request: ExecutionRequest): boolean {
-  return configuredProviderUse(request) || request.providerUse === undefined && id(request.externalAllowanceId);
-}
-export function externalAllowanceMatches(request: ExecutionRequest, allowanceId: string | null): boolean {
-  return configuredProviderUse(request) ? allowanceId === null : request.providerUse === undefined && id(allowanceId) && allowanceId === request.externalAllowanceId;
-}
-export function allowanceMappingMatches(request: ExecutionRequest, mapping: { allowanceId: string | null; allowanceDigest: string | null; consumptionDigest: string | null }): boolean {
-  return externalAllowanceMatches(request, mapping.allowanceId) && (configuredProviderUse(request)
-    ? mapping.allowanceDigest === null && mapping.consumptionDigest === null
-    : hash(mapping.allowanceDigest) && hash(mapping.consumptionDigest));
+  return configuredProviderUse(request);
 }
 export function configuredProfileMatches(request: ExecutionRequest, profile: ProviderProfile, lockId: string, lockDigest: string): boolean {
   return configuredProviderUse(request) && request.providerUse!.capabilityLockId === lockId
@@ -33,9 +26,10 @@ export function configuredProfileMatches(request: ExecutionRequest, profile: Pro
 /** Historical identity check also usable before the reservation is inserted in the admission transaction. */
 export function assertConfiguredProviderPin(store: Pick<Store, "get">, attempt: Attempt): ProviderProfile | null {
   if (!attempt.request) return null;
+  if (isCodePlanAttempt(attempt) && Object.hasOwn(attempt.request, "providerUse")) return codePlanAdmissionFromAttempt(store, attempt).profile;
   if (!Object.hasOwn(attempt.request, "providerUse")) {
     if (attempt.request.execution?.version === "1" && externalV1.has(attempt.request.execution.adapter))
-      invariant(providerAdmissionRequest(attempt.request), "CONFIGURED_PROVIDER_ADMISSION_CONFLICT", "External work lost its original provider-use or historical allowance identity");
+      invariant(false, "CONFIGURED_PROVIDER_ADMISSION_CONFLICT", "External work requires its recorded provider-use proof");
     return null;
   }
   invariant(configuredProviderUse(attempt.request), "CONFIGURED_PROVIDER_ADMISSION_CONFLICT", "Configured provider use must retain its exact recorded proof");
@@ -62,9 +56,9 @@ export function assertConfiguredProviderPin(store: Pick<Store, "get">, attempt: 
 /** Retained proof; current selection and Stop are checked separately before first submit. */
 export function assertConfiguredProviderAdmission(store: Pick<Store, "get">, attempt: Attempt): void {
   const profile = assertConfiguredProviderPin(store, attempt); if (!profile) return;
+  if (isCodePlanAttempt(attempt)) { codePlanAdmissionFromAttempt(store, attempt); return; }
   const reservation = store.get<{ id: string; projectId: string; attemptId: string; micros: string; state: string }>("reservation", attempt.reservationId!);
   invariant(reservation?.id === attempt.reservationId && reservation.projectId === attempt.projectId && reservation.attemptId === attempt.id
-    && reservation.micros === profile.unitCostMicros && ["reserved", "charged", "released"].includes(reservation.state)
-    && !store.get("external_allowance_consumption", attempt.id),
-  "CONFIGURED_PROVIDER_ADMISSION_CONFLICT", "Configured provider admission lost its original reservation or acquired incompatible allowance evidence");
+    && reservation.micros === profile.unitCostMicros && ["reserved", "charged", "released"].includes(reservation.state),
+  "CONFIGURED_PROVIDER_ADMISSION_CONFLICT", "Configured provider admission lost its original reservation");
 }

@@ -1,4 +1,4 @@
-import { configuredProviderUse, providerAdmissionRequest, allowanceMappingMatches } from "./provider-use.js";
+import { providerAdmissionRequest } from "./provider-use.js";
 import { createHash } from "node:crypto";
 import { canonical, digest, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
@@ -17,9 +17,9 @@ export interface TranscriptionExecutionPreparation { intent: TranscriptionAudioI
 interface Identity { id: string; projectId: string; version: 1; attemptId: string; requestDigest: string }
 export interface TranscriptionExecutionMapping extends Identity {
   profileDigest: string; profileDefinitionDigest: string; profileDefinition: ProviderProfile;
-  /** Retained matching evidence; consumption does not pin the original admission lock ID. */
+  /** Exact original admission lock and full profile definition. */
   capabilityLockId: string; capabilityLockDigest: string;
-  allowanceId: string | null; allowanceDigest: string | null; consumptionDigest: string | null; estimatedMicros: string;
+  estimatedMicros: string;
   preparation: { intentId: string; intentDigest: string; receiptId: string; receiptDigest: string };
   source: { record: TranscriptionAudioIntent["sourceRecord"]; descriptor: TranscriptionAudioIntent["source"]; startSample: 0; endSample: number };
   derivative: TranscriptionAudioReceipt["audio"];
@@ -27,7 +27,7 @@ export interface TranscriptionExecutionMapping extends Identity {
   transport: OpenAITranscriptionDescription;
 }
 export interface TranscriptionExecutionDispatch extends Identity {
-  mappingDigest: string; transportDigest: string; bodySha256: string; allowanceId: string | null; createdAt: string;
+  mappingDigest: string; transportDigest: string; bodySha256: string; createdAt: string;
 }
 export interface CompactTranscriptionResult {
   rawResponseSha256: string; rawResponseByteLength: number; resultDigest: string;
@@ -63,7 +63,7 @@ function base(attempt: Attempt, value: Identity, extras: string[]): void {
 /** No source lookup or conversion. Invalid operation options remain a definite pre-dispatch error. */
 export function transcriptionExecutionOptions(input: ExecutionRequest): Pick<OpenAITranscriptionRequest, "model" | "language" | "timing"> {
   const request = structuredClone(input);
-  transcriptionFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", ...(configuredProviderUse(request) ? ["providerUse"] : ["externalAllowanceId"])]);
+  transcriptionFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "providerUse"]);
   fail(request.kind === "transcription" && request.execution?.adapter === "openai-transcription" && request.execution.version === "1"
     && request.inputs.length === 1 && request.inputs[0]?.kind === "audio" && typeof request.args.language === "string",
   "Transcription requires exactly one audio input, explicit language choice and no custom settings");
@@ -94,7 +94,7 @@ export function assertTranscriptionExecutionProfile(profile: ProviderProfile, at
 /** Structural/semantic verification only: recomputing the multipart body hash requires the actual derivative bytes. */
 export function assertTranscriptionExecutionMapping(attempt: Attempt, mapping: TranscriptionExecutionMapping, preparation: TranscriptionExecutionPreparation): void {
   base(attempt, mapping, ["profileDigest", "profileDefinitionDigest", "profileDefinition", "capabilityLockId", "capabilityLockDigest",
-    "allowanceId", "allowanceDigest", "consumptionDigest", "estimatedMicros", "preparation", "source", "derivative", "parser", "transport"]);
+    "estimatedMicros", "preparation", "source", "derivative", "parser", "transport"]);
   assertTranscriptionExecutionProfile(mapping.profileDefinition, attempt);
   const options = transcriptionExecutionOptions(attempt.request), { intent, receipt } = preparation, input = transcriptionAudioInput(attempt);
   assertTranscriptionAudioSource(intent.source); assertTranscriptionAudioReceipt(intent, receipt);
@@ -114,7 +114,7 @@ export function assertTranscriptionExecutionMapping(attempt: Attempt, mapping: T
   transcriptionFields(transport, ["adapter", "model", "language", "timing", "responseFormat", "input", "requestDigest", "bodySha256", "bodyByteLength", "contentType"]);
   const { requestDigest, bodySha256, bodyByteLength, contentType, ...savedSemantic } = transport;
   fail(mapping.profileDigest === attempt.request.profile!.digest && mapping.profileDefinitionDigest === digest(mapping.profileDefinition)
-    && id(mapping.capabilityLockId) && hash(mapping.capabilityLockDigest) && allowanceMappingMatches(attempt.request, mapping) && mapping.estimatedMicros === mapping.profileDefinition.unitCostMicros
+    && id(mapping.capabilityLockId) && hash(mapping.capabilityLockDigest) && mapping.estimatedMicros === mapping.profileDefinition.unitCostMicros
     && canonical(savedSemantic) === canonical(semantic) && requestDigest === semanticDigest && hash(bodySha256)
     && integer(bodyByteLength, receipt.audio.byteLength + 64, receipt.audio.byteLength + 16384)
     && typeof contentType === "string" && new RegExp(`^multipart/form-data; boundary=openslate-${semanticDigest.slice(0, 48)}-(?:[0-9]|1[0-5])$`).test(contentType),
@@ -122,10 +122,10 @@ export function assertTranscriptionExecutionMapping(attempt: Attempt, mapping: T
 }
 export function assertTranscriptionExecutionDispatch(attempt: Attempt, mapping: TranscriptionExecutionMapping, dispatch: TranscriptionExecutionDispatch,
   preparation: TranscriptionExecutionPreparation): void {
-  base(attempt, dispatch, ["mappingDigest", "transportDigest", "bodySha256", "allowanceId", "createdAt"]);
+  base(attempt, dispatch, ["mappingDigest", "transportDigest", "bodySha256", "createdAt"]);
   assertTranscriptionExecutionMapping(attempt, mapping, preparation);
   fail(dispatch.mappingDigest === digest(mapping) && dispatch.transportDigest === mapping.transport.requestDigest
-    && dispatch.bodySha256 === mapping.transport.bodySha256 && dispatch.allowanceId === mapping.allowanceId
+    && dispatch.bodySha256 === mapping.transport.bodySha256
     && typeof dispatch.createdAt === "string" && dispatch.createdAt.length === 24 && Number.isFinite(Date.parse(dispatch.createdAt))
     && new Date(dispatch.createdAt).toISOString() === dispatch.createdAt, "Transcription dispatch differs from its exact mapping");
 }

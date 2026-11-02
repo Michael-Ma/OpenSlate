@@ -1,24 +1,77 @@
+import { resolveCodePlanProviderAdmission, isCodePlanAttempt } from "../code-plan/provider-authority.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
-import { canonical, digest, invariant } from "@openslate/core";
-import { assertExecutionRequest, describeViggleH3Request, ViggleH3Provider, registerExecutionProvider } from "@openslate/providers";
-import type { ExecutionCallOptions, ExecutionOutcome, ExecutionProvider, ExecutionRequest, ViggleH3Request, ViggleH3Resolution, ViggleH3Quality, ViggleH3AspectRatio, ViggleH3SubmitResult } from "@openslate/providers";
+import { canonical, digest, DomainError, invariant } from "@openslate/core";
+import { assertExecutionRequest, centerCropPng, describeViggleH3Request, ViggleH3Provider, registerExecutionProvider } from "@openslate/providers";
+import type { ExecutionCallOptions, ExecutionOutcome, ExecutionProvider, ExecutionRequest, PngCenterCrop, ViggleH3Request, ViggleH3Resolution, ViggleH3Quality, ViggleH3SubmitResult } from "@openslate/providers";
 import { EnvironmentMediaCredentials } from "../application/provider-credentials.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { Store } from "../persistence/store.js";
 import type { Attempt } from "./engine.js";
-import { ExecutionOutputStore } from "./output-store.js";
+import { ExecutionOutputStore, isOutputStoreCapacityError } from "./output-store.js";
 import { ProtectedVideoDownloader } from "./video-download.js";
-import { assertViggleH3ExecutionDispatch, assertViggleH3ExecutionMapping, assertViggleH3ExecutionObservation, assertViggleH3ExecutionSubmit, assertViggleH3OperationOptions, assertViggleH3PollPolicy, assertViggleH3PollSchedule, viggleH3ObservationId } from "./viggle-h3-receipts.js";
+import { assertViggleH3ExecutionDispatch, assertViggleH3ExecutionMapping, assertViggleH3ExecutionObservation, assertViggleH3ExecutionSubmit, assertViggleH3FirstFrameAspect, assertViggleH3OperationOptions, assertViggleH3PollPolicy, viggleH3RequestAspect, assertViggleH3PollSchedule, viggleH3ObservationId } from "./viggle-h3-receipts.js";
 import type { ViggleH3ExecutionDispatch, ViggleH3ExecutionMapping, ViggleH3ExecutionObservation, ViggleH3ExecutionSubmit, ViggleH3PollObservation, ViggleH3PollPolicy, ViggleH3PollSchedule, ViggleH3SubmitObservation } from "./viggle-h3-receipts.js";
 import { assertViggleFirstDispatch, assertViggleDispatchLease, assertViggleMappingAdmission, resolveViggleAdmission, resolveViggleFrame, viggleFramePin, viggleRecord } from "./viggle-h3-authority.js";
 import type { ViggleFrameEvidence } from "./viggle-h3-authority.js";
 import { assertViggleSpoolLineage, viggleObservations } from "./viggle-h3-lineage.js";
+import { VIGGLE_SETTLEMENT_KIND, assertViggleSettlementTiming, settleViggleSubmission } from "./viggle-h3-settlement.js";
+import type { ViggleSettlementTiming } from "./viggle-h3-settlement.js";
 
 const unknown = (diagnostic: string, taskId?: string): ExecutionOutcome => ({ type: "unknown", diagnostic, ...(taskId ? { taskId } : {}) });
+/** Any host's POST is aborted by then, whatever timeout the original host used. */
+const MAX_SUBMIT_TIMEOUT_MS = 120000;
+/** Polling interval floor for a released (detached) task; liability and reconciliation continue. */
+export const DETACHED_POLL_MS = 300000;
+/** Unsettled lost replies remain possible charges and require human consent. */
+export const SUBMISSION_RESPONSE_LOST = "SUBMISSION_RESPONSE_LOST";
+const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: SUBMISSION_RESPONSE_LOST, technical: true, retryAllowed: false });
 const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "VIGGLE_H3_EXECUTION_CANCELLED", "H3 operation was cancelled");
+
+/** A saved completed task still owns its clip; a local download failure is never an unknown submission. */
+export class ViggleDownloadPending extends DomainError {
+  constructor(readonly taskId: string, observed: unknown) {
+    const code = observed instanceof DomainError && ["OUTPUT_DOWNLOAD_LOCATOR", "OUTPUT_DOWNLOAD_EXPIRED", "OUTPUT_DOWNLOAD_ADDRESS"].includes(observed.code)
+      ? observed.code : "OUTPUT_DOWNLOAD_FAILED";
+    super(code, "The service finished the clip, but its download needs attention");
+  }
+}
+
+/** Exact durable provider completion, independent of whether local output files can be recovered. */
+export function completedViggleTask(store: Store, attempt: Attempt): string | null {
+  try {
+    const mapping = store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id);
+    const dispatch = store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id);
+    const submit = store.get<ViggleH3ExecutionSubmit>("viggle_h3_execution_submit", attempt.id);
+    if (!mapping || !dispatch || submit?.observation.kind !== "accepted") return null;
+    assertViggleMappingAdmission(resolveViggleAdmission(store, attempt.request, mapping), mapping);
+    for (const value of viggleObservations(store, attempt)) {
+      if (value.observation.kind !== "completed") continue;
+      const receipt = store.get<import("./output-store.js").OutputReceipt>("execution_output_receipt", value.observation.outputReceiptId);
+      assertViggleH3ExecutionObservation(attempt, mapping, dispatch, submit, value, receipt);
+      return value.observation.taskId;
+    }
+  } catch { /* Invalid historical metadata cannot supply evidence of completion. */ }
+  return null;
+}
+/** Only a validated failed/cancelled vendor task releases its code-plan liability. */
+export function viggleFreeFailure(store: Store, attempt: Attempt): boolean {
+  if (attempt.request.execution.adapter !== "viggle-h3") return false;
+  const mapping = store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id);
+  const dispatch = store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id);
+  const submit = store.get<ViggleH3ExecutionSubmit>("viggle_h3_execution_submit", attempt.id);
+  if (!mapping || !dispatch || !submit || completedViggleTask(store, attempt)) return false;
+  assertViggleMappingAdmission(resolveViggleAdmission(store, attempt.request, mapping), mapping);
+  return viggleObservations(store, attempt).some(row => {
+    if (!["failed", "cancelled"].includes(row.observation.kind)) return false;
+    assertViggleH3ExecutionObservation(attempt, mapping, dispatch, submit, row); return true;
+  });
+}
+export function viggleHasCompletedObservation(store: Store, attempt: Attempt): boolean {
+  return completedViggleTask(store, attempt) !== null;
+}
 
 /** Trusted opt-in application bridge. Construction registers availability, never spending permission. */
 export class ViggleH3Execution implements ExecutionProvider {
@@ -27,19 +80,23 @@ export class ViggleH3Execution implements ExecutionProvider {
   readonly #credentials: EnvironmentMediaCredentials; readonly #download: ProtectedVideoDownloader;
   readonly #fetch: typeof globalThis.fetch | undefined; readonly #timeout: number; readonly #now: () => number;
   readonly #policy: ViggleH3PollPolicy;
+  readonly #settlementTiming: ViggleSettlementTiming;
   constructor(options: { store: Store; outputStore: ExecutionOutputStore; artifactRoot: string;
     credentials: EnvironmentMediaCredentials; downloader: ProtectedVideoDownloader; fetch?: typeof globalThis.fetch; timeoutMs?: number;
-    pollPolicy?: { initialMs?: number; maximumMs?: number; retryAfterMaximumMs?: number }; now?: () => number }) {
+    pollPolicy?: { initialMs?: number; maximumMs?: number; retryAfterMaximumMs?: number }; now?: () => number;
+    settlementTiming?: ViggleSettlementTiming }) {
     invariant(options.outputStore.store === options.store && isAbsolute(options.artifactRoot) && options.artifactRoot !== "/",
       "VIGGLE_H3_EXECUTION_CONFIGURATION", "Use one application store and an owned artifact root");
     this.#store = options.store; this.#outputs = options.outputStore; this.#credentials = options.credentials; this.#download = options.downloader;
     this.#recovery = new InstallationRecoveryGuard(options.store);
-    this.#fetch = options.fetch; this.#timeout = options.timeoutMs ?? 30000; this.#now = options.now ?? Date.now;
-    invariant(Number.isSafeInteger(this.#timeout) && this.#timeout >= 1 && this.#timeout <= 120000,
+    this.#fetch = options.fetch; this.#timeout = options.timeoutMs ?? 30000; this.#now = options.now ?? (() => Date.now());
+    invariant(Number.isSafeInteger(this.#timeout) && this.#timeout >= 1 && this.#timeout <= MAX_SUBMIT_TIMEOUT_MS,
       "VIGGLE_H3_EXECUTION_CONFIGURATION", "H3 request timeout must be bounded");
     this.#policy = Object.freeze({ initialMs: options.pollPolicy?.initialMs ?? 2000, maximumMs: options.pollPolicy?.maximumMs ?? 15000,
       retryAfterMaximumMs: options.pollPolicy?.retryAfterMaximumMs ?? 86400000, claimMs: this.#timeout + 301000 });
     assertViggleH3PollPolicy(this.#policy);
+    this.#settlementTiming = Object.freeze({ ...(options.settlementTiming ?? { firstMs: 10000, secondMs: 30000 }) });
+    assertViggleSettlementTiming(this.#settlementTiming);
     mkdirSync(options.artifactRoot, { recursive: true, mode: 0o700 }); this.#root = realpathSync(options.artifactRoot);
     registerExecutionProvider(this, { adapter: "viggle-h3", version: "1" });
   }
@@ -54,13 +111,14 @@ export class ViggleH3Execution implements ExecutionProvider {
     let prepared: ViggleH3Request, mapping: ViggleH3ExecutionMapping;
     try {
       const savedMapping = this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id);
-      const admission = resolveViggleAdmission(this.#store, request, savedMapping), frame = resolveViggleFrame(this.#store, attempt, savedMapping?.firstFrame);
-      stopped(signal); prepared = await this.prepare(attempt, signal, frame); stopped(signal);
+      const admission = resolveViggleAdmission(this.#store, request, savedMapping);
+      stopped(signal); const preparation = await this.prepare(attempt, signal); stopped(signal);
+      prepared = preparation.request;
       const proposed: ViggleH3ExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
         profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile, capabilityLockId: admission.capabilityLock.id,
-        capabilityLockDigest: digest(admission.capabilityLock), allowanceId: (admission.allowance?.id ?? null), allowanceDigest: (admission.allowance ? digest(admission.allowance) : null),
-        consumptionDigest: (admission.consumption ? digest(admission.consumption) : null), estimatedMicros: admission.reservation.micros, firstFrame: viggleFramePin(frame),
-        transport: describeViggleH3Request(prepared) };
+        capabilityLockDigest: digest(admission.capabilityLock), estimatedMicros: admission.reservation.micros, ...preparation.pins,
+        ...(preparation.crop ? { firstFrameCrop: preparation.crop } : {}),
+        ...(preparation.lastFrameCrop ? { lastFrameCrop: preparation.lastFrameCrop } : {}), transport: describeViggleH3Request(prepared) };
       assertViggleH3ExecutionMapping(attempt, proposed);
       mapping = this.#store.transaction(() => {
         this.dispatchable(attempt, expected);
@@ -82,7 +140,7 @@ export class ViggleH3Execution implements ExecutionProvider {
         stopped(signal); this.dispatchable(attempt, expected);
         assertViggleMappingAdmission(resolveViggleAdmission(this.#store, request, mapping), mapping);
         const dispatch: ViggleH3ExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping), bodySha256: mapping.transport.bodySha256,
-          allowanceId: (request.externalAllowanceId ?? null), createdAt: this.now() };
+          createdAt: this.now() };
         this.#store.insert("viggle_h3_execution_dispatch", attempt.id, attempt.projectId, dispatch); return true;
       });
     } catch { return this.notDispatched(attempt, expected, 'LOCAL_CANCELLED', signal); }
@@ -106,7 +164,9 @@ export class ViggleH3Execution implements ExecutionProvider {
   async lookup(attemptId: string, input?: Readonly<ExecutionRequest>, options: ExecutionCallOptions = {}): Promise<ExecutionOutcome> {
     const saved = this.#store.get<Attempt>("attempt", attemptId);
     invariant(saved && (!input || input.attemptId === attemptId), "VIGGLE_H3_EXECUTION_CONFLICT", "Unknown or mismatched H3 attempt");
-    return this.replay(this.admitted(structuredClone(input ?? saved.request)), options.signal);
+    const attempt = this.admitted(structuredClone(input ?? saved.request));
+    this.fenceNeverDispatched(attempt, options);
+    return this.replay(attempt, options.signal);
   }
 
   async poll(taskId: string, input?: Readonly<ExecutionRequest>, options: ExecutionCallOptions = {}): Promise<ExecutionOutcome> {
@@ -146,17 +206,31 @@ export class ViggleH3Execution implements ExecutionProvider {
         const observation = saved.observation;
         invariant(observation.kind === "completed", "VIGGLE_H3_EXECUTION_CONFLICT", "Expected completed polling evidence");
         const receipt = this.#store.get<import("./output-store.js").OutputReceipt>("execution_output_receipt", observation.outputReceiptId)!;
+        assertViggleH3ExecutionObservation(attempt,
+          this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id)!,
+          this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id)!, submit, saved, receipt);
         try {
-          await this.#outputs.spool(attempt.projectId, receipt.id, this.#download.source(receipt), signal ? { signal } : {});
+          try { await this.#outputs.spool(attempt.projectId, receipt.id, this.#download.source(receipt), signal ? { signal } : {}); }
+          catch (error) {
+            if (isOutputStoreCapacityError(error)) throw error;
+            throw new ViggleDownloadPending(taskId, error);
+          }
           const completed = await this.#outputs.recoverCompletion(attempt.projectId, attempt.id, signal ? { signal } : {});
           invariant(completed, "VIGGLE_H3_EXECUTION_CONFLICT", "Downloaded output has no winning slot");
           assertViggleSpoolLineage(this.#store, attempt, completed.outputs[0]!.storage.spoolId); result = completed;
-        } catch { result = unknown("H3 completed; owned video storage needs recovery", taskId); }
+        } catch (error) {
+          if (error instanceof ViggleDownloadPending || isOutputStoreCapacityError(error)) throw error;
+          throw new ViggleDownloadPending(taskId, error);
+        }
       } else {
         saved = this.saveObservation(attempt, response.kind === "unknown" ? { ...response, taskId } : response);
+        if (completedViggleTask(this.#store, attempt)) throw new ViggleDownloadPending(taskId, null);
         result = this.outcome(saved);
       }
-    } catch { result = unknown("H3 task observation needs recovery", taskId); }
+    } catch (error) {
+      if (error instanceof ViggleDownloadPending || isOutputStoreCapacityError(error)) throw error;
+      result = unknown("H3 task observation needs recovery", taskId);
+    }
     finally {
       // A late worker may retain evidence, but cannot shorten a replacement poller's cooldown.
       this.#store.transaction(() => {
@@ -166,6 +240,8 @@ export class ViggleH3Execution implements ExecutionProvider {
         const observation = saved?.observation;
         if (observation?.kind === "unknown" && ["auth", "quota", "throttled"].includes(observation.error.category))
           delay = Math.max(delay, Math.min(current.policy.retryAfterMaximumMs, observation.error.retryAfterMs ?? 0));
+        // A job the person stopped waiting for (decision R3) is still polled for its late result, just less often.
+        if (this.#store.get<{ released?: unknown }>("attempt", attempt.id)?.released) delay = Math.max(delay, DETACHED_POLL_MS);
         this.#store.put("viggle_h3_poll_schedule", attempt.id, attempt.projectId, { ...current, claimId: null, nextPollAt: this.now() + delay,
           lastObservationId: saved?.id ?? current.lastObservationId });
       });
@@ -196,6 +272,17 @@ export class ViggleH3Execution implements ExecutionProvider {
     const mapping = this.#store.get<ViggleH3ExecutionMapping>('viggle_h3_execution_mapping', previous.id);
     const admission = resolveViggleAdmission(this.#store, previous.request, mapping);
     assertViggleDispatchLease(this.#store, { ...admission, attempt: previous }, expected);
+  }
+  private fenceNeverDispatched(attempt: Attempt, options: ExecutionCallOptions): void {
+    this.#store.transaction(() => {
+      const current = this.admitted(attempt.request), expected = options.expectedLease;
+      // Reconciliation owns a new epoch, so every old first-POST writer is fenced before this receipt is sealed.
+      if (options.signal?.aborted || this.started(current.id) || current.taskId || !expected || current.phase !== "submission_unknown"
+        || current.leaseOwner !== expected.owner || current.leaseEpoch !== expected.epoch || current.leaseExpiresAt <= Date.now()
+        || (isCodePlanAttempt(current) ? resolveCodePlanProviderAdmission(this.#store, current.request)?.codePlan.liability
+          : this.#store.get<{ state: string }>("reservation", current.reservationId!)?.state) !== "reserved") return;
+      this.saveSubmit(current, { kind: "not_dispatched", code: "LOCAL_CANCELLED" });
+    });
   }
   private started(id: string): boolean { return !!(this.#store.get("viggle_h3_execution_dispatch", id) || this.#store.get("viggle_h3_execution_submit", id)); }
   private transport(timeoutMs = this.#timeout): ViggleH3Provider {
@@ -241,34 +328,70 @@ export class ViggleH3Execution implements ExecutionProvider {
       policy: this.#policy, count: 0, nextPollAt: this.now() + this.#policy.initialMs, claimId: null, lastObservationId: null });
   }
   private saveObservation(attempt: Attempt, observation: ViggleH3PollObservation): ViggleH3ExecutionObservation {
-    const id = viggleH3ObservationId(attempt.id, observation), previous = this.#store.get<ViggleH3ExecutionObservation>("viggle_h3_execution_observation", id);
-    if (previous) {
-      // The same protected receipt may be reported again with another HTTP trace. Keep its first immutable observation.
-      invariant(observation.kind === "completed" && previous.observation.kind === "completed" || canonical(previous.observation) === canonical(observation),
-        "VIGGLE_H3_EXECUTION_CONFLICT", "Observation identity collision"); return previous;
-    }
-    const mapping = this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id)!, dispatch = this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id)!;
-    return this.#store.insert("viggle_h3_execution_observation", id, attempt.projectId, { ...this.identity(attempt), id, mappingDigest: digest(mapping),
-      dispatchDigest: digest(dispatch), observedAt: this.now(), observation });
+    return this.#store.transaction(() => {
+      const id = viggleH3ObservationId(attempt.id, observation), previous = this.#store.get<ViggleH3ExecutionObservation>("viggle_h3_execution_observation", id);
+      if (previous) {
+        // The same protected receipt may be reported again with another HTTP trace. Keep its first immutable observation.
+        invariant(observation.kind === "completed" && previous.observation.kind === "completed" || canonical(previous.observation) === canonical(observation),
+          "VIGGLE_H3_EXECUTION_CONFLICT", "Observation identity collision"); return previous;
+      }
+      const mapping = this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id)!, dispatch = this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id)!;
+      if (observation.kind === "pending" || observation.kind === "unknown") {
+        // HTTP trace ids are not new task state. Reuse exact validated evidence,
+        // retaining status, HTTP status, diagnostic and retry timing unchanged.
+        const state = (value: ViggleH3PollObservation) => canonical({ ...value, receipt: { ...value.receipt, requestId: null } });
+        const retained = viggleObservations(this.#store, attempt).find(value => value.observation.kind === observation.kind && state(value.observation) === state(observation));
+        if (retained) {
+          assertViggleH3ExecutionObservation(attempt, mapping, dispatch, this.submission(attempt)!, retained);
+          return retained;
+        }
+      }
+      return this.#store.insert("viggle_h3_execution_observation", id, attempt.projectId, { ...this.identity(attempt), id, mappingDigest: digest(mapping),
+        dispatchDigest: digest(dispatch), observedAt: this.now(), observation });
+    });
   }
   private async replay(attempt: Attempt, signal?: AbortSignal): Promise<ExecutionOutcome> {
     const retained = this.submission(attempt);
     if (retained?.observation.kind === 'not_dispatched' || retained?.observation.kind === 'rejected') return { type: 'rejected', certainty: 'not_accepted',
-      failureId: `h3-${digest(retained).slice(0, 32)}`, technical: retained.observation.kind === 'not_dispatched', retryAllowed: false };
+      failureId: retained.observation.kind === "rejected" ? retained.observation.error.code : retained.observation.code,
+      technical: retained.observation.kind === "not_dispatched" || retained.observation.error.category === "transport",
+      retryAllowed: retained.observation.kind === "rejected" && retained.observation.error.category === "transport" && retained.observation.error.code.startsWith("CONNECT_") };
     try { const completed = await this.#outputs.recoverCompletion(attempt.projectId, attempt.id, signal ? { signal } : {});
       if (completed) { assertViggleSpoolLineage(this.#store, attempt, completed.outputs[0]!.storage.spoolId); return completed; } }
-    catch { return unknown("H3 owned output requires local recovery", attempt.taskId ?? undefined); }
+    catch (error) {
+      if (isOutputStoreCapacityError(error)) throw error;
+      const completedTask = completedViggleTask(this.#store, attempt);
+      if (completedTask) throw new ViggleDownloadPending(completedTask, error);
+      return unknown("H3 owned output requires local recovery", attempt.taskId ?? undefined);
+    }
     const submit = retained ?? this.submission(attempt);
-    if (!submit) return unknown("H3 acceptance is unresolved; automatic resubmission is disabled", attempt.taskId ?? undefined);
+    if (!submit) {
+      // A dispatch with no receipt is a POST whose worker died. Once that POST must have ended, its reply is lost.
+      const dispatch = this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id);
+      if (!attempt.taskId && dispatch && this.now() - dispatch.createdAt >= MAX_SUBMIT_TIMEOUT_MS) return responseLost();
+      return unknown("H3 acceptance is unresolved; automatic resubmission is disabled", attempt.taskId ?? undefined);
+    }
     const observation = submit.observation;
     if (observation.kind === "not_dispatched" || observation.kind === "rejected") return { type: "rejected", certainty: "not_accepted",
-      failureId: `h3-${digest(submit).slice(0, 32)}`, technical: observation.kind === "not_dispatched", retryAllowed: false };
-    if (observation.kind === "unknown") return unknown(`H3 submission unresolved: ${observation.error.code}`, attempt.taskId ?? undefined);
+      failureId: observation.kind === "rejected" ? observation.error.code : observation.code,
+      technical: observation.kind === "not_dispatched" || observation.error.category === "transport",
+      retryAllowed: observation.kind === "rejected" && observation.error.category === "transport" && observation.error.code.startsWith("CONNECT_") };
+    if (observation.kind === "unknown") {
+      if (attempt.taskId) return unknown(`H3 submission unresolved: ${observation.error.code}`, attempt.taskId);
+      if (isCodePlanAttempt(attempt) && observation.receipt.httpStatus === null
+        && (this.#store.get(VIGGLE_SETTLEMENT_KIND, attempt.id) || !["failed", "succeeded"].includes(attempt.phase))) {
+        const dispatch = this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id)!;
+        return settleViggleSubmission({ store: this.#store, attempt, dispatch, submit, timing: this.#settlementTiming,
+          claimMs: this.#timeout * 3 + 301000, now: () => this.now(), transport: () => this.transport(), ...(signal ? { signal } : {}) });
+      }
+      return responseLost();
+    }
     invariant(!attempt.taskId || attempt.taskId === observation.taskId, "VIGGLE_H3_EXECUTION_CONFLICT", "H3 accepted identity contradicts the saved task");
     const schedule = this.#store.transaction(() => this.schedule(attempt, submit));
+    const completedTask = completedViggleTask(this.#store, attempt);
     // A terminal observation can survive a crash before the mutable cooldown pointer was updated.
     const terminal = viggleObservations(this.#store, attempt).find(item => ["failed", "cancelled"].includes(item.observation.kind));
-    if (terminal) {
+    if (terminal && !completedTask) {
       const mapping = this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id)!, dispatch = this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id)!;
       assertViggleH3ExecutionObservation(attempt, mapping, dispatch, submit, terminal); return this.outcome(terminal);
     }
@@ -276,7 +399,7 @@ export class ViggleH3Execution implements ExecutionProvider {
     if (last) {
       const mapping = this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id)!, dispatch = this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id)!;
       assertViggleH3ExecutionObservation(attempt, mapping, dispatch, submit, last, last.observation.kind === "completed" ? this.#store.get("execution_output_receipt", last.observation.outputReceiptId) : undefined);
-      if (last.observation.kind === "failed" || last.observation.kind === "cancelled") return this.outcome(last);
+      if (!completedTask && (last.observation.kind === "failed" || last.observation.kind === "cancelled")) return this.outcome(last);
     }
     return { type: "accepted", taskId: observation.taskId };
   }
@@ -288,11 +411,7 @@ export class ViggleH3Execution implements ExecutionProvider {
     return { type: "accepted", taskId: observation.taskId };
   }
 
-  private async prepare(attempt: Attempt, signal: AbortSignal | undefined, captured: ViggleFrameEvidence): Promise<ViggleH3Request> {
-    const request = attempt.request, configuration = request.profile!.configuration;
-    const admission = resolveViggleAdmission(this.#store, request, this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id));
-    assertViggleH3OperationOptions(admission.profile, request.args);
-    const reference = request.inputs[0]!, record = structuredClone(captured.artifact);
+  private async readImage(record: ViggleFrameEvidence["artifact"], signal?: AbortSignal): Promise<Buffer> {
     invariant(isAbsolute(record.path), "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG must have an owned absolute path");
     const path = await realpath(record.path), child = relative(this.#root, path);
     invariant(path === record.path && child.length > 0 && child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child),
@@ -302,17 +421,47 @@ export class ViggleH3Execution implements ExecutionProvider {
       const stat = await file.stat(); invariant(stat.isFile() && stat.size === record.byteLength, "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG size changed");
       bytes = Buffer.alloc(stat.size + 1); let size = 0;
       while (size < bytes.length) { stopped(signal); const read = await file.read(bytes, size, bytes.length - size, null); if (!read.bytesRead) break; size += read.bytesRead; }
-      invariant(size === stat.size && createHash("sha256").update(bytes.subarray(0, size)).digest("hex") === reference.sha256,
+      invariant(size === stat.size && createHash("sha256").update(bytes.subarray(0, size)).digest("hex") === record.artifact.sha256,
         "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG bytes changed"); bytes = bytes.subarray(0, size);
     } finally { await file.close(); }
     stopped(signal);
     invariant(bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
       && bytes.readUInt32BE(16) === record.width && bytes.readUInt32BE(20) === record.height,
     "VIGGLE_H3_EXECUTION_CONFLICT", "Reviewed PNG dimensions differ from their validated record");
-    return { prompt: String(request.args.prompt), durationSeconds: Number(request.args.durationFrames) / 30,
+    return bytes;
+  }
+
+  private async prepare(attempt: Attempt, signal?: AbortSignal): Promise<{ request: ViggleH3Request; crop?: PngCenterCrop; lastFrameCrop?: PngCenterCrop;
+    pins: Pick<ViggleH3ExecutionMapping, "firstFrame" | "lastFrame" | "references"> }> {
+    const request = attempt.request, configuration = request.profile!.configuration;
+    const admission = resolveViggleAdmission(this.#store, request, this.#store.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id));
+    assertViggleH3OperationOptions(admission.profile, request.args);
+    const aspectRatio = viggleH3RequestAspect(request.args, request.profile!);
+    const pins: Pick<ViggleH3ExecutionMapping, "firstFrame" | "lastFrame" | "references"> = {};
+    let crop: PngCenterCrop | undefined, lastFrameCrop: PngCenterCrop | undefined;
+    const image = async (sha256: string, role: "first" | "last" | "reference") => {
+      const ref = request.inputs.find(row => row.kind === "image" && row.sha256 === sha256);
+      invariant(ref, "VIGGLE_H3_EXECUTION_CONFLICT", "Missing owned image input");
+      const frame = resolveViggleFrame(this.#store, attempt, undefined, ref), record = frame.artifact;
+      const bytes = await this.readImage(record, signal);
+      if (role === "first") assertViggleH3FirstFrameAspect(request.args, record.width, record.height);
+      const upload = role === "reference" ? { bytes, crop: undefined } : centerCropPng(bytes, aspectRatio);
+      return { pin: viggleFramePin(frame), crop: upload.crop,
+        upload: { bytes: upload.bytes, sha256: createHash("sha256").update(upload.bytes).digest("hex"),
+          width: upload.crop?.width ?? record.width!, height: upload.crop?.height ?? record.height!, byteLength: upload.bytes.length, mediaType: "image/png" as const } };
+    };
+    const prepared: ViggleH3Request = { prompt: String(request.args.prompt), durationSeconds: Number(request.args.durationFrames) / 30,
       resolution: configuration.settings!.resolution as ViggleH3Resolution, quality: configuration.settings!.quality as ViggleH3Quality,
-      aspectRatio: configuration.settings!.aspectRatio as ViggleH3AspectRatio, watermark: false,
-      firstFrame: { bytes, sha256: reference.sha256, width: record.width!, height: record.height!,
-        byteLength: bytes.length, mediaType: "image/png" } };
+      aspectRatio, watermark: false, ...(request.args.enhance === false ? { enhance: false } : {}) };
+    if (Array.isArray(request.args.references)) {
+      pins.references = []; prepared.references = [];
+      for (const hash of request.args.references) { const result = await image(String(hash), "reference"); pins.references.push(result.pin); prepared.references.push(result.upload); }
+    } else if (request.inputs.length) {
+      const first = await image(request.inputs[0]!.sha256, "first"); pins.firstFrame = first.pin; prepared.firstFrame = first.upload; crop = first.crop;
+      if (request.args.lastFrameSha256) {
+        const last = await image(String(request.args.lastFrameSha256), "last"); pins.lastFrame = last.pin; prepared.lastFrame = last.upload; lastFrameCrop = last.crop;
+      }
+    }
+    return { request: prepared, pins, ...(crop ? { crop } : {}), ...(lastFrameCrop ? { lastFrameCrop } : {}) };
   }
 }

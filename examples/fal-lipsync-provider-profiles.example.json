@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "label": "Viggle H3 · 768p · low",
+      "profile": {
+        "id": "viggle-video-768p-low",
+        "revision": "example-1",
+        "kind": "video",
+        "adapter": "viggle-h3",
+        "executionVersion": "1",
+        "configuration": {
+          "model": "MiniMax-H3",
+          "settings": {
+            "quality": "low",
+            "resolution": "768p",
+            "aspectRatio": "16:9"
+          }
+        },
+        "maxConcurrency": 1,
+        "unitCostMicros": "150000",
+        "maxRetries": 0,
+        "minFrames": 90,
+        "maxFrames": 450
+      }
+    },
+    {
+      "label": "H3 Max lip sync on fal · 768p · singing shots",
+      "profile": {
+        "id": "fal-lipsync-768p",
+        "revision": "example-1",
+        "kind": "video",
+        "adapter": "fal-h3-lipsync",
+        "executionVersion": "1",
+        "configuration": {
+          "model": "minimax/h3-max/lip-sync/image-to-video",
+          "settings": {
+            "resolution": "768P"
+          }
+        },
+        "maxConcurrency": 1,
+        "unitCostMicros": "1200000",
+        "maxRetries": 0,
+        "minFrames": 150,
+        "maxFrames": 450
+      }
+    }
+  ]
+}

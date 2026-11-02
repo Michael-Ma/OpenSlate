@@ -1,4 +1,5 @@
-import { digest, shotVideoTiming } from "@openslate/core";
+import { defaultNarratorVoice } from "./narration/default-voice.js";
+import { digest, invariant, shotVideoTiming } from "@openslate/core";
 import type { ProjectRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationService } from "./narration/service.js";
@@ -8,6 +9,7 @@ import {
 } from "./narration/narration-speech-projection.js";
 import { isVerifiedGeneratedNarrationAudio } from "./narration/generated-audio.js";
 import { shotDraftId } from "./narration/narration-scope.js";
+import { reusableNarrationSpeech } from "./narration-reusable-speech.js";
 
 /** Read-only choices for the scene decision; no session, grant, attachment or generation is created here. */
 export function sceneNarrationView(
@@ -18,29 +20,17 @@ export function sceneNarrationView(
 ) {
   let error: string | null = null;
   const workspace = narration?.workspaceSnapshot(project.id);
-  const canonicalHead = production.store.get<{ canonicalId: string }>(
-    "narration_canonical_head",
-    project.id,
-  );
-  const canonical = canonicalHead
-    ? production.store.get<{
-        shotMappings: { shotId: string; segmentId: string | null }[];
-      }>("narration_canonical", canonicalHead.canonicalId)
-    : undefined;
   let options: ReturnType<typeof projectNarrationSpeechOptions> | null = null;
   const rows = project.shots
     .filter((shot) => shot.sceneId === sceneId)
     .map((shot) => {
       const ready = shotVideoTiming(project, shot).ready,
         mode = shot.narration?.mode ?? "undecided";
-      const draft = production.store.get<{ segmentId: string }>(
+      const draft = production.store.get<{ segmentId: string; intentDigest: string }>(
         "narration_shot_draft",
         shotDraftId(project.id, shot.id),
       );
-      const segmentId =
-        draft?.segmentId ??
-        canonical?.shotMappings.find((mapping) => mapping.shotId === shot.id)
-          ?.segmentId;
+      const segmentId = draft?.segmentId;
       const row = workspace?.segments.find(
         (row) => row.entry.segmentId === segmentId,
       );
@@ -58,25 +48,26 @@ export function sceneNarrationView(
           options ??= projectNarrationSpeechOptions(production, project.id);
           const source = row?.script.source;
           const savedVoice = source?.kind === "generated" ? source.voice : null;
+          const writingCurrent = draft?.intentDigest === digest(shot.narration ?? null);
+          const selectedVoice = shot.narration?.voice;
+          const voiceCurrent = selectedVoice === "stock" || selectedVoice === "personal" && savedVoice?.startsWith("openai-custom:") || savedVoice === selectedVoice;
+          invariant(!savedVoice || !writingCurrent || !voiceCurrent || !/^(openai-custom|elevenlabs-personal):/.test(savedVoice) || options.personalVoices.some(value => value.id === savedVoice && value.ready),
+            "PERSONAL_VOICE_REQUIRED", "Choose a ready personal voice for this pinned line.");
           voice =
-            savedVoice && options.voices.includes(savedVoice)
+            savedVoice && writingCurrent && voiceCurrent && options.voices.includes(savedVoice)
               ? savedVoice
-              : options.voices.includes("cedar")
-                ? "cedar"
-                : (options.voices.find(
-                    (value) => !value.startsWith("openai-custom:"),
-                  ) ?? "");
+              : defaultNarratorVoice(production.store, project, shot);
           if (shot.narration?.voice === "personal") {
             if (
-              !savedVoice?.startsWith("openai-custom:") ||
+              !voice.startsWith("openai-custom:") ||
               !options.personalVoices.some(
-                (value) => value.id === savedVoice && value.ready,
+                (value) => value.id === voice && value.ready,
               )
             ) {
               if (!ready)
                 error ??=
                   "Choose your registered narration voice before confirming this scene.";
-            } else voice = savedVoice;
+            }
           }
           const selected = options.profiles.find(
             (profile) => profile.id === options!.preferredProfileId,
@@ -179,6 +170,14 @@ export function sceneNarrationView(
             ? (row?.audio?.media.sha256 ?? null)
             : null,
           recordingCurrent,
+          reusableSpeechTake: !ready && !recordingCurrent && mode === "generated" && !!reusableNarrationSpeech(production, project.id, {
+            segmentId: row?.entry.segmentId ?? null, segmentRevisionId: row?.script.id ?? null,
+            text, voice, profileId, profileRevisionId,
+          }),
+          measuredSeconds: (recordingCurrent || ready) && row?.audio?.media.probe.audio?.samples
+            ? row.audio.media.probe.audio.samples / 48000
+            : durationSamples === null ? null : durationSamples / 48000,
+          fit: ready ? shot.narrationFit ?? null : null,
           timing: {
             startFrame: 0,
             startSample,

@@ -12,11 +12,12 @@ import { Store } from "../dist/persistence/store.js";
 import { ProductionService } from "../dist/application/service.js";
 import { EnvironmentMediaCredentials } from "../dist/application/provider-credentials.js";
 import { createMediaExecutionRuntime } from "../dist/application/media-execution-runtime.js";
-import { allowanceIssueContextDigest } from "../dist/application/external-allowances.js";
 import { InstalledProviderCatalog } from "../dist/application/provider-catalog.js";
 import { assertViggleH3OperationOptions } from "../dist/execution/viggle-h3-receipts.js";
 import { ImageApplicationService } from "../dist/media/image-application.js";
 import { NarrationService, NarrationCanonicalService } from "../dist/narration/index.js";
+import { createShotNarrationSession } from "../dist/narration/narration-scope.js";
+import { createShotAudioWorkspace } from "../dist/narration/shot-audio-routes.js";
 import { projectFixture } from "./execution-fixture.mjs";
 
 const ffmpegPath = process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync("/opt/homebrew/bin/ffmpeg") ? "/opt/homebrew/bin/ffmpeg" : "/usr/bin/ffmpeg");
@@ -30,7 +31,8 @@ const viggleProfile = { id: "configured-viggle-video", revision: "viggle-config-
   maxConcurrency: 1, unitCostMicros: "900000", maxRetries: 0, minFrames: 90, maxFrames: 450 };
 const viggleConfig = () => ({ ...config(), viggleH3: true, viggleH3DownloadHosts: ["viggle.example.test"] });
 const providerConfiguration = { version: 1, profiles: [{ label: "Configured image", profile: imageProfile }, { label: "Configured video", profile: videoProfile }] };
-const config = (image = false, h3 = false) => ({ image, h3, h3DownloadHosts: h3 ? ["media.example.test"] : [] });
+const config = (image = false, h3 = false) => ({ image, codexImage: false, h3, speech: false, transcription: false, viggleH3: false,
+  h3DownloadHosts: h3 ? ["media.example.test"] : [], viggleH3DownloadHosts: [], falLipSync: false, falLipSyncDownloadHosts: [] });
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 let inputDirectory, png, voice;
 before(async () => {
@@ -73,6 +75,7 @@ function fixture(t, options = {}) {
     const runtime = f.runtime, production = legacy ? new ProductionService(store, runtime.engine) : f.production, profile = kind === "image" ? imageProfile : options.videoProfile ?? videoProfile;
     const selection = runtime.providerCatalog.select(runtime.providerCatalog.digest, [profile.id]);
     const created = production.createProject("Offline runtime composition", selection), seed = projectFixture(created.id, 1);
+    if (kind === "video") seed.shots[0].desiredFrames = videoSeconds * 30;
     let project = store.saveProject({ ...seed, capabilityLockId: created.capabilityLockId }, created.headVersion);
     const human = production.beginRequest(project.id, "offline-human", "Plan one exact media operation");
     let reference;
@@ -81,21 +84,25 @@ function fixture(t, options = {}) {
         { bytes: png, sha256: hash(png), expectedHeadVersion: project.headVersion, key: newId() });
       reference = imported.artifact; project = store.getProject(project.id);
       const narration = new NarrationService(production, runtime.localMedia), canonical = new NarrationCanonicalService(narration);
-      const view = () => narration.snapshot(project.id, human), key = () => newId();
-      narration.reviseSegments(project.id, human, view().state.version, key(), { add: [
-        { text: "Built to last.", meaning: "Built to last.", textKind: "draft", language: "en", source: { kind: "uploaded" } },
-      ] });
+      const shotId = project.shots[0].id, key = () => newId();
+      const session = createShotNarrationSession(production, project.id, shotId, key(), undefined, { holdScopeIds: [] });
+      const narrationHuman = { kind: "human", principalId: session.principalId, requestId: session.requestId };
+      const workspace = createShotAudioWorkspace({ production, narration, canonical, actorFor: (projectId, sessionId) => {
+        const saved = store.get("narration_session", sessionId); assert.equal(saved?.projectId, projectId);
+        return { kind: "human", principalId: saved.principalId, requestId: saved.requestId };
+      } });
+      const view = () => narration.workspaceSnapshot(project.id);
+      workspace.saveWriting(project.id, shotId, { sessionId: session.id, expectedHeadVersion: project.headVersion,
+        expectedVersion: view().state.version, text: "Built to last.", language: "en", mode: "uploaded", voice: null, profileRevisionId: null }, key());
       const path = join(runtime.uploadDirectory, "narration.wav"); copyFileSync(voice, path);
-      const audio = await narration.importAudio(project.id, human, { path, declaredOrigin: "uploaded", key: key() });
-      const segmentId = view().segments[0].entry.segmentId;
-      narration.bindAudio(project.id, human, view().state.version, key(), segmentId, audio.id);
-      narration.recordHumanCue(project.id, human, view().state.version, key(), { segmentId, startSample: 0, endSample: videoSeconds * 48000 });
-      let segment = view().segments[0]; narration.accept(project.id, human, view().state.version, key(), "script", [segment.script.id]);
-      narration.acceptAudio(project.id, human, view().state.version, key(), [{ segmentRevisionId: segment.script.id, audioId: audio.id }]);
-      segment = view().segments[0]; narration.accept(project.id, human, view().state.version, key(), "timing", [segment.cue.id]);
-      const canonicalPlan = canonical.prepare(project.id, human, { expectedHeadVersion: project.headVersion,
-        expectedNarrationVersion: view().state.version, shotMappings: [{ shotId: project.shots[0].id, segmentId }], key: key() });
-      await canonical.apply(project.id, human, canonicalPlan.id); project = store.getProject(project.id);
+      const audio = await narration.importAudio(project.id, narrationHuman, { path, declaredOrigin: "uploaded", key: key() });
+      const segmentId = workspace.detail(project.id, shotId).segment.entry.segmentId;
+      narration.bindAudio(project.id, narrationHuman, view().state.version, key(), segmentId, audio.id);
+      const segment = workspace.detail(project.id, shotId).segment;
+      await workspace.accept(project.id, shotId, { sessionId: session.id, expectedHeadVersion: store.getProject(project.id).headVersion,
+        expectedVersion: view().state.version, segmentId, segmentRevisionId: segment.script.id, audioId: audio.id,
+        sha256: audio.media.sha256, startSample: 0, endSample: videoSeconds * 48000 }, key());
+      project = store.getProject(project.id);
     }
     const shot = project.shots[0], q = JSON.stringify, settingsSource = options.videoSettings === undefined ? "" : `,settings:${q(options.videoSettings)}`;
     production.authorize(project.id, human, [{ scopeId: shot.id, kind }], newId(), "initial_slot");
@@ -111,16 +118,8 @@ function fixture(t, options = {}) {
     }
     return { projectId: project.id, binding, profile };
   };
-  f.issue = selected => {
-    const input = { profileDigest: String(providerProfileArguments(selected.profile).profileDigest), profileDefinitionDigest: digest(selected.profile),
-      selections: [{ candidateId: selected.binding.candidateId, nodeId: selected.binding.id, specDigest: selected.binding.node.specDigest }],
-      maxAttempts: 1, maxEstimatedMicros: selected.profile.unitCostMicros, expiresAt: new Date(Date.now() + 3600000).toISOString() };
-    const human = f.production.beginRequest(selected.projectId, "offline-human", "Approve this exact configured estimate", { editing: false,
-      contextDigest: allowanceIssueContextDigest(selected.projectId, input) });
-    return f.runtime.allowances.issue(selected.projectId, human, input);
-  };
   f.noAdmission = projectId => {
-    for (const kind of ["attempt", "reservation", "external_allowance_consumption", "image_execution_dispatch", "h3_execution_dispatch", "viggle_h3_execution_dispatch"])
+    for (const kind of ["attempt", "reservation", "image_execution_dispatch", "h3_execution_dispatch", "viggle_h3_execution_dispatch"])
       assert.equal(store.list(kind, projectId).length, 0, `Unexpected ${kind}`);
   };
   return f;
@@ -142,12 +141,13 @@ test("explicit routes and credential presence do not call networks or create gen
   configuration.image = false; configuration.h3 = false; configuration.h3DownloadHosts[0] = "changed.example.test";
   assert.ok(runtime.engine.registry.resolve({ adapter: "openai-image", version: "1" })); assert.ok(runtime.engine.registry.resolve({ adapter: "minimax-h3", version: "1" }));
   assert.equal(runtime.providerCatalog.view().realExecutionEnabled, true);
-  assert.deepEqual(runtime.productionOptions, { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video" });
+  assert.deepEqual(runtime.productionOptions, { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video",
+    newCodeProjectMediaProfiles: [videoProfile] });
   const demo = f.production.createProject("Default still fake"), selected = runtime.providerCatalog.select(runtime.providerCatalog.digest, [videoProfile.id]);
   const production = f.production.createProject("Pinned production", selected);
   assert.equal(Object.hasOwn(f.store.get("capability_lock", demo.capabilityLockId), "localExecution"), false);
   assert.deepEqual(f.store.get("capability_lock", production.capabilityLockId).localExecution, { adapter: "local-media", version: "1" });
-  for (const project of [demo, production]) for (const kind of ["message", "grant", "candidate", "attempt", "reservation", "external_allowance", "external_allowance_consumption"])
+  for (const project of [demo, production]) for (const kind of ["message", "grant", "candidate", "attempt", "reservation"])
     assert.equal(f.store.list(kind, project.id).length, 0);
   assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 });
 });
@@ -161,6 +161,20 @@ test("enabled routes require executable local tools, while disabled startup supp
   f.arguments_.ffmpegPath = f.directory; f.arguments_.ffprobePath = ffprobePath;
   assert.throws(f.build, { code: "MEDIA_EXECUTION_TOOLS_REQUIRED" });
   assert.equal(f.store.listProjects().length, 0); assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 });
+});
+
+test("runtime configuration requires every route switch and host list explicitly before construction", t => {
+  const f = fixture(t, { tools: false });
+  for (const field of Object.keys(config())) {
+    const configuration = config(); delete configuration[field]; f.arguments_.configuration = configuration;
+    assert.throws(f.build, { code: "MEDIA_EXECUTION_CONFIGURATION" }, `Missing ${field}`);
+    for (const value of field.endsWith("DownloadHosts") ? [null, "media.example.test", {}] : [null, 1, "1"]) {
+      f.arguments_.configuration = { ...config(), [field]: value };
+      assert.throws(f.build, { code: "MEDIA_EXECUTION_CONFIGURATION" }, `Malformed ${field}`);
+    }
+  }
+  assert.equal(f.store.listProjects().length, 0); assert.equal(existsSync(join(f.directory, "uploads")), false);
+  assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 }); assert.deepEqual(f.viggleCalls, { fetch: 0, lookup: 0, download: 0 });
 });
 
 test("readiness separates enabled host routes, credential availability and unregistered providers", t => {
@@ -177,27 +191,24 @@ test("readiness separates enabled host routes, credential availability and unreg
 
 test("configured image use publishes the exact injected PNG without a separate allowance or fake fallback", async t => {
   const f = fixture(t, { configuration: config(true), keys: true }), runtime = f.build(), selected = await f.seed();
-  // A cap saved by the earlier app is historical bookkeeping, never a new approval gate.
-  runtime.engine.setBudget(selected.projectId, "0");
   await runtime.engine.runReady();
   const output = runtime.engine.outputs(selected.projectId)[0], artifact = f.store.get("artifact", output.artifact.artifactId);
   assert.equal(artifact.fixture, false); assert.equal(artifact.artifact.sha256, hash(png)); assert.deepEqual(readFileSync(artifact.path), png);
   assert.equal(artifact.path.startsWith(runtime.imageStore.rootDir), true);
-  const attempt = runtime.engine.attempts(selected.projectId)[0]; assert.equal(attempt.phase, "succeeded"); assert.equal(attempt.request.externalAllowanceId, undefined);
-  assert.equal(f.store.list("external_allowance", selected.projectId).length, 0);
-  assert.equal(f.store.list("external_allowance_consumption", selected.projectId).length, 0);
+  const attempt = runtime.engine.attempts(selected.projectId)[0]; assert.equal(attempt.phase, "succeeded"); assert.equal(attempt.request.providerUse.profileDefinitionDigest, digest(selected.profile));
+  assert.equal(f.store.get("reservation", attempt.reservationId).attemptId, attempt.id);
   assert.equal(f.store.list("image_execution_dispatch", selected.projectId).length, 1); assert.equal(f.provider.acceptedCount(), 0);
   await runtime.engine.reconcile(); await runtime.engine.runReady(); assert.deepEqual(f.calls, { image: 1, h3: 0, lookup: 0, download: 0 });
 });
 
-for (const kind of ["image", "video"]) test(`missing ${kind} credential blocks before consuming an existing allowance`, async t => {
-  const f = fixture(t, { configuration: config(true, true) }), runtime = f.build(), selected = await f.seed(kind); f.issue(selected);
+for (const kind of ["image", "video"]) test(`missing ${kind} credential blocks before any attempt or reservation`, async t => {
+  const f = fixture(t, { configuration: config(true, true) }), runtime = f.build(), selected = await f.seed(kind);
   const result = await runtime.engine.runReady(); assert.ok(result.blocked.some(item => item.code === "MEDIA_CREDENTIAL_MISSING"), JSON.stringify(result));
   f.noAdmission(selected.projectId); assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 });
 });
 
 test("legacy external-video projects require a new local-assembly pin before paid admission", async t => {
-  const f = fixture(t, { configuration: config(false, true), keys: true }), runtime = f.build(), selected = await f.seed("video", true); f.issue(selected);
+  const f = fixture(t, { configuration: config(false, true), keys: true }), runtime = f.build(), selected = await f.seed("video", true);
   const before = f.store.getProject(selected.projectId), lock = f.store.get("capability_lock", before.capabilityLockId);
   const result = await runtime.engine.runReady(); assert.ok(result.blocked.some(item => item.code === "LOCAL_EXECUTION_UPGRADE_REQUIRED"), JSON.stringify(result));
   assert.deepEqual(f.store.getProject(selected.projectId), before); assert.deepEqual(f.store.get("capability_lock", before.capabilityLockId), lock);
@@ -208,8 +219,8 @@ test("new pinned H3 project admits one reviewed attempt without a separate allow
   const f = fixture(t, { configuration: config(false, true), keys: true }), runtime = f.build(), selected = await f.seed("video");
   const result = await runtime.engine.runReady(); const attempt = runtime.engine.attempts(selected.projectId)[0]; assert.ok(attempt, JSON.stringify(result));
   assert.equal(attempt.phase, "remote_pending"); assert.equal(attempt.taskId, "offline-runtime-h3-task");
-  assert.deepEqual(attempt.request.execution, { adapter: "minimax-h3", version: "1" }); assert.equal(attempt.request.externalAllowanceId, undefined);
-  assert.equal(f.store.list("external_allowance_consumption", selected.projectId).length, 0);
+  assert.deepEqual(attempt.request.execution, { adapter: "minimax-h3", version: "1" }); assert.equal(attempt.request.providerUse.profileDefinitionDigest, digest(selected.profile));
+  assert.equal(f.store.get("reservation", attempt.reservationId).attemptId, attempt.id);
   assert.equal(f.store.list("h3_execution_dispatch", selected.projectId).length, 1); assert.equal(f.provider.acceptedCount(), 0);
   assert.deepEqual(f.calls, { image: 0, h3: 1, lookup: 0, download: 0 });
 });
@@ -237,7 +248,7 @@ test("Viggle construction registers only its explicit route and pins only new ex
   const production = f.production.createProject("Viggle production", selected);
   assert.equal(Object.hasOwn(f.store.get("capability_lock", demo.capabilityLockId), "localExecution"), false);
   assert.deepEqual(f.store.get("capability_lock", production.capabilityLockId).localExecution, { adapter: "local-media", version: "1" });
-  for (const project of [demo, production]) for (const kind of ["message", "grant", "candidate", "attempt", "reservation", "external_allowance", "external_allowance_consumption"])
+  for (const project of [demo, production]) for (const kind of ["message", "grant", "candidate", "attempt", "reservation"])
     assert.equal(f.store.list(kind, project.id).length, 0);
   assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 }); assert.deepEqual(f.viggleCalls, { fetch: 0, lookup: 0, download: 0 });
 });
@@ -252,10 +263,10 @@ test("Viggle activation validates tools, boolean configuration and its own downl
   assert.deepEqual(f.viggleCalls, { fetch: 0, lookup: 0, download: 0 });
 });
 
-for (const blocker of ["missing_key", "legacy_pin"]) test(`Viggle ${blocker} blocks before consuming an exact allowance`, async t => {
+for (const blocker of ["missing_key", "legacy_pin"]) test(`Viggle ${blocker} blocks before any attempt or reservation`, async t => {
   const f = fixture(t, { configuration: viggleConfig(), videoProfile: viggleProfile, keys: true });
   if (blocker === "missing_key") f.arguments_.credentials = new EnvironmentMediaCredentials(name => name === "OPENSLATE_VIGGLE_API_KEY" ? undefined : "synthetic-other-provider-key");
-  const runtime = f.build(), selected = await f.seed("video", blocker === "legacy_pin"); f.issue(selected);
+  const runtime = f.build(), selected = await f.seed("video", blocker === "legacy_pin");
   const result = await runtime.engine.runReady(), expected = blocker === "missing_key" ? "MEDIA_CREDENTIAL_MISSING" : "LOCAL_EXECUTION_UPGRADE_REQUIRED";
   assert.ok(result.blocked.some(value => value.code === expected), JSON.stringify(result));
   f.noAdmission(selected.projectId); assert.deepEqual(f.viggleCalls, { fetch: 0, lookup: 0, download: 0 }); assert.equal(f.provider.acceptedCount(), 0);
@@ -266,9 +277,8 @@ test("Viggle runtime starts an actually reviewed take through its injected bridg
   const result = await runtime.engine.runReady(), attempt = runtime.engine.attempts(selected.projectId)[0];
   assert.ok(attempt, JSON.stringify(result)); assert.equal(attempt.phase, "remote_pending"); assert.equal(attempt.taskId, "vid_offline_runtime");
   assert.deepEqual(attempt.request.execution, { adapter: "viggle-h3", version: "1" });
-  assert.deepEqual(attempt.request.profile.configuration.settings, viggleProfile.configuration.settings); assert.equal(attempt.request.externalAllowanceId, undefined);
-  assert.equal(f.store.list("external_allowance", selected.projectId).length, 0);
-  assert.equal(f.store.list("external_allowance_consumption", selected.projectId).length, 0);
+  assert.deepEqual(attempt.request.profile.configuration.settings, viggleProfile.configuration.settings); assert.equal(attempt.request.providerUse.profileDefinitionDigest, digest(selected.profile));
+  assert.equal(f.store.get("reservation", attempt.reservationId).attemptId, attempt.id);
   assert.equal(f.store.list("viggle_h3_execution_dispatch", selected.projectId).length, 1); assert.equal(f.store.list("h3_execution_dispatch", selected.projectId).length, 0);
   await runtime.engine.runReady(); assert.equal(f.provider.acceptedCount(), 0);
   assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 }); assert.deepEqual(f.viggleCalls, { fetch: 1, lookup: 0, download: 0 });
@@ -292,26 +302,24 @@ test("invalid explicit Viggle transport injections fail locally instead of falli
   assert.equal(f.store.listProjects().length, 0);
 });
 
-test("unsupported Viggle creative setting override preserves the exact unused allowance before admission", async t => {
+test("unsupported Viggle creative setting override blocks before any attempt or reservation", async t => {
   const f = fixture(t, { configuration: viggleConfig(), videoProfile: viggleProfile, keys: true, videoSettings: { quality: "high" } });
-  const runtime = f.build(), selected = await f.seed("video"), allowance = f.issue(selected);
+  const runtime = f.build(), selected = await f.seed("video");
   assert.equal(f.store.list("approval", selected.projectId).length, 1, "The exact frame and requested options were actually reviewed");
   for (let i = 0; i < 2; i++) {
     const result = await runtime.engine.runReady();
     assert.ok(result.blocked.some(row => row.code === "VIGGLE_H3_PREFLIGHT_INVALID"), JSON.stringify(result));
     f.noAdmission(selected.projectId);
-    assert.deepEqual(f.store.get("external_allowance", allowance.id), allowance);
     assert.equal(f.store.get("node_binding", selected.binding.id).candidateId, selected.binding.candidateId);
   }
   assert.deepEqual(f.viggleCalls, { fetch: 0, lookup: 0, download: 0 });
   assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 }); assert.equal(f.provider.acceptedCount(), 0);
 });
 
-test("fractional Viggle video duration is rejected by the compiler before any spending allowance or attempt", async t => {
+test("fractional Viggle video duration is rejected by the compiler before any attempt or reservation", async t => {
   const f = fixture(t, { configuration: viggleConfig(), videoProfile: viggleProfile, keys: true, videoSeconds: 3.5 });
   f.build(); await assert.rejects(f.seed("video"), { code: "PROFILE_INCOMPATIBLE" });
   const project = f.store.listProjects()[0]; f.noAdmission(project.id);
-  assert.equal(f.store.list("external_allowance", project.id).length, 0);
   assert.deepEqual(f.viggleCalls, { fetch: 0, lookup: 0, download: 0 }); assert.equal(f.provider.acceptedCount(), 0);
 });
 

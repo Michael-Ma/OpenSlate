@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { chmod, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
-import { canonical, digest, providerProfileArguments } from '@openslate/core';
-import { ExternalAllowanceService, allowanceIssueContextDigest } from '../dist/application/external-allowances.js';
+import { canonical, digest } from '@openslate/core';
 import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from '../dist/application/installation-recovery.js';
 import { OwnedTranscriptionService } from '../dist/narration/owned-transcription-service.js';
 import { resolveOwnedTranscriptionApplication } from '../dist/narration/owned-transcription-authorization.js';
@@ -142,6 +141,7 @@ test('a second request appends a different recording while retaining the first r
 test('human review of a retained generated recording preserves exact speech and normalization provenance without another call', async t => {
   const f = await generatedNarrationFixture(t, { extraProfiles: [structuredClone(transcriptionProfile)] });
   await f.narration.attachGeneratedAudio(f.project.id, f.human, generatedSelection(f));
+ f.human=f.production.beginRequest(f.project.id,'local-user','Transcribe this retained generated recording.');
   // This shared fixture starts its speech plan directly in Engine. Supply the
   // saved aliases that ordinary application publication already maintains.
   const active = f.store.get('plan', f.store.getProject(f.project.id).activePlanId).compiled;
@@ -211,7 +211,7 @@ test(`review rejects ${kind} authority before media reads or mutations`, async t
   assert.equal(reads, 0); assert.deepEqual(data(f), before);
 });
 
-test('fresh explicit human review can approve a prior director proposal without rewriting its original authorship or holds', async t => {
+test('fresh explicit human review can approve a prior director proposal without rewriting its original authorship and retires the superseded holds', async t => {
   const f = await fixture(t), proposal = structuredClone(f.proposal), source = f.store.get('owned_transcription_source', proposal.sourceBinding.id), originalRequestId = f.human.requestId;
   f.human = f.production.beginRequest(f.project.id, 'human', 'I reviewed this exact recording and recognition plan.');
   assert.equal(f.store.get('message', originalRequestId).state, 'superseded');
@@ -219,7 +219,8 @@ test('fresh explicit human review can approve a prior director proposal without 
   const result = await f.review(); assertReceipt(f, result);
   assert.deepEqual(f.store.get('owned_transcription_proposal', proposal.id), proposal);
   assert.deepEqual(f.store.get('owned_transcription_source', source.id), source);
-  assert.ok(rows(f, 'hold').some(hold => hold.ownerId === originalRequestId && hold.active));
+  assert.ok(rows(f, 'hold').some(hold => hold.ownerId === originalRequestId));
+  assert.ok(rows(f, 'hold').filter(hold => hold.ownerId === originalRequestId).every(hold => !hold.active));
   assert.ok(rows(f, 'hold').filter(hold => hold.ownerId === f.human.requestId).every(hold => !hold.active));
   noSpending(f);
 });
@@ -337,7 +338,7 @@ test(`review rechecks ${change} after the actual isolated composition result arr
 for (const boundary of ['grant', 'owned_transcription_review', 'prepared', 'candidate', 'plan', 'owned_transcription_application', 'command'])
 test(`failure after ${boundary} publication rolls back all authority, holds, project and command state`, async t => {
   const f = await fixture(t), previousRequest = f.human.requestId;
-  f.human = f.production.beginRequest(f.project.id, 'human', 'Review the exact proposal with my new request.');
+  f.human = f.production.beginRequest(f.project.id, 'human', 'Review the exact proposal with my new request.',{concurrency:'alongside'});
   const before = data(f), insert = f.store.insert.bind(f.store), sql = f.store.db.prepare.bind(f.store.db), failure = Error(`injected ${boundary} failure`); let hits = 0;
   f.store.insert = (...args) => { const result = insert(...args); if (args[0] === boundary) { hits++; throw failure; } return result; };
   f.store.db.prepare = statement => {
@@ -369,21 +370,6 @@ test(`original cancellation after ${boundary} insertion still rolls back the com
   finally { f.store.insert = insert; f.store.db.prepare = sql; }
   assert.equal(hits, 1); assert.deepEqual(data(f), before); noSpending(f);
   assertReceipt(f, await f.review()); assert.equal(rows(f, 'candidate').length, 1); noSpending(f);
-});
-
-test('a separate exact one-start spending allowance does not create another candidate or automatically execute review', async t => {
-  const f = await fixture(t), result = await f.review(); assertReceipt(f, result); noSpending(f);
-  const node = f.proposal.compiled.nodes.find(node => node.alias === f.proposal.operation.alias), allowances = new ExternalAllowanceService(f.store);
-  const input = { profileDigest: providerProfileArguments(f.profile).profileDigest, profileDefinitionDigest: digest(f.profile),
-    selections: [{ candidateId: result.candidateId, nodeId: node.id, specDigest: node.specDigest }], maxAttempts: 1,
-    maxEstimatedMicros: f.profile.unitCostMicros, expiresAt: new Date(Date.now() + 3600000).toISOString() };
-  const before = bodies(f, [...authorityKinds, ...narrationKinds, 'hold', 'epoch']), project = f.store.getProject(f.project.id);
-  const human = f.production.beginRequest(f.project.id, 'human', 'Approve this exact one-start recognition estimate.',
-    { editing: false, contextDigest: allowanceIssueContextDigest(f.project.id, input) });
-  const allowance = allowances.issue(f.project.id, human, input), summary = allowances.list(f.project.id, human)[0];
-  assert.equal(allowance.maxAttempts, 1); assert.equal(summary.remainingAttempts, 1); assert.equal(summary.usedAttempts, 0);
-  assert.equal(summary.remainingEstimatedMicros, f.profile.unitCostMicros); assert.deepEqual(f.store.getProject(f.project.id), project);
-  assert.equal(bodies(f, [...authorityKinds, ...narrationKinds, 'hold', 'epoch']), before); assert.equal(f.provider.acceptedCount(), 0); noSpending(f);
 });
 
 test('released restoration cannot turn an imported ungranted proposal into fresh human generation authority', async t => {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -13,6 +13,7 @@ import { ProductionService } from "../dist/application/service.js";
 import { Engine } from "../dist/execution/engine.js";
 import { Store } from "../dist/persistence/store.js";
 import { createApp } from "../dist/app.js";
+import { codexImageFixture, codexImageProfile } from "./codex-image-execution-fixture.mjs";
 
 const token = "offline_provider_catalog_session_0123456789", credential = "offline-credential-never-published";
 const image = () => ({ label: "Configured image", profile: { id: "image-pinned", revision: "image-config-1", kind: "image", adapter: "openai-image", executionVersion: "1",
@@ -24,6 +25,51 @@ const speech = () => ({ label: "Configured speech", profile: { id: "speech-pinne
 const transcription = () => ({ label: "Configured transcription", profile: { id: "transcription-pinned", revision: "transcription-config-1", kind: "transcription", adapter: "openai-transcription", executionVersion: "1",
   configuration: { model: OPENAI_TRANSCRIPTION_MODEL, settings: {} }, maxConcurrency: 1, unitCostMicros: "20000", maxRetries: 0 } });
 const configuration = (...profiles) => ({ version: 1, profiles });
+
+test("startup accepts the previous Codex config in memory, reports one notice and exposes the ready current runtime", t => {
+  const f = codexImageFixture(t), profile = structuredClone(codexImageProfile);
+  profile.configuration.settings.runtimeVersion = "0.153.4";
+  const input = configuration({ label: "Old Codex images", profile }), file = join(f.directory, "providers.json"), bytes = JSON.stringify(input);
+  writeFileSync(file, bytes);
+  const notices = []; t.mock.method(console, "warn", value => notices.push(JSON.parse(value)));
+  const installed = readInstalledProviderConfiguration(file);
+  assert.equal(installed.profiles[0].profile.configuration.settings.runtimeVersion, "0.162.1");
+  f.options.providerConfiguration = installed;
+  const runtime = f.build(), row = runtime.providerCatalog.view().profiles.find(row => row.id === profile.id);
+  assert.equal(row.profile.configuration.settings.runtimeVersion, "0.162.1");
+  assert.equal(row.profile.configuration.settings.directorModel, "gpt-6-astra");
+  assert.equal(row.installedDefinition, true); assert.equal(row.readiness.realExecutionEnabled, true);
+  assert.equal(notices.length, 1); assert.equal(notices[0].kind, "codex_image_profile_runtime_notice");
+  assert.deepEqual(notices[0].profileIds, [profile.id]); assert.match(notices[0].message, /Change runtimeVersion to "0\.162\.1"/);
+  assert.equal(readFileSync(file, "utf8"), bytes); assert.equal(input.profiles[0].profile.configuration.settings.runtimeVersion, "0.153.4");
+  assert.equal(new InstalledProviderCatalog({ configuration: input }).digest, runtime.providerCatalog.digest);
+  assert.equal(f.calls.prepare, 0); assert.equal(f.calls.start, 0); assert.equal(f.calls.api, 0);
+});
+
+test("the old-config exception accepts no unsupported runtime or invalid neighboring field and logs only after validation", t => {
+  const f = codexImageFixture(t), file = join(f.directory, "providers.json"), notices = [];
+  t.mock.method(console, "warn", value => notices.push(value));
+  for (const change of [
+    profile => { profile.configuration.settings.runtimeVersion = "0.150.0"; },
+    profile => { profile.configuration.settings.runtimeVersion = "0.162.2"; },
+    profile => { profile.configuration.settings.directorModel = "gpt-6.1-sol"; },
+    profile => { profile.configuration.settings.width = 768; },
+    profile => { profile.configuration.settings.extra = false; },
+    profile => { profile.configuration.extra = false; },
+    profile => { profile.extra = false; },
+    profile => { profile.unitCostMicros = "1"; },
+    profile => { profile.maxConcurrency = 2; },
+    profile => { profile.maxRetries = 1; },
+  ]) {
+    const profile = structuredClone(codexImageProfile); profile.configuration.settings.runtimeVersion = "0.153.4"; change(profile);
+    const input = configuration({ label: "Old Codex images", profile }); writeFileSync(file, JSON.stringify(input));
+    assert.throws(() => readInstalledProviderConfiguration(file), { code: "PROVIDER_CATALOG_INVALID" });
+    assert.throws(() => new InstalledProviderCatalog({ configuration: input }), { code: "PROVIDER_CATALOG_INVALID" });
+  }
+  writeFileSync(file, JSON.stringify(configuration({ label: "Current Codex images", profile: codexImageProfile })));
+  readInstalledProviderConfiguration(file); assert.deepEqual(notices, []);
+});
+
 function fixture(t, config = configuration(image(), video()), extra = {}) {
   const directory = mkdtempSync(join(tmpdir(), "openslate-provider-catalog-")), store = new Store(join(directory, "store.sqlite"));
   const provider = new FakeProvider(join(directory, "fake.sqlite")), engine = new Engine(store, provider, { artifactDir: join(directory, "artifacts") });
@@ -47,6 +93,9 @@ function expectedLock(project) {
     recipeDigest: RECIPE_DIGEST, stageContractsDigest: STAGE_CONTRACTS_DIGEST, tools: TOOL_NAMES };
 }
 function lock(f, project) { return f.store.get("capability_lock", project.capabilityLockId); }
+function projectView(f, project, catalog = f.catalog) {
+  const saved = lock(f, project); return catalog.projectView(saved.profiles, saved.providerSelection, saved.localExecution);
+}
 function untouchedAuthority(f, projectId) {
   for (const kind of ["message", "hold", "epoch", "director_turn", "grant", "candidate", "attempt", "reservation", "approval", "external_allowance", "external_allowance_claim"])
     assert.equal(f.store.list(kind, projectId).length, 0, kind);
@@ -127,7 +176,7 @@ test("authenticated catalog reports technical setup without a spending approval 
   assert.equal(row.readiness.configurationValid, true); assert.equal(row.readiness.registered, false);
   assert.deepEqual(row.readiness.mediaTools, { required: true, available: false });
   assert.deepEqual(row.readiness.credential, { required: true, present: true, backendUnavailable: false, apiValidated: false });
-  assert.equal(row.readiness.spendingPermissionRequired, false); assert.equal(row.readiness.realExecutionEnabled, false);
+  assert.equal(Object.hasOwn(row.readiness, "spendingPermissionRequired"), false); assert.equal(row.readiness.realExecutionEnabled, false);
   assert.deepEqual(row.estimatedCost, { currency: "USD", unitMicros: "123456", basis: "host_configured", actualVendorPriceVerified: false });
   assert.equal(response.body.includes(credential), false); assert.equal(f.store.listProjects().length, 0); assert.equal(f.provider.acceptedCount(), 0);
 });
@@ -137,7 +186,7 @@ test("registered execution and present dependencies still do not activate real g
   const catalog = new InstalledProviderCatalog({ configuration: configuration(image()), registry: new ExecutionRegistry([provider]),
     mediaTools: { image: true, video: false }, credentials: new EnvironmentMediaCredentials(() => credential) });
   const row = catalog.view().profiles.at(-1); assert.equal(row.readiness.registered, true); assert.equal(row.readiness.mediaTools.available, true);
-  assert.equal(row.readiness.credential.present, true); assert.equal(row.readiness.spendingPermissionRequired, false); assert.equal(row.readiness.realExecutionEnabled, false);
+  assert.equal(row.readiness.credential.present, true); assert.equal(Object.hasOwn(row.readiness, "spendingPermissionRequired"), false); assert.equal(row.readiness.realExecutionEnabled, false);
 });
 
 test("audio catalog profiles use exact transport preflight and preserve legacy default catalog bytes", () => {
@@ -147,7 +196,7 @@ test("audio catalog profiles use exact transport preflight and preserve legacy d
     const catalog = new InstalledProviderCatalog({ configuration: configuration(definition) }), row = catalog.view().profiles.at(-1);
     assert.deepEqual(row.profile, definition.profile); assert.deepEqual(profilePolicy(row.profile), { credential: "openai-media", media: "audio", fixture: false });
     assert.equal(row.definitionDigest, digest(definition.profile)); assert.equal(row.estimatedCost.actualVendorPriceVerified, false);
-    assert.equal(row.readiness.enabledByHost, false); assert.equal(row.readiness.spendingPermissionRequired, false);
+    assert.equal(row.readiness.enabledByHost, false); assert.equal(Object.hasOwn(row.readiness, "spendingPermissionRequired"), false);
     assert.equal(canonical(defaultCatalog.view().profiles.map(value => value.profile)), originalProfiles);
   }
 });
@@ -206,9 +255,9 @@ test("human audio model selection saves exact immutable locks without authority 
   assert.deepEqual(saved.profiles, [...DEFAULT_PROFILES.slice(0, 2), speech().profile, transcription().profile]);
   assert.equal(canonical(lock(f, old)), oldBytes); untouchedAuthority(f, project.id); assert.equal(f.readNames.length, 0);
   const changes = f.store.db.prepare("SELECT total_changes() AS n").get().n;
-  const projection = await f.req("GET", `/api/projects/${project.id}/providers`); assert.equal(projection.statusCode, 200, projection.body);
-  assert.deepEqual(projection.json().profiles.map(value => value.profile), saved.profiles);
-  for (const row of projection.json().profiles.slice(-2)) { assert.equal(row.projectExecution.compatible, true); assert.equal(row.readiness.realExecutionEnabled, false); }
+  const projection = projectView(f, project);
+  assert.deepEqual(projection.profiles.map(value => value.profile), saved.profiles);
+  for (const row of projection.profiles.slice(-2)) { assert.equal(row.projectExecution.compatible, true); assert.equal(row.readiness.realExecutionEnabled, false); }
   assert.equal(f.store.db.prepare("SELECT total_changes() AS n").get().n, changes);
   const replacement = f.appFor(f.catalogs({ configuration: configuration() }));
   const replay = await f.req("POST", "/api/projects", body, "audio-project-once", replacement);
@@ -216,7 +265,7 @@ test("human audio model selection saves exact immutable locks without authority 
   assert.equal((await f.req("POST", "/api/projects", body, "audio-project-new", replacement)).statusCode, 409); untouchedAuthority(f, project.id);
 });
 
-test("project provider HTTP separates installation readiness from immutable local assembly compatibility without writes", async t => {
+test("project provider projection separates installation readiness from immutable local assembly compatibility without writes", async t => {
   const f = fixture(t, configuration(image(), video()), { readCredential: () => credential });
   const port = adapter => registerExecutionProvider({ submit: async () => { throw Error("No provider calls"); },
     lookup: async () => { throw Error("No provider calls"); }, poll: async () => { throw Error("No provider calls"); } }, { adapter, version: "1" });
@@ -232,8 +281,7 @@ test("project provider HTTP separates installation readiness from immutable loca
   const installation = (await f.req("GET", "/api/providers", undefined, randomUUID(), app)).json();
   assert.equal(installation.realExecutionEnabled, true); assert.equal(installation.profiles.find(row => row.id === "video-pinned").projectExecution, undefined);
   for (const [project, compatible, profileId] of [[legacy, false, "video-pinned"], [pinned, true, "video-pinned"], [imageOnly, true, "image-pinned"]]) {
-    const response = await f.req("GET", `/api/projects/${project.id}/providers`, undefined, randomUUID(), app); assert.equal(response.statusCode, 200, response.body);
-    const view = response.json(), row = view.profiles.find(row => row.id === profileId);
+    const view = projectView(f, project, catalog), row = view.profiles.find(row => row.id === profileId);
     assert.equal(row.readiness.realExecutionEnabled, true, "Installation readiness remains independent");
     assert.equal(row.projectExecution.compatible, compatible); assert.equal(view.realExecutionEnabled, compatible);
     assert.equal(row.projectExecution.code, compatible ? null : "LOCAL_EXECUTION_UPGRADE_REQUIRED");
@@ -266,8 +314,8 @@ test("human project selection saves exact lock and creates no requests, authorit
   assert.deepEqual(selected.providerSelection, { catalogDigest: f.catalog.digest, profileIds: selected.profiles.map(profile => profile.id) });
   assert.deepEqual(lock(f, old), oldLock); assert.deepEqual(f.store.getProject(old.id), oldProject);
   untouchedAuthority(f, project.id); assert.equal(f.readNames.length, 0, "Selection neither resolves keys nor checks remote APIs");
-  const view = await f.req("GET", `/api/projects/${project.id}/providers`); assert.equal(view.statusCode, 200);
-  assert.deepEqual(view.json().profiles.map(row => row.profile), selected.profiles);
+  const view = projectView(f, project);
+  assert.deepEqual(view.profiles.map(row => row.profile), selected.profiles);
 });
 
 test("project creation schema requires paired selection fields and rejects user-authored configuration", async t => {
@@ -291,8 +339,8 @@ test("stale and unknown selections reject before writes; exact replay survives a
   const replay = await f.req("POST", "/api/projects", body, "same-command", app); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), project);
   assert.equal((await f.req("POST", "/api/projects", body, "new-command", app)).statusCode, 409);
   assert.deepEqual(lock(f, project), original); assert.equal(f.store.cursor(project.id), cursor); assert.equal(f.store.listProjects().length, 1);
-  const pinned = await f.req("GET", `/api/projects/${project.id}/providers`, undefined, randomUUID(), app);
-  assert.deepEqual(pinned.json().profiles[0].profile, image().profile); assert.equal(pinned.json().profiles[0].installedDefinition, false);
+  const pinned = projectView(f, project, next);
+  assert.deepEqual(pinned.profiles[0].profile, image().profile); assert.equal(pinned.profiles[0].installedDefinition, false);
 });
 
 test("real-profile projects cannot enter the hardcoded demo or gain its grants", async t => {
@@ -385,7 +433,7 @@ test("Viggle and MiniMax remain different saved choices and default profile byte
 
 test("Codex image catalog pins the supported worker without claiming a media API credential or quota estimate", () => {
   const row = { label: "Codex images", profile: { id: "codex-keyframes", revision: "manual-live-1", kind: "image", adapter: "codex-image", executionVersion: "1",
-    configuration: { model: "codex-image-generation", settings: { runtimeVersion: "0.153.4", directorModel: "gpt-6-astra", width: 1024, height: 1024 } }, maxConcurrency: 1, unitCostMicros: "0", maxRetries: 0 } };
+    configuration: { model: "codex-image-generation", settings: { runtimeVersion: "0.162.1", directorModel: "gpt-6-astra", width: 1024, height: 1024 } }, maxConcurrency: 1, unitCostMicros: "0", maxRetries: 0 } };
   assert.deepEqual(profilePolicy(row.profile), { credential: null, media: "image", fixture: false });
   const catalog = new InstalledProviderCatalog({ configuration: configuration(row) });
   const visible = catalog.view().profiles.find(value => value.profile.id === row.profile.id);
@@ -399,4 +447,13 @@ test("Codex image catalog pins the supported worker without claiming a media API
     const invalid = structuredClone(row); mutate(invalid.profile);
     assert.throws(() => new InstalledProviderCatalog({ configuration: configuration(invalid) }), error => error.code === "PROVIDER_CATALOG_INVALID");
   }
+});
+
+test("with the music route enabled and no music profile, Lyria installs itself; a configured profile or a disabled route does not", () => {
+  const enabledExecutions = [{ adapter: "gemini-lyria", version: "1" }];
+  const ids = (catalog) => catalog.view().profiles.filter(row => row.profile.kind === "music").map(row => row.profile.id);
+  assert.deepEqual(ids(new InstalledProviderCatalog({ enabledExecutions })), ["lyria-3.5-music"]);
+  assert.deepEqual(ids(new InstalledProviderCatalog({})), []);
+  const own = { id: "my-lyria", revision: "1", kind: "music", adapter: "gemini-lyria", executionVersion: "1", configuration: { model: "lyria-3.5", settings: {} }, maxConcurrency: 1, unitCostMicros: "80000", maxRetries: 0 };
+  assert.deepEqual(ids(new InstalledProviderCatalog({ enabledExecutions, configuration: { version: 1, profiles: [{ label: "Mine", profile: own }] } })), ["my-lyria"]);
 });

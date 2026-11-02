@@ -1,3 +1,5 @@
+import { VideoI2vExecution } from "../execution/video-i2v-execution.js";
+import { codeOnlyVideoAdapter } from "../execution/video-i2v-options.js";
 import { accessSync, constants, mkdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -19,12 +21,18 @@ import { SpoolTranscriptIngestor } from "../execution/spool-transcript-ingestor.
 import { TranscriptionAudioService } from "../execution/transcription-audio-service.js";
 import { TranscriptionAudioStore } from "../media/transcription-audio-store.js";
 import { LocalMediaExecutor } from "../execution/local-media-executor.js";
-import { ConfiguredExternalAdmission } from "../execution/durable-external-admission.js";
+import { ConfiguredExternalAdmission } from "../execution/configured-external-admission.js";
 import { CodexImageExecution } from "../execution/codex-image-execution.js";
 import { assertCodexImageOperationOptions } from "../execution/codex-image-receipts.js";
+import { resolveConfiguredCodexBinary } from "./codex-binary.js";
 import { OpenAIImageExecution } from "../execution/openai-image-execution.js";
 import { MiniMaxH3Execution } from "../execution/minimax-h3-execution.js";
 import { ViggleH3Execution } from "../execution/viggle-h3-execution.js";
+import { FalH3LipSyncExecution } from "../execution/fal-lipsync-execution.js";
+import { assertFalLipSyncOperationOptions } from "../execution/fal-lipsync-receipts.js";
+import type { NarrationAudio } from "../narration/types.js";
+import { GeminiLyriaExecution } from "../execution/gemini-lyria-execution.js";
+import { SpoolMusicIngestor } from "../execution/spool-music-ingester.js";
 import { OpenAISpeechExecution } from "../execution/openai-speech-execution.js";
 import { OpenAITranscriptionExecution } from "../execution/openai-transcription-execution.js";
 import { ProtectedVideoDownloader } from "../execution/video-download.js";
@@ -32,19 +40,23 @@ import type { VideoDownloadOptions } from "../execution/video-download.js";
 import { LocalImageStore, LocalMediaService } from "../media/index.js";
 import { EnvironmentMediaCredentials } from "./provider-credentials.js";
 import { InstalledProviderCatalog, profilePolicy } from "./provider-catalog.js";
-import { ExternalAllowanceService } from "./external-allowances.js";
 import type { ProductionServiceOptions } from "./service.js";
 import type { MediaExecutionConfiguration } from "./media-execution-config.js";
+import { readCodexStartupTimeout } from "./director-run-config.js";
+import { characterSheetJobNode } from "../execution/character-sheet-execution.js";
 
 export interface MediaExecutionRuntimeOptions {
   store: Store; fakeProvider: FakeProvider; dataDirectory: string; configuration: Readonly<MediaExecutionConfiguration>;
   ffmpegPath: string | null; ffprobePath: string | null;
   credentials?: EnvironmentMediaCredentials; providerConfiguration?: unknown;
+  startupTimeoutMs?: number;
   /** Trusted host/test dependencies only; never populated from a browser or model request. */
   transport?: { codexImage?: CodexImageTransport; imageFetch?: typeof globalThis.fetch; h3Fetch?: typeof globalThis.fetch; viggleFetch?: typeof globalThis.fetch;
-    speechFetch?: typeof globalThis.fetch; transcriptionFetch?: typeof globalThis.fetch;
+    musicFetch?: typeof globalThis.fetch; speechFetch?: typeof globalThis.fetch; transcriptionFetch?: typeof globalThis.fetch; falFetch?: typeof globalThis.fetch; seedanceFetch?: typeof globalThis.fetch;
     download?: Pick<VideoDownloadOptions, "lookup" | "request">;
-    viggleDownload?: Pick<VideoDownloadOptions, "lookup" | "request"> };
+    viggleDownload?: Pick<VideoDownloadOptions, "lookup" | "request">;
+    seedanceDownload?: Pick<VideoDownloadOptions, "lookup" | "request">;
+    falDownload?: Pick<VideoDownloadOptions, "lookup" | "request"> };
 }
 function executable(path: string | null): path is string {
   if (!path || !isAbsolute(path)) return false;
@@ -53,17 +65,20 @@ function executable(path: string | null): path is string {
 
 /** One local installation. Construction performs no network, generation or authority writes. */
 export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOptions) {
+  const startupTimeoutMs = readCodexStartupTimeout(options.startupTimeoutMs === undefined ? {} : { OPENSLATE_CODEX_STARTUP_TIMEOUT_MS: String(options.startupTimeoutMs) });
   const { store, fakeProvider, ffmpegPath, ffprobePath } = options;
-  const captured = structuredClone(options.configuration);
-  const configuration = { ...captured, codexImage: captured.codexImage === undefined ? false : captured.codexImage, speech: captured.speech === undefined ? false : captured.speech,
-    transcription: captured.transcription === undefined ? false : captured.transcription,
-    viggleH3: captured.viggleH3 === undefined ? false : captured.viggleH3,
-    viggleH3DownloadHosts: captured.viggleH3DownloadHosts === undefined ? [] : captured.viggleH3DownloadHosts };
-  invariant(typeof configuration.image === "boolean" && typeof configuration.codexImage === "boolean" && typeof configuration.h3 === "boolean"
+  const configuration = structuredClone(options.configuration);
+  invariant((configuration.music === undefined || typeof configuration.music === "boolean") && typeof configuration.image === "boolean" && typeof configuration.codexImage === "boolean" && typeof configuration.h3 === "boolean"
     && typeof configuration.speech === "boolean" && typeof configuration.transcription === "boolean" && typeof configuration.viggleH3 === "boolean"
-    && Array.isArray(configuration.h3DownloadHosts) && Array.isArray(configuration.viggleH3DownloadHosts),
+    && typeof configuration.falLipSync === "boolean" && Array.isArray(configuration.h3DownloadHosts)
+    && Array.isArray(configuration.viggleH3DownloadHosts) && Array.isArray(configuration.falLipSyncDownloadHosts),
     "MEDIA_EXECUTION_CONFIGURATION", "Use validated local generation configuration");
-  const enabled = configuration.image || configuration.codexImage || configuration.h3 || configuration.viggleH3 || configuration.speech || configuration.transcription,
+  invariant((configuration.seedance === undefined || typeof configuration.seedance === "boolean")
+    && (configuration.falVideo === undefined || typeof configuration.falVideo === "boolean")
+    && (configuration.seedanceDownloadHosts === undefined || Array.isArray(configuration.seedanceDownloadHosts))
+    && (configuration.falVideoDownloadHosts === undefined || Array.isArray(configuration.falVideoDownloadHosts)),
+    "MEDIA_EXECUTION_CONFIGURATION", "Use boolean N2 switches and exact download host arrays");
+  const enabled = configuration.music || configuration.seedance || configuration.falVideo || configuration.image || configuration.codexImage || configuration.h3 || configuration.viggleH3 || configuration.falLipSync || configuration.speech || configuration.transcription,
     haveTools = executable(ffmpegPath) && executable(ffprobePath);
   invariant(!enabled || haveTools, "MEDIA_EXECUTION_TOOLS_REQUIRED", "Enabled media generation requires executable FFmpeg and ffprobe on this computer");
   invariant([configuration.codexImageBinary, configuration.codexImageHome].every(path => path === undefined
@@ -74,11 +89,15 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
     && [injectedCodex.prepare, injectedCodex.start, injectedCodex.lookup].every(method => typeof method === "function")
     && (injectedCodex.release === undefined || typeof injectedCodex.release === "function"),
     "MEDIA_EXECUTION_CONFIGURATION", "Use a complete trusted Codex image transport");
-  const codexImageConfigured = injectedCodex !== undefined || executable(configuration.codexImageBinary ?? null);
+  const selectedCodex = !injectedCodex && configuration.codexImage && configuration.codexImageBinary
+    ? resolveConfiguredCodexBinary(configuration.codexImageBinary) : undefined;
+  if (selectedCodex?.diagnostic) console.warn(JSON.stringify({ kind: "codex_image_runtime_notice", ...selectedCodex.diagnostic }));
+  const codexImageConfigured = injectedCodex !== undefined || executable(selectedCodex?.binaryPath ?? configuration.codexImageBinary ?? null);
   invariant(!configuration.codexImage || codexImageConfigured, "MEDIA_EXECUTION_CODEX_REQUIRED",
     "Enabled Codex image generation requires an executable pinned native binary");
   const nativeWorker = !injectedCodex && configuration.codexImage ? new CodexImageWorkerTransport({ directory: join(resolve(options.dataDirectory), "codex-images"),
-    command: { file: configuration.codexImageBinary! }, nativeHome: homedir(), codexHome: configuration.codexImageHome ?? join(homedir(), ".codex"),
+    startupTimeoutMs,
+    command: { file: selectedCodex!.binaryPath }, nativeHome: homedir(), codexHome: configuration.codexImageHome ?? join(homedir(), ".codex"),
     env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, SHELL: "/bin/sh", CI: "1", NO_COLOR: "1" } }) : undefined;
   let closing: Promise<void> | undefined;
   // Capture the trusted instance and methods once. Later option mutation cannot replace the route.
@@ -128,6 +147,34 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
       ...(viggleFetch === undefined ? {} : { fetch: viggleFetch }) }));
     enabledExecutions.push({ adapter: "viggle-h3", version: "1" });
   }
+  for (const adapter of ["seedance", "fal-video-i2v"] as const) {
+    if (!(adapter === "seedance" ? configuration.seedance : configuration.falVideo)) continue;
+    const dependency = adapter === "seedance" ? options.transport?.seedanceDownload : options.transport?.falDownload;
+    const fetch = adapter === "seedance" ? options.transport?.seedanceFetch : options.transport?.falFetch;
+    const hosts = adapter === "seedance" ? configuration.seedanceDownloadHosts : configuration.falVideoDownloadHosts;
+    const downloader = new ProtectedVideoDownloader({ allowedHosts: hosts ?? [], ...(dependency?.lookup ? {lookup:dependency.lookup} : {}), ...(dependency?.request ? {request:dependency.request} : {}) });
+    providers.push(new VideoI2vExecution(adapter, {store,outputStore,artifactRoot:artifactDir,credentials,downloader,images:imageStore!,...(fetch ? {fetch} : {})}));
+    enabledExecutions.push({adapter,version:"1"});
+  }
+  if (configuration.falLipSync) {
+    const falDownload = options.transport?.falDownload;
+    const downloader = new ProtectedVideoDownloader({ allowedHosts: configuration.falLipSyncDownloadHosts,
+      ...(falDownload?.lookup ? { lookup: falDownload.lookup } : {}), ...(falDownload?.request ? { request: falDownload.request } : {}) });
+    // The owned normalized song, verified against its recorded identity before any byte is read.
+    const songSource = async (input: { projectId: string; audioId: string; sha256: string; signal?: AbortSignal }): Promise<string> => {
+      const audio = store.get<NarrationAudio>("narration_audio", input.audioId);
+      invariant(localMedia && audio?.projectId === input.projectId && audio.media.kind === "audio" && audio.media.sha256 === input.sha256,
+        "MEDIA_SOURCE_UNAVAILABLE", "The reviewed song is no longer available");
+      return (await localMedia.verifiedSource(audio.media, input.signal ? { signal: input.signal } : {})).path;
+    };
+    providers.push(new FalH3LipSyncExecution({ store, outputStore, artifactRoot: artifactDir, credentials, downloader, songSource,
+      ...(options.transport?.falFetch ? { fetch: options.transport.falFetch } : {}) }));
+    enabledExecutions.push({ adapter: "fal-h3-lipsync", version: "1" });
+  }
+  if (configuration.music) {
+    providers.push(new GeminiLyriaExecution(store, outputStore, credentials, options.transport?.musicFetch ? { fetch: options.transport.musicFetch } : {}));
+    enabledExecutions.push({ adapter: "gemini-lyria", version: "1" });
+  }
   if (configuration.speech) {
     providers.push(new OpenAISpeechExecution({ store, outputStore, credentials,
       ...(options.transport?.speechFetch ? { fetch: options.transport.speechFetch } : {}) }));
@@ -154,11 +201,12 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   });
   const externalAdmission: ExternalExecutionAdmission = {
     authorize(input) {
+      invariant(!codeOnlyVideoAdapter(input.profile.adapter), "VIDEO_I2V_CODE_ONLY", "Choose this video model in a code-plan film");
       if (input.profile.adapter === "codex-image") {
         const binding = store.get<NodeBinding>("node_binding", input.nodeId);
         invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId && binding.node.kind === "image",
           "EXTERNAL_SELECTION_STALE", "Codex preflight requires the exact current image candidate");
-        invariant(typeof binding.node.shotId === "string", "CODEX_IMAGE_PREFLIGHT_INVALID", "Codex image version 1 supports shot keyframes only");
+        invariant(typeof binding.node.shotId === "string" || characterSheetJobNode(store, binding), "CODEX_IMAGE_PREFLIGHT_INVALID", "Codex image version 1 supports shot keyframes and recorded character sheets only");
         assertCodexImageOperationOptions(input.profile, binding.node.args);
       }
       if (input.profile.adapter === "openai-speech" || input.profile.adapter === "openai-transcription") {
@@ -176,7 +224,13 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
         // Admission below synchronously rechecks the full active node and profile definition.
         assertViggleH3OperationOptions(input.profile, binding.node.args);
       }
-      if (input.profile.adapter === "minimax-h3" || input.profile.adapter === "viggle-h3") {
+      if (input.profile.adapter === "fal-h3-lipsync") {
+        const binding = store.get<NodeBinding>("node_binding", input.nodeId);
+        invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId && binding.node.kind === "video",
+          "EXTERNAL_SELECTION_STALE", "Lip-sync preflight requires the exact current video candidate");
+        assertFalLipSyncOperationOptions(input.profile as never, binding.node.args);
+      }
+      if (input.profile.adapter === "minimax-h3" || input.profile.adapter === "viggle-h3" || input.profile.adapter === "fal-h3-lipsync") {
         const project = store.getProject(input.projectId), lock = store.get<{ projectId: string; localExecution?: unknown }>("capability_lock", project.capabilityLockId);
         let pinned = false;
         try { if (lock?.projectId === project.id && Object.hasOwn(lock, "localExecution")) { snapshotLocalExecution(lock.localExecution); pinned = true; } } catch { /* Historical projects cannot silently inherit a new runtime. */ }
@@ -185,17 +239,23 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
       return configured.authorize(input);
     },
   };
-  const engine = new Engine(store, registry, { artifactDir, outputStore,
-    outputIngestor: new ExecutionIngestionRouter({ ...(imageStore ? { image: new SpoolImageIngestor(outputStore, imageStore) } : {}),
+  const musicIngestor = localMedia ? new SpoolMusicIngestor(outputStore, localMedia) : undefined;
+  const speechIngestor = localMedia ? new SpoolAudioIngestor(outputStore, localMedia, { rootDir: join(directory, "audio-derivations") }) : undefined;
+  const outputIngestor = new ExecutionIngestionRouter({ ...(imageStore ? { image: new SpoolImageIngestor(outputStore, imageStore) } : {}),
       ...(localMedia ? { video: new SpoolVideoIngestor(outputStore, localMedia, { rootDir: join(directory, "video-derivations") }),
-        audio: new SpoolAudioIngestor(outputStore, localMedia, { rootDir: join(directory, "audio-derivations") }),
-        transcription: new SpoolTranscriptIngestor(outputStore, localMedia, transcriptionFiles!, { artifactDir }) } : {}) }),
+        audio: { ingest: input => input.attempt.request.kind === "music" ? musicIngestor!.ingest(input) : speechIngestor!.ingest(input) },
+        transcription: new SpoolTranscriptIngestor(outputStore, localMedia, transcriptionFiles!, { artifactDir }) } : {}) });
+  const localExecutor = localMedia ? new LocalMediaExecutor(store, localMedia, { artifactDir }) : undefined;
+  const engine = new Engine(store, registry, { artifactDir, outputStore, outputIngestor,
     ...(enabled ? { externalAdmission } : {}),
     ...(transcriptionExecution ? { submissionPreparation: transcriptionExecution } : {}),
-    ...(localMedia ? { localExecution: new LocalMediaExecutor(store, localMedia, { artifactDir }) } : {}) });
+    ...(localExecutor ? { localExecution: localExecutor } : {}) });
   const providerCatalog = new InstalledProviderCatalog({ ...(options.providerConfiguration === undefined ? {} : { configuration: options.providerConfiguration }),
     registry, credentials, enabledExecutions, codexImageConfigured, mediaTools: { image: !!imageStore, video: !!localMedia, audio: !!localMedia } });
-  const productionOptions: ProductionServiceOptions = configuration.h3 || configuration.viggleH3
-    ? { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video" } : {};
-  return { close: () => closing ??= nativeWorker?.close() ?? Promise.resolve(), engine, localMedia, imageStore, outputStore, allowances: new ExternalAllowanceService(store), providerCatalog, uploadDirectory, productionOptions };
+  const lipSyncProfiles = providerCatalog.lipSyncProfiles(), codeMediaProfiles = providerCatalog.codeMediaProfiles();
+  const productionOptions: ProductionServiceOptions = configuration.h3 || configuration.viggleH3 || configuration.seedance || configuration.falVideo
+    ? { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video",
+      ...(lipSyncProfiles.length ? { newProjectLipSyncProfiles: lipSyncProfiles } : {}),
+      ...(codeMediaProfiles.length ? { newCodeProjectMediaProfiles: codeMediaProfiles } : {}) } : {};
+  return { close: () => closing ??= nativeWorker?.close() ?? Promise.resolve(), engine, registry, outputIngestor, localExecutor, localMedia, imageStore, outputStore, providerCatalog, uploadDirectory, productionOptions };
 }

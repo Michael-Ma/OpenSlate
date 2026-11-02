@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 2,
+  "id": "format-social-vertical",
+  "version": "8.0.0",
+  "role": "format",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/guide.md"
+  ],
+  "compatibility": {
+    "toolContract": "7.0.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "read_guidance"
+  ],
+  "requires": [],
+  "optional": []
+}

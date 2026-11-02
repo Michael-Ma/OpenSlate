@@ -5,13 +5,13 @@ import { canonical, digest } from "../../../packages/core/dist/index.js";
 import { response } from "./transcription-execution-fixture.mjs";
 import { addSecondTranscription, current, deferred, due, eventually, liability, preparationEngineFixture, replan, rows, useOutputSource } from "./transcription-preparation-engine-fixture.mjs";
 
-test("repeated preparation contention keeps one attempt, candidate, reservation and permanently consumed allowance", async t => {
+test("repeated preparation contention keeps one attempt, candidate, reservation and pinned provider use", async t => {
   const f = await preparationEngineFixture(t);
   assert.equal((await f.engine.runReady()).dispatched, 1);
   const first = current(f), saved = liability(f), proof = rows(f, "transcription_preparation_intent")[0];
-  assert.equal(first.phase, "preparing"); assert.equal(first.preparation.intentId, first.id); assert.equal(first.preparation.intentDigest, digest(proof));
+  assert.equal(first.request.providerUse.kind, "configured"); assert.equal(first.phase, "preparing"); assert.equal(first.preparation.intentId, first.id); assert.equal(first.preparation.intentDigest, digest(proof));
   assert.equal(proof.source.artifactId, f.audio.id); assert.equal(proof.sourceEndSample, 48000);
-  assert.equal(first.leaseExpiresAt, 0); assert.equal(rows(f, "external_allowance_consumption").length, 1);
+  assert.equal(first.leaseExpiresAt, 0); assert.equal(rows(f, "reservation").length, 1);
   for (let cycle = 0; cycle < 4; cycle++) {
     const previous = current(f), before = Date.now(); due(f);
     assert.equal((await f.engine.reconcile()).reconciled, 1);
@@ -37,10 +37,52 @@ test("not-yet-due waiting work does not claim a lease or repeat local preparatio
   assert.deepEqual(current(f), saved); assert.deepEqual(f.calls, calls);
 });
 
-test("two admitted transcriptions defer independently in one cycle without repeating either spending consumption", async t => {
+test("Stop retires and detaches positively unsent transcription preparation before Continue", async t => {
+  const f = await preparationEngineFixture(t); await f.engine.runReady();
+  const attempt = current(f), candidates = rows(f, "candidate");
+  assert.deepEqual(f.engine.detachUnsent(f.project.id, "human-stop"), { sentJobs: 0, detachedJobs: 1 });
+  assert.equal(current(f).phase, "failed"); assert.equal(current(f).failure.retryAllowed, false);
+  assert.equal(f.store.get("node_binding", f.node.id).candidateId, null);
+  assert.equal(rows(f, "reservation")[0].state, "released");
+  assert.deepEqual(rows(f, "candidate"), candidates);
+  f.control.busy = false; f.engine.setPaused(f.project.id, false, "human-continue");
+  await f.engine.reconcile(); await f.engine.runReady();
+  assert.equal(f.calls.http, 0); assert.equal(f.calls.credentials, 0);
+  assert.equal(rows(f, "attempt").length, 1); assert.equal(current(f).id, attempt.id);
+  assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
+});
+
+test("Stop after verified transcription upload preparation fences the irreversible marker", async t => {
+  const f = await preparationEngineFixture(t), read = f.files.readUpload.bind(f.files);
+  f.files.readUpload = async (...args) => {
+    const upload = await read(...args); f.engine.detachUnsent(f.project.id, "stop-before-marker"); return upload;
+  };
+  f.control.busy = false; await f.engine.runReady();
+  assert.equal(current(f).phase, "failed"); assert.equal(rows(f, "reservation")[0].state, "released");
+  assert.equal(rows(f, "transcription_execution_dispatch").length, 0); assert.equal(f.calls.http, 0);
+  assert.equal(f.calls.credentials, 0); assert.equal(f.store.get("node_binding", f.node.id).candidateId, null);
+});
+
+test("Stop preserves a dispatched transcription's liability and late provider evidence", async t => {
+  const entered = deferred(), release = deferred();
+  const f = await preparationEngineFixture(t, { fetch: async () => { entered.resolve(); await release.promise; return response(); } });
+  f.control.busy = false; const running = f.engine.runReady(); await entered.promise;
+  try {
+    assert.deepEqual(f.engine.detachUnsent(f.project.id, "stop-after-marker"), { sentJobs: 1, detachedJobs: 0 });
+    assert.equal(rows(f, "reservation")[0].state, "reserved");
+    assert.equal(f.store.get("node_binding", f.node.id).candidateId, current(f).candidateId);
+  } finally { release.resolve(); }
+  // This scheduler fixture intentionally omits raw transcript ingestion.
+  await assert.rejects(running, { code: "INVALID_PROVIDER_OUTPUT" });
+  assert.equal(current(f).phase, "ingesting"); assert.equal(f.calls.http, 1);
+  assert.equal(rows(f, "transcription_execution_result")[0].observation.kind, "completed");
+  assert.equal(rows(f, "reservation")[0].state, "reserved");
+});
+
+test("two admitted transcriptions defer independently in one cycle without repeating either admission", async t => {
   const f = await preparationEngineFixture(t); addSecondTranscription(f);
   assert.equal((await f.engine.runReady()).dispatched, 2);
-  const saved = liability(f); assert.equal(saved.attempts.length, 2); assert.equal(saved.consumptions.length, 2);
+  const saved = liability(f); assert.equal(saved.attempts.length, 2); assert.equal(saved.reservations.length, 2);
   assert.equal(new Set(saved.attempts.map(item => item.reservationId)).size, 2);
   for (let cycle = 0; cycle < 3; cycle++) {
     for (const attempt of rows(f, "attempt")) f.store.put("attempt", attempt.id, f.project.id,
@@ -83,7 +125,7 @@ test("an obsolete worker's late local failure cannot settle or overwrite the rep
   assert.equal(rows(f, "transcription_execution_result").length, 0); assert.equal(rows(f, "execution_evidence").length, 0); assert.equal(f.calls.http, 0);
 });
 
-for (const control of ["pause", "hold"]) test(`${control} defers due preparation and release continues the same consumed work`, async t => {
+for (const control of ["pause", "hold"]) test(`${control} defers due preparation and release continues the same admitted work`, async t => {
   const f = await preparationEngineFixture(t); await f.engine.runReady(); due(f);
   const saved = liability(f), beforeCalls = f.calls.prepare;
   const hold = control === "hold" ? f.engine.setHold(f.project.id, { scopeId: f.project.id, ownerId: "human-review" }) : undefined;
@@ -126,7 +168,7 @@ test("an edit during awaited preparation aborts the old signal and settles only 
   replan(f, { language: "en" });
   try { await eventually(() => signal.aborted); } finally { release.resolve(); await running; }
   assert.equal(current(f).phase, "failed"); assert.equal(rows(f, "reservation")[0].state, "released");
-  assert.equal(rows(f, "external_allowance_consumption").length, 1); assert.equal(f.calls.http, 0);
+  assert.equal(rows(f, "reservation").length, 1); assert.equal(f.calls.http, 0);
   assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
 });
 
@@ -136,24 +178,25 @@ test("an edit after verified upload bytes returns prevents the first marker whil
   f.control.busy = false; await f.engine.runReady();
   assert.equal(current(f).phase, "failed"); assert.equal(rows(f, "reservation")[0].state, "released");
   assert.equal(rows(f, "transcription_audio_receipt").length, 1); assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
-  assert.equal(f.calls.http, 0); assert.equal(f.calls.credentials, 0); assert.equal(rows(f, "external_allowance_consumption").length, 1);
+  assert.equal(f.calls.http, 0); assert.equal(f.calls.credentials, 0); assert.equal(rows(f, "reservation").length, 1);
 });
 
-for (const replacement of ["candidate", "specification", "retired"]) test(`${replacement} replacement cancels only obsolete pre-marker work and never refunds consumed allowance capacity`, async t => {
+for (const replacement of ["candidate", "specification", "retired"]) test(`${replacement} replacement cancels only obsolete pre-marker work and retains the original candidate history`, async t => {
   const f = await preparationEngineFixture(t); await f.engine.runReady();
-  const consumed = rows(f, "external_allowance_consumption"), original = current(f);
+  const original = current(f), originalCandidate = f.store.get("candidate", original.candidateId);
   if (replacement === "retired") replan(f, { alias: "replacement-transcript" });
   else replan(f, replacement === "candidate" ? { freshCandidate: true } : { language: "en" });
   due(f); await f.engine.reconcile();
   assert.equal(current(f).id, original.id); assert.equal(current(f).phase, "failed");
-  assert.equal(rows(f, "reservation")[0].state, "released"); assert.deepEqual(rows(f, "external_allowance_consumption"), consumed);
+  assert.equal(f.store.get("reservation", original.reservationId).state, "released"); assert.deepEqual(f.store.get("candidate", original.candidateId), originalCandidate);
+  assert.equal(rows(f, "attempt").length, 1); assert.equal(rows(f, "reservation").length, 1);
   assert.equal(f.calls.http, 0); assert.equal(f.calls.prepare, 1); assert.equal(f.calls.lookups, 0);
   assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
 });
 
 test("identical bytes under a different upstream artifact identity obsolete waiting input despite an unchanged effective hash", async t => {
   const f = await preparationEngineFixture(t), upstreamId = useOutputSource(f);
-  await f.engine.runReady(); const old = current(f), consumed = rows(f, "external_allowance_consumption");
+  await f.engine.runReady(); const old = current(f), candidates = rows(f, "candidate");
   const original = f.store.get("artifact", f.audio.id), id = randomUUID();
   const replacement = { ...original, id, artifact: { ...original.artifact, artifactId: id } };
   // The controlled upstream output has independently selected another ID for the exact same existing owned bytes.
@@ -164,7 +207,7 @@ test("identical bytes under a different upstream artifact identity obsolete wait
   assert.equal(resolved.fingerprint, old.fingerprint); assert.notEqual(resolved.artifacts[0].artifactId, old.request.inputs[0].artifactId);
   due(f); await f.engine.reconcile();
   assert.equal(current(f).phase, "failed"); assert.equal(rows(f, "reservation")[0].state, "released");
-  assert.deepEqual(rows(f, "external_allowance_consumption"), consumed); assert.equal(f.calls.http, 0); assert.equal(f.calls.prepare, 1);
+  assert.deepEqual(rows(f, "candidate"), candidates); assert.equal(f.calls.http, 0); assert.equal(f.calls.prepare, 1);
 });
 
 test("interruption after installed local proof reopens into dedicated preparation without ordinary lookup", async t => {
@@ -177,14 +220,21 @@ test("interruption after installed local proof reopens into dedicated preparatio
   assert.deepEqual(liability(f), saved); assert.equal(current(f).phase, "ingesting");
 });
 
-test("a crash before protocol installation remains ordinary unknown recovery and cannot enter preparation", async t => {
+test("a crash before protocol installation is fenced as never dispatched and cannot enter preparation", async t => {
   const f = await preparationEngineFixture(t);
   f.control.beforeStart = () => { throw Error("synthetic crash before protocol installation"); };
   await f.engine.runReady(); assert.equal(current(f).phase, "submission_unknown");
   assert.equal(rows(f, "transcription_preparation_intent").length, 0); const saved = liability(f);
   f.control.beforeStart = undefined; f.reopen(); await f.engine.reconcile();
-  assert.equal(current(f).phase, "submission_unknown"); assert.equal(f.calls.lookups, 1); assert.equal(f.calls.resumes, 0);
-  assert.equal(f.calls.prepare, 0); assert.equal(f.calls.http, 0); assert.deepEqual(liability(f), saved);
+  assert.equal(current(f).phase, "failed"); assert.equal(f.calls.lookups, 1); assert.equal(f.calls.resumes, 0);
+  assert.equal(current(f).failure.retryAllowed, false);
+  assert.equal(rows(f, "transcription_execution_result")[0].observation.kind, "not_dispatched");
+  assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
+  assert.equal(f.calls.prepare, 0); assert.equal(f.calls.http, 0);
+  const { reservations: oldReservations, ...before } = saved, { reservations, ...after } = liability(f);
+  assert.deepEqual(after, before); assert.equal(reservations[0].id, oldReservations[0].id); assert.equal(reservations[0].state, "released");
+  for (let cycle = 0; cycle < 3; cycle++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.equal(f.calls.starts, 1); assert.equal(f.calls.prepare, 0); assert.equal(f.calls.http, 0);
 });
 
 test("post-marker interruption recovers only observations and never prepares or submits again after reopen", async t => {

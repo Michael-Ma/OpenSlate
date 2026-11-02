@@ -9,7 +9,7 @@ export type { ImportedAuthorityKind, RecoveryFence, RecoveryReceipt, RecoveryRel
 export interface RecoverySnapshot {
   state: "ordinary" | "quarantined" | "released";
   receipt: RecoveryReceipt | null; receiptDigest: string | null; summaryDigest: string | null;
-  counts: { projects: number; knownJobs: number; unknownJobs: number; nativeRequests: number; unusedAllowances: number; preparingJobs?: number };
+  counts: { projects: number; knownJobs: number; unknownJobs: number; nativeRequests: number; preparingJobs: number };
 }
 const terminal = new Set(["succeeded", "failed"]);
 const fenceKey = (projectId: string, kind: ImportedAuthorityKind, id: string) => `${projectId}\0${kind}\0${id}`;
@@ -48,14 +48,13 @@ export class InstallationRecoveryGuard {
   }
   assertFirstSubmit(projectId: string, attemptId: string): void {
     this.assertWritable(projectId); this.assertFreshAuthority(projectId, "attempt", attemptId);
-    const attempt = this.store.get<{ projectId: string; candidateId: string | null; request: { externalAllowanceId?: string } }>("attempt", attemptId);
+    const attempt = this.store.get<{ projectId: string; candidateId: string | null }>("attempt", attemptId);
     invariant(attempt?.projectId === projectId, "RECOVERY_INVALID", "Dispatch attempt is outside this project");
     if (attempt.candidateId) {
       this.assertFreshAuthority(projectId, "candidate", attempt.candidateId);
       const candidate = this.store.get<{ grantId: string }>("candidate", attempt.candidateId);
       if (candidate) this.assertFreshAuthority(projectId, "grant", candidate.grantId);
     }
-    if (attempt.request.externalAllowanceId) this.assertFreshAuthority(projectId, "external_allowance", attempt.request.externalAllowanceId);
   }
   recoveryMode(projectId: string, attemptId: string): "blocked" | "existing_results_only" | "ordinary" {
     const current = this.current();
@@ -67,7 +66,7 @@ export class InstallationRecoveryGuard {
     return (!current || !!current.release) && !this.isImported(projectId, "director_turn", turnId) && !this.isImported(projectId, "message", requestId);
   }
   snapshot(): RecoverySnapshot {
-    const current = this.current(), counts: RecoverySnapshot["counts"] = { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, unusedAllowances: 0 };
+    const current = this.current(), counts: RecoverySnapshot["counts"] = { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, preparingJobs: 0 };
     if (!current) return { state: "ordinary", receipt: null, receiptDigest: null, summaryDigest: null, counts };
     counts.projects = current.receipt.projectIds.length;
     const imported = (projectId: string, kind: ImportedAuthorityKind, id: string) => this.imported.has(fenceKey(projectId, kind, id));
@@ -90,7 +89,7 @@ export class InstallationRecoveryGuard {
           catch { /* Damaged evidence remains uncertain; this read never repairs or authorizes it. */ }
         }
         const known = taskIds.size === 1 && attempt.phase !== "preparing";
-        if (preparing) counts.preparingJobs = (counts.preparingJobs ?? 0) + 1;
+        if (preparing) counts.preparingJobs++;
         else if (known) counts.knownJobs++; else counts.unknownJobs++;
         work.push({ projectId, attemptId: attempt.id, phase: attempt.phase, task: attempt.taskId ? digest(attempt.taskId) : null,
           accepted: accepted.map(row => row.outcomeDigest).sort(), reservation: attempt.reservationId ? this.store.get("reservation", attempt.reservationId) ?? null : null });
@@ -98,15 +97,6 @@ export class InstallationRecoveryGuard {
       const turns = this.store.list<{ id: string; state: string }>("director_turn", projectId).filter(turn => imported(projectId, "director_turn", turn.id));
       counts.nativeRequests += turns.length;
       work.push({ projectId, turns: turns.map(turn => ({ id: turn.id, state: turn.state })) });
-      const usage = new Map<string, number>();
-      for (const row of this.store.list<{ allowanceId: string }>("external_allowance_consumption", projectId)) usage.set(row.allowanceId, (usage.get(row.allowanceId) ?? 0) + 1);
-      for (const allowance of this.store.list<{ id: string; maxAttempts: number; expiresAt: string }>("external_allowance", projectId)) {
-        if (!imported(projectId, "external_allowance", allowance.id)) continue;
-        const used = usage.get(allowance.id) ?? 0;
-        const revoked = !!this.store.get("external_allowance_revocation", allowance.id);
-        if (!revoked && used < allowance.maxAttempts) counts.unusedAllowances++;
-        work.push({ projectId, allowanceId: allowance.id, used, revoked, expiresAt: allowance.expiresAt });
-      }
     }
     const receiptDigest = digest(current.receipt);
     return { state: current.release ? "released" : "quarantined", receipt: structuredClone(current.receipt), receiptDigest,

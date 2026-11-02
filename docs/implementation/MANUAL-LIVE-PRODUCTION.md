@@ -9,11 +9,13 @@ Run `./start.sh --doctor`, then `./start.sh` (or `--restart` after configuration
 If native Codex is not yet installed, install the supported pinned version in a separate local prefix:
 
 ```sh
-npm install --prefix "$HOME/.local/share/openslate-codex" --save-exact @openai/codex@0.153.4
-"$HOME/.local/share/openslate-codex/node_modules/.bin/codex" --version
+npm install --prefix "$HOME/.local/share/openslate-codex-0.162.1" --save-exact @openai/codex@0.162.1
+"$HOME/.local/share/openslate-codex-0.162.1/node_modules/.bin/codex" --version
 ```
 
-Expected version: `codex-cli 0.153.4`. Sign in locally with that binary if needed. Configure its absolute path for the director/image worker; do not copy auth tokens into the repository or chat. The image worker uses ChatGPT login. Director account setup is separate and can use its selected supported Codex account; `OPENSLATE_OPENAI_API_KEY` only configures media API routes.
+Keep `~/.local/share/openslate-codex` untouched: a running older studio may still use it. Install the new version side by side, then restart the studio after review. A configured older binary falls back to the supported versioned installation with a version notice; without that installation setup still refuses.
+
+Expected version: `codex-cli 0.162.1`. Sign in locally with that binary if needed. Configure its absolute path for the director/image worker; do not copy auth tokens into the repository or chat. The image worker uses ChatGPT login. Director account setup is separate and can use its selected supported Codex account; `OPENSLATE_OPENAI_API_KEY` only configures media API routes.
 
 | Job | Select installed supported profile | Account consumed |
 |---|---|---|
@@ -62,7 +64,7 @@ Refresh and restart/reopen. Confirm the same attempt/take/export identities rema
 
 - **API images:** test the alternate image route in a separate small project so account/provider identity stays clear.
 - **Speech:** generate one exact short stock-voice script, listen/accept current bytes/range and verify overlay playback/export.
-- **Transcription:** recognize one short owned recording; compare returned words/timing with what you hear, then explicitly adopt only the intended evidence. Rewritten text is not automatically aligned.
+- **Transcription:** recognize one short owned recording; compare returned words/timing with what you hear as candidate evidence for Director attachments. Human transcript adoption is unavailable. Rewritten text is not automatically aligned.
 - **Two-shot edit:** after a successful small run, add a second shot and revise only that shot. Confirm the first image/take is reused, only affected reviews renew and export reflects the edit.
 - **Longer film:** expand only after the small flows pass. Synthetic six-minute tests do not prove real long-form quality.
 

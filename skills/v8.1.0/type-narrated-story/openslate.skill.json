@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 2,
+  "id": "type-narrated-story",
+  "version": "8.1.0",
+  "role": "type",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/guide.md"
+  ],
+  "compatibility": {
+    "toolContract": "7.1.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "read_guidance"
+  ],
+  "routes": {
+    "kinds": [
+      "narrated_story"
+    ],
+    "subtypes": [
+      "history",
+      "list",
+      "legend",
+      "other"
+    ]
+  },
+  "requires": [
+    "craft-story",
+    "craft-narration",
+    "craft-visual-style",
+    "craft-shot-prompting"
+  ],
+  "optional": [
+    {
+      "id": "craft-characters",
+      "when": "has_characters"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { assertMusicArtifact, type MusicReceipt } from "../execution/spool-music-ingester.js";
 import { CODEX_IMAGE_RECORD_KINDS, assertCodexImageArtifact } from "../execution/codex-image-lineage.js";
 import { assertConfiguredProviderAdmission, assertConfiguredProviderPin } from "../execution/provider-use.js";
 import { assertRequestedNarrationShotScope } from "../narration/narration-scope.js";
@@ -8,13 +9,11 @@ import { assertNarrationSpeechProposal } from "../narration/narration-speech-rec
 import { assertNarrationSpeechReview, assertNarrationSpeechApplication, assertNarrationSpeechAttemptInput } from "../narration/narration-speech-authorization.js";
 import type { NarrationSpeechReview } from "../narration/narration-speech-types.js";
 import Database from "better-sqlite3";
-import { mkdirSync, existsSync, openSync, closeSync, unlinkSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { canonical, digest, DomainError, invariant, newId } from "@openslate/core";
+import { canonical, digest, DomainError, invariant, newId, normalizeStoredFilmKind } from "@openslate/core";
 import type { JsonObject, ProjectEvent, ProjectRecord } from "@openslate/core";
-import { verifySchema } from "./schema.js";
-import { initializeDatabase } from "./migrations.js";
-import { flushSnapshot, prepareSnapshotDirectory, snapshotDatabase, verifyDatabase } from "./database-snapshot.js";
+import { initializeDatabase, verifySchema } from "./schema.js";
 import { assertVideoDerivationIntent, assertVideoDerivationReceipt } from "../execution/video-derivation.js";
 import type { VideoDerivationIntent, VideoDerivationReceipt } from "../execution/video-derivation.js";
 import { assertAudioDerivationIntent, assertAudioDerivationReceipt, assertNormalizedAudioIngestion } from "../execution/audio-derivation.js";
@@ -24,6 +23,10 @@ import type { TranscriptionAudioIntent, TranscriptionAudioReceipt, Transcription
 import { assertSpeechMappingAdmission, resolveSpeechAdmission } from "../execution/audio-execution-authority.js";
 import { assertSpeechSpoolLineage } from "../execution/audio-execution-lineage.js";
 import { assertViggleSpoolLineage } from "../execution/viggle-h3-lineage.js";
+import { VIGGLE_SETTLEMENT_KIND, assertViggleSettlement, assertViggleSettlementTransition, ownedViggleTasks } from "../execution/viggle-h3-settlement.js";
+import type { ViggleSubmissionSettlement } from "../execution/viggle-h3-settlement.js";
+import { assertFalLipSyncDispatch, assertFalLipSyncMapping, assertFalLipSyncObservation, assertFalLipSyncPollSchedule, assertFalLipSyncSubmit, FAL_LIPSYNC_KINDS } from "../execution/fal-lipsync-receipts.js";
+import type { FalLipSyncDispatch, FalLipSyncMapping, FalLipSyncObservation, FalLipSyncPollSchedule, FalLipSyncSubmit } from "../execution/fal-lipsync-receipts.js";
 import { resolveViggleAdmission, assertViggleMappingAdmission } from "../execution/viggle-h3-authority.js";
 import { assertViggleH3ExecutionMapping, assertViggleH3ExecutionDispatch, assertViggleH3ExecutionSubmit, assertViggleH3ExecutionObservation, assertViggleH3PollSchedule } from "../execution/viggle-h3-receipts.js";
 import type { ViggleH3ExecutionMapping, ViggleH3ExecutionDispatch, ViggleH3ExecutionSubmit, ViggleH3ExecutionObservation, ViggleH3PollSchedule } from "../execution/viggle-h3-receipts.js";
@@ -45,16 +48,11 @@ import { assertImageExecutionDispatch, assertImageExecutionMapping, assertImageE
 import type { ImageExecutionDispatch, ImageExecutionMapping, ImageExecutionResult } from "../execution/openai-image-receipts.js";
 import { assertH3ExecutionMapping, assertH3ExecutionDispatch, assertH3ExecutionSubmit, assertH3ExecutionObservation, assertH3PollSchedule } from "../execution/minimax-h3-receipts.js";
 import type { H3ExecutionMapping, H3ExecutionDispatch, H3ExecutionSubmit, H3ExecutionObservation, H3PollSchedule } from "../execution/minimax-h3-receipts.js";
-import { assertExternalAllowance, assertExternalAllowanceConsumption, assertExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
-import type { AllowanceHumanRequest, ExternalAllowance, ExternalAllowanceConsumption, ExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
-import { assertProjectBudgetRevision } from "../application/project-budget.js";
-import type { ProjectBudgetRevision } from "../application/project-budget.js";
 import { assertLocalExecutionDispatch, assertLocalExecutionIntent, assertLocalExecutionResult, assertPreparedLocalExecution } from "../execution/local-execution.js";
 import type { LocalExecutionBinding, LocalExecutionCompletion, LocalExecutionDispatch, LocalExecutionIntent } from "../execution/local-execution.js";
 import { assertRecoveryFence, assertRecoveryReceipt, assertRecoveryRelease, recoveryBodyHash } from "./recovery-records.js";
 import type { InstallationRecoveryRow, RecoveryFence, RecoveryReceipt, RecoveryReleaseReceipt } from "./recovery-records.js";
 import { assertGeneratedCanonicalNarrationSegment, assertGeneratedNarrationAudio } from "../narration/generated-audio.js";
-import { assertTranscriptCanonicalSegment, assertTranscriptSelection, assertTranscriptSelectionOutput, transcriptCanonicalProvenance } from "../narration/transcript-selection.js";
 import type { CanonicalNarration, PreparedNarrationCommit } from "../narration/canonical-types.js";
 import type { NarrationAudio } from "../narration/types.js";
 import { assertOwnedTranscriptionSource, assertOwnedTranscriptionProposal } from "../narration/owned-transcription-records.js";
@@ -71,7 +69,7 @@ export class Store {
   constructor(readonly path: string) {
     invariant(typeof path === "string" && path.length > 0, "DATABASE_PATH_INVALID", "Use a database path or :memory:");
     if (path !== ":memory:") mkdirSync(dirname(resolve(path)), { recursive: true });
-    // Reject newer or unrecognized databases through a read-only connection before
+    // Reject non-current or unrecognized databases through a read-only connection before
     // opening a writer or applying persistent journal/schema configuration.
     if (path !== ":memory:" && existsSync(path)) {
       const existing = new Database(path, { readonly: true, fileMustExist: true });
@@ -82,7 +80,7 @@ export class Store {
       this.db.pragma("foreign_keys = ON");
       this.db.pragma("synchronous = FULL");
       this.db.pragma("busy_timeout = 5000");
-      initializeDatabase(this.db, path);
+      initializeDatabase(this.db);
       this.db.pragma("journal_mode = WAL");
     } catch (error) { this.db.close(); throw error; }
   }
@@ -113,11 +111,12 @@ export class Store {
   getProject(id: string): ProjectRecord {
     const row = this.db.prepare("SELECT body,head_version FROM projects WHERE id=?").get(id) as ProjectRow | undefined;
     invariant(row, "NOT_FOUND", "Project not found");
-    return JSON.parse(row.body) as ProjectRecord;
+    // Unshipped 7.0.0 stored filmKind as a flat string; read it as the structured film-kind@1 record.
+    return normalizeStoredFilmKind(JSON.parse(row.body) as ProjectRecord);
   }
 
   listProjects(): ProjectRecord[] {
-    return (this.db.prepare("SELECT body FROM projects ORDER BY rowid DESC").all() as ProjectRow[]).map(row => JSON.parse(row.body) as ProjectRecord);
+    return (this.db.prepare("SELECT body FROM projects ORDER BY rowid DESC").all() as ProjectRow[]).map(row => normalizeStoredFilmKind(JSON.parse(row.body) as ProjectRecord));
   }
 
   saveProject(project: ProjectRecord, expectedHeadVersion: number): ProjectRecord {
@@ -178,7 +177,7 @@ export class Store {
       const configured = assertConfiguredProviderPin(this, { ...body, id, projectId } as unknown as Attempt);
       if (configured) {
         reference("capability_lock", (body.request as Attempt["request"]).providerUse!.capabilityLockId);
-        reference("grant", this.get<{ grantId: string }>("candidate", String(body.candidateId))!.grantId);
+        if (body.candidateId !== null) reference("grant", this.get<{ grantId: string }>("candidate", String(body.candidateId))!.grantId);
       }
       // Initial admission writes its reservation next. Every later attempt write must retain the full proof.
       if (this.get("attempt", id)) assertConfiguredProviderAdmission(this, { ...body, id, projectId } as unknown as Attempt);
@@ -211,9 +210,6 @@ export class Store {
         "OWNED_TRANSCRIPTION_AUTHORIZATION_INVALID", "An already consumed grant cannot acquire a later recording review");
     }
     if (kind === "owned_transcription_application") assertOwnedTranscriptionApplication(this, projectId, { ...body, id, projectId });
-    if (kind === "narration_transcript_selection") assertTranscriptSelection(this, projectId, { ...body, id, projectId });
-    if (kind === "narration_segment" || kind === "narration_cue")
-      assertTranscriptSelectionOutput(this, projectId, kind, { ...body, id, projectId });
     if (kind === "narration_audio" && (Object.hasOwn(body, "originEvidence") || Object.hasOwn(body, "generation"))) {
       const audio = { ...body, id, projectId };
       assertGeneratedNarrationAudio(this, projectId, audio);
@@ -222,7 +218,6 @@ export class Store {
     if (kind === "narration_prepared") {
       const prepared = body as unknown as PreparedNarrationCommit;
       for (const view of prepared.snapshot?.segments ?? []) {
-        transcriptCanonicalProvenance(this, projectId, view.script, view.cue);
         const saved = view.audio ? this.get<NarrationAudio>("narration_audio", view.audio.id) : undefined;
         if (!view.audio || !(Object.hasOwn(view.audio, "originEvidence") || Object.hasOwn(view.audio, "generation") || saved && Object.hasOwn(saved, "generation"))) continue;
         reference("narration_audio", view.audio.id); assertGeneratedNarrationAudio(this, projectId, view.audio);
@@ -232,8 +227,6 @@ export class Store {
     if (kind === "narration_canonical") {
       const value = body as unknown as CanonicalNarration;
       for (const segment of value.segments ?? []) {
-        assertTranscriptCanonicalSegment(this, projectId, segment,
-          { narrationRevisionId: value.narrationRevisionId, narrationVersion: value.narrationVersion });
         const provenance = segment.provenance;
         const saved = provenance ? this.get<NarrationAudio>("narration_audio", provenance.audioId) : undefined;
         if (!provenance || provenance.originEvidence === "human_declared_supplied_recording" && !Object.hasOwn(provenance, "generation") && !(saved && Object.hasOwn(saved, "generation"))) continue;
@@ -285,37 +278,9 @@ export class Store {
         && selection.prepared.specDigest === intent.prepared.specDigest && selection.prepared.contentDigest === intent.prepared.contentDigest,
       "LOCAL_EXECUTION_CONFLICT", "Local selection differs from the verified completed work");
     }
-    if (kind === "project_budget_revision") {
-      reference("message", body.requestId);
-      assertProjectBudgetRevision({ ...body, id, projectId } as unknown as ProjectBudgetRevision,
-        this.get<AllowanceHumanRequest & { editing: boolean }>("message", String(body.requestId))!);
-    }
-    if (kind === "external_allowance") {
-      reference("message", body.requestId);
-      const allowance = { ...body, id, projectId } as unknown as ExternalAllowance;
-      assertExternalAllowance(allowance, this.get<AllowanceHumanRequest>("message", String(body.requestId))!);
-      for (const selected of allowance.selections) {
-        reference("candidate", selected.candidateId);
-        const candidate = this.get<{ nodeId: string }>("candidate", selected.candidateId)!;
-        invariant(candidate.nodeId === selected.nodeId, "ALLOWANCE_INVALID", "Allowance candidate must belong to its selected node");
-      }
-    }
-    if (kind === "external_allowance_revocation") {
-      reference("message", body.requestId); reference("external_allowance", body.allowanceId);
-      assertExternalAllowanceRevocation({ ...body, id, projectId } as unknown as ExternalAllowanceRevocation,
-        this.get<ExternalAllowance>("external_allowance", String(body.allowanceId))!, this.get<AllowanceHumanRequest>("message", String(body.requestId))!);
-    }
-    if (kind === "external_allowance_consumption") {
-      reference("attempt", id); reference("external_allowance", body.allowanceId);
-      const attempt = this.get<Attempt>("attempt", id)!;
-      reference("reservation", attempt.reservationId);
-      assertExternalAllowanceConsumption({ ...body, id, projectId } as unknown as ExternalAllowanceConsumption,
-        this.get<ExternalAllowance>("external_allowance", String(body.allowanceId))!, attempt,
-        this.get("reservation", attempt.reservationId!)!);
-    }
     if (kind === "request_image_selection") {
       reference("message", id);
-      invariant(body.requestId === id && Array.isArray(body.images) && body.images.length >= 1 && body.images.length <= 4 && body.selectionDigest === digest(body.images), "IDENTITY_MISMATCH", "Image selection must bind a bounded ordered request payload");
+      invariant(body.requestId === id && Array.isArray(body.images) && body.images.length >= 1 && body.images.length <= 8 && body.selectionDigest === digest(body.images), "IDENTITY_MISMATCH", "Image selection must bind a bounded ordered request payload");
       const images = body.images as Array<{ artifactId: string; sha256: string }>;
       invariant(new Set(images.map(image => image.artifactId)).size === images.length, "IDENTITY_MISMATCH", "Image selections must be unique");
       for (const image of images) {
@@ -334,6 +299,55 @@ export class Store {
       const images = body.images as Array<{ artifactId: string; sha256: string; thumbnailSha256: string; byteLength: number; mediaType: string }>;
       invariant(canonical(images.map(({ artifactId, sha256 }) => ({ artifactId, sha256 }))) === canonical(selection.images), "IDENTITY_MISMATCH", "Image projection must preserve selected reference order and identity");
       invariant(images.every(image => /^[a-f0-9]{64}$/.test(image.thumbnailSha256) && Number.isSafeInteger(image.byteLength) && image.byteLength > 0 && image.byteLength <= 128 * 1024 && image.mediaType === "image/jpeg"), "VALIDATION_ERROR", "Image projection requires bounded JPEG content receipts");
+    }
+    if (kind === "request_attachment_selection") {
+      reference("message", id);
+      type Ref = { artifactId: string; sha256: string };
+      invariant(body.requestId === id && Array.isArray(body.attachments) && body.attachments.length >= 1 && body.attachments.length <= 8 &&
+        (body.legacyImages === undefined || Array.isArray(body.legacyImages)), "IDENTITY_MISMATCH", "Attachments must bind a bounded ordered message selection");
+      const attachments = body.attachments as Ref[], images = body.legacyImages as Ref[] | undefined;
+      const refs = [...(images ?? []), ...attachments];
+      invariant(refs.length <= 8 && new Set(refs.map(ref => ref.artifactId)).size === refs.length &&
+        body.selectionDigest === digest({ attachments, ...(images ? { legacyImages: images } : {}) }), "IDENTITY_MISMATCH", "Attachment selection must preserve unique identities and order");
+      for (const ref of refs) {
+        invariant(ref && typeof ref.artifactId === "string" && ref.artifactId.length > 0 && ref.artifactId.length <= 160 && /^[a-f0-9]{64}$/.test(ref.sha256), "VALIDATION_ERROR", "Select an owned artifact identity and SHA-256");
+        const artifact = this.get<{ projectId: string; artifact: { artifactId: string; sha256: string; kind: string } }>("artifact", ref.artifactId);
+        if (artifact) {
+          reference("artifact", ref.artifactId);
+          invariant(artifact.artifact.artifactId === ref.artifactId && artifact.artifact.sha256 === ref.sha256 && ["image", "video", "audio", "document"].includes(artifact.artifact.kind), "IDENTITY_MISMATCH", "Attachment selection must bind exact owned content");
+        } else {
+          reference("narration_audio", ref.artifactId);
+          const audio = this.get<{ media: { sha256: string; artifactId: string; kind: string } }>("narration_audio", ref.artifactId)!;
+          invariant(audio.media.sha256 === ref.sha256 && audio.media.artifactId === ref.artifactId && audio.media.kind === "audio", "IDENTITY_MISMATCH", "Attachment selection must bind exact owned audio content");
+        }
+      }
+      const request = this.get<{ contextDigest: string }>("message", id)!;
+      invariant(request.contextDigest === digest({ replyToReviewId: body.replyToReviewId ?? null, ...(images ? { images } : {}), attachments }), "IDENTITY_MISMATCH", "Attachments must match their message context identity");
+    }
+    if (kind === "request_attachment_projection") {
+      reference("request_attachment_selection", id);
+      const selection = this.get<{ selectionDigest: string; attachments: Array<{ artifactId: string; sha256: string }>; legacyImages?: Array<{ artifactId: string; sha256: string }> }>("request_attachment_selection", id)!;
+      const refs = [...(selection.legacyImages ?? []), ...selection.attachments];
+      invariant(body.requestId === id && body.selectionDigest === selection.selectionDigest && Array.isArray(body.attachments) && body.attachments.length === refs.length &&
+        Array.isArray(body.images) && body.images.length <= 8 && [body.recipeDigest, body.toolchainDigest].every(value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)), "IDENTITY_MISMATCH", "Attachment projection must bind its message, recipe and toolchain");
+      const materials = body.attachments as Array<{ artifact: { artifactId: string; sha256: string }; name: string; readable: boolean; text?: string; characters?: number; truncated?: boolean }>;
+      invariant(materials.every((material, index) => material.artifact?.artifactId === refs[index]!.artifactId && material.artifact.sha256 === refs[index]!.sha256 &&
+        typeof material.name === "string" && typeof material.readable === "boolean" && (material.text === undefined || typeof material.text === "string" && material.text.length <= 200_000 && material.characters === material.text.length && typeof material.truncated === "boolean")), "IDENTITY_MISMATCH", "Attached material must preserve its selected identity and bounded text");
+      let totalBytes = 0;
+      for (const image of body.images as Array<{ artifactId: string; sha256: string; attachmentIndex: number; thumbnailSha256: string; byteLength: number; mediaType: string }>) {
+        invariant(Number.isSafeInteger(image.attachmentIndex) && refs[image.attachmentIndex]?.artifactId === image.artifactId && refs[image.attachmentIndex]?.sha256 === image.sha256 &&
+          /^[a-f0-9]{64}$/.test(image.thumbnailSha256) && Number.isSafeInteger(image.byteLength) && image.byteLength > 0 && image.byteLength <= 128 * 1024 && image.mediaType === "image/jpeg", "VALIDATION_ERROR", "Attachment pictures require exact bounded JPEG receipts");
+        totalBytes += image.byteLength;
+      }
+      invariant(totalBytes <= 1024 * 1024, "VALIDATION_ERROR", "Attachment picture bytes exceed their message limit");
+    }
+    if (kind === "document_import") reference("message", body.requestId);
+    if (kind === "document_import_receipt") {
+      reference("document_import", id);
+      const artifact = body.artifact as { artifactId?: unknown; sha256?: unknown; kind?: unknown } | undefined;
+      reference("artifact", artifact?.artifactId);
+      const imported = this.get<{ artifactId: string; sha256: string }>("document_import", id)!;
+      invariant(imported.artifactId === artifact?.artifactId && imported.sha256 === artifact?.sha256 && artifact?.kind === "document", "IDENTITY_MISMATCH", "Document receipt must match its import artifact identity");
     }
     if (kind === "image_import") reference("message", body.requestId);
     if (kind === "image_import_receipt") {
@@ -531,7 +545,38 @@ export class Store {
         }
       }
     }
-    if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule"].includes(kind)) {
+    if ((FAL_LIPSYNC_KINDS as readonly string[]).includes(kind)) {
+      // fal lip-sync receipts: same write-time proofs as the H3 receipts above.
+      reference("attempt", body.attemptId);
+      const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
+      assertConfiguredProviderAdmission(this, attempt);
+      const mapping = this.get<FalLipSyncMapping>("fal_lipsync_execution_mapping", attempt.id), dispatch = this.get<FalLipSyncDispatch>("fal_lipsync_execution_dispatch", attempt.id);
+      const submit = this.get<FalLipSyncSubmit>("fal_lipsync_execution_submit", attempt.id), value = { ...body, id, projectId };
+      if (kind === "fal_lipsync_execution_mapping") {
+        invariant(!submit || !!mapping, "FAL_LIPSYNC_EXECUTION_CONFLICT", "Closed lip-sync preparation cannot acquire a mapping");
+        assertFalLipSyncMapping(attempt, value as unknown as FalLipSyncMapping); reference("artifact", body.firstFrameArtifactId);
+      } else if (kind === "fal_lipsync_execution_dispatch") {
+        reference("fal_lipsync_execution_mapping", attempt.id);
+        invariant(!submit || !!dispatch, "FAL_LIPSYNC_EXECUTION_CONFLICT", "Closed lip-sync preparation cannot acquire a dispatch");
+        assertFalLipSyncDispatch(attempt, mapping!, value as unknown as FalLipSyncDispatch);
+      } else if (kind === "fal_lipsync_execution_submit") assertFalLipSyncSubmit(attempt, mapping, dispatch, value as unknown as FalLipSyncSubmit);
+      else {
+        reference("fal_lipsync_execution_mapping", attempt.id); reference("fal_lipsync_execution_dispatch", attempt.id); reference("fal_lipsync_execution_submit", attempt.id);
+        if (kind === "fal_lipsync_execution_observation") {
+          const observation = value as unknown as FalLipSyncObservation, outputId = observation.observation?.kind === "completed" ? observation.observation.outputReceiptId : undefined;
+          if (outputId !== undefined) reference("execution_output_receipt", outputId);
+          assertFalLipSyncObservation(attempt, mapping!, dispatch!, submit!, observation, outputId ? this.get("execution_output_receipt", outputId) : undefined);
+        } else {
+          const schedule = value as unknown as FalLipSyncPollSchedule; assertFalLipSyncPollSchedule(attempt, submit!, schedule);
+          if (schedule.lastObservationId !== null) {
+            reference("fal_lipsync_execution_observation", schedule.lastObservationId);
+            invariant(this.get<FalLipSyncObservation>("fal_lipsync_execution_observation", schedule.lastObservationId)!.attemptId === attempt.id,
+              "FAL_LIPSYNC_EXECUTION_CONFLICT", "Polling schedule cannot adopt another attempt's observation");
+          }
+        }
+      }
+    }
+    if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule", VIGGLE_SETTLEMENT_KIND].includes(kind)) {
       reference("attempt", body.attemptId);
       const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
       const mapping = this.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id), dispatch = this.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id);
@@ -540,12 +585,19 @@ export class Store {
       if (retainedMapping) assertViggleMappingAdmission(resolveViggleAdmission(this, attempt.request, retainedMapping), retainedMapping);
       if (kind === "viggle_h3_execution_mapping") {
         invariant(!submit || !!mapping, "VIGGLE_H3_EXECUTION_CONFLICT", "Closed H3 preparation cannot acquire a mapping");
-        assertViggleH3ExecutionMapping(attempt, value as unknown as ViggleH3ExecutionMapping); reference("artifact", (body.firstFrame as ViggleH3ExecutionMapping["firstFrame"]).artifactId);
+        assertViggleH3ExecutionMapping(attempt, value as unknown as ViggleH3ExecutionMapping);
+        const pins = value as unknown as ViggleH3ExecutionMapping;
+        for (const pin of [pins.firstFrame, pins.lastFrame, ...(pins.references ?? [])]) if (pin) reference("artifact", pin.artifactId);
       } else if (kind === "viggle_h3_execution_dispatch") {
         reference("viggle_h3_execution_mapping", attempt.id);
         invariant(!submit || !!dispatch, "VIGGLE_H3_EXECUTION_CONFLICT", "Closed H3 preparation cannot acquire a dispatch");
         assertViggleH3ExecutionDispatch(attempt, mapping!, value as unknown as ViggleH3ExecutionDispatch);
       } else if (kind === "viggle_h3_execution_submit") assertViggleH3ExecutionSubmit(attempt, mapping, dispatch, value as unknown as ViggleH3ExecutionSubmit);
+      else if (kind === VIGGLE_SETTLEMENT_KIND) {
+        reference("viggle_h3_execution_mapping", attempt.id); reference("viggle_h3_execution_dispatch", attempt.id); reference("viggle_h3_execution_submit", attempt.id);
+        assertViggleH3ExecutionSubmit(attempt, mapping, dispatch, submit!);
+        assertViggleSettlement(attempt, dispatch!, submit!, value as unknown as ViggleSubmissionSettlement, ownedViggleTasks(this));
+      }
       else {
         reference("viggle_h3_execution_mapping", attempt.id); reference("viggle_h3_execution_dispatch", attempt.id); reference("viggle_h3_execution_submit", attempt.id);
         if (kind === "viggle_h3_execution_observation") {
@@ -636,7 +688,21 @@ export class Store {
         { type: "normalized_audio", artifact, derivation: receipt, mediaSource: { id: intent.artifactId, projectId, source: receipt.source,
           origin: "generated_audio", attemptId: intent.attemptId, derivationId: id } });
     }
-    if (kind === "media_source" && body.origin === "generated_audio") {
+    const musicSource = kind === "media_source" && body.origin === "generated_audio"
+      && this.get<Attempt>("attempt", String(body.attemptId))?.request.kind === "music";
+    if (musicSource) {
+      reference("artifact", id); reference("attempt", body.attemptId); reference("music_ingestion_receipt", body.derivationId);
+      const receipt = this.get<MusicReceipt>("music_ingestion_receipt", String(body.derivationId))!;
+      const output = this.get<OutputReceipt>("execution_output_receipt", receipt.spoolId)!;
+      invariant(output && output.source.kind === "returned_bytes", "IDENTITY_MISMATCH", "Music source requires its retained raw bytes");
+      assertMusicArtifact(this, this.get<Attempt>("attempt", receipt.attemptId)!, { port: "audio", kind: "audio", mimeType: output.mimeType,
+        extension: output.mimeType === "audio/mpeg" ? "mp3" : "wav", sha256: receipt.rawSha256, byteLength: output.source.byteLength,
+        fixture: false, storage: { type: "spool", spoolId: receipt.spoolId } }, this.get<ArtifactRecord>("artifact", id)!);
+      invariant(canonical({ ...body, id, projectId }) === canonical({ id: receipt.source.artifactId, projectId: receipt.projectId,
+        source: receipt.source, origin: "generated_audio", attemptId: receipt.attemptId, derivationId: receipt.id }),
+      "IDENTITY_MISMATCH", "Generated music must retain its exact source without upload authority");
+    }
+    if (kind === "media_source" && body.origin === "generated_audio" && !musicSource) {
       reference("artifact", id); reference("attempt", body.attemptId); reference("audio_derivation_receipt", body.derivationId);
       const receipt = this.get<AudioDerivationReceipt>("audio_derivation_receipt", String(body.derivationId))!;
       const intent = this.get<AudioDerivationIntent>("audio_derivation_intent", receipt.id)!;
@@ -661,6 +727,19 @@ export class Store {
       const epoch = this.get<{ requestId: string }>("epoch", String(body.epochId));
       invariant(epoch?.requestId === body.requestId, "SCOPE_DENIED", "Director record request does not match its epoch");
     }
+    if (["director_generation_effect", "director_generation_block", "director_keyframes_receipt", "director_attachment_transcription"].includes(kind)) {
+      reference("message", body.requestId); reference("epoch", body.epochId);
+      const epoch = this.get<{ requestId: string }>("epoch", String(body.epochId));
+      invariant(epoch?.requestId === body.requestId, "SCOPE_DENIED", "Generation evidence must belong to its original epoch request");
+    }
+    if (kind === "scene_confirmation_candidate") {
+      invariant(body.candidateId === id, "IDENTITY_MISMATCH", "Scene run mapping must retain its candidate identity");
+      reference("candidate", id); reference("scene_confirmation", body.confirmationId);
+      const candidate = this.get<{ grantId: string }>("candidate", id)!;
+      const grant = this.get<{ authorityId: string }>("grant", candidate.grantId);
+      const run = this.get<{ actor: { requestId: string } }>("scene_confirmation", String(body.confirmationId));
+      invariant(grant?.authorityId === run?.actor.requestId, "SCOPE_DENIED", "Scene run must retain the candidate's original human request");
+    }
     if (kind === "tool_invocation") {
       reference("message", body.requestId);
       reference("epoch", body.epochId);
@@ -676,6 +755,8 @@ export class Store {
       const encoded = this.checkedBody(kind, id, projectId, body);
       try { this.db.prepare("INSERT INTO entities(kind,id,project_id,body) VALUES(?,?,?,?)").run(kind, id, projectId, encoded); }
       catch (error) { this.constraint(error); }
+      if (kind === "artifact" || kind === "narration_audio")
+        this.insert("asset_metadata", `${kind}:${id}`, projectId, { createdAt: new Date().toISOString() });
       return JSON.parse(encoded) as T;
     });
   }
@@ -686,10 +767,11 @@ export class Store {
       if (!old) return this.insert(kind, id, projectId, body);
       invariant(old.project_id === projectId, "SCOPE_DENIED", "Cannot move records between projects");
       const encoded = this.checkedBody(kind, id, projectId, body);
-      if (["h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation"].includes(kind))
+      if (["video_i2v_mapping", "video_i2v_dispatch", "video_i2v_submit", "video_i2v_terminal", "h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "H3 execution receipts are immutable");
       if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Viggle execution receipts are immutable");
+      if (kind === VIGGLE_SETTLEMENT_KIND) assertViggleSettlementTransition(JSON.parse(old.body) as ViggleSubmissionSettlement, JSON.parse(encoded) as ViggleSubmissionSettlement);
       if ((CODEX_IMAGE_RECORD_KINDS as readonly string[]).includes(kind)) invariant(old.body === encoded, "IMMUTABLE_RECORD", "Native image receipts are immutable");
       if (kind === "project_model_preview") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Model previews are immutable");
       if (kind === "narration_requested_shot_scope") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Requested shot narration scope is immutable");
@@ -699,22 +781,51 @@ export class Store {
           invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Viggle poll identity and host policy are immutable");
         invariant(Number(next.count) >= Number(previous.count), "VIGGLE_H3_EXECUTION_CONFLICT", "Viggle polling cannot rewind");
       }
+      if (["fal_lipsync_execution_mapping", "fal_lipsync_execution_dispatch", "fal_lipsync_execution_submit", "fal_lipsync_execution_observation"].includes(kind))
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", "Lip-sync execution receipts are immutable");
+      if (kind === "fal_lipsync_poll_schedule") {
+        const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
+        for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Lip-sync poll identity and host policy are immutable");
+        invariant(Number(next.count) >= Number(previous.count), "FAL_LIPSYNC_EXECUTION_CONFLICT", "Lip-sync polling cannot rewind");
+      }
       if (kind === "h3_poll_schedule") {
         const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
         for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])
           invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "H3 poll identity and host policy are immutable");
         invariant(Number(next.count) >= Number(previous.count), "H3_EXECUTION_CONFLICT", "H3 poll backoff cannot rewind");
       }
-      if (["external_allowance", "external_allowance_revocation", "external_allowance_consumption", "project_budget_revision"].includes(kind))
-        invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
-      if (["local_execution_intent", "local_execution_dispatch", "local_execution_completion", "installation_recovery_fence"].includes(kind))
+      if (["code_plan_render_intent", "local_execution_intent", "local_execution_dispatch", "local_execution_completion", "installation_recovery_fence"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
-      if (["audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
+      if (["lyria_dispatch", "lyria_result", "music_ingestion_intent", "music_ingestion_receipt", "audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
         "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result",
-        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcription_preparation_intent", "transcript_candidate", "narration_transcript_selection", "owned_transcription_source", "owned_transcription_proposal", "owned_transcription_review", "owned_transcription_application", "narration_speech_proposal", "narration_speech_review", "narration_speech_application"].includes(kind))
+        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcription_preparation_intent", "transcript_candidate", "owned_transcription_source", "owned_transcription_proposal", "owned_transcription_review", "owned_transcription_application", "narration_speech_proposal", "narration_speech_review", "narration_speech_application"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
-      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt", "personal_voice", "personal_voice_revocation"].includes(kind))
+      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "request_attachment_selection", "request_attachment_projection", "document_import", "document_import_receipt", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt", "personal_voice", "personal_voice_revocation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
+      if (["director_generation_effect", "director_generation_block", "scene_confirmation_candidate"].includes(kind))
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", "Generation and scene run evidence is immutable");
+      if (kind === "director_attachment_transcription") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        for (const field of ["requestId", "epochId", "key", "inputDigest", "audioId", "operationDigest"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Attachment transcription identity is immutable");
+        if (previous.state !== "started") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Completed attachment transcription is immutable");
+      }
+      if (kind === "director_keyframes_receipt") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        for (const field of ["requestId", "epochId", "argumentsDigest"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Director generation identity is immutable");
+        if (previous.complete) invariant(old.body === encoded, "IMMUTABLE_RECORD", "Completed keyframe receipts are immutable");
+      }
+      if (kind === "code_plan_execution") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        for (const field of ["requestDigest", "createdAt", "planVersion", "normalizedInput", "priceMicros"])
+          invariant(canonical(previous[field] ?? null) === canonical(next[field] ?? null), "IMMUTABLE_RECORD", "Code-plan execution intent is immutable");
+      }
+      if (kind === "message") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        invariant(canonical(previous.attachments ?? []) === canonical(next.attachments ?? []), "IMMUTABLE_RECORD", "Message attachments are immutable");
+      }
       if (kind === "epoch") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
         const next = JSON.parse(encoded) as Record<string, unknown>;
@@ -741,6 +852,22 @@ export class Store {
       if (kind === "attempt") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
         const next = JSON.parse(encoded) as Record<string, unknown>;
+        if (previous.released) invariant(canonical(previous.released) === canonical(next.released ?? null), "IMMUTABLE_RECORD", "Attempt release evidence is immutable");
+        else if (next.released) {
+          const released = next.released as Attempt["released"];
+          // remote_pending: a job the provider still reports as running, detached by the person (decision R3).
+          invariant((previous.phase === "submission_unknown" || previous.phase === "remote_pending") && next.phase === previous.phase
+            && released && typeof released.by === "string" && released.by.length > 0
+            && typeof released.at === "string" && Number.isFinite(Date.parse(released.at)),
+          "ATTEMPT_NOT_RELEASABLE", "Release requires a retained unknown or running submission and human audit evidence");
+        }
+        if (previous.discarded) invariant(canonical(previous.discarded) === canonical(next.discarded ?? null), "IMMUTABLE_RECORD", "Attempt discard evidence is immutable");
+        else if (next.discarded) {
+          const discarded = next.discarded as NonNullable<Attempt["discarded"]>;
+          invariant(previous.phase === "ingesting" && next.phase === "failed" && typeof discarded.by === "string" && discarded.by.length > 0
+            && typeof discarded.at === "string" && Number.isFinite(Date.parse(discarded.at)) && typeof discarded.code === "string",
+          "ATTEMPT_NOT_DISCARDABLE", "Discard requires a finished ingesting job and human audit evidence");
+        }
         invariant(Object.hasOwn(previous, "narrationSpeech") === Object.hasOwn(next, "narrationSpeech")
           && (!Object.hasOwn(previous, "narrationSpeech") || canonical(previous.narrationSpeech) === canonical(next.narrationSpeech)),
           "IMMUTABLE_RECORD", "Attempt speech review evidence is immutable");
@@ -845,27 +972,6 @@ export class Store {
         .run(canonical(snapshot), snapshot.restoreId);
       invariant(result.changes === 1, "RECOVERY_CONFLICT", "Recovery release changed"); return snapshot;
     });
-  }
-
-  async backup(destination: string): Promise<void> {
-    invariant(!this.db.inTransaction, "TRANSACTION_ACTIVE", "Backup must run outside a write transaction");
-    invariant(typeof destination === "string" && destination.length > 0 && destination !== ":memory:" && destination === destination.trim() && resolve(destination) !== resolve(this.path)
-      && !existsSync(destination) && !existsSync(`${destination}-wal`) && !existsSync(`${destination}-shm`), "BACKUP_EXISTS", "Use a new backup destination");
-    verifySchema(this.db, { integrity: true });
-    prepareSnapshotDirectory(destination);
-    const fd = openSync(destination, "wx", 0o600); closeSync(fd);
-    try { await this.db.backup(destination); Store.checkDatabase(destination); flushSnapshot(destination); }
-    catch (error) { try { unlinkSync(destination); } catch { /* Do not replace the original backup error. */ } throw error; }
-  }
-
-  static checkDatabase(path: string): void {
-    verifyDatabase(path);
-  }
-
-  static restore(source: string, destination: string): void {
-    invariant(!existsSync(destination) && !existsSync(`${destination}-wal`) && !existsSync(`${destination}-shm`), "RESTORE_DESTINATION_EXISTS", "Restore requires a new closed database path");
-    const reader = new Database(source, { readonly: true, fileMustExist: true });
-    try { snapshotDatabase(reader, destination); } finally { reader.close(); }
   }
 
   close(): void { this.db.close(); }

@@ -1,0 +1,79 @@
+/*
+ * The shot's narration in the inspector (card B13 parity): the row's Edit / Listen pills and the narration panel.
+ * Only :root tokens. Neutral throughout: amber stays the Director's; the chosen option and primary action are white.
+ */
+
+/* ---------- the row's controls, under its label ---------- */
+.insp .rows dt .narr-acts { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.insp .narr-acts .pill.sm { padding: 1px 8px; font-size: 11.5px; line-height: 18px; }
+.insp .narr-acts .play.sm { width: 22px; height: 22px; }
+.insp .narr-acts .play.sm svg { margin-left: 1px; }
+
+/* ---------- the panel ---------- */
+/* While it is open the panel gets the inspector's room: the keyframe's status pill and the framing step aside. */
+.insp[data-editing="narration"] .st, .insp[data-editing="narration"] .insp-title .framing { display: none; }
+.insp[data-editing="narration"] .insp-body > form { margin-top: 8px; }
+/* A field that takes the focus (the line, a refusal's Choose another…) scrolls clear of the sticky buttons. */
+.insp[data-editing="narration"] .insp-body { scroll-padding-bottom: 60px; }
+.insp .narr-panel { gap: 7px; }
+.insp .narr-panel > .label { font-size: 12px; color: var(--muted); }
+.insp .narr-panel .segctl { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--hairline); background: var(--bar); border-radius: var(--r-pill); min-width: 0; }
+.insp .narr-panel .segctl button { flex: 1 1 auto; min-width: 0; border: 0; background: none; color: var(--text-2); font-weight: 600; font-size: 12px; padding: 4px 6px; border-radius: var(--r-pill); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.insp .narr-panel .segctl button:hover:not(:disabled) { color: var(--text); }
+.insp .narr-panel .segctl button:focus-visible { outline-offset: -2px; }
+.insp .narr-panel .segctl button[aria-checked="true"] { background: var(--raised-2); color: var(--text); }
+.insp .narr-panel .segctl button:disabled { cursor: not-allowed; }
+.insp .narr-panel .stale { margin-top: 0; line-height: 1.4; }
+/* The voice on one row with its label, so the line stays in view with it in a short inspector. Brought to the top, it
+   stops clear of the body's 16 px top fade. */
+.insp .narr-voice { display: flex; align-items: center; gap: 8px; scroll-margin-top: 16px; }
+.insp .narr-voice label { flex: none; }
+.insp .narr-voice select { appearance: auto; flex: 1 1 auto; min-width: 0; font-size: 12.5px; padding: 7px 6px; }
+.insp .narr-voice select option { background: var(--raised); color: var(--text); }
+
+/* The current take: its label and the native player (seek, volume, keyboard). */
+.insp .narr-take { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--hairline); background: var(--bar); border-radius: 10px; padding: 7px 8px; }
+.insp .narr-take-label { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.insp .narr-audio { display: block; width: 100%; height: 34px; }
+/*
+ * In a narrow inspector the native player has no room for its timeline: a full-width seek slider joins it there
+ * (keyboard and pointer, its position said in seconds). Where the native timeline fits, the slider is not shown.
+ */
+.insp .narr-take { container-type: inline-size; }
+.insp .narr-seek { display: none; width: 100%; margin: -2px 0 0; height: 14px; padding: 0; border: 0; border-radius: 0; background: none; accent-color: var(--text); cursor: pointer; }
+@container (max-width: 300px) {
+  .insp .narr-seek { display: block; }
+}
+.insp .narr-loading { font-size: 12px; color: var(--muted); }
+.insp .narr-state { font-size: 12.5px; color: var(--text-2); line-height: 1.4; }
+.insp .narr-state.warn { color: var(--text); font-weight: 600; }
+.insp .narr-state .pill { margin-left: 4px; }
+
+/* A chosen recording: white when it can be added, a plain border when it cannot. */
+.insp .narr-file { border: 2px solid var(--select); background: var(--surface); border-radius: 10px; padding: 6px 9px; font-size: 12.5px; color: var(--text); min-width: 0; }
+.insp .narr-file[data-state="refused"] { border: 1px solid var(--track); padding: 7px 10px; color: var(--text-2); }
+.insp .narr-file .name { display: block; overflow-wrap: anywhere; }
+.insp .narr-choose { align-self: flex-start; }
+.insp .narr-refusal { margin: 0; display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--track); background: var(--raised); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; color: var(--text); line-height: 1.4; }
+.insp .narr-refusal-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.insp .narr-refusal-body .name { color: var(--text-2); overflow-wrap: anywhere; }
+.insp .narr-refusal-body .narr-words-note { color: var(--text-2); }
+.insp .narr-refusal-body .narr-choose { align-self: flex-start; margin-top: 2px; }
+.insp .narr-refusal .ic { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--text); color: var(--select-ink); display: grid; place-items: center; font-size: 11px; font-weight: 700; margin-top: 1px; }
+.insp .narr-free { color: var(--muted); font-size: 12px; }
+
+/* Sending: a real fraction of the bytes; the studio's check after it has none, so it is indeterminate. */
+.insp .narr-progress-row { display: flex; flex-direction: column; gap: 5px; }
+.insp .narr-progress { height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; position: relative; }
+.insp .narr-progress i { position: absolute; top: 0; bottom: 0; left: 0; background: var(--text); border-radius: 2px; }
+.insp .narr-progress.indet i { width: 32%; animation: narr-indet 1.4s ease-in-out infinite; }
+@keyframes narr-indet { from { transform: translateX(-100%); } to { transform: translateX(320%); } }
+@media (prefers-reduced-motion: reduce) {
+  .insp .narr-progress.indet i { width: 100%; opacity: .4; animation: none; transform: none; }
+}
+
+/* Save / Add, and what is happening to a recording, stay in view while the panel scrolls inside the inspector. */
+.insp .narr-panel .narr-foot { position: sticky; bottom: -2px; background: var(--surface); padding: 6px 0 2px; margin-top: 2px; z-index: 1; }
+/* What scrolls under the buttons fades out instead of being cut mid-line. */
+.insp .narr-panel .narr-foot::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 16px; background: linear-gradient(to bottom, transparent, var(--surface)); pointer-events: none; }
+.insp .narr-panel div.narr-foot:not(.two) { display: flex; flex-direction: column; gap: 6px; }

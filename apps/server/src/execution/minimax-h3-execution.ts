@@ -1,4 +1,5 @@
-import { assertConfiguredProviderAdmission, configuredProviderUse, providerAdmissionRequest } from "./provider-use.js";
+import { resolveCodePlanProviderAdmission, assertCodePlanFirstDispatch, assertCodePlanProviderLease, isCodePlanAttempt } from "../code-plan/provider-authority.js";
+import { assertConfiguredProviderAdmission, providerAdmissionRequest } from "./provider-use.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open, realpath } from "node:fs/promises";
@@ -16,6 +17,9 @@ import { assertCurrentGeneratedSelection } from './current-generated-selection.j
 import { assertH3ExecutionDispatch, assertH3ExecutionMapping, assertH3ExecutionObservation, assertH3ExecutionSubmit, assertH3PollPolicy, assertH3PollSchedule, h3Fields, h3Hash, h3ObservationId } from "./minimax-h3-receipts.js";
 import type { H3ExecutionDispatch, H3ExecutionMapping, H3ExecutionObservation, H3ExecutionSubmit, H3PollObservation, H3PollPolicy, H3PollSchedule, H3SubmitObservation } from "./minimax-h3-receipts.js";
 
+// The highest timeout accepted by any host; a shorter recovery-host setting cannot end another request.
+const MAX_SUBMIT_TIMEOUT_MS = 120000;
+const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false });
 const unknown = (diagnostic: string, taskId?: string): ExecutionOutcome => ({ type: "unknown", diagnostic, ...(taskId ? { taskId } : {}) });
 const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "H3_EXECUTION_CANCELLED", "H3 operation was cancelled");
 
@@ -34,7 +38,7 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     this.#store = options.store; this.#outputs = options.outputStore; this.#credentials = options.credentials; this.#download = options.downloader;
     this.#recovery = new InstallationRecoveryGuard(options.store);
     this.#fetch = options.fetch; this.#timeout = options.timeoutMs ?? 30000; this.#now = options.now ?? Date.now;
-    invariant(Number.isSafeInteger(this.#timeout) && this.#timeout >= 1 && this.#timeout <= 120000,
+    invariant(Number.isSafeInteger(this.#timeout) && this.#timeout >= 1 && this.#timeout <= MAX_SUBMIT_TIMEOUT_MS,
       "H3_EXECUTION_CONFIGURATION", "H3 request timeout must be bounded");
     this.#policy = Object.freeze({ initialMs: options.pollPolicy?.initialMs ?? 2000, maximumMs: options.pollPolicy?.maximumMs ?? 15000,
       retryAfterMaximumMs: options.pollPolicy?.retryAfterMaximumMs ?? 86400000, claimMs: this.#timeout + 301000 });
@@ -54,7 +58,7 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     try {
       stopped(signal); prepared = await this.prepare(attempt, signal); stopped(signal);
       const proposed: H3ExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
-        externalAllowanceId: (request.externalAllowanceId ?? null), firstFrameArtifactId: request.inputs[0]!.artifactId,
+        firstFrameArtifactId: request.inputs[0]!.artifactId,
         transport: describeMiniMaxH3Request(request.profile!.configuration.model as MiniMaxH3Model, prepared) };
       assertH3ExecutionMapping(attempt, proposed);
       mapping = this.#store.transaction(() => {
@@ -75,7 +79,7 @@ export class MiniMaxH3Execution implements ExecutionProvider {
         if (this.started(attempt.id)) return false;
         stopped(signal); this.dispatchable(attempt, expected);
         const dispatch: H3ExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping), bodySha256: mapping.transport.bodySha256,
-          externalAllowanceId: (request.externalAllowanceId ?? null), createdAt: this.now() };
+          createdAt: this.now() };
         this.#store.insert("h3_execution_dispatch", attempt.id, attempt.projectId, dispatch); return true;
       });
     } catch { return this.notDispatched(attempt, expected, 'LOCAL_CANCELLED', signal); }
@@ -99,7 +103,9 @@ export class MiniMaxH3Execution implements ExecutionProvider {
   async lookup(attemptId: string, input?: Readonly<ExecutionRequest>, options: ExecutionCallOptions = {}): Promise<ExecutionOutcome> {
     const saved = this.#store.get<Attempt>("attempt", attemptId);
     invariant(saved && (!input || input.attemptId === attemptId), "H3_EXECUTION_CONFLICT", "Unknown or mismatched H3 attempt");
-    return this.replay(this.admitted(structuredClone(input ?? saved.request)), options.signal);
+    const attempt = this.admitted(structuredClone(input ?? saved.request));
+    this.fenceNeverDispatched(attempt, options);
+    return this.replay(attempt, options.signal);
   }
 
   async poll(taskId: string, input?: Readonly<ExecutionRequest>, options: ExecutionCallOptions = {}): Promise<ExecutionOutcome> {
@@ -174,6 +180,8 @@ export class MiniMaxH3Execution implements ExecutionProvider {
   private admitted(request: ExecutionRequest): Attempt {
     this.#recovery.assertWritable();
     assertExecutionRequest(this, request);
+    const code = resolveCodePlanProviderAdmission(this.#store, request);
+    if (code) return code.attempt;
     const attempt = this.#store.get<Attempt>("attempt", request.attemptId);
     invariant(attempt && attempt.nodeId === request.nodeId && attempt.fingerprint === request.fingerprint && attempt.candidateId && attempt.reservationId
       && request.kind === "video" && canonical(attempt.request) === canonical(request) && providerAdmissionRequest(request),
@@ -185,15 +193,28 @@ export class MiniMaxH3Execution implements ExecutionProvider {
   }
   private dispatchable(previous: Attempt, expected: ExecutionCallOptions["expectedLease"]): void {
     this.leaseOwned(previous, expected);
+    if (isCodePlanAttempt(previous)) { assertCodePlanFirstDispatch(this.#store, previous, expected); return; }
     assertCurrentGeneratedSelection(this.#store, previous, 'H3_EXECUTION_NOT_DISPATCHABLE');
   }
   private leaseOwned(previous: Attempt, expected: ExecutionCallOptions["expectedLease"]): void {
+    if (isCodePlanAttempt(previous)) { assertCodePlanProviderLease(this.#store, previous, expected); return; }
     this.#recovery.assertFirstSubmit(previous.projectId, previous.id);
     const current = this.admitted(previous.request), reservation = this.#store.get<{ state: string }>("reservation", current.reservationId!);
     invariant(expected && Object.keys(expected).every(key => ["owner", "epoch"].includes(key)) && expected.owner === current.leaseOwner
       && expected.epoch === current.leaseEpoch && previous.leaseOwner === current.leaseOwner && previous.leaseEpoch === current.leaseEpoch
       && current.phase === "submitting" && current.leaseExpiresAt > Date.now() && reservation?.state === "reserved",
     "H3_EXECUTION_NOT_DISPATCHABLE", "First H3 POST requires the caller's original live admission lease");
+  }
+  private fenceNeverDispatched(attempt: Attempt, options: ExecutionCallOptions): void {
+    this.#store.transaction(() => {
+      const current = this.admitted(attempt.request), expected = options.expectedLease;
+      // Reconciliation owns a new epoch, so every old first-POST writer is fenced before this receipt is sealed.
+      if (options.signal?.aborted || this.started(current.id) || current.taskId || !expected || current.phase !== "submission_unknown"
+        || current.leaseOwner !== expected.owner || current.leaseEpoch !== expected.epoch || current.leaseExpiresAt <= Date.now()
+        || (isCodePlanAttempt(current) ? resolveCodePlanProviderAdmission(this.#store, current.request)?.codePlan.liability
+          : this.#store.get<{ state: string }>("reservation", current.reservationId!)?.state) !== "reserved") return;
+      this.saveSubmit(current, { kind: "not_dispatched", code: "LOCAL_CANCELLED" });
+    });
   }
   private started(id: string): boolean { return !!(this.#store.get("h3_execution_dispatch", id) || this.#store.get("h3_execution_submit", id)); }
   private transport(model: MiniMaxH3Model, timeoutMs = this.#timeout): MiniMaxH3Provider {
@@ -247,15 +268,27 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     const retained = this.submission(attempt);
     // Definite non-acceptance is SQL evidence. Cancellation or an unavailable output store cannot hide it.
     if (retained?.observation.kind === 'not_dispatched' || retained?.observation.kind === 'rejected') return { type: 'rejected', certainty: 'not_accepted',
-      failureId: `h3-${digest(retained).slice(0, 32)}`, technical: retained.observation.kind === 'not_dispatched', retryAllowed: false };
+      failureId: retained.observation.kind === "rejected" ? retained.observation.error.code : retained.observation.code,
+      technical: retained.observation.kind === "not_dispatched" || retained.observation.error.category === "transport",
+      retryAllowed: retained.observation.kind === "rejected" && retained.observation.error.category === "transport" && retained.observation.error.code.startsWith("H3_CONNECT_") };
     try { const completed = await this.#outputs.recoverCompletion(attempt.projectId, attempt.id, signal ? { signal } : {}); if (completed) return completed; }
     catch { return unknown("H3 owned output requires local recovery", attempt.taskId ?? undefined); }
     const submit = retained ?? this.submission(attempt);
-    if (!submit) return unknown("H3 acceptance is unresolved; automatic resubmission is disabled", attempt.taskId ?? undefined);
+    if (!submit) {
+      const dispatch = this.#store.get<H3ExecutionDispatch>("h3_execution_dispatch", attempt.id);
+      if (!attempt.taskId && dispatch && this.now() - dispatch.createdAt >= MAX_SUBMIT_TIMEOUT_MS) return responseLost();
+      return unknown("H3 acceptance is unresolved; automatic resubmission is disabled", attempt.taskId ?? undefined);
+    }
     const observation = submit.observation;
     if (observation.kind === "not_dispatched" || observation.kind === "rejected") return { type: "rejected", certainty: "not_accepted",
-      failureId: `h3-${digest(submit).slice(0, 32)}`, technical: observation.kind === "not_dispatched", retryAllowed: false };
-    if (observation.kind === "unknown") return unknown(`H3 submission unresolved: ${observation.error.code}`, attempt.taskId ?? undefined);
+      failureId: observation.kind === "rejected" ? observation.error.code : observation.code,
+      technical: observation.kind === "not_dispatched" || observation.error.category === "transport",
+      retryAllowed: observation.kind === "rejected" && observation.error.category === "transport" && observation.error.code.startsWith("H3_CONNECT_") };
+    if (observation.kind === "unknown") {
+      const dispatch = this.#store.get<H3ExecutionDispatch>("h3_execution_dispatch", attempt.id)!;
+      return !attempt.taskId && this.now() - dispatch.createdAt >= MAX_SUBMIT_TIMEOUT_MS ? responseLost()
+        : unknown(`H3 submission unresolved: ${observation.error.code}`, attempt.taskId ?? undefined);
+    }
     invariant(!attempt.taskId || attempt.taskId === observation.taskId, "H3_EXECUTION_CONFLICT", "H3 accepted identity contradicts the saved task");
     const schedule = this.#store.transaction(() => this.schedule(attempt, submit));
     // A terminal observation can survive a crash before the mutable cooldown pointer was updated.
@@ -283,13 +316,13 @@ export class MiniMaxH3Execution implements ExecutionProvider {
 
   private async prepare(attempt: Attempt, signal?: AbortSignal): Promise<MiniMaxH3Request> {
     const request = attempt.request, configuration = request.profile!.configuration;
-    h3Fields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", ...(configuredProviderUse(request) ? ["providerUse"] : ["externalAllowanceId"])]);
+    h3Fields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "providerUse"]);
     h3Fields(configuration, ["model", "settings"]); h3Fields(configuration.settings, ["resolution"]);
     h3Fields(request.args.settings, []);
     invariant(request.inputs.length === 1 && request.inputs[0]!.kind === "image" && Number.isSafeInteger(request.args.durationFrames)
       && Number(request.args.durationFrames) % 30 === 0 && canonical(request.args.frameRate) === canonical({ numerator: 30, denominator: 1 }),
     "H3_EXECUTION_CONFLICT", "H3 requires one reviewed first frame and exact integer seconds");
-    invariant(this.#store.list<{ videoNodeId: string; approvalDigest: string }>("approval", attempt.projectId)
+    invariant(resolveCodePlanProviderAdmission(this.#store, request) || this.#store.list<{ videoNodeId: string; approvalDigest: string }>("approval", attempt.projectId)
       .some(approval => approval.videoNodeId === request.nodeId && approval.approvalDigest === request.fingerprint),
     "H3_EXECUTION_CONFLICT", "H3 first frame lacks its exact human approval");
     const reference = request.inputs[0]!, record = this.#store.get<ArtifactRecord>("artifact", reference.artifactId);

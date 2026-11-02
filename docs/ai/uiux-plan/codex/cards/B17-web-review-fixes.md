@@ -1,0 +1,10 @@
+# Card B17: fix the web review findings
+
+Read `docs/ai/uiux-plan/codex/RULES.md` first and follow it, with one change: this card edits apps/web (the owner asked Codex to do testing and fixing). Do NOT launch Chrome or run browser checks (RULES item 3); the lead runs them outside the sandbox afterwards. The design is fixed (docs/ai/prototypes/last-ferry/DESIGN.md, P5-DESIGN.md): keep each fix the smallest change that makes the intended behaviour right, using the existing components, message catalogs (en and zh; errors only in i18n/catalog/errors.ts) and store primitives.
+
+A read-only review found fifteen defects in the web UI; the findings with file:line and scenarios are in `docs/ai/uiux-plan/codex/reports/review-web.md`. The lead reviewed them and wants all fifteen fixed. Common thread for 2 to 9, 12 and 15: every draft, form and in-flight command must belong to the film (projectId) and the baseline (head version, digest or displayed value) it was opened against; a reply from a superseded film or baseline must never change what is now on screen; a newer server value must never be overwritten silently (show the conflict, keep the person's text); navigation that would drop unsaved text keeps it (above the view, keyed by film) or asks first. For each finding, write a failing unit test first (model, store or reducer level; tests import .ts under apps/web/test/next/), then fix it.
+
+Also, for finding 1 and 11: every paid action shows its price next to it, and the expected estimate sent equals the displayed total (sum of the selected shots' exact quotes). For 13: a failed keyframe always offers a fresh priced human "Make again" (a new request, not an automatic retry), and a partial scene offers to make its missing frames. For 14: Stop availability and its counts include replacement takes and narration work.
+
+## Checks
+`pnpm build`, `node scripts/run-tests.mjs apps/web/test/*.test.mjs apps/web/test/next/*.test.mjs`, `cd apps/web && pnpm typecheck`, then the full `pnpm test`. Report per finding: the test, the fix, files.

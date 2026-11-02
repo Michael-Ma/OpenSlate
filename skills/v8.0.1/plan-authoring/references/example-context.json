@@ -1,0 +1,27 @@
+{
+  "project": {
+    "id": "10000000-0000-4000-8000-000000000001",
+    "revisionId": "10000000-0000-4000-8000-000000000002",
+    "headVersion": 1,
+    "name": "Offline v8 creative fixture",
+    "brief": "",
+    "story": "",
+    "scenes": [],
+    "narration": {
+      "script": "",
+      "source": "undecided"
+    },
+    "maxFrames": 10800,
+    "capabilityLockId": "10000000-0000-4000-8000-000000000010",
+    "shots": [],
+    "cues": [],
+    "artifacts": [],
+    "activePlanId": null
+  },
+  "expected": {
+    "sceneTitle": "Craftsmanship",
+    "scenePurpose": "Reveal the care in the boot stitching",
+    "framing": "Close-up",
+    "desiredFrames": 180
+  }
+}

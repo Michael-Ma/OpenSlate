@@ -1,0 +1,27 @@
+/* The give-up flow outside the inspector (the Director's transcription line); the inspector keeps its .insp rules. */
+.give-up .ack{display:flex;gap:8px;align-items:flex-start;color:var(--text-2);font-size:12px;line-height:1.4}
+.give-up .ack input{width:auto;margin:2px 0 0;padding:0;flex:none;accent-color:var(--select)}
+.give-up .two{display:flex;gap:6px;flex-wrap:wrap}
+.give-up .two .pill{flex:1;justify-content:center}
+/* Confirm takes the row; Cancel keeps its own width, in the inspector as well as the Director line. */
+.give-up .two .pill[data-act$="-cancel"]{flex:none}
+
+/*
+ * The v8 visual pass on the rule-drift recovery actions (R1-R4): a head line names what happened, with a money tag,
+ * so the four read alike and the charge is seen before the button. App facts: neutral with an icon, never amber.
+ */
+.give-up .gu-head{display:flex;align-items:flex-start;gap:7px;color:var(--text);font-size:12.5px;line-height:1.3}
+.give-up .gu-head b{font-weight:700;min-width:0;flex:1 1 auto;padding-top:1px}
+.give-up .gu-ic{flex:none;width:16px;height:16px;border-radius:50%;background:var(--text);color:var(--surface);display:grid;place-items:center;font-size:10px;font-weight:800;font-style:normal}
+.give-up .gu-charge{flex:none;font-size:10.5px;font-weight:700;letter-spacing:.03em;border:1px solid var(--track);border-radius:var(--r-pill);padding:0 7px;line-height:17px;color:var(--text-2);white-space:nowrap}
+.give-up .gu-charge[data-charge="recovery.charge.charged"]{color:var(--text);border-color:var(--text-2)}
+.give-up .gu-since{color:var(--text);font-weight:600;white-space:nowrap}
+/* What Codex reported (R1): quoted, so it reads as the service's words, not the studio's advice. */
+.give-up .reason{border-left:2px solid var(--track);padding-left:8px;color:var(--text)}
+.give-up .gu-confirm{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--hairline);padding-top:8px}
+/* Needs attention › Film (R4): the item has no shot badge; once Render again is opened, its acknowledgement takes the
+   item's whole width under the words instead of a narrow column beside them. */
+.attn-pop .attn-item[data-group="film"]{grid-template-columns:minmax(0,1fr) auto}
+.attn-pop .attn-act.give-up[data-open]{grid-column:1/-1}
+.attn-pop .attn-act.give-up[data-open] .two{justify-content:flex-end}
+.attn-pop .attn-act.give-up[data-open] .two .pill{flex:none}

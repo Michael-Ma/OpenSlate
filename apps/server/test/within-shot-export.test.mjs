@@ -1,3 +1,4 @@
+import { narrationServiceHarness } from './narration-service-harness.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -41,16 +42,18 @@ test('accepted one-second voice renders inside a planned six-second shot with si
   const projectId = initial.id, shotId = initial.shots[0].id;
   const post = (suffix, payload, binary = false) => app.inject({ method: 'POST', url: `/api/projects/${projectId}${suffix}`, payload,
     headers: { host: '127.0.0.1', authorization: `Bearer ${token}`, 'idempotency-key': randomUUID(), 'content-type': binary ? 'application/octet-stream' : 'application/json' } });
-  const sessionResponse = await post(`/narration/shots/${shotId}/sessions`, {}); assert.equal(sessionResponse.statusCode, 200, sessionResponse.body); const sessionId = sessionResponse.json().session.id;
-  const saved = await post(`/narration/shots/${shotId}/script`, { sessionId, expectedHeadVersion: store.getProject(projectId).headVersion, expectedVersion: narration.workspaceSnapshot(projectId).state.version,
+  // Canonical audio setup uses the same workspace services as confirmation.
+  const setupNarration = narrationServiceHarness({ production, store, narration, canonical, project: initial, app, testToken: token }, { uploadDirectory: uploads });
+  const sessionResponse = await setupNarration(`/shots/${shotId}/sessions`, {}); assert.equal(sessionResponse.statusCode, 200, sessionResponse.body); const sessionId = sessionResponse.json().session.id;
+  const saved = await setupNarration(`/shots/${shotId}/script`, { sessionId, expectedHeadVersion: store.getProject(projectId).headVersion, expectedVersion: narration.workspaceSnapshot(projectId).state.version,
     text: 'One brief voiceover line.', language: 'en', mode: 'uploaded', voice: null, profileRevisionId: null }); assert.equal(saved.statusCode, 200, saved.body);
   // This one-second tone stands in for spoken audio; no speech or video provider is called.
   const imported = await post('/audio-library/uploads?name=one-second-voice.wav', wave(24000), true); assert.equal(imported.statusCode, 200, imported.body); const recording = imported.json().recording;
   assert.equal(recording.samples, 48000); assert.equal(recording.durationSeconds, 1);
   let view = narration.workspaceSnapshot(projectId), segment = view.segments[0];
-  const bound = await post('/narration/bindings', { sessionId, expectedVersion: view.state.version, segmentId: segment.entry.segmentId, audioId: recording.id }); assert.equal(bound.statusCode, 200, bound.body);
+  const bound = await setupNarration('/bindings', { sessionId, expectedVersion: view.state.version, segmentId: segment.entry.segmentId, audioId: recording.id }); assert.equal(bound.statusCode, 200, bound.body);
   view = narration.workspaceSnapshot(projectId); segment = view.segments[0];
-  const accepted = await post(`/narration/shots/${shotId}/accept`, { sessionId, expectedHeadVersion: store.getProject(projectId).headVersion, expectedVersion: view.state.version,
+  const accepted = await setupNarration(`/shots/${shotId}/accept`, { sessionId, expectedHeadVersion: store.getProject(projectId).headVersion, expectedVersion: view.state.version,
     segmentId: segment.entry.segmentId, segmentRevisionId: segment.script.id, audioId: recording.id, sha256: recording.sha256, startSample: 0, endSample: 48000 });
   assert.equal(accepted.statusCode, 200, accepted.body);
   const project = store.getProject(projectId), frozen = canonical.workspaceCurrent(projectId), voice = frozen.segments[0];

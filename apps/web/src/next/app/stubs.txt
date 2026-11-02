@@ -1,0 +1,4 @@
+Component files and their owners (replace the stub bodies):
+- app/TopBar.tsx, app/Toast.tsx, app/Connect.tsx                          (shell agent)
+- keyframes/KeyframesView.tsx and its parts, media/useArtifactUrl.ts       (keyframes agent)
+- director/DirectorColumn.tsx and its parts, fixtures/fixture-port.ts       (director agent)

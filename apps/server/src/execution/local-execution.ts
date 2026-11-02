@@ -112,7 +112,7 @@ export function assertLocalExecutionIntent(value: LocalExecutionIntent, attempt:
     && value.prepared.kind === attempt.request.kind && value.requestDigest === digest(attempt.request)
     && hash(value.effectiveFingerprint) && attempt.fingerprint === localFingerprint(value.effectiveFingerprint, value.prepared.contentDigest)
     && attempt.request.fingerprint === attempt.fingerprint && attempt.workKey === localWorkKey(attempt.projectId, attempt.nodeId, attempt.fingerprint, attempt.ordinal)
-    && attempt.candidateId === null && attempt.reservationId === null && attempt.taskId === null && !attempt.request.profile && !attempt.request.externalAllowanceId
+    && attempt.candidateId === null && attempt.reservationId === null && attempt.taskId === null && !attempt.request.profile
     && id(value.capabilityLockId) && id(value.outputArtifactId) && Number.isFinite(Date.parse(value.createdAt)),
   "LOCAL_EXECUTION_CONFLICT", "Local intent is not bound to its exact application attempt");
 }

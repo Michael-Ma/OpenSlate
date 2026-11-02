@@ -1,9 +1,24 @@
 import { isAbsolute } from "node:path";
 import { object, requireRuntime } from "./validation.js";
+import type { PrivateCodexHome } from "./private-home.js";
 
 export type CodexConfigValue = string | number | boolean | readonly CodexConfigValue[] | { readonly [key: string]: CodexConfigValue };
 /** Updating this requires regenerating protocol fixtures and rerunning compatibility evidence. */
-export const CODEX_PROTOCOL_VERSION = "0.153.4";
+export const CODEX_PROTOCOL_VERSION = "0.162.1";
+/** Pinned native surface reductions shared by setup and execution; not independent credential isolation proof. */
+export const CODEX_DISABLED_FEATURES = ["apps", "plugins", "remote_plugin", "hooks", "shell_tool", "shell_snapshot", "unified_exec", "browser_use",
+  "browser_use_external", "computer_use", "in_app_browser", "image_generation", "memories", "multi_agent", "multi_agent_v2",
+  "skill_search", "skill_mcp_dependency_install", "tool_suggest", "sleep_tool", "workspace_dependencies", "code_mode", "unbounded_connection_retries"];
+const FEATURE_KEYS = new Set([...CODEX_DISABLED_FEATURES, "code_mode_host", "skip_host_skill_discovery", "default_mode_request_user_input"]);
+/** 0.162.1 strict config rejects unknown feature keys. Omit unknown *disabled* reductions;
+ * never silently enable an unverified capability or weaken the rest of strict config. */
+export function supportedCodexConfig(config: Readonly<Record<string, CodexConfigValue>>): Record<string, CodexConfigValue> {
+  return Object.fromEntries(Object.entries(config).filter(([key, value]) => {
+    if (!key.startsWith("features.") || FEATURE_KEYS.has(key.slice("features.".length))) return true;
+    requireRuntime(value === false, "RUNTIME_CONFIG_INVALID", "An unverified native feature cannot be enabled");
+    return false;
+  }));
+}
 /** Pinned config/read serialization emits these absent optional fields as null.
  * Preserve every other field: stripping arbitrary nulls or comparing subsets could hide drift. */
 export function normalizePermissionProfile(value: unknown): unknown {
@@ -32,6 +47,8 @@ export interface LocalCodexPolicy {
   config: Readonly<Record<string, CodexConfigValue>>;
 }
 export interface CodexRuntimeLimits {
+  /** Whole cold app-server preparation phase; ordinary RPCs retain their separate limit. */
+  startupTimeoutMs: number;
   requestTimeoutMs: number;
   runTimeoutMs: number;
   interruptGraceMs: number;
@@ -41,15 +58,21 @@ export interface CodexRuntimeLimits {
   eventTimeoutMs: number;
 }
 export const CODEX_RUNTIME_LIMITS: Readonly<CodexRuntimeLimits> = Object.freeze({
-  requestTimeoutMs: 15_000, runTimeoutMs: 180_000, interruptGraceMs: 3_000,
+  startupTimeoutMs: 60_000, requestTimeoutMs: 15_000, runTimeoutMs: 180_000, interruptGraceMs: 3_000,
   shutdownGraceMs: 1_000, outputBytes: 16 * 1024 * 1024, eventQueue: 256, eventTimeoutMs: 5_000,
 });
+/** Host-configured planning turns may take longer; the default stays three minutes.
+ * This bounds the complete native run, never a retry or an idle-time extension. */
+export const CODEX_MAX_RUN_TIMEOUT_MS = 600_000;
+export const CODEX_MAX_STARTUP_TIMEOUT_MS = 120_000;
 export interface CodexDirectorOptions {
   /** An explicitly selected local binary; never resolved through PATH. */
   command: { file: string; args?: readonly string[] };
   cwd: string;
   /** Complete launch environment. No process.env merge or personal config/auth reads occur here. */
   env: Readonly<Record<string, string>>;
+  /** Studio-owned instruction-free home, prepared again before each native launch. */
+  privateCodexHome?: PrivateCodexHome;
   model: string;
   runtimeVersion: string;
   policy?: LocalCodexPolicy;
@@ -74,11 +97,19 @@ export function validateOptions(supplied: CodexDirectorOptions): CodexDirectorOp
     typeof value.model === "string" && /^[A-Za-z0-9_.:/-]{1,120}$/.test(value.model), "RUNTIME_CONFIG_INVALID", "Runtime paths and model must be explicit");
   requireRuntime(Object.entries(value.env).every(([key, item]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && typeof item === "string" && !item.includes("\0")),
     "RUNTIME_CONFIG_INVALID", "Invalid explicit runtime environment");
+  policy.config = supportedCodexConfig(policy.config);
+  if (value.privateCodexHome !== undefined) {
+    requireRuntime(value.privateCodexHome && [value.privateCodexHome.home, value.privateCodexHome.authSource].every(path =>
+      typeof path === "string" && isAbsolute(path) && path.length <= 4096 && !/[\x00-\x1f\x7f]/.test(path)) &&
+      value.env.CODEX_HOME === value.privateCodexHome.home,
+    "RUNTIME_CONFIG_INVALID", "Private native home must match the explicit runtime environment");
+  }
   const limits = { ...CODEX_RUNTIME_LIMITS };
   for (const key of Object.keys(limits) as (keyof CodexRuntimeLimits)[]) {
     const requested = value.limits?.[key];
     if (requested !== undefined) {
-      requireRuntime(Number.isSafeInteger(requested) && requested > 0 && requested <= limits[key], "RUNTIME_CONFIG_INVALID", "Runtime limits may only tighten defaults");
+      const maximum = key === "runTimeoutMs" ? CODEX_MAX_RUN_TIMEOUT_MS : key === "startupTimeoutMs" ? CODEX_MAX_STARTUP_TIMEOUT_MS : limits[key];
+      requireRuntime(Number.isSafeInteger(requested) && requested > 0 && requested <= maximum, "RUNTIME_CONFIG_INVALID", "Runtime limit exceeds its supported bound");
       limits[key] = requested;
     }
   }

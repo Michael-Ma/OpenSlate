@@ -1,3 +1,4 @@
+import { assertSceneRowParity } from "./helpers/scene-row-parity.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -37,7 +38,8 @@ function fixture(t, external = false) {
     shots: shape.shots.map(shot => ({ ...shot, narration: { mode: 'none', text: '', voice: 'stock' } })) };
   const saved = store.saveProject({ ...project, headVersion: 0 }, 0);
   const logicalIds = {};
-  t.after(() => { store.close(); fake.close(); rmSync(directory, { recursive: true, force: true }); });
+  t.after(() => {
+    assertSceneRowParity(service, project.id); store.close(); fake.close(); rmSync(directory, { recursive: true, force: true }); });
   const source = current => 'definePlan({baseRevision:' + JSON.stringify(current.revisionId) + '},p=>{'
     + 'const shot=p.shot("shot-0");const image=p.image("image",{intent:shot,profile:"fake-image-v1",prompt:' + JSON.stringify(current.shots[0].imagePrompt) + '});'
     + 'const review=p.humanReview("review",{shots:[{intent:shot,keyframe:image,videoProfile:"fake-video-v1",motionPrompt:' + JSON.stringify(current.shots[0].videoPrompt) + ',seconds:6}]});'
@@ -75,7 +77,8 @@ test('image-only scene publication creates no new video grant or candidate for t
   f.service.authorize(project.id, actor, [{ scopeId: shot.id, kind: 'image' }], 'image-only');
   const oldVideoGrants = f.store.list('grant', project.id).filter(grant => grant.kind === 'video').length;
   f.store.transaction(() => f.service.applyCompiledSceneGeneration(project.id, actor, compiled, f.logicalIds, saved.headVersion,
-    digest(f.store.get('capability_lock', saved.capabilityLockId)), 'image'));
+    digest(f.store.get('capability_lock', saved.capabilityLockId)), 'image',
+    compiled.nodes.filter(node => node.kind === 'image' && node.shotId === shot.id).map(node => node.id)));
   const video = compiled.nodes.find(node => node.kind === 'video');
   assert.equal(f.store.get('node_binding', video.id).candidateId, null);
   assert.equal(f.store.list('grant', project.id).filter(grant => grant.kind === 'video').length, oldVideoGrants);

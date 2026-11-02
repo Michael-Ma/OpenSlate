@@ -1,15 +1,14 @@
+import { recordHumanFields } from "../application/human-fields.js";
+import { assertAcceptedNarrationDurationFloor } from "../application/publication-validation.js";
 import { installNarrationPlanRebase, prepareNarrationPlanRebase } from './plan-rebase.js';
 import { digest, invariant, newId, requiredStages, shotIntentDigest, stageInputDigest, STAGE_CONTRACTS, STAGE_CONTRACTS_DIGEST, RECIPE_DIGEST, validateStageRequirements } from "@openslate/core";
-import type { ActorContext, CueRecord, ProjectRecord, StageRequirement } from "@openslate/core";
+import type { ActorContext, ProjectRecord, StageRequirement } from "@openslate/core";
 import type { NarrationService } from "./service.js";
-import type { NarrationAcceptance, NarrationAudio, NarrationSnapshot } from "./types.js";
+import type { NarrationAcceptance, NarrationSnapshot } from "./types.js";
 import type { CanonicalNarration, CanonicalNarrationArtifact, NarrationCommitReceipt, NarrationShotImpact, NarrationShotMapping, PreparedNarrationCommit, PrepareNarrationCommit } from "./canonical-types.js";
 import { installNarrationAudio } from "./verified-audio.js";
 import { assertGeneratedNarrationAudio, createGeneratedNarrationProvenance, isVerifiedGeneratedNarrationAudio, narrationAudioOrigin, resolveGeneratedNarrationAudio, verifyGeneratedNarrationAudio } from "./generated-audio.js";
 import type { ResolvedGeneratedNarrationAudio } from "./generated-audio.js";
-import { resolvePublishedTranscriptCandidate, transcriptCanonicalProvenance, transcriptSelectionRecord } from "./transcript-selection.js";
-import type { TranscriptSelection } from "./transcript-selection.js";
-import { verifyTranscriptSelectionEvidence } from "./transcript-selection-media.js";
 import { assertNarrationAuthority, assertScopedCanonicalFootprint } from './narration-scope.js';
 
 interface StageBinding extends StageRequirement { id: string; projectId: string; inputDigest: string; outputDigest: string; bindingVersion: number; progressVersion: number; contractDigest: string }
@@ -50,16 +49,14 @@ export class NarrationCanonicalService {
       invariant(before.headVersion === input.expectedHeadVersion, "REVISION_CONFLICT", "Project changed before narration preparation");
       const fullSnapshot = this.narration.snapshot(projectId, actor);
       const scope = assertNarrationAuthority(this.production, projectId, actor);
-      if (scope) {
-        invariant(input.segmentIds?.length === 1 && input.shotMappings.length === 1 && input.shotMappings[0]?.shotId === scope.shotId
-          && input.shotMappings[0].segmentId === input.segmentIds[0], 'SCOPE_DENIED', 'A shot narration session may accept only its pinned section and mapping');
-        assertNarrationAuthority(this.production, projectId, actor, input.segmentIds[0]);
-      }
+      invariant(scope, "NARRATION_SHOT_SCOPE_REQUIRED", "Open a dedicated shot narration session before accepting narration");
+      invariant(input.segmentIds.length === 1 && input.shotMappings.length === 1 && input.shotMappings[0]?.shotId === scope.shotId
+        && input.shotMappings[0].segmentId === input.segmentIds[0], 'SCOPE_DENIED', 'A shot narration session may accept only its pinned section and mapping');
+      assertNarrationAuthority(this.production, projectId, actor, input.segmentIds[0]);
       invariant(fullSnapshot.state.version === input.expectedNarrationVersion, "REVISION_CONFLICT", "Narration changed before preparation");
       const previous = this.current(projectId, actor);
       const snapshot = this.selectedSnapshot(projectId, fullSnapshot, previous, input);
-      const relativeIds = input.segmentIds ? [...new Set([...(previous?.segments.filter(segment => segment.placementMode === "shot").map(segment => segment.segmentId) ?? []), ...(input.shotRelativeSegmentIds ?? []), ...(scope ? input.segmentIds : [])])] : [];
-      const projection = this.narration.projectSnapshot(snapshot, { requireAccepted: true, shotRelativeSegmentIds: relativeIds });
+      const projection = this.narration.projectSnapshot(snapshot, { requireAccepted: true });
       this.verifyAcceptances(projectId, snapshot);
       const lock = this.store.get<{ recipeDigest: string; stageContractsDigest: string }>("capability_lock", before.capabilityLockId);
       invariant(lock?.recipeDigest === RECIPE_DIGEST && lock.stageContractsDigest === STAGE_CONTRACTS_DIGEST, "CAPABILITY_MISMATCH", "Unsupported workflow lock");
@@ -82,14 +79,16 @@ export class NarrationCanonicalService {
         const index = next.shots.findIndex(shot => shot.id === mapping.shotId), shot = next.shots[index]!;
         const oldCue = before.cues.find(cue => cue.id === shot.cueId);
         const cue = mapping.segmentId === null ? undefined : projection.segments.find(segment => segment.segmentId === mapping.segmentId)!.cue;
-        const withinShot = input.shotRelativeSegmentIds?.includes(mapping.segmentId ?? "") ?? false;
-        const retained = !!input.segmentIds && !input.segmentIds.includes(mapping.segmentId ?? "");
-        const revised = { ...shot, cueId: cue?.id ?? null, desiredFrames: retained || withinShot && input.shotDurationMode !== "match_audio" ? shot.desiredFrames : cue?.durationFrames ?? shot.desiredFrames };
-        if (withinShot) {
-          invariant(cue && cue.durationFrames <= revised.desiredFrames, "NARRATION_CUE_OUT_OF_RANGE", "Trim the narration to this shot or explicitly match the shot to its recording duration");
-          revised.narrationTimingMode = "within_shot";
-        }
-        if (input.segmentIds && mapping.segmentId && input.segmentIds.includes(mapping.segmentId)) {
+        const retained = !input.segmentIds.includes(mapping.segmentId ?? "");
+        const revised = { ...shot, cueId: cue?.id ?? null, desiredFrames: !retained && input.shotDurationMode === "match_audio" ? cue!.durationFrames : shot.desiredFrames };
+        invariant(cue && cue.durationFrames <= revised.desiredFrames, "NARRATION_CUE_OUT_OF_RANGE", "Trim the narration to this shot or explicitly match the shot to its recording duration");
+        revised.narrationTimingMode = "within_shot";
+        const selected = snapshot.segments.find(row => row.entry.segmentId === mapping.segmentId);
+        if (!retained && input.shotDurationMode === "match_audio") revised.narrationFit = "extend_shot";
+        else if (!retained && selected?.cue && selected.audio?.media.probe.audio &&
+          selected.audio.media.probe.audio.samples !== null && selected.cue.endSample - selected.cue.startSample < selected.audio.media.probe.audio.samples) revised.narrationFit = "cut_to_shot";
+        else if (!retained) delete revised.narrationFit;
+        if (mapping.segmentId && input.segmentIds.includes(mapping.segmentId)) {
           const script = snapshot.segments.find(row => row.entry.segmentId === mapping.segmentId)!.script;
           revised.narration = { mode: script.source.kind === "generated" ? "generated" : "uploaded", text: script.text, voice: shot.narration?.voice ?? "stock" };
           revised.narrationPending = false;
@@ -111,7 +110,7 @@ export class NarrationCanonicalService {
         id: newId(), projectId, requestId: actor.requestId, principalId: actor.principalId, epochId: epochId(actor),
         expectedHeadVersion: before.headVersion, expectedNarrationVersion: snapshot.state.version,
         projectDigest: digest(before), snapshotDigest: digest(fullSnapshot), capabilityDigest: digest(lock), previousCanonicalId: previous?.id ?? null,
-        projection, snapshot, ...(relativeIds.length ? { shotRelativeSegmentIds: relativeIds } : {}), shotMappings: mappings, shotImpact, next, stages,
+        projection, snapshot, shotRelativeSegmentIds: projection.segments.map(segment => segment.segmentId), shotMappings: mappings, shotImpact, next, stages,
         stageVersions: Object.fromEntries(stages.map(stage => { const id = stageId(projectId, stage); return [id, this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0]; })),
       };
       this.ensureHolds(projectId, actor);
@@ -129,19 +128,6 @@ export class NarrationCanonicalService {
     if (replay) return replay;
     this.checkCurrent(prepared, actor);
     invariant(!this.store.db.inTransaction, "ASYNC_TRANSACTION", "Narration artifact verification must run outside SQLite transactions");
-    // Writing can retain evidence from an earlier take; timing must still match
-    // the selected script/recording. Verify each linked historical selection once.
-    const transcriptSelections = new Set<string>();
-    for (const view of prepared.snapshot.segments) {
-      const links = transcriptCanonicalProvenance(this.store, projectId, view.script, view.cue);
-      for (const link of [links?.writing, links?.timing]) if (link) transcriptSelections.add(link.selectionId);
-    }
-    for (const selectionId of transcriptSelections) {
-      const selection = transcriptSelectionRecord<TranscriptSelection>(this.store, "narration_transcript_selection", selectionId, projectId);
-      const audio = transcriptSelectionRecord<NarrationAudio>(this.store, "narration_audio", selection.input.audioId, projectId);
-      const published = resolvePublishedTranscriptCandidate(this.store, projectId, selection.candidateId);
-      await verifyTranscriptSelectionEvidence(this.store, this.narration.media, { artifactDir: this.production.engine.artifactDir }, published, audio);
-    }
     const sources = [...new Map(prepared.projection.segments.map(segment => [segment.audioPlacement.source.artifactId, segment.audioPlacement.source])).values()];
     const artifacts: CanonicalNarrationArtifact[] = [];
     const generated: ResolvedGeneratedNarrationAudio[] = [];
@@ -154,8 +140,7 @@ export class NarrationCanonicalService {
       } else artifacts.push(await installNarrationAudio(this.narration.media, this.production.engine.artifactDir, projectId, source));
     }
     const candidateNext = { ...prepared.next, revisionId: newId(), headVersion: prepared.expectedHeadVersion + 1 };
-    const derived = prepared.shotRelativeSegmentIds?.length ? await prepareNarrationPlanRebase(this.production, this.store.getProject(projectId), candidateNext, [...prepared.projection.segments.map(segment => segment.cue.audio), ...(this.workspaceCurrent(projectId)?.segments.map(segment => segment.cue.audio) ?? [])])
-      : { notice: { status: candidateNext.activePlanId ? "requires_plan_review" as const : "not_needed" as const }, planId: candidateNext.activePlanId, compiled: null, logicalIds: {} };
+    const derived = await prepareNarrationPlanRebase(this.production, this.store.getProject(projectId), candidateNext, [...prepared.projection.segments.map(segment => segment.cue.audio), ...(this.workspaceCurrent(projectId)?.segments.map(segment => segment.cue.audio) ?? [])]);
     return this.store.transaction(() => {
       this.authority(projectId, actor);
       const replay = this.store.get<NarrationCommitReceipt>("narration_commit_receipt", preparedId);
@@ -174,23 +159,31 @@ export class NarrationCanonicalService {
       }
       this.ensureHolds(projectId, actor);
       const before = this.store.getProject(projectId);
+      const beforePublish = this.store.getProject(projectId);
+      assertAcceptedNarrationDurationFloor(candidateNext);
       const next = this.store.saveProject({ ...candidateNext, activePlanId: derived.compiled ? derived.planId : candidateNext.activePlanId }, prepared.expectedHeadVersion);
+      recordHumanFields(this.store, beforePublish, next, actor);
       installNarrationPlanRebase(this.production, before, derived);
       this.store.insert("project_revision", next.revisionId, projectId, { project: next });
-      for (const mapping of prepared.shotMappings) if (mapping.segmentId && prepared.shotRelativeSegmentIds?.includes(mapping.segmentId)) {
-        const id = digest({ projectId, shotId: mapping.shotId }), map = this.store.get<{ segmentId: string; projectId: string; shotId: string; intentDigest?: string }>("narration_shot_draft", id);
+      for (const mapping of prepared.shotMappings) if (mapping.segmentId) {
+        const id = digest({ projectId, shotId: mapping.shotId }), map = this.store.get<{ segmentId: string; projectId: string; shotId: string; intentDigest: string }>("narration_shot_draft", id);
         const shot = next.shots.find(shot => shot.id === mapping.shotId);
         if (map?.segmentId === mapping.segmentId && shot) this.store.put("narration_shot_draft", id, projectId, { ...map, intentDigest: digest(shot.narration ?? null) });
       }
+      // Publication can retain an older accepted take while its live draft is
+      // unfinished. Save exactly the published entries without replacing that draft.
+      const narrationRevisionId = newId();
+      this.store.insert("narration_revision", narrationRevisionId, projectId, { requestId: actor.requestId,
+        state: { ...prepared.snapshot.state, revisionId: narrationRevisionId,
+          entries: prepared.snapshot.segments.map(view => view.entry) } });
       const record: CanonicalNarration = { id: newId(), projectId, projectRevisionId: next.revisionId, headVersion: next.headVersion,
         requestId: actor.requestId, epochId: epochId(actor), preparedId, narrationVersion: prepared.expectedNarrationVersion,
-        narrationRevisionId: prepared.snapshot.state.revisionId, projectionDigest: digest(prepared.projection), script: next.narration.script, source: next.narration.source,
+        narrationRevisionId, projectionDigest: digest(prepared.projection), script: next.narration.script, source: next.narration.source,
         shotMappings: prepared.shotMappings.filter(mapping => mapping.segmentId !== null),
         segments: prepared.projection.segments.map(segment => {
           const view = prepared.snapshot.segments.find(view => view.entry.segmentId === segment.segmentId)!;
           const audio = view.audio!;
-          const transcriptProvenance = transcriptCanonicalProvenance(this.store, projectId, view.script, view.cue);
-          const nextSegment = { ...segment, ...(prepared.shotRelativeSegmentIds?.includes(segment.segmentId) ? { placementMode: "shot" as const, ...(prepared.next.shots.some(shot => shot.cueId === segment.cue.id && shot.narrationTimingMode === "within_shot") ? { timingMode: "within_shot" as const } : {}) } : {}), ...(transcriptProvenance ? { transcriptProvenance } : {}) };
+          const nextSegment = { ...segment, placementMode: "shot" as const, timingMode: "within_shot" as const };
           if (isVerifiedGeneratedNarrationAudio(audio)) return { ...nextSegment, provenance: createGeneratedNarrationProvenance(audio, {
             scriptAcceptanceId: view.entry.scriptAcceptanceId!, audioAcceptanceId: view.entry.audioAcceptanceId!, timingAcceptanceId: view.entry.timingAcceptanceId! }) };
           return { ...nextSegment, provenance: { audioId: audio.id, declaredOrigin: audio.declaredOrigin, originEvidence: "human_declared_supplied_recording",
@@ -200,7 +193,7 @@ export class NarrationCanonicalService {
       this.store.insert("narration_canonical", record.id, projectId, record);
       this.store.put(canonicalHead, projectId, projectId, { canonicalId: record.id });
       this.bindStages(prepared, next);
-      if (derived.compiled) for (const hold of this.store.list<{ id: string; ownerId: string; active: boolean }>("hold", projectId).filter(hold => hold.active && hold.ownerId === actor.requestId)) this.production.engine.releaseHold(projectId, hold.id, actor.requestId);
+      if (derived.compiled || this.store.get<{ concurrency?: string }>("message", actor.requestId)?.concurrency === "alongside") for (const hold of this.store.list<{ id: string; ownerId: string; active: boolean }>("hold", projectId).filter(hold => hold.active && hold.ownerId === actor.requestId)) this.production.engine.releaseHold(projectId, hold.id, actor.requestId);
       for (const artifact of artifacts) this.store.appendEvent(projectId, "artifact.published", { artifactId: artifact.id, narrationCanonicalId: record.id, fixture: false });
       this.store.appendEvent(projectId, "narration.canonical_committed", { preparedId, canonicalId: record.id, revisionId: next.revisionId, headVersion: next.headVersion, narrationVersion: record.narrationVersion,
         shotImpact: prepared.shotImpact.map(impact => ({ ...impact })), matchingPlanInstalled: !!derived.compiled });
@@ -235,12 +228,11 @@ export class NarrationCanonicalService {
     invariant(snapshot.state.version === prepared.expectedNarrationVersion && digest(snapshot) === prepared.snapshotDigest, "REVISION_CONFLICT", "Narration changed after review");
     invariant(this.current(prepared.projectId, actor)?.id === (prepared.previousCanonicalId ?? undefined), "REVISION_CONFLICT", "Canonical narration selection changed");
     invariant(digest(this.store.get("capability_lock", project.capabilityLockId) ?? null) === prepared.capabilityDigest, "CAPABILITY_MISMATCH", "Workflow lock changed after preparation");
-    this.narration.projectSnapshot(prepared.snapshot, { requireAccepted: true, ...(prepared.shotRelativeSegmentIds ? { shotRelativeSegmentIds: prepared.shotRelativeSegmentIds } : {}) }); this.verifyAcceptances(project.id, prepared.snapshot);
+    this.narration.projectSnapshot(prepared.snapshot, { requireAccepted: true }); this.verifyAcceptances(project.id, prepared.snapshot);
     validateStageRequirements(prepared.next, prepared.stages);
     for (const [id, version] of Object.entries(prepared.stageVersions)) invariant((this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0) === version, "STAGE_BINDING_CONFLICT", "Stage binding changed after preparation");
   }
   private verifyAcceptances(projectId: string, snapshot: NarrationSnapshot): void {
-    for (const view of snapshot.segments) transcriptCanonicalProvenance(this.store, projectId, view.script, view.cue);
     for (const view of snapshot.segments) if (view.audio && isVerifiedGeneratedNarrationAudio(view.audio)) assertGeneratedNarrationAudio(this.store, projectId, view.audio);
     for (const view of snapshot.segments) for (const kind of ["script", "audio", "timing"] as const) {
       const id = kind === "script" ? view.entry.scriptAcceptanceId : kind === "audio" ? view.entry.audioAcceptanceId : view.entry.timingAcceptanceId;
@@ -252,7 +244,6 @@ export class NarrationCanonicalService {
     }
   }
   private selectedSnapshot(projectId: string, full: NarrationSnapshot, previous: CanonicalNarration | null, input: PrepareNarrationCommit): NarrationSnapshot {
-    if (!input.segmentIds) return full;
     const selected = new Set(input.segmentIds);
     const rows = full.segments.filter(row => selected.has(row.entry.segmentId));
     invariant(rows.length === selected.size, "NARRATION_INVALID_INPUT", "A selected narration section changed or was removed");
@@ -266,7 +257,6 @@ export class NarrationCanonicalService {
         "NARRATION_INTEGRITY_ERROR", "Accepted narration history is unavailable");
       rows.push(structuredClone(row));
     }
-    rows.sort((a, b) => a.entry.atSample - b.entry.atSample);
     // Keep the global revision fence, but exclude unfinished unrelated drafts from this review.
     const gaps = full.readiness.gaps.filter(gap => gap.segmentId !== null && selected.has(gap.segmentId));
     return { ...full, segments: rows, readiness: { ...full.readiness, gaps } };
@@ -304,8 +294,8 @@ export class NarrationCanonicalService {
     invariant(Array.isArray(input.shotMappings) && input.shotMappings.length <= 400, "NARRATION_INVALID_INPUT", "Provide unique bounded shot mappings");
     for (const mapping of input.shotMappings) invariant(mapping && typeof mapping === "object" && Object.keys(mapping).length === 2 && typeof mapping.shotId === "string" && mapping.shotId.length > 0 && mapping.shotId.length <= 160 && (mapping.segmentId === null || typeof mapping.segmentId === "string" && mapping.segmentId.length > 0 && mapping.segmentId.length <= 160), "NARRATION_INVALID_INPUT", "Invalid shot mapping");
     invariant(new Set(input.shotMappings.map(mapping => mapping.shotId)).size === input.shotMappings.length, "NARRATION_INVALID_INPUT", "Provide unique shot mappings");
-    if (input.segmentIds !== undefined) invariant(Array.isArray(input.segmentIds) && input.segmentIds.length > 0 && input.segmentIds.length <= 400 && new Set(input.segmentIds).size === input.segmentIds.length && input.segmentIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 160), "NARRATION_INVALID_INPUT", "Choose unique saved narration sections");
-    if (input.shotRelativeSegmentIds !== undefined) invariant(Array.isArray(input.shotRelativeSegmentIds) && input.shotRelativeSegmentIds.length > 0 && new Set(input.shotRelativeSegmentIds).size === input.shotRelativeSegmentIds.length && input.shotRelativeSegmentIds.every(id => input.segmentIds?.includes(id) && input.shotMappings.some(mapping => mapping.segmentId === id)), "NARRATION_INVALID_INPUT", "Shot-relative narration requires reviewed selected shot mappings");
-    if (input.shotDurationMode !== undefined) invariant(["preserve", "match_audio"].includes(input.shotDurationMode) && (input.shotRelativeSegmentIds?.length ?? 0) > 0, "NARRATION_INVALID_INPUT", "Only reviewed compact shot narration may choose its video duration mode");
+    invariant(Array.isArray(input.segmentIds) && input.segmentIds.length > 0 && input.segmentIds.length <= 400 && new Set(input.segmentIds).size === input.segmentIds.length && input.segmentIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 160), "NARRATION_INVALID_INPUT", "Choose unique saved narration sections");
+    invariant(Array.isArray(input.shotRelativeSegmentIds) && input.shotRelativeSegmentIds.length === input.segmentIds.length && new Set(input.shotRelativeSegmentIds).size === input.shotRelativeSegmentIds.length && input.shotRelativeSegmentIds.every(id => input.segmentIds.includes(id) && input.shotMappings.some(mapping => mapping.segmentId === id)), "NARRATION_INVALID_INPUT", "Shot-relative narration requires reviewed selected shot mappings");
+    invariant(["preserve", "match_audio"].includes(input.shotDurationMode), "NARRATION_INVALID_INPUT", "Choose how accepted shot narration affects its video duration");
   }
 }

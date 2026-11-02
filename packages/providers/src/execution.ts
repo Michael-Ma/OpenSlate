@@ -7,13 +7,10 @@ export interface ExecutionProfileSnapshot { id: string; revision: string; config
 export interface ExecutionRequest {
   attemptId: string; nodeId: string; kind: OperationKind; fingerprint: string;
   args: JsonObject; inputs: ArtifactRef[];
-  /** Absent only on historical requests, which used the fake/v1 contract. */
-  execution?: ExecutionIdentity;
-  /** Pinned only on new explicit profiles; never backfilled into historical requests. */
+  execution: ExecutionIdentity;
+  /** Configured profiles are pinned; fake/v1 demo requests have no profile snapshot. */
   profile?: ExecutionProfileSnapshot;
-  /** Application-issued spending correlation, never a credential. */
-  externalAllowanceId?: string;
-  /** Host-created readiness proof; retains the exact original profile lock without a spending allowance. */
+  /** Host-created readiness proof retaining the exact original profile lock. */
   providerUse?: { kind: "configured"; capabilityLockId: string; capabilityLockDigest: string; profileDefinitionDigest: string };
 }
 export interface ExecutionOutput {
@@ -23,8 +20,8 @@ export interface ExecutionOutput {
 /** Small owned-byte descriptor. Raw bytes and protected vendor locators stay outside execution evidence. */
 export interface ExecutionSpoolOutput {
   port: "image" | "video" | "audio" | "cues"; kind: "image" | "video" | "audio" | "data";
-  mimeType: "image/png" | "video/mp4" | "audio/wav" | "application/json";
-  extension: "png" | "mp4" | "wav" | "json"; sha256: string; byteLength: number; fixture: false;
+  mimeType: "image/png" | "video/mp4" | "audio/wav" | "audio/mpeg" | "application/json";
+  extension: "png" | "mp4" | "wav" | "mp3" | "json"; sha256: string; byteLength: number; fixture: false;
   storage: { type: "spool"; spoolId: string };
 }
 export type ExecutionSpoolRole = Pick<ExecutionSpoolOutput, "port" | "kind" | "mimeType" | "extension">;
@@ -33,9 +30,11 @@ export const EXECUTION_SPOOL_ROLES = Object.freeze({
   image: Object.freeze({ port: "image", kind: "image", mimeType: "image/png", extension: "png" } as const),
   video: Object.freeze({ port: "video", kind: "video", mimeType: "video/mp4", extension: "mp4" } as const),
   speech: Object.freeze({ port: "audio", kind: "audio", mimeType: "audio/wav", extension: "wav" } as const),
+  musicMp3: Object.freeze({ port: "audio", kind: "audio", mimeType: "audio/mpeg", extension: "mp3" } as const),
   transcription: Object.freeze({ port: "cues", kind: "data", mimeType: "application/json", extension: "json" } as const),
 });
-export function executionSpoolRole(kind: OperationKind): Readonly<ExecutionSpoolRole> | null {
+export function executionSpoolRole(kind: OperationKind, mimeType?: string): Readonly<ExecutionSpoolRole> | null {
+  if (kind === "music") return mimeType === "audio/mpeg" ? EXECUTION_SPOOL_ROLES.musicMp3 : EXECUTION_SPOOL_ROLES.speech;
   return Object.hasOwn(EXECUTION_SPOOL_ROLES, kind) ? EXECUTION_SPOOL_ROLES[kind as keyof typeof EXECUTION_SPOOL_ROLES] : null;
 }
 export interface ExecutionSpoolCompletion {
@@ -47,13 +46,14 @@ export type ExecutionOutcome =
   | { type: "accepted"; taskId: string }
   | { type: "completed"; taskId: string; outputs: ExecutionOutput[] }
   | ExecutionSpoolCompletion
-  | { type: "failed"; taskId: string; failureId: string; technical: boolean; retryAllowed?: boolean }
-  | { type: "rejected"; certainty: "not_accepted"; failureId: string; technical: boolean; retryAllowed?: boolean }
+  // Native Codex failures and terminal lost POST replies may have no vendor job id.
+  | { type: "failed"; taskId: string | null; failureId: string; technical: boolean; retryAllowed: boolean }
+  | { type: "rejected"; certainty: "not_accepted"; failureId: string; technical: boolean; retryAllowed: boolean }
   | { type: "unknown"; diagnostic: string; taskId?: string };
 export interface ExecutionProvider {
   submit(request: ExecutionRequest, options?: ExecutionCallOptions): Promise<ExecutionOutcome>;
   poll(taskId: string, request?: Readonly<ExecutionRequest>, options?: ExecutionCallOptions): Promise<ExecutionOutcome>;
-  /** A missing receipt must remain unknown; this operation must never submit. */
+  /** Reconcile local evidence or a known vendor identity; never submit or discover work by attempt id. */
   lookup(attemptId: string, request?: Readonly<ExecutionRequest>, options?: ExecutionCallOptions): Promise<ExecutionOutcome>;
 }
 export interface ExecutionCallOptions {
@@ -62,15 +62,17 @@ export interface ExecutionCallOptions {
   expectedLease?: Readonly<{ owner: string; epoch: number }>;
 }
 
-const LEGACY_IDENTITY = Object.freeze({ adapter: "fake", version: "1" });
+const DEMO_EXECUTION_IDENTITY = Object.freeze({ adapter: "fake", version: "1" });
 const registrations = new WeakMap<ExecutionProvider, Readonly<ExecutionIdentity>>();
-const generated = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
+const generated = new Set<OperationKind>(["image", "video", "speech", "music", "transcription"]);
 
 const contractId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
 const identityKey = (identity: ExecutionIdentity) => JSON.stringify([identity.adapter, identity.version]);
-export function isLegacyExecution(identity: ExecutionIdentity): boolean { return identity.adapter === "fake" && identity.version === "1"; }
+export function isDemoExecution(identity: ExecutionIdentity): boolean {
+  return identity.adapter === DEMO_EXECUTION_IDENTITY.adapter && identity.version === DEMO_EXECUTION_IDENTITY.version;
+}
 export function requestExecutionIdentity(request: ExecutionRequest): Readonly<ExecutionIdentity> {
-  const identity = request.execution ?? LEGACY_IDENTITY;
+  const identity = request.execution;
   invariant(identity && contractId(identity.adapter) && contractId(identity.version)
     && Object.keys(identity).every(key => ["adapter", "version"].includes(key)), "PROVIDER_NOT_REGISTERED", "Invalid saved execution identity");
   return Object.freeze({ adapter: identity.adapter, version: identity.version });
@@ -112,7 +114,7 @@ export function assertExecutionRequest(provider: ExecutionProvider, request: Exe
   const registered = executionIdentity(provider), saved = requestExecutionIdentity(request);
   invariant(saved.adapter === registered.adapter && saved.version === registered.version,
     "PROVIDER_NOT_REGISTERED", "Attempt belongs to a different execution contract");
-  if (!isLegacyExecution(saved) || request.profile !== undefined || request.args.executionVersion !== undefined || request.args.profileConfiguration !== undefined) {
+  if (!isDemoExecution(saved) || request.profile !== undefined || request.args.executionVersion !== undefined || request.args.profileConfiguration !== undefined) {
     const profile = request.profile;
     invariant(profile && Object.keys(profile).every(key => ["id", "revision", "configuration", "digest"].includes(key)), "PROFILE_INCOMPATIBLE", "Attempt has no exact frozen profile");
     const args = providerProfileArguments({ id: profile.id, revision: profile.revision, kind: request.kind, adapter: saved.adapter,
@@ -143,7 +145,7 @@ export class ExecutionRegistry {
     const provider = this.resolve(requestExecutionIdentity(request)); assertExecutionRequest(provider, request); return provider;
   }
 }
-/** Preserve the historical source label without making Engine depend on FakeProvider. */
+/** Stable diagnostic source label, independent of a provider's implementation class. */
 export function executionFailureSource(provider: ExecutionProvider): string {
   return `${executionIdentity(provider).adapter}_provider`;
 }
@@ -177,13 +179,13 @@ function normalizeSpoolCompletion(value: Record<string, unknown>, request?: Exec
     || !hash(output.sha256) || !Number.isSafeInteger(output.byteLength) || Number(output.byteLength) <= 0
     || Number(output.byteLength) > EXECUTION_SPOOL_LIMITS[role.kind] || output.fixture !== false
     || !object(output.storage) || !exact(output.storage, ["type", "spoolId"]) || output.storage.type !== "spool"
-    || output.storage.spoolId !== value.receiptId || (request && executionSpoolRole(request.kind) !== role)) return null;
+    || output.storage.spoolId !== value.receiptId || (request && executionSpoolRole(request.kind, String(output.mimeType)) !== role)) return null;
   return structuredClone(value) as unknown as ExecutionSpoolCompletion;
 }
 
 /** Validate and copy normalized adapter observations before saving immutable evidence. */
 export function normalizeExecutionOutcome(value: unknown, request?: ExecutionRequest): ExecutionOutcome {
-  const synchronousRaw = request?.kind === "speech" || request?.kind === "transcription"
+  const synchronousRaw = request?.kind === "music" || request?.kind === "speech" || request?.kind === "transcription"
     || (object(value) && Array.isArray(value.outputs) && value.outputs.length === 1 && object(value.outputs[0])
       && (value.outputs[0].kind === "audio" || value.outputs[0].kind === "data"));
   const invalid = (): ExecutionOutcome => ({ type: "unknown", diagnostic: "Invalid execution provider observation",
@@ -201,9 +203,13 @@ export function normalizeExecutionOutcome(value: unknown, request?: ExecutionReq
     const fields = value.type === "failed" ? ["type", "taskId", "failureId", "technical", "retryAllowed"]
       : ["type", "certainty", "failureId", "technical", "retryAllowed"];
     if (!exact(value, fields) || !id(value.failureId) || typeof value.technical !== "boolean"
-      || (value.retryAllowed !== undefined && typeof value.retryAllowed !== "boolean")
-      || (value.type === "failed" ? !id(value.taskId) : value.certainty !== "not_accepted")) return invalid();
-    // Missing retryAllowed remains missing for historical evidence; the engine requires explicit true.
+      || typeof value.retryAllowed !== "boolean"
+      || (value.type === "failed" ? !(id(value.taskId) || value.taskId === null && request?.kind === "image"
+        && request.execution?.adapter === "codex-image" && request.execution.version === "1"
+        && value.technical === false && value.retryAllowed === false
+        || value.taskId === null && value.failureId === "SUBMISSION_RESPONSE_LOST"
+        && value.retryAllowed === false
+        || value.taskId === null && request?.kind === "music" && ["LYRIA_AUDIO_MISSING", "LYRIA_AUDIO_INVALID"].includes(String(value.failureId)) && value.technical === true && value.retryAllowed === false) : value.certainty !== "not_accepted")) return invalid();
     return structuredClone(value) as unknown as ExecutionOutcome;
   }
   if (value.type !== "completed" || !exact(value, ["type", "taskId", "outputs"]) || !id(value.taskId)
@@ -223,7 +229,7 @@ export function normalizeExecutionOutcome(value: unknown, request?: ExecutionReq
   }
   if (request) {
     const roles: Record<OperationKind, [string, ArtifactRef["kind"]]> = {
-      image: ["image", "image"], video: ["video", "video"], speech: ["audio", "audio"],
+      image: ["image", "image"], video: ["video", "video"], speech: ["audio", "audio"], music: ["audio", "audio"],
       transcription: ["cues", "data"], timeline: ["timeline", "data"], render: ["video", "video"],
     };
     const expected = roles[request.kind];

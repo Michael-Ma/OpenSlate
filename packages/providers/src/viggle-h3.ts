@@ -1,13 +1,14 @@
+import { connectFailureCode } from "./connect-failure.js";
 import { createHash } from "node:crypto";
 import { setImmediate as yieldEventLoop } from "node:timers/promises";
 
-/** Viggle V1 H3 text/first/last-frame contract; no reference or animation mode. */
+/** Viggle V1 H3 text, exact-frame and reference-image contract. */
 export const VIGGLE_H3_ADAPTER_VERSION = "1";
 /** Conservative host bounds, not a claim about the provider's maximum upload size. */
-export const VIGGLE_H3_LIMITS = Object.freeze({ imageBytes: 32 * 1024 * 1024, requestBytes: 65 * 1024 * 1024,
+export const VIGGLE_H3_LIMITS = Object.freeze({ imageBytes: 32 * 1024 * 1024, referenceImageBytes: 20 * 1024 * 1024, requestBytes: 81 * 1024 * 1024,
   promptBytes: 32 * 1024, responseBytes: 1024 * 1024, timeoutMs: 30_000 });
 export type ViggleH3Quality = "low" | "high";
-export type ViggleH3Resolution = "480p" | "768p" | "1080p";
+export type ViggleH3Resolution = "480p" | "768p" | "1080p" | "2k" | "4k";
 export type ViggleH3AspectRatio = "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "21:9";
 export interface ViggleH3ImageDescription { sha256: string; byteLength: number; width: number; height: number; mediaType: "image/png" }
 /** Bytes must come from owned, verified image ingestion; this transport does not decode pixels. */
@@ -15,12 +16,12 @@ export interface ViggleH3Image extends ViggleH3ImageDescription { bytes: Uint8Ar
 export interface ViggleH3Settings { quality: ViggleH3Quality; resolution: ViggleH3Resolution; aspectRatio: ViggleH3AspectRatio }
 export interface ViggleH3Request {
   prompt: string; quality: ViggleH3Quality; durationSeconds: number; resolution: ViggleH3Resolution;
-  aspectRatio: ViggleH3AspectRatio; watermark: false; seed?: number; firstFrame?: ViggleH3Image; lastFrame?: ViggleH3Image;
+  aspectRatio: ViggleH3AspectRatio; watermark: false; enhance?: boolean; seed?: number; references?: ViggleH3Image[]; firstFrame?: ViggleH3Image; lastFrame?: ViggleH3Image;
 }
 export interface ViggleH3Description {
-  adapterVersion: "1"; model: "MiniMax-H3"; mode: "text" | "first_frame" | "first_last_frame";
+  adapterVersion: "1"; model: "MiniMax-H3"; mode: "text" | "first_frame" | "first_last_frame" | "reference";
   quality: ViggleH3Quality; durationSeconds: number; resolution: ViggleH3Resolution; aspectRatio: ViggleH3AspectRatio;
-  watermark: false; seed?: number; firstFrame?: ViggleH3ImageDescription; lastFrame?: ViggleH3ImageDescription;
+  watermark: false; enhance?: boolean; seed?: number; references?: ViggleH3ImageDescription[]; firstFrame?: ViggleH3ImageDescription; lastFrame?: ViggleH3ImageDescription;
   requestDigest: string; bodySha256: string; bodyByteLength: number;
 }
 export interface ViggleH3Options { apiKey: string; fetch?: typeof globalThis.fetch; timeoutMs?: number; maxResponseBytes?: number }
@@ -29,6 +30,21 @@ export interface ViggleH3Receipt { requestId: string | null; httpStatus: number 
 export interface ViggleH3Diagnostic {
   code: string; category: "invalid_input" | "auth" | "quota" | "policy" | "throttled" | "transport" | "protocol" | "aborted" | "provider_failure";
   retryAfterMs?: number;
+  errorName?: string; causeCode?: string; causeName?: string; causeSyscall?: string;
+}
+export interface ViggleH3VideoSummary { id: string; createdAt: string }
+export type ViggleH3ListResult =
+  | { kind: "listed"; items: ViggleH3VideoSummary[]; hasMore: boolean; receipt: ViggleH3Receipt }
+  | { kind: "unknown"; error: ViggleH3Diagnostic; receipt: ViggleH3Receipt };
+/** Bounded tokens only: transport messages and arbitrary nested objects never enter receipts. */
+export const VIGGLE_DIAGNOSTIC_TOKEN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+function dataField(value: unknown, key: string): unknown {
+  if (value === null || typeof value !== "object") return;
+  // Error.name normally lives on its prototype. Read data descriptors without invoking getters.
+  for (let depth = 0, current: object | null = value; current && depth < 4; depth++, current = Object.getPrototypeOf(current)) {
+    const field = Object.getOwnPropertyDescriptor(current, key);
+    if (field) return Object.hasOwn(field, "value") ? field.value : undefined;
+  }
 }
 export type ViggleH3SubmitResult =
   | { kind: "accepted"; taskId: string; requestedModel: "MiniMax-H3"; receipt: ViggleH3Receipt }
@@ -104,14 +120,15 @@ export function validateViggleH3Settings(input: ViggleH3Settings): void {
   const row = own(input, ["quality", "resolution", "aspectRatio"]);
   settings({ ...row, durationSeconds: 3, watermark: false });
 }
-function settings(row: Record<string, unknown>): Pick<ViggleH3Description, "quality" | "durationSeconds" | "resolution" | "aspectRatio" | "watermark" | "seed"> {
+function settings(row: Record<string, unknown>): Pick<ViggleH3Description, "quality" | "durationSeconds" | "resolution" | "aspectRatio" | "watermark" | "seed" | "enhance"> {
   ensure(row.quality === "low" || row.quality === "high");
   ensure(typeof row.durationSeconds === "number" && Number.isFinite(row.durationSeconds) && row.durationSeconds >= 3 && row.durationSeconds <= 15);
-  ensure(row.resolution === "480p" || row.resolution === "768p" || row.resolution === "1080p");
+  ensure(typeof row.resolution === "string" && ["480p", "768p", "1080p", "2k", "4k"].includes(row.resolution));
+  ensure(row.enhance === undefined || typeof row.enhance === "boolean");
   ensure(typeof row.aspectRatio === "string" && ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"].includes(row.aspectRatio));
   ensure(row.watermark === false && (row.seed === undefined || Number.isSafeInteger(row.seed) && Number(row.seed) >= 0));
-  return { quality: row.quality, durationSeconds: row.durationSeconds, resolution: row.resolution,
-    aspectRatio: row.aspectRatio as ViggleH3AspectRatio, watermark: false, ...(row.seed === undefined ? {} : { seed: row.seed as number }) };
+  return { quality: row.quality, durationSeconds: row.durationSeconds, resolution: row.resolution as ViggleH3Resolution,
+    aspectRatio: row.aspectRatio as ViggleH3AspectRatio, watermark: false, ...(row.seed === undefined ? {} : { seed: row.seed as number }), ...(row.enhance === undefined ? {} : { enhance: row.enhance as boolean }) };
 }
 function promptText(value: unknown): string {
   ensure(typeof value === "string" && value.length <= VIGGLE_H3_LIMITS.promptBytes && value.trim().length > 0
@@ -119,35 +136,59 @@ function promptText(value: unknown): string {
     && Buffer.byteLength(value) <= VIGGLE_H3_LIMITS.promptBytes);
   return value;
 }
+function referenceImages<T extends ViggleH3ImageDescription>(value: unknown, convert: (value: unknown) => T): T[] | undefined {
+  if (value === undefined) return;
+  ensure(Array.isArray(value) && value.length >= 1 && value.length <= 4);
+  return value.map(image => { const result = convert(image); ensure(result.byteLength <= VIGGLE_H3_LIMITS.referenceImageBytes, "VIGGLE_H3_IMAGE_INVALID"); return result; });
+}
+/** Published credits per five generated seconds. Vendor-reported usage never overrides this table. */
+export const VIGGLE_PRICE_CREDITS = Object.freeze({
+  text: { on: [10,15,25,30,50], off: [10,15,25,30,50] },
+  first_frame: { on: [20,25,35,40,60], off: [10,15,25,30,50] },
+  first_last_frame: { on: [25,30,40,45,65], off: [15,25,30,35,55] },
+  reference: { on: [35,45,50,55,75], off: [15,25,30,35,55] },
+});
+export function vigglePriceMicros(input: { mode: ViggleH3Description["mode"]; resolution: ViggleH3Resolution; durationSeconds: number; enhance?: boolean }): string {
+  const index = ["480p","768p","1080p","2k","4k"].indexOf(input.resolution);
+  ensure(Object.hasOwn(VIGGLE_PRICE_CREDITS, input.mode) && index >= 0 && Number.isFinite(input.durationSeconds)
+    && input.durationSeconds >= (input.mode === "reference" ? 5 : 3) && input.durationSeconds <= 15
+    && (input.enhance === undefined || typeof input.enhance === "boolean"));
+  return (BigInt(Math.ceil(input.durationSeconds)) * BigInt(VIGGLE_PRICE_CREDITS[input.mode][input.enhance === false ? "off" : "on"][index]!) * 2000n).toString();
+}
 type DescriptionBase = Omit<ViggleH3Description, "requestDigest" | "bodySha256" | "bodyByteLength">;
 /** Metadata-only identity; exact upload bytes are bound independently by bodySha256. */
 export function viggleH3MetadataDigest(prompt: string, description: DescriptionBase): string {
-  const row = own(description, ["adapterVersion", "model", "mode", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "seed", "firstFrame", "lastFrame"]);
+  const row = own(description, ["adapterVersion", "model", "mode", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "seed", "firstFrame", "lastFrame", "references", "enhance"]);
   const text = promptText(prompt), values = settings(row);
   ensure(row.adapterVersion === VIGGLE_H3_ADAPTER_VERSION && row.model === "MiniMax-H3");
   const firstFrame = row.firstFrame === undefined ? undefined : imageMetadata(row.firstFrame);
   const lastFrame = row.lastFrame === undefined ? undefined : imageMetadata(row.lastFrame);
-  ensure(!lastFrame || firstFrame);
-  const mode = lastFrame ? "first_last_frame" : firstFrame ? "first_frame" : "text";
+  const references = referenceImages(row.references, imageMetadata);
+  ensure(!lastFrame || firstFrame); ensure(!references || !firstFrame && !lastFrame);
+  ensure(!references || values.durationSeconds >= 5);
+  const mode = references ? "reference" : lastFrame ? "first_last_frame" : firstFrame ? "first_frame" : "text";
   ensure(row.mode === mode);
   return sha(JSON.stringify({ adapterVersion: VIGGLE_H3_ADAPTER_VERSION, model: "MiniMax-H3", mode, prompt: text, ...values,
-    ...(firstFrame ? { firstFrame } : {}), ...(lastFrame ? { lastFrame } : {}) }));
+    ...(firstFrame ? { firstFrame } : {}), ...(lastFrame ? { lastFrame } : {}), ...(references ? { references } : {}) }));
 }
 function prepare(input: ViggleH3Request): { description: ViggleH3Description; body: Buffer; contentType: string } {
-  const row = own(input, ["prompt", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "seed", "firstFrame", "lastFrame"]);
+  const row = own(input, ["prompt", "quality", "durationSeconds", "resolution", "aspectRatio", "watermark", "seed", "firstFrame", "lastFrame", "references", "enhance"]);
   const prompt = promptText(row.prompt), values = settings(row);
   const firstFrame = row.firstFrame === undefined ? undefined : prepareImage(row.firstFrame);
   const lastFrame = row.lastFrame === undefined ? undefined : prepareImage(row.lastFrame); ensure(!lastFrame || firstFrame);
+  const references = referenceImages(row.references, prepareImage);
+  ensure(!references || !firstFrame && !lastFrame); ensure(!references || values.durationSeconds >= 5);
   const describe = ({ bytes: _bytes, ...metadata }: ViggleH3Image): ViggleH3ImageDescription => metadata;
   const base: DescriptionBase = { adapterVersion: VIGGLE_H3_ADAPTER_VERSION, model: "MiniMax-H3",
-    mode: lastFrame ? "first_last_frame" : firstFrame ? "first_frame" : "text", ...values,
-    ...(firstFrame ? { firstFrame: describe(firstFrame) } : {}), ...(lastFrame ? { lastFrame: describe(lastFrame) } : {}) };
+    mode: references ? "reference" : lastFrame ? "first_last_frame" : firstFrame ? "first_frame" : "text", ...values,
+    ...(firstFrame ? { firstFrame: describe(firstFrame) } : {}), ...(lastFrame ? { lastFrame: describe(lastFrame) } : {}), ...(references ? { references: references.map(describe) } : {}) };
   const requestDigest = viggleH3MetadataDigest(prompt, base), boundary = `openslate-viggle-h3-${requestDigest}`;
   const parts: Buffer[] = [];
   const field = (name: string, value: string): void => { parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`)); };
   field("prompt", prompt); field("quality", values.quality); field("duration_s", String(values.durationSeconds)); field("resolution", values.resolution);
   field("aspect_ratio", values.aspectRatio); if (values.seed !== undefined) field("seed", String(values.seed)); field("watermark", "false");
-  for (const [name, image] of [["first_frame_image", firstFrame], ["last_frame_image", lastFrame]] as const) {
+  if (values.enhance !== undefined) field("enhance", String(values.enhance));
+  for (const [name, image] of [["first_frame_image", firstFrame], ["last_frame_image", lastFrame], ...(references ?? []).map(image => ["reference_image", image] as const)] as const) {
     if (image) {
       ensure(!Buffer.from(image.bytes).includes(Buffer.from(`--${boundary}`)), "VIGGLE_H3_MULTIPART_COLLISION");
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="${name}.png"\r\nContent-Type: image/png\r\n\r\n`), Buffer.from(image.bytes), Buffer.from("\r\n"));
@@ -178,7 +219,7 @@ function retryAfter(value: string | null): number | undefined {
   const ms = Number(value) * 1000; return Number.isFinite(ms) && ms >= 0 && ms <= 600000 ? Math.ceil(ms) : undefined;
 }
 type HttpResponse = { ok: true; body: Record<string, unknown>; receipt: ViggleH3Receipt; retryAfterMs?: number }
-  | { ok: false; error: ViggleH3Diagnostic; receipt: ViggleH3Receipt };
+  | { ok: false; error: ViggleH3Diagnostic; receipt: ViggleH3Receipt; notSubmitted?: boolean };
 /** Explicit single-call transport; only the host owns durable admission, polling schedules and recovery. */
 export class ViggleH3Provider {
   readonly id = "viggle-h3-v1";
@@ -205,7 +246,9 @@ export class ViggleH3Provider {
       error: { code: error instanceof ViggleH3ValidationError ? error.code : "VIGGLE_H3_REQUEST_INVALID",
         category: error instanceof ViggleH3ValidationError && error.code === "VIGGLE_H3_ABORTED_BEFORE_DISPATCH" ? "aborted" : "invalid_input" } }; }
     const response = await this.call("POST", "/v1/videos", context.signal, prepared);
-    if (!response.ok) return { kind: "unknown", error: response.error, receipt: response.receipt };
+    if (!response.ok) return response.notSubmitted
+      ? { kind: "rejected", certainty: "not_accepted", source: "local", error: response.error, receipt: response.receipt }
+      : { kind: "unknown", error: response.error, receipt: response.receipt };
     const data = response.body;
     if (response.receipt.httpStatus === 200 && this.safeTask(data.id) && data.status === "queued" && data.error == null
       && data.video_url == null && data.alpha_url == null && data.type !== "error" && !Object.hasOwn(data, "task"))
@@ -232,6 +275,22 @@ export class ViggleH3Provider {
     if (data.status !== "ready" || !https(data.video_url) || data.video_url.includes(this.#key)) return unknown();
     return { kind: "completed", taskId, requestedModel: "MiniMax-H3", reportedModel: null, output: { url: data.video_url, expiresAt: null },
       reported: { seed: Number.isSafeInteger(data.seed) && Number(data.seed) >= 0 ? data.seed as number : null }, receipt: response.receipt };
+  }
+  async listVideos(limit: number, options: ViggleH3CallOptions = {}): Promise<ViggleH3ListResult> {
+    let context: ViggleH3CallOptions;
+    try { context = callOptions(options); ensure(Number.isSafeInteger(limit) && limit >= 1 && limit <= 100, "VIGGLE_H3_LIST_LIMIT_INVALID"); }
+    catch { return { kind: "unknown", error: { code: "VIGGLE_H3_LIST_LIMIT_INVALID", category: "invalid_input" }, receipt: blankReceipt() }; }
+    const response = await this.call("GET", `/v1/videos?limit=${limit}`, context.signal);
+    if (!response.ok) return { kind: "unknown", error: response.error, receipt: response.receipt };
+    const { items, has_more: hasMore } = response.body;
+    if (response.receipt.httpStatus !== 200 || typeof hasMore !== "boolean" || !Array.isArray(items) || items.length > limit
+      || hasMore && items.length === 0 || !items.every(item => object(item) && this.safeTask(item.id)
+        && typeof item.created_at === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(item.created_at)
+        && Number.isFinite(Date.parse(item.created_at)) && new Date(item.created_at).toISOString() === item.created_at.replace("Z", ".000Z"))
+      || new Set(items.map(item => item.id)).size !== items.length
+      || items.some((item, index) => index > 0 && Date.parse(item.created_at) > Date.parse(items[index - 1].created_at)))
+      return { kind: "unknown", error: { code: "VIGGLE_H3_LIST_INVALID", category: "protocol" }, receipt: response.receipt };
+    return { kind: "listed", items: items.map(item => ({ id: item.id as string, createdAt: item.created_at as string })), hasMore, receipt: response.receipt };
   }
   async reconcile(receipt: { taskId?: string }, options: ViggleH3CallOptions = {}): Promise<ViggleH3PollResult> {
     try { const row = own(receipt, ["taskId"], "VIGGLE_H3_TASK_ID_INVALID"); if (this.safeTask(row.taskId)) return this.poll(row.taskId, options); }
@@ -299,8 +358,17 @@ export class ViggleH3Provider {
       // Complete parsed evidence survives a later cleanup/abort race. Cancellation
       // cannot erase an observed provider job and justify another paid submission.
       if (observed) return observed;
+      const cause = dataField(error, "cause");
+      const code = receipt.httpStatus === null && !controller.signal.aborted ? connectFailureCode({ cause }) : undefined;
+      const detail: Partial<ViggleH3Diagnostic> = {};
+      if (receipt.httpStatus === null) {
+        for (const [field, value] of [["errorName", dataField(error, "name")], ["causeCode", dataField(cause, "code")],
+          ["causeName", dataField(cause, "name")], ["causeSyscall", dataField(cause, "syscall")]] as const)
+          if (typeof value === "string" && VIGGLE_DIAGNOSTIC_TOKEN.test(value) && !value.includes(this.#key)) detail[field] = value;
+      }
+      if (code) return { ok: false, notSubmitted: true, receipt: { ...receipt }, error: { code: `CONNECT_${code}`, category: "transport", ...detail } };
       return {ok:false,receipt:{...receipt},error:{code:error instanceof ViggleH3ValidationError ? error.code : "VIGGLE_H3_TRANSPORT_OR_RESPONSE_LOSS",
-      category:controller.signal.aborted ? timedOut ? "transport" : "aborted" : "protocol"}};
+      category:controller.signal.aborted ? timedOut ? "transport" : "aborted" : "protocol", ...detail}};
     } finally {clearTimeout(timer);signal?.removeEventListener("abort",stop);controller.signal.removeEventListener("abort",reject);controller.abort();cancelBody?.();}
   }
 }

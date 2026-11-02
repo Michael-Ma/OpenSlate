@@ -4,29 +4,44 @@ import { ProtectedVideoDownloader } from "../execution/video-download.js";
 import { EnvironmentMediaCredentials } from "./provider-credentials.js";
 
 export interface MediaExecutionConfiguration {
+  seedance?: boolean;
+  seedanceDownloadHosts?: readonly string[];
+  falVideo?: boolean;
+  falVideoDownloadHosts?: readonly string[];
   image: boolean;
-  codexImage?: boolean;
+  music?: boolean;
+  codexImage: boolean;
   codexImageBinary?: string;
   codexImageHome?: string;
   h3: boolean;
-  /** Omission preserves trusted pre-audio programmatic callers; environment parsing returns explicit booleans. */
-  speech?: boolean;
-  transcription?: boolean;
-  viggleH3?: boolean;
-  viggleH3DownloadHosts?: readonly string[];
+  speech: boolean;
+  transcription: boolean;
+  viggleH3: boolean;
+  viggleH3DownloadHosts: readonly string[];
   h3DownloadHosts: readonly string[];
+  /** fal MiniMax H3 Max lip sync for singing shots. */
+  falLipSync: boolean;
+  falLipSyncDownloadHosts: readonly string[];
 }
+/** fal serves outputs from its CDN; the owner may narrow or replace these exact hosts. */
+export const FAL_DEFAULT_DOWNLOAD_HOSTS: readonly string[] = Object.freeze(["v3.fal.media", "v3b.fal.media", "fal.media"]);
+
+export const FAL_VIDEO_DEFAULT_DOWNLOAD_HOSTS: readonly string[] = Object.freeze([...FAL_DEFAULT_DOWNLOAD_HOSTS, "storage.googleapis.com"]);
+
+/** Exact output host documented by the ModelArk Retrieve task response. */
+export const SEEDANCE_DEFAULT_DOWNLOAD_HOSTS: readonly string[] = Object.freeze(["ark-content-generation-ap-southeast-1.tos-ap-southeast-1.volces.com"]);
 
 /** Trusted local startup settings. A configured API key enables its routes; explicit zero keeps a host route disabled. */
 export function readMediaExecutionConfiguration(environment: Readonly<Record<string, string | undefined>>): Readonly<MediaExecutionConfiguration> {
   const credentials = new EnvironmentMediaCredentials(name => environment[name]).status().credentials;
-  const configured = (id: "openai-media" | "minimax-video" | "viggle-video") => credentials.some(credential => credential.id === id && credential.configured);
+  const configured = (id: "openai-media" | "minimax-video" | "viggle-video" | "fal-video" | "modelark-video" | "gemini-music") => credentials.some(credential => credential.id === id && credential.configured);
   const enabled = (name: string, defaultEnabled = false): boolean => {
     const value = environment[name];
     invariant(value === undefined || value === "" || value === "0" || value === "1", "MEDIA_EXECUTION_CONFIGURATION", "Generation switches must be explicitly 0 or 1");
     return value === "1" || (value === undefined || value === "") && defaultEnabled;
   };
   const image = enabled("OPENSLATE_ENABLE_IMAGE_GENERATION", configured("openai-media")), h3 = enabled("OPENSLATE_ENABLE_H3_GENERATION", configured("minimax-video"));
+  const music = enabled("OPENSLATE_ENABLE_MUSIC_GENERATION", configured("gemini-music"));
   const speech = enabled("OPENSLATE_ENABLE_SPEECH_GENERATION", configured("openai-media")), transcription = enabled("OPENSLATE_ENABLE_TRANSCRIPTION", configured("openai-media"));
   const viggleH3 = enabled("OPENSLATE_ENABLE_VIGGLE_H3_GENERATION", configured("viggle-video"));
   const nativePath = (name: string): string | undefined => {
@@ -49,5 +64,12 @@ export function readMediaExecutionConfiguration(environment: Readonly<Record<str
   };
   const h3DownloadHosts = downloadHosts(environment.OPENSLATE_H3_DOWNLOAD_HOSTS, h3);
   const viggleH3DownloadHosts = downloadHosts(environment.OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS, viggleH3);
-  return Object.freeze({ image, codexImage, ...(codexImageBinary ? { codexImageBinary } : {}), ...(codexImageHome ? { codexImageHome } : {}), h3, speech, transcription, viggleH3, h3DownloadHosts, viggleH3DownloadHosts });
+  const falLipSync = enabled("OPENSLATE_ENABLE_FAL_LIPSYNC", configured("fal-video"));
+  const falLipSyncDownloadHosts = falLipSync ? downloadHosts(environment.OPENSLATE_FAL_DOWNLOAD_HOSTS || FAL_DEFAULT_DOWNLOAD_HOSTS.join(","), true) : Object.freeze([]);
+  const seedance = enabled("OPENSLATE_ENABLE_SEEDANCE_GENERATION", configured("modelark-video"));
+  const falVideo = enabled("OPENSLATE_ENABLE_FAL_VIDEO_GENERATION", configured("fal-video"));
+  const seedanceDownloadHosts = seedance ? downloadHosts(environment.OPENSLATE_SEEDANCE_DOWNLOAD_HOSTS || SEEDANCE_DEFAULT_DOWNLOAD_HOSTS.join(","), true) : Object.freeze([]);
+  const falVideoDownloadHosts = falVideo ? downloadHosts(environment.OPENSLATE_FAL_DOWNLOAD_HOSTS || FAL_VIDEO_DEFAULT_DOWNLOAD_HOSTS.join(","), true) : Object.freeze([]);
+  return Object.freeze({ seedance, falVideo, seedanceDownloadHosts, falVideoDownloadHosts, image, music, codexImage, ...(codexImageBinary ? { codexImageBinary } : {}), ...(codexImageHome ? { codexImageHome } : {}), h3, speech, transcription, viggleH3, h3DownloadHosts, viggleH3DownloadHosts,
+    falLipSync, falLipSyncDownloadHosts });
 }

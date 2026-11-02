@@ -5,6 +5,8 @@ import { assertViggleMappingAdmission, resolveViggleAdmission, viggleRecord } fr
 import type { ViggleAuthorityStore } from "./viggle-h3-authority.js";
 import { assertViggleH3ExecutionDispatch, assertViggleH3ExecutionObservation, assertViggleH3ExecutionSubmit, assertViggleH3PollSchedule, viggleH3CompletedObservationId } from "./viggle-h3-receipts.js";
 import type { ViggleH3ExecutionMapping, ViggleH3ExecutionDispatch, ViggleH3ExecutionSubmit, ViggleH3ExecutionObservation, ViggleH3PollSchedule } from "./viggle-h3-receipts.js";
+import { VIGGLE_SETTLEMENT_KIND, VIGGLE_SETTLEMENT_BYTES, assertViggleSettlement, ownedViggleTasks } from "./viggle-h3-settlement.js";
+import type { ViggleSubmissionSettlement } from "./viggle-h3-settlement.js";
 
 export const VIGGLE_OBSERVATION_LIMITS = Object.freeze({ count: 4096, bytes: 32768 });
 /** Bounded exact-attempt reads; no project-history hydration and no remote or filesystem calls. */
@@ -17,7 +19,7 @@ export function viggleObservations(reader: ViggleAuthorityStore, attempt: Attemp
 /** All retained facts are historical; incomplete pre-submit/unknown/accepted history remains exportable. */
 export function assertViggleRecords(reader: ViggleAuthorityStore, attemptId: string): void {
   const attempt = reader.get<Attempt>("attempt", attemptId);
-  invariant(attempt?.id === attemptId && attempt.request.execution?.adapter === "viggle-h3" && attempt.request.execution.version === "1", "VIGGLE_H3_EXECUTION_CONFLICT", "Invalid Viggle attempt");
+  invariant(attempt?.id === attemptId && attempt.request.execution.adapter === "viggle-h3" && attempt.request.execution.version === "1", "VIGGLE_H3_EXECUTION_CONFLICT", "Invalid Viggle attempt");
   const mapping = viggleRecord<ViggleH3ExecutionMapping>(reader, "viggle_h3_execution_mapping", attemptId, attempt.projectId);
   const dispatch = viggleRecord<ViggleH3ExecutionDispatch>(reader, "viggle_h3_execution_dispatch", attemptId, attempt.projectId);
   const submit = viggleRecord<ViggleH3ExecutionSubmit>(reader, "viggle_h3_execution_submit", attemptId, attempt.projectId);
@@ -26,6 +28,11 @@ export function assertViggleRecords(reader: ViggleAuthorityStore, attemptId: str
   if (mapping) assertViggleMappingAdmission(admission, mapping);
   if (dispatch) { invariant(mapping, "VIGGLE_H3_EXECUTION_CONFLICT", "Viggle dispatch lost its mapping"); assertViggleH3ExecutionDispatch(attempt, mapping, dispatch); }
   if (submit) assertViggleH3ExecutionSubmit(attempt, mapping, dispatch, submit);
+  const settlement = viggleRecord<ViggleSubmissionSettlement>(reader, VIGGLE_SETTLEMENT_KIND, attemptId, attempt.projectId, VIGGLE_SETTLEMENT_BYTES);
+  if (settlement) {
+    invariant(dispatch && submit, "VIGGLE_H3_EXECUTION_CONFLICT", "Settlement lost its original submission evidence");
+    assertViggleSettlement(attempt, dispatch, submit, settlement, ownedViggleTasks(reader));
+  }
   if (schedule) { invariant(submit, "VIGGLE_H3_EXECUTION_CONFLICT", "Polling lost its accepted submit"); assertViggleH3PollSchedule(attempt, submit, schedule); }
   const observations = viggleObservations(reader, attempt);
   for (const value of observations) {
@@ -38,7 +45,7 @@ export function assertViggleRecords(reader: ViggleAuthorityStore, attemptId: str
 
 /** Caller may overlay get() with verified filesystem spool/slot manifests before SQL repair. */
 export function assertViggleSpoolLineage(reader: ViggleAuthorityStore, attempt: Readonly<Attempt>, spoolId: string): void {
-  if (attempt.request.execution?.adapter !== "viggle-h3") return;
+  if (attempt.request.execution.adapter !== "viggle-h3") return;
   invariant(attempt.request.execution.version === "1", "VIGGLE_H3_EXECUTION_CONFLICT", "Unsupported Viggle execution version");
   const mapping = reader.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id);
   const dispatch = reader.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id);

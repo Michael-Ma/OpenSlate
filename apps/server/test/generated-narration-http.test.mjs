@@ -1,3 +1,4 @@
+import { narrationServiceHarness } from './narration-service-harness.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -10,7 +11,7 @@ import { MediaApplicationService, registerMediaRoutes } from '../dist/media/inde
 import { ManagedUploadStore } from '../dist/narration/managed-upload.js';
 import { projectDirectorContext, DIRECTOR_PROJECTION_LIMITS } from '../dist/application/context-projection.js';
 import { generatedNarrationFixture } from './generated-narration-fixture.mjs';
-import { assertGeneratedCanonicalNarrationSegment } from '../dist/narration/generated-audio.js';
+import { resolveGeneratedNarrationAudio, summarizeGeneratedNarrationAudio, assertGeneratedCanonicalNarrationSegment } from '../dist/narration/generated-audio.js';
 import { createInstallationBackup, inspectInstallationBackup } from '../dist/persistence/installation-backup.js';
 import { restoreInstallationBackup } from '../dist/persistence/installation-restore.js';
 
@@ -22,28 +23,20 @@ async function setup(t) {
   registerMediaRoutes(f.app, { production: f.production, media: new MediaApplicationService(f.production, f.media), uploads: new ManagedUploadStore({ rootDir: join(f.root, 'video-uploads') }) });
   await f.app.ready(); t.after(() => f.app.close());
   f.base = `/api/projects/${f.project.id}/narration`;
-  f.request = (suffix = '', payload, extras = {}) => f.app.inject({ method: payload === undefined ? 'GET' : 'POST', url: `${f.base}${suffix}`, ...(payload === undefined ? {} : { payload }), ...extras,
-    headers: { host: '127.0.0.1', authorization: `Bearer ${token}`, 'idempotency-key': randomUUID(), ...extras.headers } });
-  f.session = async () => {
-    const response = await f.request('/sessions', {}); assert.equal(response.statusCode, 200, response.body);
-    return response.json().session;
-  };
+  f.testToken = token; f.request = narrationServiceHarness(f, { uploadDirectory: f.uploadDirectory ?? join(f.root ?? f.dir, 'uploads'), speech: f.speechService ?? (f.profile?.kind === 'speech' ? f.service : undefined) });
+  const activeSession=f.session;
+  f.session = async () => activeSession;
   f.selection = async session => {
-    const list = (await f.request('/generated-recordings')).json(), recording = list.recordings[0];
-    const view = f.narration.workspaceSnapshot(f.project.id), row = view.segments[0];
-    return { sessionId: session.id, expectedVersion: view.state.version, segmentId: row.entry.segmentId, segmentRevisionId: row.script.id,
-      artifactId: recording.id, ...recording.selection };
+    const selected=resolveGeneratedNarrationAudio(f.store,f.project.id,f.artifact.id),row=f.narration.workspaceSnapshot(f.project.id).segments[0];
+    return {sessionId:session.id,expectedVersion:f.narration.workspaceSnapshot(f.project.id).state.version,segmentId:row.entry.segmentId,segmentRevisionId:row.script.id,
+      artifactId:f.artifact.id,artifactDigest:selected.artifactDigest,generationEvidenceDigest:selected.generationEvidenceDigest};
   };
   return f;
 }
 
-test('generated recording HTTP lists bounded exact metadata and previews existing WAV without creating authority', async t => {
+test('generated recording summary and saved WAV preview expose exact provenance without creating authority', async t => {
   const f = await setup(t), before = f.store.db.prepare('SELECT total_changes() AS n').get().n;
-  assert.equal((await f.request('/generated-recordings', undefined, { headers: { authorization: '' } })).statusCode, 403);
-  assert.equal((await f.request('/generated-recordings', undefined, { headers: { origin: 'https://other.example' } })).statusCode, 403);
-  const response = await f.request('/generated-recordings'); assert.equal(response.statusCode, 200, response.body);
-  const page = response.json(), audio = page.recordings[0];
-  assert.equal(page.recordings.length, 1); assert.equal(page.coverage.nextOffset, null); assert.equal(page.coverage.scanned, 1);
+  const audio=summarizeGeneratedNarrationAudio(resolveGeneratedNarrationAudio(f.store,f.project.id,f.artifact.id).audio),response={body:canonical(audio)};
   assert.equal(audio.id, f.artifact.id); assert.equal(audio.originEvidence, 'verified_generated_audio');
   assert.equal(audio.selection.artifactDigest, digest(f.artifact.artifact)); assert.match(audio.selection.generationEvidenceDigest, /^[a-f0-9]{64}$/);
   assert.equal(audio.generation.voice, 'coral'); assert.equal('requestId' in audio, false); assert.equal('declaredOrigin' in audio, false);
@@ -58,7 +51,7 @@ test('generated recording HTTP lists bounded exact metadata and previews existin
   assert.deepEqual(f.calls, f.initialCalls);
 });
 
-test('human HTTP attaches exact generated evidence, replays after later edits and blocks the legacy binding bypass', async t => {
+test('human service attaches exact generated evidence, replays after later edits and blocks the legacy binding bypass', async t => {
   const f = await setup(t), session = await f.session(), input = await f.selection(session);
   const original = f.narration.workspaceSnapshot(f.project.id), project = canonical(f.store.getProject(f.project.id)), artifact = canonical(f.store.get('artifact', f.artifact.id));
   const counts = Object.fromEntries(['grant', 'attempt', 'reservation', 'external_allowance_consumption', 'hold'].map(kind => [kind, f.store.list(kind, f.project.id).length]));
@@ -71,8 +64,7 @@ test('human HTTP attaches exact generated evidence, replays after later edits an
   assert.equal(selected.originEvidence, 'verified_generated_audio'); assert.equal('mappingDigest' in selected.generation, false);
   const bypass = await f.request('/bindings', { sessionId: session.id, expectedVersion: attached.state.version, segmentId: input.segmentId, audioId: f.artifact.id });
   assert.equal(bypass.json().error.code, 'NARRATION_GENERATED_ATTACHMENT_REQUIRED');
-  const later = await f.request('/placements', { sessionId: session.id, expectedVersion: attached.state.version, placements: [{ segmentId: input.segmentId, atSample: 48000 }] });
-  assert.equal(later.statusCode, 200, later.body);
+  f.narration.reviseSegments(f.project.id,f.human,attached.state.version,randomUUID(),{update:[{segmentId:input.segmentId,draft:{...original.segments[0].script,text:'Later wording.',meaning:'Later wording.'}}]});
   const replay = await f.request('/generated-audio-bindings', input, { headers: { 'idempotency-key': 'attach-once' } });
   assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), attached);
   const conflict = await f.request('/generated-audio-bindings', { ...input, generationEvidenceDigest: 'f'.repeat(64) }, { headers: { 'idempotency-key': 'attach-once' } });
@@ -82,13 +74,9 @@ test('human HTTP attaches exact generated evidence, replays after later edits an
   assert.equal(f.store.list('narration_acceptance', f.project.id).length, 0); assert.deepEqual(f.calls, f.initialCalls);
 });
 
-test('generated attachment route rejects forged, stale and foreign human selections without adopting anything', async t => {
+test('generated attachment service rejects stale and foreign human selections without adopting anything', async t => {
   const f = await setup(t), session = await f.session(), input = await f.selection(session);
   const before = canonical(f.narration.workspaceSnapshot(f.project.id));
-  for (const extra of [{ actor: { kind: 'human' } }, { path: '/tmp/audio.wav' }, { artifactDigest: 'bad' }, { expectedVersion: -1 }]) {
-    assert.equal((await f.request('/generated-audio-bindings', { ...input, ...extra })).statusCode, 400);
-  }
-  assert.equal((await f.request('/generated-audio-bindings', input, { headers: { 'idempotency-key': '' } })).statusCode, 400);
   for (const extra of [{ sessionId: randomUUID() }, { segmentRevisionId: randomUUID() }, { artifactDigest: 'f'.repeat(64) }, { generationEvidenceDigest: 'f'.repeat(64) }, { artifactId: randomUUID() }, { expectedVersion: input.expectedVersion + 1 }]) {
     assert.notEqual((await f.request('/generated-audio-bindings', { ...input, ...extra })).statusCode, 200);
   }
@@ -99,21 +87,6 @@ test('generated attachment route rejects forged, stale and foreign human selecti
   assert.equal((await f.request('/generated-audio-bindings', input)).json().error.code, 'NARRATION_SESSION_STALE');
   assert.equal(canonical(f.narration.workspaceSnapshot(f.project.id)), before); assert.equal(f.store.list('narration_audio', f.project.id).length, 0);
   assert.deepEqual(f.calls, f.initialCalls);
-});
-
-test('eligible library scanning is paged before provenance resolution and cannot join a stale page', async t => {
-  const f = await setup(t);
-  // Deliberately invalid retained artifact rows exercise omission without requiring 40 conversions.
-  for (let i = 0; i < 40; i++) f.store.insert('artifact', `invalid-${i}`, f.project.id, { id: `invalid-${i}`, projectId: f.project.id, origin: 'generated_audio' });
-  const changes = f.store.db.prepare('SELECT total_changes() AS n').get().n;
-  const first = (await f.request('/generated-recordings')).json();
-  assert.equal(first.coverage.scanned, 40); assert.equal(first.recordings.length, 0); assert.equal(first.coverage.nextOffset, 40);
-  const second = (await f.request(`/generated-recordings?offset=40&expectedDigest=${first.coverage.dataDigest}`)).json();
-  assert.equal(second.recordings.length, 1); assert.equal(second.recordings[0].id, f.artifact.id); assert.equal(second.coverage.nextOffset, null);
-  assert.equal(f.store.db.prepare('SELECT total_changes() AS n').get().n, changes);
-  f.store.insert('artifact', 'new-invalid', f.project.id, { id: 'new-invalid', projectId: f.project.id, origin: 'generated_audio' });
-  assert.equal((await f.request(`/generated-recordings?offset=40&expectedDigest=${first.coverage.dataDigest}`)).json().error.code, 'REVISION_CONFLICT');
-  assert.equal((await f.request('/generated-recordings?offset=1000001')).statusCode, 400);
 });
 
 test('context distinguishes generated evidence from human labels while preserving byte bounds and detached reads', async t => {
@@ -134,21 +107,17 @@ test('context distinguishes generated evidence from human labels while preservin
 });
 
 async function scopedGeneratedShot(t,options={}) {
-  const f=await generatedNarrationFixture(t,options),shape=(await import('./execution-fixture.mjs')).projectFixture(f.project.id,2),current=f.store.getProject(f.project.id);
-  const project=f.store.saveProject({...current,...shape,capabilityLockId:current.capabilityLockId,activePlanId:null,shots:shape.shots.map((shot,index)=>({...shot,narration:{mode:index?'none':'generated',text:index?'':'Leather boots.',voice:'stock'},narrationPending:!index}))},current.headVersion);
-  f.store.insert('project_revision',project.revisionId,project.id,{project});
+  const f=await generatedNarrationFixture(t,options),session=f.session;
   f.app=createApp({service:f.production,localToken:token});registerNarrationRoutes(f.app,{production:f.production,narration:f.narration,canonical:f.canonical,uploadDirectory:join(f.root,'uploads')});await f.app.ready();t.after(()=>f.app.close());
-  f.request=(suffix,payload,commandKey=randomUUID())=>f.app.inject({method:payload===undefined?'GET':'POST',url:`/api/projects/${project.id}/narration${suffix}`,...(payload===undefined?{}:{payload}),headers:{host:'127.0.0.1',authorization:`Bearer ${token}`,'idempotency-key':commandKey}});
-  let result=await f.request('/shots/shot-0/initialize',{expectedHeadVersion:project.headVersion,expectedNarrationVersion:f.narration.workspaceSnapshot(project.id).state.version,text:'Leather boots.',mode:'generated',voice:'coral',profileId:f.profile.id});
-  assert.equal(result.statusCode,200,result.body);const detail=result.json(),session=detail.session;
-  const recording=(await f.request('/generated-recordings')).json().recordings[0];
-  result=await f.request('/generated-audio-bindings',{sessionId:session.id,expectedVersion:f.narration.workspaceSnapshot(project.id).state.version,segmentId:detail.segment.entry.segmentId,segmentRevisionId:detail.segment.script.id,artifactId:recording.id,...recording.selection});
+  f.testToken=token;const invoke=narrationServiceHarness(f,{uploadDirectory:join(f.root,'uploads')});f.request=(suffix,body,commandKey=randomUUID())=>invoke(suffix,body,{headers:{'idempotency-key':commandKey}});
+  const selected=resolveGeneratedNarrationAudio(f.store,f.project.id,f.artifact.id),detail=f.workspace.detail(f.project.id,'shot-0');
+  const result=await f.request('/generated-audio-bindings',{sessionId:session.id,expectedVersion:f.view().state.version,segmentId:detail.segment.entry.segmentId,segmentRevisionId:detail.segment.script.id,artifactId:f.artifact.id,artifactDigest:selected.artifactDigest,generationEvidenceDigest:selected.generationEvidenceDigest});
   assert.equal(result.statusCode,200,result.body);
-  const row=(await f.request('/shots/shot-0')).json().segment;
-  f.acceptBody={sessionId:session.id,expectedHeadVersion:f.store.getProject(project.id).headVersion,expectedVersion:f.narration.workspaceSnapshot(project.id).state.version,segmentId:row.entry.segmentId,segmentRevisionId:row.script.id,audioId:row.audio.id,sha256:row.audio.media.sha256,startSample:0,endSample:row.audio.media.probe.audio.samples,durationMode:'keep'};
+  const row=f.workspace.detail(f.project.id,'shot-0').segment;
+  f.acceptBody={sessionId:session.id,expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedVersion:f.view().state.version,segmentId:row.entry.segmentId,segmentRevisionId:row.script.id,audioId:row.audio.id,sha256:row.audio.media.sha256,startSample:0,endSample:row.audio.media.probe.audio.samples,durationMode:'keep'};
   return f;
 }
-test('a verified generated take accepts through the existing narrow shot API and retains full within-shot provenance',async t=>{
+test('a verified generated take accepts through the existing narrow shot workspace and retains full within-shot provenance',async t=>{
   const f=await scopedGeneratedShot(t,{samples:24001}),before=f.store.getProject(f.project.id),response=await f.request('/shots/shot-0/accept',f.acceptBody,'verified-within-shot');
   assert.equal(response.statusCode,200,response.body);
   const current=f.store.getProject(f.project.id),saved=f.canonical.workspaceCurrent(f.project.id),segment=saved.segments[0];
@@ -192,6 +161,7 @@ test('historical generated shot provenance rejects a different shot, section, pr
     finally { f.store.db.prepare('UPDATE entities SET body=?,project_id=? WHERE kind=? AND id=?').run(row.body,row.project_id,kind,id); }
     verify();
   };
+  damage('project-wide scope','message',session.requestId,body=>({body:{...body,scopeIds:[f.project.id]}}),'GENERATED_NARRATION_CONFLICT');
   damage('other shot','message',session.requestId,body=>({body:{...body,scopeIds:['shot-1']}}),'SCOPE_DENIED');
   damage('multiple shot scopes','message',session.requestId,body=>({body:{...body,scopeIds:['shot-0','shot-1']}}),'SCOPE_DENIED');
   damage('other principal','message',session.requestId,body=>({body:{...body,principalId:'other-human'}}),'GENERATED_NARRATION_CONFLICT');

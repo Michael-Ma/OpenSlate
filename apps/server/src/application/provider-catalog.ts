@@ -1,7 +1,10 @@
+import { codeOnlyVideoAdapter, assertVideoI2vProfile } from "../execution/video-i2v-options.js";
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { canonical, DEFAULT_PROFILES, digest, invariant, moneyMicros, providerProfileArguments, snapshotLocalExecution } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
-import { describeOpenAIImageRequest, validateViggleH3Settings } from "@openslate/providers";
+import { CODEX_IMAGE_RUNTIME_VERSION, isRecordedCodexImageRuntime, isCodexImageRuntimeUpgrade, describeOpenAIImageRequest, FAL_H3_LIPSYNC_MODEL, FAL_H3_LIPSYNC_RESOLUTIONS, falH3LipSyncPriceMicros, validateViggleH3Settings } from "@openslate/providers";
+import type { FalH3LipSyncResolution } from "@openslate/providers";
+import { lipSyncAudioSamples } from "../execution/lip-sync.js";
 import type { ExecutionIdentity, ExecutionRegistry, OpenAIImageModel, OpenAIImageQuality, ViggleH3Settings } from "@openslate/providers";
 import { preflightAudioProfile } from "../execution/audio-preflight.js";
 import { EnvironmentMediaCredentials } from "./provider-credentials.js";
@@ -9,13 +12,20 @@ import type { MediaCredentialId } from "./provider-credentials.js";
 
 const MAX_BYTES = 64 * 1024;
 const BUILT_IN_PROFILES: ProviderProfile[] = structuredClone(DEFAULT_PROFILES);
+/** Lyria needs only the Gemini key the studio already reads: with its route enabled and no music profile configured, it installs itself. */
+const LYRIA_PROFILE: ProviderProfile = { id: "lyria-3.5-music", revision: "1", kind: "music", adapter: "gemini-lyria", executionVersion: "1",
+  configuration: { model: "lyria-3.5", settings: {} }, maxConcurrency: 1, unitCostMicros: "80000", maxRetries: 0 };
+/** New code films use the model's duration range, independent of manual live-validation profiles. */
+const VIGGLE_PROFILE: ProviderProfile = { id: "viggle-h3", revision: "1", kind: "video", adapter: "viggle-h3", executionVersion: "1",
+  configuration: { model: "MiniMax-H3", settings: { quality: "low", resolution: "768p", aspectRatio: "16:9" } },
+  minFrames: 150, maxFrames: 450, maxConcurrency: 1, unitCostMicros: "750000", maxRetries: 0 };
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
-const generatedKinds = ["image", "video", "speech", "transcription"] as const;
+const generatedKinds = ["image", "video", "speech", "transcription", "music"] as const;
 interface Definition { label: string; profile: ProviderProfile }
 interface Configuration { version: 1; profiles: Definition[] }
 export interface InstalledProviderSelection { readonly catalogDigest: string; readonly profileIds: readonly string[] }
 interface SelectionSnapshot { profiles: ProviderProfile[]; provenance: { catalogDigest: string; profileIds: string[] } }
-const selections = new WeakMap<InstalledProviderSelection, SelectionSnapshot>();
+const selections = new WeakMap<InstalledProviderSelection, { graph: SelectionSnapshot; code: SelectionSnapshot }>();
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value)
   && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 function exact(value: unknown, fields: string[]): asserts value is Record<string, unknown> {
@@ -27,20 +37,26 @@ function label(value: unknown): value is string {
     && !/\b[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/^(?:\/|~\/)/.test(value);
 }
 /** Pure fixed-profile validation; does not inspect credentials, readiness or registration. */
-export function profilePolicy(profile: ProviderProfile): { credential: MediaCredentialId | null; media: "image" | "video" | "audio" | null; fixture: boolean } {
+export function profilePolicy(profile: ProviderProfile, options: { historical?: boolean } = {}): { credential: MediaCredentialId | null; media: "image" | "video" | "audio" | null; fixture: boolean } {
   exact(profile, ["id", "revision", "kind", "adapter", "executionVersion", "configuration", "maxConcurrency", "unitCostMicros", "maxRetries", "minFrames", "maxFrames"]);
   providerProfileArguments(profile);
   invariant(integer(profile.maxConcurrency, 1, 64) && integer(profile.maxRetries, 0, 3) && typeof profile.unitCostMicros === "string",
     "PROVIDER_CATALOG_INVALID", "Provider limits and an explicit estimated unit cost are required");
   moneyMicros(profile.unitCostMicros);
   if (profile.adapter === "fake") {
-    const legacy = BUILT_IN_PROFILES.find(item => item.id === profile.id);
-    invariant(legacy && canonical(profile) === canonical(legacy), "PROVIDER_CATALOG_INVALID", "Built-in fake profiles cannot be redefined");
+    const demo = BUILT_IN_PROFILES.find(item => item.id === profile.id);
+    invariant(demo && canonical(profile) === canonical(demo), "PROVIDER_CATALOG_INVALID", "Built-in fake profiles cannot be redefined");
     return { credential: null, media: null, fixture: true };
   }
   invariant(profile.executionVersion === "1", "PROVIDER_CATALOG_INVALID", "Unsupported execution mapping version");
   exact(profile.configuration, ["model", "settings"]);
   const configuration = profile.configuration;
+  if (profile.adapter === "gemini-lyria") {
+    invariant(profile.kind === "music" && configuration.model === "lyria-3.5" && profile.unitCostMicros === "80000" && profile.maxRetries === 0
+      && profile.minFrames === undefined && profile.maxFrames === undefined, "PROVIDER_CATALOG_INVALID", "Lyria requires a music profile priced at $0.08 per song with no automatic vendor retries");
+    exact(configuration.settings, []);
+    return { credential: "gemini-music", media: "audio", fixture: false };
+  }
   if (profile.adapter === "codex-image") {
     invariant(profile.kind === "image" && profile.configuration?.model === "codex-image-generation"
       && profile.maxConcurrency === 1 && profile.maxRetries === 0 && profile.unitCostMicros === "0"
@@ -48,7 +64,7 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
     "PROVIDER_CATALOG_INVALID", "Codex images require one concurrent turn, no automatic retries and zero API-dollar accounting");
     exact(configuration.settings, ["runtimeVersion", "directorModel", "width", "height"]);
     const settings = configuration.settings;
-    invariant(settings.runtimeVersion === "0.153.4" && settings.directorModel === "gpt-6-astra"
+    invariant((settings.runtimeVersion === CODEX_IMAGE_RUNTIME_VERSION || options.historical && isRecordedCodexImageRuntime(settings.runtimeVersion)) && settings.directorModel === "gpt-6-astra"
       && settings.width === 1024 && settings.height === 1024,
     "PROVIDER_CATALOG_INVALID", "Use the pinned Codex runtime, director model and 1024-square canvas preferences");
     return { credential: null, media: "image", fixture: false };
@@ -76,6 +92,24 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
     validateViggleH3Settings(configuration.settings as unknown as ViggleH3Settings);
     return { credential: "viggle-video", media: "video", fixture: false };
   }
+  if (codeOnlyVideoAdapter(profile.adapter)) {
+    assertVideoI2vProfile(profile);
+    return { credential: profile.adapter === "seedance" ? "modelark-video" : "fal-video", media: "video", fixture: false };
+  }
+  if (profile.adapter === "fal-h3-lipsync") {
+    // Audio of at least 5 s drives the clip; shots stay within the 15 s storyboard bound.
+    invariant(profile.kind === "video" && configuration.model === FAL_H3_LIPSYNC_MODEL
+      && integer(profile.minFrames, 150, 450) && integer(profile.maxFrames, Number(profile.minFrames), 450)
+      && Number(profile.minFrames) % 30 === 0 && Number(profile.maxFrames) % 30 === 0,
+    "PROVIDER_CATALOG_INVALID", "Lip-sync profiles require the H3 Max lip-sync model and whole-second bounds within 5 to 15 seconds");
+    exact(configuration.settings, ["resolution"]);
+    const resolution = configuration.settings.resolution as FalH3LipSyncResolution;
+    invariant(FAL_H3_LIPSYNC_RESOLUTIONS.includes(resolution), "PROVIDER_CATALOG_INVALID", "Use a published lip-sync resolution");
+    // The flat per-clip estimate reserves the longest clip at the published per-second price.
+    const ceiling = falH3LipSyncPriceMicros(resolution, lipSyncAudioSamples(Number(profile.maxFrames)) / 48000);
+    invariant(moneyMicros(profile.unitCostMicros) >= BigInt(ceiling), "PROVIDER_CATALOG_INVALID", "The lip-sync clip estimate must cover the longest clip at the published price");
+    return { credential: "fal-video", media: "video", fixture: false };
+  }
   invariant(profile.adapter === "minimax-h3" && profile.kind === "video", "PROVIDER_CATALOG_INVALID", "Only installed fixed media mappings may be configured");
   exact(configuration.settings, ["resolution"]);
   const model = configuration.model, minimum = model === "MiniMax-H3" ? 120 : 150;
@@ -91,14 +125,20 @@ function validateConfiguration(input: unknown): Configuration {
     exact(input, ["version", "profiles"]);
     invariant(input.version === 1 && Array.isArray(input.profiles) && input.profiles.length <= 28
       && Buffer.byteLength(canonical(input)) <= MAX_BYTES, "PROVIDER_CATALOG_INVALID", "Use a bounded version-one provider catalog");
+    // Normalize only host configuration, on a detached copy. Saved film locks never enter this path.
+    const configuration = structuredClone(input) as unknown as Configuration;
     const used = new Set(BUILT_IN_PROFILES.map(profile => profile.id));
-    for (const entry of input.profiles) {
+    for (const entry of configuration.profiles) {
       exact(entry, ["label", "profile"]);
       invariant(label(entry.label), "PROVIDER_CATALOG_INVALID", "Use a short provider label without host locations");
+      if (entry.profile?.adapter === "codex-image" && isCodexImageRuntimeUpgrade(entry.profile.configuration?.settings?.runtimeVersion, CODEX_IMAGE_RUNTIME_VERSION))
+        entry.profile.configuration!.settings!.runtimeVersion = CODEX_IMAGE_RUNTIME_VERSION;
       const policy = profilePolicy(entry.profile as ProviderProfile), profile = entry.profile as ProviderProfile;
+      invariant(profile.id !== VIGGLE_PROFILE.id || canonical(profile) === canonical(VIGGLE_PROFILE),
+        "PROVIDER_CATALOG_INVALID", "The built-in Viggle identity requires its exact definition; use a distinct id for custom profiles");
       invariant(!policy.fixture && !used.has(profile.id), "PROVIDER_CATALOG_INVALID", "Additional external profiles require distinct nonreserved identities"); used.add(profile.id);
     }
-    return structuredClone(input) as unknown as Configuration;
+    return configuration;
   } catch { invariant(false, "PROVIDER_CATALOG_INVALID", "Provider configuration contains unsupported identities, settings, estimates or fields"); }
 }
 
@@ -111,15 +151,20 @@ export function readInstalledProviderConfiguration(path: string): unknown {
     const bytes = Buffer.alloc(stat.size + 1); let size = 0;
     while (size < bytes.length) { const count = readSync(fd, bytes, size, bytes.length - size, null); if (!count) break; size += count; }
     invariant(size === stat.size, "PROVIDER_CATALOG_INVALID", "Provider configuration changed while reading");
-    return validateConfiguration(JSON.parse(bytes.subarray(0, size).toString("utf8")));
+    const input = JSON.parse(bytes.subarray(0, size).toString("utf8")), configuration = validateConfiguration(input);
+    const upgraded = configuration.profiles.filter((entry, index) => entry.profile.adapter === "codex-image"
+      && isCodexImageRuntimeUpgrade(input.profiles[index].profile.configuration.settings.runtimeVersion, CODEX_IMAGE_RUNTIME_VERSION));
+    if (upgraded.length) console.warn(JSON.stringify({ kind: "codex_image_profile_runtime_notice", profileIds: upgraded.map(entry => entry.profile.id),
+      message: `Using Codex ${CODEX_IMAGE_RUNTIME_VERSION} for new images. Change runtimeVersion to "${CODEX_IMAGE_RUNTIME_VERSION}" in these provider configuration profiles.` }));
+    return configuration;
   } catch { invariant(false, "PROVIDER_CATALOG_INVALID", "The configured provider catalog could not be read or validated"); }
   finally { if (fd !== undefined) closeSync(fd); }
 }
 
 /** Only catalog-issued selections may enter project creation. Return a detached immutable-lock snapshot. */
-export function selectedProviderProfiles(selection: InstalledProviderSelection): SelectionSnapshot {
+export function selectedProviderProfiles(selection: InstalledProviderSelection, planMode?: "graph" | "code"): SelectionSnapshot {
   const value = selections.get(selection);
-  invariant(value, "PROVIDER_SELECTION_INVALID", "Use a trusted installed provider selection"); return structuredClone(value);
+  invariant(value, "PROVIDER_SELECTION_INVALID", "Use a trusted installed provider selection"); return structuredClone(planMode === "code" ? value.code : value.graph);
 }
 
 /** Immutable host configuration and read-only local readiness. No network, grants or activation. */
@@ -135,14 +180,18 @@ export class InstalledProviderCatalog {
   constructor(options: { configuration?: unknown; registry?: ExecutionRegistry; credentials?: EnvironmentMediaCredentials;
     codexImageConfigured?: boolean; mediaTools?: { image: boolean; video: boolean; audio?: boolean }; enabledExecutions?: readonly ExecutionIdentity[] } = {}) {
     const configuration = options.configuration === undefined ? { version: 1 as const, profiles: [] } : validateConfiguration(options.configuration);
-    this.#definitions = [...BUILT_IN_PROFILES.map(profile => ({ label: `Demo ${profile.kind}`, profile: structuredClone(profile) })), ...configuration.profiles];
-    this.#digest = digest({ version: 1, profiles: this.#definitions }); this.#registry = options.registry;
     this.#credentials = options.credentials ?? new EnvironmentMediaCredentials();
+    const lyria = !configuration.profiles.some(row => row.profile.kind === "music") && (options.enabledExecutions ?? []).some(row => row.adapter === "gemini-lyria");
+    const viggle = !configuration.profiles.some(row => row.profile.id === VIGGLE_PROFILE.id) && (options.enabledExecutions ?? []).some(row => row.adapter === "viggle-h3");
+    this.#definitions = [...BUILT_IN_PROFILES.map(profile => ({ label: `Demo ${profile.kind}`, profile: structuredClone(profile) })), ...configuration.profiles,
+      ...(viggle ? [{ label: "Viggle H3", profile: structuredClone(VIGGLE_PROFILE) }] : []),
+      ...(lyria ? [{ label: "Google Lyria 3.5 · $0.08/song", profile: structuredClone(LYRIA_PROFILE) }] : [])];
+    this.#digest = digest({ version: 1, profiles: this.#definitions }); this.#registry = options.registry;
     this.#mediaTools = Object.freeze({ image: options.mediaTools?.image === true, video: options.mediaTools?.video === true, audio: options.mediaTools?.audio === true });
     this.#codexImageConfigured = options.codexImageConfigured === true;
     const enabled = options.enabledExecutions ?? [];
-    invariant(Array.isArray(enabled) && enabled.length <= 6 && enabled.every(value => object(value)
-      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription"].includes(value.adapter) && value.version === "1"),
+    invariant(Array.isArray(enabled) && enabled.length <= 10 && enabled.every(value => object(value)
+      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription", "fal-h3-lipsync", "seedance", "fal-video-i2v", "gemini-lyria"].includes(value.adapter) && value.version === "1"),
     "PROVIDER_CATALOG_INVALID", "Only explicit supported external execution identities can be enabled");
     this.#enabledExecutions = new Set(enabled.map(value => canonical(value)));
     invariant(this.#enabledExecutions.size === enabled.length, "PROVIDER_CATALOG_INVALID", "Enabled execution identities must be distinct");
@@ -159,7 +208,7 @@ export class InstalledProviderCatalog {
     let localAssemblyCompatible = false;
     try { snapshotLocalExecution(localExecution); localAssemblyCompatible = true; } catch { /* Absence and unsupported saved pins require a new project for H3. */ }
     const described = profiles.map(profile => {
-      const row = this.describe(profile), compatible = !(["minimax-h3", "viggle-h3"].includes(row.profile?.adapter ?? "")) || localAssemblyCompatible;
+      const row = this.describe(profile), compatible = !(["minimax-h3", "viggle-h3", "fal-h3-lipsync", "seedance", "fal-video-i2v"].includes(row.profile?.adapter ?? "")) || localAssemblyCompatible;
       return { ...row, projectExecution: { compatible,
         code: compatible ? null : "LOCAL_EXECUTION_UPGRADE_REQUIRED",
         message: compatible ? null : "Create a new project with video generation enabled on this computer. This project's saved assembly mode cannot generate H3 video." } };
@@ -176,19 +225,42 @@ export class InstalledProviderCatalog {
     "PROVIDER_SELECTION_INVALID", "Select at most one installed profile for each operation");
     const selected = profileIds.map(id => {
       const definition = this.#definitions.find(item => item.profile.id === id);
-      invariant(definition, "PROVIDER_SELECTION_INVALID", "A selected provider is not installed"); return definition.profile;
+      invariant(definition, "PROVIDER_SELECTION_INVALID", "A selected provider is not installed");
+      // Lip sync only makes singing shots; new projects pin it beside the chosen video model (see lipSyncProfiles).
+      invariant(definition.profile.adapter !== "fal-h3-lipsync", "PROVIDER_SELECTION_INVALID", "Lip sync is added beside the video model, not chosen as it");
+      return definition.profile;
     });
     invariant(new Set(selected.map(profile => profile.kind)).size === selected.length,
       "PROVIDER_SELECTION_INVALID", "Select only one profile for each operation");
     const profiles = BUILT_IN_PROFILES.map(fallback => structuredClone(selected.find(profile => profile.kind === fallback.kind) ?? fallback));
+    profiles.push(...selected.filter(profile => profile.kind === "music").map(profile => structuredClone(profile)));
     const value = Object.freeze({ catalogDigest: this.digest, profileIds: Object.freeze([...profileIds]) });
-    selections.set(value, { profiles, provenance: { catalogDigest: this.digest, profileIds: profiles.map(profile => profile.id) } }); return value;
+    const viggle = this.#definitions.find(row => row.profile.id === VIGGLE_PROFILE.id)?.profile;
+    const codeProfiles = profiles.map(profile => profile.adapter === "viggle-h3" && viggle ? structuredClone(viggle) : structuredClone(profile));
+    const snapshot = (rows: ProviderProfile[]): SelectionSnapshot => ({ profiles: rows, provenance: { catalogDigest: this.digest, profileIds: rows.map(profile => profile.id) } });
+    selections.set(value, { graph: snapshot(profiles), code: snapshot(codeProfiles) }); return value;
+  }
+  /** Installed, enabled and ready lip-sync profiles, pinned on new projects whose video is a real model. */
+  lipSyncProfiles(): ProviderProfile[] {
+    return this.#definitions.filter(definition => definition.profile.adapter === "fal-h3-lipsync" && this.describe(definition.profile).readiness.realExecutionEnabled)
+      .map(definition => structuredClone(definition.profile)).slice(0, 1);
+  }
+  /** Every ready video and music model, pinned on new code films: their plans choose a model per shot. */
+  codeMediaProfiles(): ProviderProfile[] {
+    return this.#definitions.filter(definition => (definition.profile.kind === "video" || definition.profile.kind === "music") && definition.profile.adapter !== "fal-h3-lipsync"
+      && (definition.profile.adapter !== "viggle-h3" || definition.profile.id === VIGGLE_PROFILE.id)
+      && this.describe(definition.profile).readiness.realExecutionEnabled).map(definition => structuredClone(definition.profile));
   }
   private describe(input: unknown, name?: string) {
     let valid = true, policy: ReturnType<typeof profilePolicy> | undefined;
-    try { policy = profilePolicy(input as ProviderProfile); } catch { valid = false; }
+    try { policy = profilePolicy(input as ProviderProfile, { historical: true }); } catch { valid = false; }
     const profile = valid ? structuredClone(input) as ProviderProfile : null;
-    const current = profile ? this.#definitions.find(item => item.profile.id === profile.id && canonical(item.profile) === canonical(profile)) : undefined;
+    // Retain the locked profile and its digest for step keys and receipts. Only a runtime-only upgrade
+    // counts as installed; revision, price, limits and every other field must remain byte-for-byte equal.
+    const effective = profile ? structuredClone(profile) : null;
+    if (effective?.adapter === "codex-image" && isCodexImageRuntimeUpgrade(effective.configuration?.settings?.runtimeVersion, CODEX_IMAGE_RUNTIME_VERSION))
+      effective.configuration!.settings!.runtimeVersion = CODEX_IMAGE_RUNTIME_VERSION;
+    const current = effective ? this.#definitions.find(item => item.profile.id === effective.id && canonical(item.profile) === canonical(effective)) : undefined;
     let registered = false;
     if (valid && profile) { try { registered = !!this.#registry?.forProfile(profile); } catch { /* A missing route remains unavailable. */ } }
     let credentialPresent: boolean | null = null, credentialUnavailable = false;
@@ -199,7 +271,7 @@ export class InstalledProviderCatalog {
     const enabledByHost = !!profile && !policy?.fixture && this.#enabledExecutions.has(canonical({ adapter: profile.adapter, version: profile.executionVersion }));
     const codexImage = profile?.adapter === "codex-image";
     const realExecutionEnabled = enabledByHost && registered && valid && !!policy?.media && this.#mediaTools[policy.media]
-      && (codexImage ? this.#codexImageConfigured : credentialPresent === true && !credentialUnavailable);
+      && (codexImage ? this.#codexImageConfigured && !!current && effective?.configuration?.settings?.runtimeVersion === CODEX_IMAGE_RUNTIME_VERSION : credentialPresent === true && !credentialUnavailable);
     return { id: object(input) && typeof input.id === "string" && ID.test(input.id) ? input.id : "unavailable",
       label: name ?? current?.label ?? (profile ? `${profile.kind}: ${profile.id}` : "Unsupported saved provider"),
       ...(codexImage ? { usage: { kind: "codex_subscription" as const, unit: "native_turn" as const, quotaEstimateAvailable: false as const } } : {}),
@@ -210,7 +282,7 @@ export class InstalledProviderCatalog {
         mediaTools: { required: !!policy?.media, available: policy?.media ? this.#mediaTools[policy.media] : valid },
         credential: { required: !!policy?.credential, present: credentialPresent, backendUnavailable: credentialUnavailable, apiValidated: false as const },
         ...(codexImage ? { nativeAccess: { configured: this.#codexImageConfigured, authentication: "checked_before_dispatch" as const, quota: "unverified" as const } } : {}),
-        spendingPermissionRequired: false, enabledByHost, realExecutionEnabled } };
+        enabledByHost, realExecutionEnabled } };
   }
 }
 

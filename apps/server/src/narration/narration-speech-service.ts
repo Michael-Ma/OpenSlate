@@ -1,4 +1,4 @@
-import { canonical, composeSpeechPlanIsolated, digest, diffPlans, invariant, newId, providerProfileArguments, RECIPE_DIGEST,
+import { canonical, digest, diffPlans, invariant, newId, providerProfileArguments, RECIPE_DIGEST,
   requiredStages, snapshotLocalExecution, STAGE_CONTRACTS_DIGEST, validateStageRequirements } from "@openslate/core";
 import type { ActorContext, CompiledPlan, CompileContext, ProviderProfile, StageRequirement } from "@openslate/core";
 import { OPENAI_SPEECH_BUDGET } from "@openslate/providers";
@@ -13,6 +13,7 @@ import { assertPersonalVoiceCurrent } from './personal-voices.js';
 import { assertMappedSpeechPreparation } from './mapped-speech-intent.js';
 import { assertNarrationAuthority } from './narration-scope.js';
 import { requestHoldCutoff } from './request-holds.js';
+import { composeNarrationSpeechPlan } from './narration-speech-composition.js';
 export { narrationSpeechPrepareScope } from "./narration-speech-review-state.js";
 
 interface Lock { projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string; localExecution?: unknown }
@@ -31,7 +32,7 @@ export class NarrationSpeechService {
     assertNarrationAuthority(this.production, projectId, actor, segmentId);
   }
   private compose(base: CompiledPlan | null, operation: NarrationSpeechOperation, context: CompileContext, options: { signal?: AbortSignal }) {
-    return composeSpeechPlanIsolated(base, operation, context, options);
+    return composeNarrationSpeechPlan(this.store, base, operation, context, options);
   }
   private selected(projectId: string, section: NarrationSpeechSection): void {
     const entry = this.store.get<NarrationState>("narration_state", projectId)?.entries.find(item => item.segmentId === section.segmentId);
@@ -120,16 +121,14 @@ export class NarrationSpeechService {
   async review(projectId: string, human: ActorContext, input: ReviewNarrationSpeech, options: { signal?: AbortSignal } = {}): Promise<NarrationSpeechApplyReceipt> {
     return this.publish(projectId, human, input, options, false);
   }
-  async request(projectId: string, actor: ActorContext, input: PrepareNarrationSpeech, options: { signal?: AbortSignal } = {}): Promise<{ proposal: NarrationSpeechProposal; receipt: NarrationSpeechApplyReceipt }> {
+  /** Prepare a suggestion, including a virtual saved shot script, without publishing paid work. */
+  async prepareRequest(projectId: string, actor: ActorContext, input: PrepareNarrationSpeech, options: { signal?: AbortSignal } = {}): Promise<NarrationSpeechProposal> {
     actor = snapshotOwnedTranscriptionData(actor, 16384); input = snapshotOwnedTranscriptionData(input, 16384);
     const signal = options.signal; options = signal ? { signal } : {};
-    invariant(!signal?.aborted, 'NARRATION_SPEECH_CANCELLED', 'Narration request was cancelled.');
+    invariant(!signal?.aborted, 'NARRATION_SPEECH_CANCELLED', 'Narration preparation was cancelled.');
     this.production.assertActor(projectId, actor, true);
-    const originalKey = input.key, originalDigest = digest(input), requestScope = `${actor.principalId}:${projectId}:${actor.requestId}:narration-speech-request:${epoch(actor) ?? 'human'}`;
-    const requestedAtCursor = this.store.command(`${requestScope}-cursor`,originalKey,originalDigest,()=>requestHoldCutoff(this.store,projectId,actor));
-    const replay = this.store.commandReplay<{ proposal: NarrationSpeechProposal; receipt: NarrationSpeechApplyReceipt }>(requestScope, originalKey, originalDigest);
-    if (replay) return replay.result;
-    input = this.store.command(`${requestScope}-input`, originalKey, originalDigest, () => {
+    const originalKey = input.key, originalDigest = digest(input), normalizationScope = `${actor.principalId}:${projectId}:${actor.requestId}:narration-speech-request:${epoch(actor) ?? 'human'}`;
+    input = this.store.command(`${normalizationScope}-input`, originalKey, originalDigest, () => {
       const project = this.store.getProject(projectId), shot = project.shots.find(shot => shot.id === input.segmentId);
       if (!shot) { this.authority(projectId, actor, input.segmentId); return input; }
       const lock = this.store.get<Lock>('capability_lock', project.capabilityLockId), profile = lock?.profiles.find(profile => profile.id === input.profileId && profile.kind === 'speech');
@@ -142,7 +141,19 @@ export class NarrationSpeechService {
       this.authority(projectId, actor, section.segmentId);
       return { ...input, expectedHeadVersion: section.headVersion, segmentId: section.segmentId, segmentRevisionId: section.segmentRevisionId };
     });
-    const proposal = await this.prepare(projectId, actor, input, options);
+    return this.prepare(projectId, actor, input, options);
+  }
+  async request(projectId: string, actor: ActorContext, input: PrepareNarrationSpeech, options: { signal?: AbortSignal } = {}): Promise<{ proposal: NarrationSpeechProposal; receipt: NarrationSpeechApplyReceipt }> {
+    actor = snapshotOwnedTranscriptionData(actor, 16384); input = snapshotOwnedTranscriptionData(input, 16384);
+    const signal = options.signal; options = signal ? { signal } : {};
+    invariant(!signal?.aborted, 'NARRATION_SPEECH_CANCELLED', 'Narration request was cancelled.');
+    this.production.assertActor(projectId, actor, true);
+    invariant(actor.kind === "human", "ACTOR_DENIED", "Only a human press may request paid narration");
+    const originalKey = input.key, originalDigest = digest(input), requestScope = `${actor.principalId}:${projectId}:${actor.requestId}:narration-speech-request:${epoch(actor) ?? 'human'}`;
+    const requestedAtCursor = this.store.command(`${requestScope}-cursor`,originalKey,originalDigest,()=>requestHoldCutoff(this.store,projectId,actor));
+    const replay = this.store.commandReplay<{ proposal: NarrationSpeechProposal; receipt: NarrationSpeechApplyReceipt }>(requestScope, originalKey, originalDigest);
+    if (replay) return replay.result;
+    const proposal = await this.prepareRequest(projectId, actor, input, options);
     const receipt = await this.publish(projectId, actor, { key: digest({ key: input.key, action: 'request-speech' }), proposalId: proposal.id, proposalDigest: digest(proposal) }, options, true, requestedAtCursor);
     return this.store.command(requestScope, originalKey, originalDigest, () => ({ proposal, receipt }));
   }
@@ -153,7 +164,7 @@ export class NarrationSpeechService {
       stopped(); human = snapshotOwnedTranscriptionData(human, 16384); input = captureNarrationSpeechReviewInput(input);
       const scope = narrationSpeechReviewScope(projectId, human), inputDigest = digest(input);
       const checkpoint = (): NarrationSpeechApplyReceipt | undefined => {
-        stopped(); invariant(human.kind === 'human' || automatic && human.kind === 'director', "ACTOR_DENIED", "A current application request is required for narration speech");
+        stopped(); invariant(human.kind === 'human', "ACTOR_DENIED", "A current application request is required for narration speech");
         this.authority(projectId, human, this.store.get<NarrationSpeechProposal>('narration_speech_proposal', input.proposalId)?.section.segmentId);
         this.production.recovery.assertFreshAuthority(projectId, "narration_speech_proposal", input.proposalId);
         const replay = this.store.commandReplay<NarrationSpeechApplyReceipt>(scope, input.key, inputDigest); if (replay) return replay.result;

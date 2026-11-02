@@ -1,15 +1,17 @@
+import { assertMusicArtifact } from "../execution/spool-music-ingester.js";
+import { composeOwnedTranscriptionPlan } from '../narration/owned-transcription-composition.js';
 import type { ArtifactRecord } from "../execution/engine.js";
 import { assertConfiguredProviderAdmission } from "../execution/provider-use.js";
 import { assertRequestedNarrationShotScope } from "../narration/narration-scope.js";
 import { codexImageBackupClosure } from "./codex-image-backup.js";
 import { CODEX_IMAGE_RECORD_KINDS } from "../execution/codex-image-lineage.js";
-import { composeSpeechPlanIsolated } from "@openslate/core";
+import { composeNarrationSpeechPlan } from "../narration/narration-speech-composition.js";
 import { assertNarrationSpeechProposal } from "../narration/narration-speech-records.js";
 import { assertNarrationSpeechReview, assertNarrationSpeechApplication, assertNarrationSpeechAttemptInput, resolveNarrationSpeechApplication } from "../narration/narration-speech-authorization.js";
 import Database from "better-sqlite3";
 import { viggleBackupClosure } from "./viggle-backup.js";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { canonical, composeTranscriptionPlanIsolated, digest, invariant, snapshotLocalExecution } from "@openslate/core";
+import { canonical, digest, invariant, snapshotLocalExecution } from "@openslate/core";
 import type { CompiledPlan, ProjectRecord, ProviderProfile } from "@openslate/core";
 import { assertOwnedTranscriptionSource, assertOwnedTranscriptionProposal, ownedTranscriptionCatalog } from "../narration/owned-transcription-records.js";
 import type { OwnedTranscriptionSource } from "../narration/owned-transcription-types.js";
@@ -41,7 +43,6 @@ import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt } from "../execution/engine.js";
 import type { BackupFile } from "./installation-backup.js";
 import { assertGeneratedCanonicalNarrationSegment, assertGeneratedNarrationAudio, resolveGeneratedNarrationAudio } from "../narration/generated-audio.js";
-import { assertTranscriptCanonicalSegment, assertTranscriptSelection, assertTranscriptSelectionOutput, transcriptCanonicalProvenance } from "../narration/transcript-selection.js";
 
 type RecordValue = Record<string, any>;
 const object = (value: unknown): value is RecordValue => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -141,7 +142,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       const catalog = ownedTranscriptionCatalog(speechReader, projectId, base);
       for (const item of catalog) await ownedSource(get("owned_transcription_source", item.id), projectId);
       const logicalIds = { ...value.logicalIds }, localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
-      const compiled = await composeTranscriptionPlanIsolated(base, value.operation, { project, profiles: lock.profiles, logicalIds,
+      const compiled = await composeOwnedTranscriptionPlan(speechReader, base, value.operation, { project, profiles: lock.profiles, logicalIds,
         allocateId: () => { fail(false, "Owned transcription proposal lacks an exact saved logical ID"); return ""; },
         transcriptionInputs: [...catalog, { id: binding.id, digest: digest(binding), consumerAlias: binding.consumerAlias, artifact: binding.artifact }],
         ...(localExecution ? { localExecution } : {}) });
@@ -159,7 +160,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       const catalog = ownedTranscriptionCatalog(speechReader, projectId, base);
       for (const item of catalog) await ownedSource(get("owned_transcription_source", item.id), projectId);
       const logicalIds = { ...value.logicalIds }, localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
-      const compiled = await composeSpeechPlanIsolated(base, value.operation, { project, profiles: lock.profiles, logicalIds,
+      const compiled = await composeNarrationSpeechPlan(speechReader, base, value.operation, { project, profiles: lock.profiles, logicalIds,
         allocateId: () => { fail(false, "Speech proposal lost its saved logical identity"); return ""; }, transcriptionInputs: catalog,
         ...(localExecution ? { localExecution } : {}) });
       fail(canonical(compiled) === canonical(value.compiled) && canonical(logicalIds) === canonical(value.logicalIds), "Speech proposal differs from isolated historical recomposition");
@@ -331,7 +332,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
     for (const [path, file] of files) {
       // Binary objects and timeline documents use the exact byte hash as the name.
       const named = /^(?:artifacts\/(?:images\/blobs|local-timelines\/documents|[^/]+)|media\/blobs|execution-output\/blobs|audio-derivatives\/blobs)\/([a-f0-9]{64})\.[a-z]+$/.exec(path)
-        ?? /^native\/[^/]+\/workspace\/image-attachments\/[a-f0-9]{64}\/[0-3]-([a-f0-9]{64})\.jpg$/.exec(path);
+        ?? /^native\/[^/]+\/workspace\/(?:image|material)-attachments\/[a-f0-9]{64}\/[0-7]-([a-f0-9]{64})\.jpg$/.exec(path)
+        ?? /^artifacts\/documents\/blobs\/([a-f0-9]{64})$/.exec(path);
       if (named) fail(file.sha256 === named[1], `Content-addressed filename differs: ${path}`);
       if (path.startsWith("media/sources/")) { const value = await json(path); fail(path === `media/sources/${value.id}.json`, "Source descriptor filename differs"); await source(value); }
       else if (path.startsWith("media/manifests/")) { const value = await json(path); fail(path === `media/manifests/${value.digest}.json`, "Render manifest filename differs"); await renderManifest(value); }
@@ -400,8 +402,17 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         if (value.origin === "generated_video" && value.attemptId && viggle.applicable(get("attempt", value.attemptId) as Attempt))
           await viggle.derivation(get("video_derivation_intent", value.derivationId) as VideoDerivationIntent,
             get("video_derivation_receipt", value.derivationId) as VideoDerivationReceipt, true);
-        if (value.origin === "generated_audio") fail(get("audio_derivation_receipt", value.derivationId).source.artifactId === value.id,
-          "Generated audio artifact lost its derivation receipt");
+        if (value.origin === "generated_audio") {
+          const music = value.attemptId && get("attempt", value.attemptId).request.kind === "music";
+          const receipt = get(music ? "music_ingestion_receipt" : "audio_derivation_receipt", value.derivationId);
+          fail(receipt.source.artifactId === value.id, "Generated audio artifact lost its derivation receipt");
+          if (music) {
+            const output = get("execution_output_receipt", receipt.spoolId);
+            assertMusicArtifact(speechReader, get("attempt", value.attemptId) as Attempt, { port: "audio", kind: "audio", mimeType: output.mimeType,
+              extension: output.mimeType === "audio/mpeg" ? "mp3" : "wav", sha256: output.source.sha256, byteLength: output.source.byteLength,
+              fixture: false, storage: { type: "spool", spoolId: receipt.spoolId } }, value as ArtifactRecord);
+          }
+        }
         if (value.origin === "transcription_response") fail(get("transcript_candidate", value.transcriptCandidateId).artifactId === value.id,
           "Raw transcription artifact lost its unreviewed candidate");
       }
@@ -434,7 +445,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
           await viggle.derivation(get("video_derivation_intent", value.derivationId) as VideoDerivationIntent,
             get("video_derivation_receipt", value.derivationId) as VideoDerivationReceipt, true);
         if (value.origin === "generated_audio") {
-          const receipt = get("audio_derivation_receipt", value.derivationId);
+          const receipt = get(get("attempt", value.attemptId).request.kind === "music" ? "music_ingestion_receipt" : "audio_derivation_receipt", value.derivationId);
           fail(canonical(value) === canonical({ id: receipt.source.artifactId, projectId: receipt.projectId, source: receipt.source,
             origin: "generated_audio", attemptId: receipt.attemptId, derivationId: receipt.id }), "Generated audio source lost its exact provenance");
         }
@@ -444,7 +455,6 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         else await source(value.media);
       } else if (row.kind === "narration_prepared") {
         for (const view of value.snapshot?.segments ?? []) {
-          transcriptCanonicalProvenance(speechReader, value.projectId, view.script, view.cue);
           const saved = view.audio ? speechReader.get<RecordValue>("narration_audio", view.audio.id) : undefined;
           if (!view.audio || !(Object.hasOwn(view.audio, "originEvidence") || Object.hasOwn(view.audio, "generation") || saved && Object.hasOwn(saved, "generation"))) continue;
           fail(canonical(get("narration_audio", view.audio.id)) === canonical(view.audio), "Prepared generated narration differs from its saved recording");
@@ -452,8 +462,6 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         }
       } else if (row.kind === "narration_canonical") {
         for (const segment of value.segments ?? []) {
-          assertTranscriptCanonicalSegment(speechReader, value.projectId, segment,
-            { narrationRevisionId: value.narrationRevisionId, narrationVersion: value.narrationVersion });
           const provenance = segment.provenance;
           const saved = provenance ? speechReader.get<RecordValue>("narration_audio", provenance.audioId) : undefined;
           if (!provenance || provenance.originEvidence === "human_declared_supplied_recording" && !Object.hasOwn(provenance, "generation") && !(saved && Object.hasOwn(saved, "generation"))) continue;
@@ -461,14 +469,6 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
             { narrationRevisionId: value.narrationRevisionId, narrationVersion: value.narrationVersion });
           const audio = get("narration_audio", provenance.audioId); await generatedNarration(audio);
         }
-      } else if (row.kind === "narration_segment" || row.kind === "narration_cue") {
-        assertTranscriptSelectionOutput(speechReader, value.projectId, row.kind, value);
-      } else if (row.kind === "narration_transcript_selection") {
-        assertTranscriptSelection(speechReader, value.projectId, value);
-        const output = get(value.output.kind, value.output.id);
-        assertTranscriptSelectionOutput(speechReader, value.projectId, value.output.kind, output);
-        fail(output.id === value.id && digest(output) === value.output.digest, "Transcript selection lost its reciprocal output");
-        await transcriptCandidate(get("transcript_candidate", value.candidateId) as TranscriptCandidate);
       }
       else if (row.kind === "media_render") { await renderManifest(value.manifest); if (value.artifact) {
         const saved = get("artifact", value.artifact.artifactId); fail(canonical(saved.artifact) === canonical(value.artifact), "Render artifact identity differs"); }
@@ -481,6 +481,18 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       } else if (row.kind === "video_derivation_receipt") {
         await viggle.derivation(get("video_derivation_intent", row.id) as VideoDerivationIntent, value as VideoDerivationReceipt, true);
         fail(canonical(await json(`video-derivations/completions/${row.id}.json`)) === canonical(value), "Saved derivation differs from its published receipt");
+      } else if (row.kind === "music_ingestion_receipt") {
+        const intent = get("music_ingestion_intent", row.id), attempt = get("attempt", value.attemptId), result = get("lyria_result", value.attemptId);
+        const raw = get("execution_output_receipt", value.spoolId);
+        assertOutputReceiptIdentity(raw as OutputReceipt, attempt as Attempt);
+        fail(attempt.request.kind === "music" && attempt.request.execution.adapter === "gemini-lyria"
+          && value.requestDigest === digest(attempt.request) && result.requestDigest === value.requestDigest
+          && result.observationDigest === digest(result.observation) && result.dispatchDigest === digest(get("lyria_dispatch", value.attemptId))
+          && result.observation.kind === "completed" && result.observation.receiptId === value.spoolId
+          && canonical({ ...intent, source: value.source, leadInSamples: value.leadInSamples }) === canonical(value)
+          && raw.source.kind === "returned_bytes" && raw.source.sha256 === value.rawSha256 && value.source.originalSha256 === value.rawSha256
+          && value.source.originalByteLength === raw.source.byteLength, "Music receipt lost its exact request, returned bytes or normalization intent");
+        await source(value.source);
       } else if (row.kind === "audio_derivation_intent") {
         await audioIntent(value as AudioDerivationIntent);
       } else if (row.kind === "audio_derivation_receipt") {
@@ -534,7 +546,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
           assertOutputReceiptIdentity(value as OutputReceipt, attempt as Attempt);
       } else if ((CODEX_IMAGE_RECORD_KINDS as readonly string[]).includes(row.kind)) {
         fail(value.id === row.id && value.projectId === row.project_id && value.attemptId === row.id, "Native receipt row identity differs"); await codexImage.records(row.id);
-      } else if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule"].includes(row.kind)) {
+      } else if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule", "viggle_h3_submission_settlement"].includes(row.kind)) {
         fail(value.id === row.id && value.projectId === row.project_id
           && (row.kind === "viggle_h3_execution_observation" || row.id === value.attemptId), "Viggle receipt row identity differs");
         await viggle.records(value.attemptId);
@@ -547,12 +559,18 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       } else if (row.kind === "request_image_projection") {
         fail(Array.isArray(value.images), "Invalid saved image projection");
         for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/image-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);
+      } else if (row.kind === "request_attachment_projection") {
+        fail(Array.isArray(value.images) && value.images.length <= 8 && Array.isArray(value.attachments), "Invalid saved attachment projection");
+        for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/material-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);
       } else if (row.kind === "skill_activation") {
         for (const skill of value.activation?.skills ?? []) absoluteReference(skill.entryPath, skill.entrySha256);
       } else if (row.kind === "director_skill_lock") {
         fail(Array.isArray(value.lock?.skills), "Invalid saved skill lock");
         for (const skill of value.lock.skills) fail(files.has(`skill-snapshots/${skill.packageDigest}/SKILL.md`)
           || files.has(`native/${value.projectId}/workspace/.agents/skills/${skill.packageDigest}/SKILL.md`), "A locked skill snapshot is missing");
+        if (value.lock.schemaVersion === 2) { const release = value.lock.release?.releaseDigest;
+          fail(typeof release === "string" && (files.has(`skill-snapshots/${release}/release.json`)
+            || files.has(`native/${value.projectId}/workspace/.agents/skills/${release}/release.json`)), "A locked guidance release snapshot is missing"); }
       }
     }
     // Current canonical references must retain their owned artifact identity too.

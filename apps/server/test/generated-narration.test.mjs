@@ -2,10 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,unlinkSync} from 'node:fs';
 import {join} from 'node:path';
-import {projectFixture} from './execution-fixture.mjs';
 import {canonical,digest} from '@openslate/core';
 import {assertGeneratedCanonicalNarrationSegment,resolveGeneratedNarrationAudio} from '../dist/narration/generated-audio.js';
-import {generatedNarrationFixture,key,draft,rows,bodies,selection,acceptAll} from './generated-narration-fixture.mjs';
+import {generatedNarrationFixture,key,draft,rows,bodies,selection,acceptSelected} from './generated-narration-fixture.mjs';
 
 const protectedKinds=['grant','candidate','attempt','reservation','external_allowance','external_allowance_consumption','hold','approval','narration_acceptance','narration_canonical','plan'];
 const attach=(f,input=selection(f),actor=f.human,options={})=>f.narration.attachGeneratedAudio(f.project.id,actor,input,options);
@@ -18,7 +17,7 @@ test('explicit generated selection binds existing identity and only changes the 
  const acceptedRows=bodies(f,protectedKinds),result=await attach(f);assert.equal(result.segments[0].audio.id,f.artifact.id);assert.equal(result.segments[0].audio.media.artifactId,f.artifact.id);
  assert.deepEqual(result.segments[0].audio.media,f.source.source);assert.equal(result.segments[0].audio.originEvidence,'verified_generated_audio');assert.equal(Object.hasOwn(result.segments[0].audio,'declaredOrigin'),false);assert.equal(Object.hasOwn(result.segments[0].audio,'requestId'),false);
  assert.equal(result.segments[0].entry.scriptAcceptanceId,accepted);assert.equal(result.segments[0].entry.audioAcceptanceId,null);assert.equal(result.segments[0].entry.cueId,null);assert.deepEqual(result.segments[1],before.segments[1]);
- assert.deepEqual(result.segments[0].script.source,{kind:'generated',voice:null,profileRevisionId:null});assert.equal(result.readiness.gaps.some(x=>x.segmentId===before.segments[0].entry.segmentId&&x.category==='missing_voice_or_profile'),false);
+ assert.deepEqual(result.segments[0].script.source,{kind:'generated',voice:'coral',profileRevisionId:f.profile.revision});assert.equal(result.readiness.gaps.some(x=>x.segmentId===before.segments[0].entry.segmentId&&x.category==='missing_voice_or_profile'),false);
  assert.equal(bodies(f,protectedKinds),acceptedRows);assert.notEqual(protectedRows,acceptedRows);assert.equal(canonical(f.store.getProject(f.project.id)),project);assert.deepEqual(f.calls,f.initialCalls);
  const revision=rows(f,'narration_revision').at(-1);assert.equal(revision.requestId,f.human.requestId);assert.equal(rows(f,'narration_audio').length,1);
  assert.equal(f.store.readEvents(f.project.id,0).filter(e=>e.kind==='narration.generated_audio_attached').length,1);
@@ -42,11 +41,11 @@ test('lost-response replay after another saved edit needs no media and rejects c
 });
 
 test('old binding method cannot bypass generated selection even for a human or director actor',async t=>{
- const f=await generatedNarrationFixture(t);await attach(f);const other=f.view().segments[1];
+ const f=await generatedNarrationFixture(t);await attach(f);const other=f.view().segments[0];
  assert.throws(()=>f.narration.bindAudio(f.project.id,f.human,f.view().state.version,key(),other.entry.segmentId,f.artifact.id),{code:'NARRATION_GENERATED_ATTACHMENT_REQUIRED'});
  const actor=f.production.openEpoch(f.project.id,f.human).actor;
  assert.throws(()=>f.narration.bindAudio(f.project.id,actor,f.view().state.version,key(),other.entry.segmentId,f.artifact.id),{code:'NARRATION_GENERATED_ATTACHMENT_REQUIRED'});
- await assert.rejects(attach(f,selection(f,1),actor),{code:'ACTOR_DENIED'});
+ await assert.rejects(attach(f,selection(f),actor),{code:'ACTOR_DENIED'});
 });
 
 test('stale section, wrong source choice and changed frozen identities fail before media verification',async t=>{
@@ -87,7 +86,7 @@ test('Store rejects a generated recording whose pinned provenance changes',async
 });
 
 test('human acceptance and canonical application preserve generated artifact and provenance without relabeling',async t=>{
- const f=await generatedNarrationFixture(t);f.revise({remove:[f.view().segments[1].entry.segmentId]});await attach(f);await acceptAll(f);
+ const f=await generatedNarrationFixture(t);await attach(f);await acceptSelected(f);
  const original=canonical(f.store.get('artifact',f.artifact.id)),calls={...f.calls};const prepared=f.prepare(),receipt=await f.canonical.apply(f.project.id,f.human,prepared.id),saved=f.canonical.workspaceCurrent(f.project.id);
  assert.equal(saved.segments[0].provenance.originEvidence,'verified_generated_audio');assert.deepEqual(saved.segments[0].provenance.generation,f.view().segments[0].audio.generation);assert.equal(Object.hasOwn(saved.segments[0].provenance,'declaredOrigin'),false);
  assert.equal(canonical(f.store.get('artifact',f.artifact.id)),original);assert.equal(rows(f,'artifact').length,1);assert.deepEqual(f.calls,calls);assert.equal(saved.source,'generated');assert.deepEqual(await f.canonical.apply(f.project.id,f.human,prepared.id),receipt);
@@ -96,15 +95,13 @@ test('human acceptance and canonical application preserve generated artifact and
 });
 
 test('canonical prepare and apply revalidate retained generation evidence',async t=>{
- const f=await generatedNarrationFixture(t);f.revise({remove:[f.view().segments[1].entry.segmentId]});await attach(f);await acceptAll(f);const prepared=f.prepare(),before=canonical(f.store.getProject(f.project.id));
+ const f=await generatedNarrationFixture(t);await attach(f);await acceptSelected(f);const prepared=f.prepare(),before=canonical(f.store.getProject(f.project.id));
  f.store.db.prepare("DELETE FROM entities WHERE kind='speech_execution_dispatch' AND id=?").run(f.attempt.id);
  assert.throws(()=>f.prepare());await assert.rejects(f.canonical.apply(f.project.id,f.human,prepared.id));assert.equal(canonical(f.store.getProject(f.project.id)),before);assert.equal(rows(f,'narration_canonical').length,0);
 });
 
 test('generated canonical persistence reconstructs the exact saved cue and revision placement',async t=>{
- const f=await generatedNarrationFixture(t);f.revise({remove:[f.view().segments[1].entry.segmentId]});await attach(f);await acceptAll(f);
- // Choose a non-frame-aligned position so both relative duration and absolute end rounding matter.
- f.narration.placeSegments(f.project.id,f.human,f.view().state.version,key(),[{segmentId:f.view().segments[0].entry.segmentId,atSample:801}]);
+ const f=await generatedNarrationFixture(t);await attach(f);await acceptSelected(f);
  const prepared=f.prepare();await f.canonical.apply(f.project.id,f.human,prepared.id);const saved=f.canonical.workspaceCurrent(f.project.id),calls={...f.calls};
  for(const change of [
   c=>c.segments[0].cue.meaning='Different unapproved meaning',
@@ -124,7 +121,7 @@ test('generated canonical persistence reconstructs the exact saved cue and revis
 });
 
 test('generated canonical persistence requires the selected acceptance and its original human request evidence',async t=>{
- const f=await generatedNarrationFixture(t);f.revise({remove:[f.view().segments[1].entry.segmentId]});await attach(f);await acceptAll(f);
+ const f=await generatedNarrationFixture(t);await attach(f);await acceptSelected(f);
  const prepared=f.prepare();await f.canonical.apply(f.project.id,f.human,prepared.id);const saved=f.canonical.workspaceCurrent(f.project.id),acceptanceId=saved.segments[0].provenance.audioAcceptanceId;
  const row=f.store.db.prepare("SELECT body FROM entities WHERE kind='narration_acceptance' AND id=?").get(acceptanceId),accepted=JSON.parse(row.body);
  for(const changed of [{...accepted,requestId:'missing-human-acceptance-request'},{...accepted,principalId:'different-human'}]){
@@ -145,33 +142,21 @@ test('missing original generated PCM blocks a first selection even when normaliz
  await assert.rejects(attach(f,input));assert.equal(rows(f,'narration_audio').length,0);assert.deepEqual(readFileSync(f.artifact.path),artifact);assert.deepEqual(f.calls,f.initialCalls);
 });
 
-test('generated canonical selection preserves historical supplied bytes/provenance and unrelated shots',async t=>{
- const f=await generatedNarrationFixture(t),current=f.store.getProject(f.project.id),fixture=projectFixture(f.project.id,2);
- const seeded=f.store.saveProject({...current,revisionId:key(),brief:fixture.brief,story:fixture.story,scenes:fixture.scenes,shots:fixture.shots},current.headVersion);
- f.store.insert('project_revision',seeded.revisionId,f.project.id,{project:seeded});
- const raw=join(f.root,'execution-output','blobs',`${f.source.source.originalSha256}.blob`);
+test('generated canonical selection preserves supplied bytes, provenance and unrelated shots',async t=>{
+ const f=await generatedNarrationFixture(t),raw=join(f.root,'execution-output','blobs',`${f.source.source.originalSha256}.blob`);
  const uploaded=await f.narration.importAudio(f.project.id,f.human,{path:raw,declaredOrigin:'generated',key:key()});
  assert.deepEqual(Object.keys(uploaded).sort(),['id','projectId','media','declaredOrigin','requestId'].sort());
- for(const segment of f.view().segments)f.narration.bindAudio(f.project.id,f.human,f.view().state.version,key(),segment.entry.segmentId,uploaded.id);
- f.narration.placeSegments(f.project.id,f.human,f.view().state.version,key(),[{segmentId:f.view().segments[1].entry.segmentId,atSample:48000}]);await acceptAll(f);
- const legacyPrepared=f.prepare();await f.canonical.apply(f.project.id,f.human,legacyPrepared.id);const legacy=f.canonical.workspaceCurrent(f.project.id),legacyHash=digest(legacy),uploadHash=digest(uploaded),other=structuredClone(f.view().segments[1]),shots=canonical(f.store.getProject(f.project.id).shots);
- for(const segment of legacy.segments){const p=segment.provenance;assert.deepEqual(Object.keys(p).sort(),['audioId','declaredOrigin','originEvidence','scriptAcceptanceId','audioAcceptanceId','timingAcceptanceId','originalSha256','toolchainDigest'].sort());assert.equal(p.originEvidence,'human_declared_supplied_recording');assert.equal(p.declaredOrigin,'generated');}
- await attach(f);const first=f.view().segments[0];f.narration.recordHumanCue(f.project.id,f.human,f.view().state.version,key(),{segmentId:first.entry.segmentId,startSample:0,endSample:48000});
- f.narration.acceptAudio(f.project.id,f.human,f.view().state.version,key(),[{segmentRevisionId:first.script.id,audioId:f.artifact.id}]);f.narration.accept(f.project.id,f.human,f.view().state.version,key(),'timing',[f.view().segments[0].cue.id]);
- const prepared=f.prepare();await f.canonical.apply(f.project.id,f.human,prepared.id);const next=f.canonical.workspaceCurrent(f.project.id);
- assert.equal(next.segments[0].provenance.originEvidence,'verified_generated_audio');assert.deepEqual(next.segments[1].provenance,legacy.segments[1].provenance);assert.deepEqual(f.view().segments[1],other);
- assert.equal(digest(f.store.get('narration_audio',uploaded.id)),uploadHash);assert.equal(digest(f.store.get('narration_canonical',legacy.id)),legacyHash);assert.equal(canonical(f.store.getProject(f.project.id).shots),shots);assert.equal(f.store.get('artifact',f.artifact.id).origin,'generated_audio');
+ for(const index of [0,1]){f.selectShot(index);const row=f.view().segments[index];f.narration.bindAudio(f.project.id,f.human,f.view().state.version,key(),row.entry.segmentId,uploaded.id);await f.accept();}
+ f.selectShot(0);const historical=f.canonical.workspaceCurrent(f.project.id),historicalDigest=digest(historical),uploadedDigest=digest(uploaded),other=f.view().segments[1],shot=f.store.getProject(f.project.id).shots[1];
+ for(const segment of historical.segments){const provenance=segment.provenance;assert.deepEqual(Object.keys(provenance).sort(),['audioId','declaredOrigin','originEvidence','scriptAcceptanceId','audioAcceptanceId','timingAcceptanceId','originalSha256','toolchainDigest'].sort());assert.equal(provenance.originEvidence,'human_declared_supplied_recording');assert.equal(provenance.declaredOrigin,'generated');}
+ await attach(f);await f.accept();const next=f.canonical.workspaceCurrent(f.project.id);
+ assert.equal(next.segments[0].provenance.originEvidence,'verified_generated_audio');assert.deepEqual(next.segments.find(segment=>segment.segmentId===other.entry.segmentId),historical.segments.find(segment=>segment.segmentId===other.entry.segmentId));
+ assert.deepEqual(f.view().segments[1],other);assert.deepEqual(f.store.getProject(f.project.id).shots[1],shot);
+ assert.equal(digest(f.store.get('narration_audio',uploaded.id)),uploadedDigest);assert.equal(digest(f.store.get('narration_canonical',historical.id)),historicalDigest);assert.equal(f.store.get('artifact',f.artifact.id).origin,'generated_audio');
 });
 
 async function acceptedProjectShotNarration(t,endSample) {
- const f=await generatedNarrationFixture(t,{samples:24001}),current=f.store.getProject(f.project.id),shape=projectFixture(f.project.id,2);
- const project=f.store.saveProject({...current,...shape,capabilityLockId:current.capabilityLockId,activePlanId:null,shots:shape.shots.map((shot,index)=>({...shot,narration:{mode:index?'none':'generated',text:index?'':'Leather boots.',voice:'stock'},narrationPending:!index}))},current.headVersion);
- f.store.insert('project_revision',project.revisionId,project.id,{project});f.revise({remove:[f.view().segments[1].entry.segmentId]});await attach(f);
- const segment=f.view().segments[0];f.narration.recordHumanCue(project.id,f.human,f.view().state.version,key(),{segmentId:segment.entry.segmentId,startSample:0,endSample});
- f.narration.accept(project.id,f.human,f.view().state.version,key(),'script',[segment.script.id]);f.narration.acceptAudio(project.id,f.human,f.view().state.version,key(),[{segmentRevisionId:segment.script.id,audioId:f.artifact.id}]);
- f.narration.accept(project.id,f.human,f.view().state.version,key(),'timing',[f.view().segments[0].cue.id]);
- const prepared=f.canonical.prepare(project.id,f.human,{key:key(),expectedHeadVersion:f.store.getProject(project.id).headVersion,expectedNarrationVersion:f.view().state.version,segmentIds:[segment.entry.segmentId],shotRelativeSegmentIds:[segment.entry.segmentId],shotDurationMode:'preserve',shotMappings:[{shotId:'shot-0',segmentId:segment.entry.segmentId}]});
- await f.canonical.apply(project.id,f.human,prepared.id);return f;
+ const f=await generatedNarrationFixture(t,{samples:24001});await attach(f);await f.accept({endSample});return f;
 }
 test('generated canonical within-shot geometry preserves complete non-frame-aligned samples and rejects forged modes or coverage',async t=>{
  const f=await acceptedProjectShotNarration(t,48002),saved=f.canonical.workspaceCurrent(f.project.id),segment=saved.segments[0],selection={narrationRevisionId:saved.narrationRevisionId,narrationVersion:saved.narrationVersion};
@@ -199,4 +184,20 @@ test('verified generated streaming WAV retains raw provenance through attachment
  const {verifyGeneratedNarrationAudio}=await import('../dist/narration/generated-audio.js');
  await verifyGeneratedNarrationAudio(f.store,f.media,{artifactDir:join(f.root,'artifacts')},selected);
  assert.deepEqual(f.calls,before);
+});
+
+test('accepting another shot preserves frozen generated narration while its newer draft remains unfinished',async t=>{
+ const f=await generatedNarrationFixture(t);await attach(f);await f.accept();
+ const previous=f.canonical.workspaceCurrent(f.project.id),acceptedShot=f.store.getProject(f.project.id).shots[0],frozenEntry=f.store.get('narration_revision',previous.narrationRevisionId).state.entries[0];
+ f.revise({update:[{segmentId:f.view().segments[0].entry.segmentId,draft:draft('Unfinished replacement words.')}]});
+ const unfinished=f.view().segments[0];f.selectShot(1);await attach(f,selection(f,1));const accepted=await f.accept();
+ const next=f.canonical.workspaceCurrent(f.project.id),savedFirst=next.segments.find(segment=>segment.segmentId===frozenEntry.segmentId),selected=f.store.get('narration_revision',next.narrationRevisionId),live=f.store.get('narration_state',f.project.id);
+ assert.deepEqual(savedFirst,previous.segments[0]);assert.deepEqual(f.store.getProject(f.project.id).shots[0],acceptedShot);
+ assert.deepEqual(f.view().segments[0],unfinished);assert.equal(next.segments.length,2);assert.equal(next.script.includes('Unfinished replacement words.'),false);
+ assert.deepEqual(selected.state.entries.map(entry=>entry.segmentId),next.segments.map(segment=>segment.segmentId));
+ assert.deepEqual(selected.state.entries.find(entry=>entry.segmentId===frozenEntry.segmentId),frozenEntry);
+ assert.deepEqual(selected.state.entries.find(entry=>entry.segmentId!==frozenEntry.segmentId),f.view().segments[1].entry);
+ assert.equal(selected.state.version,next.narrationVersion);assert.notEqual(selected.id,live.revisionId);
+ const revisions=rows(f,'narration_revision');assert.deepEqual(await f.canonical.apply(f.project.id,f.human,accepted.receipt.preparedId),accepted.receipt);assert.deepEqual(rows(f,'narration_revision'),revisions);assert.deepEqual(f.store.get('narration_state',f.project.id),live);
+ assert.deepEqual(f.calls,f.initialCalls);
 });

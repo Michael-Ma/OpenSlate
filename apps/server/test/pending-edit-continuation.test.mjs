@@ -11,18 +11,18 @@ const active = f => f.store.list('hold', f.projectId).filter(h => h.active);
 test('one covering human message continues several selected edits, retaining unrelated holds and immutable attempts', async t => {
   const f = fixture(t), first = f.service.beginRequest(f.projectId, 'local-user', 'Change shot one', { scopeIds: ['shot-0'] });
   const oldEpoch = f.service.openEpoch(f.projectId, first);
-  const second = f.service.beginRequest(f.projectId, 'local-user', 'Refine its motion', { scopeIds: ['shot-0'] });
-  const unrelated = f.service.beginRequest(f.projectId, 'local-user', 'Separate second shot edit', { scopeIds: ['shot-1'] });
+  const second = f.service.beginRequest(f.projectId, 'local-user', 'Refine its motion', { scopeIds: ['shot-0'], concurrency: 'alongside' });
+  const unrelated = f.service.beginRequest(f.projectId, 'local-user', 'Separate second shot edit', { scopeIds: ['shot-1'], concurrency: 'alongside' });
   const review = f.service.pendingEditContinuation(f.projectId, 'local-user', ['shot-0']);
   assert.deepEqual(new Set(review.requestIds), new Set([first.requestId, second.requestId]));
   const before = { grants: f.store.list('grant', f.projectId), attempts: f.engine.attempts(f.projectId), project: f.store.getProject(f.projectId) };
-  const actor = f.service.beginRequest(f.projectId, 'local-user', 'Use a softer camera movement and continue these saved edits', { scopeIds: ['shot-0'], continueEdits: review, key: 'covering-message' });
+  const actor = f.service.beginRequest(f.projectId, 'local-user', 'Use a softer camera movement and continue these saved edits', { scopeIds: ['shot-0'], continueEdits: review, supersede: 'intersecting', key: 'covering-message' });
   assert.deepEqual(active(f).map(h => h.ownerId).sort(), [actor.requestId, unrelated.requestId].sort());
   assert.equal(f.store.get('epoch', oldEpoch.actor.epochId).state, 'revoked');
   const edges = f.store.list('request_continuation', f.projectId);
   assert.equal(edges.length, 2); assert.ok(edges.every(edge => edge.toRequestId === actor.requestId));
   assert.deepEqual(f.store.list('grant', f.projectId), before.grants); assert.deepEqual(f.engine.attempts(f.projectId), before.attempts); assert.deepEqual(f.store.getProject(f.projectId), before.project);
-  assert.deepEqual(f.service.beginRequest(f.projectId, 'local-user', 'Use a softer camera movement and continue these saved edits', { scopeIds: ['shot-0'], continueEdits: review, key: 'covering-message' }), actor);
+  assert.deepEqual(f.service.beginRequest(f.projectId, 'local-user', 'Use a softer camera movement and continue these saved edits', { scopeIds: ['shot-0'], continueEdits: review, supersede: 'intersecting', key: 'covering-message' }), actor);
   assert.equal(f.store.list('request_continuation', f.projectId).length, 2);
 });
 
@@ -39,7 +39,7 @@ test('continuation digest rejects stale hold changes before revoking the current
 
 test('partial owner coverage, another principal, duplicate IDs and read-only continuation cannot transfer authority', t => {
   const f = fixture(t), local = f.service.beginRequest(f.projectId, 'local-user', 'Both shots', { scopeIds: ['shot-0', 'shot-1'] });
-  const foreign = f.service.beginRequest(f.projectId, 'another-user', 'Private authority', { scopeIds: ['shot-0'] });
+  const foreign = f.service.beginRequest(f.projectId, 'another-user', 'Private authority', { scopeIds: ['shot-0'], concurrency: 'alongside' });
   assert.equal(f.service.pendingEditContinuation(f.projectId, 'local-user', ['shot-0']), null);
   const review = f.service.pendingEditContinuation(f.projectId, 'local-user', [f.projectId]);
   assert.deepEqual(review.requestIds, [local.requestId]);
@@ -71,17 +71,18 @@ test('linear continuation traversal includes only ancestors, handles duplicate/c
 });
 
 
-test('one fresh message resumes an observed Stop and transfers two held edits without new grants or duplicate continuation', t => {
-  const f = fixture(t), first = f.service.beginRequest(f.projectId, 'local-user', 'Edit first shot', { scopeIds: ['shot-0'] }), second = f.service.beginRequest(f.projectId, 'local-user', 'Edit second shot', { scopeIds: ['shot-1'] });
+test('Stop retires two unfinished owners and a fresh resume creates only its own holds without grants', t => {
+  const f = fixture(t), first = f.service.beginRequest(f.projectId, 'local-user', 'Edit first shot', { scopeIds: ['shot-0'] }), second = f.service.beginRequest(f.projectId, 'local-user', 'Edit second shot', { scopeIds: ['shot-1'], concurrency: 'alongside' });
   const stop = f.service.beginRequest(f.projectId, 'local-user', 'Stop conversation and generation', { editing: false, key: 'stop-request' });
   const before = { grants: f.store.list('grant', f.projectId), attempts: f.engine.attempts(f.projectId), project: f.store.getProject(f.projectId) };
-  f.service.control(f.projectId, stop, 'stop'); assert.equal(f.store.get('execution_control', f.projectId).paused, true); assert.equal(active(f).length, 2);
+  f.service.control(f.projectId, stop, 'stop'); assert.equal(f.store.get('execution_control', f.projectId).paused, true); assert.equal(active(f).length, 0);
+  assert.ok(f.store.list('hold', f.projectId).filter(hold => [first.requestId, second.requestId].includes(hold.ownerId)).every(hold => !hold.active));
   const options = { scopeIds: [f.projectId], resumeFromStopId: stop.requestId, key: 'resume-two-edits' };
   const resumed = f.service.beginRequest(f.projectId, 'local-user', 'Continue with the saved changes', options);
   assert.equal(f.store.get('execution_control', f.projectId).paused, false); assert.deepEqual(active(f).map(hold => hold.ownerId), [resumed.requestId]);
-  const edges = f.store.list('request_continuation', f.projectId); assert.deepEqual(new Set(edges.map(edge => edge.fromRequestId)), new Set([first.requestId, second.requestId])); assert.ok(edges.every(edge => edge.toRequestId === resumed.requestId));
+  assert.deepEqual(f.store.list('request_continuation', f.projectId), [], 'retired edits supply no resumed authority');
   assert.deepEqual(f.store.list('grant', f.projectId), before.grants); assert.deepEqual(f.engine.attempts(f.projectId), before.attempts); assert.deepEqual(f.store.getProject(f.projectId), before.project); assert.equal(f.provider.acceptedCount(), 0);
-  assert.deepEqual(f.service.beginRequest(f.projectId, 'local-user', 'Continue with the saved changes', options), resumed); assert.equal(f.store.list('request_continuation', f.projectId).length, 2);
+  assert.deepEqual(f.service.beginRequest(f.projectId, 'local-user', 'Continue with the saved changes', options), resumed); assert.equal(f.store.list('request_continuation', f.projectId).length, 0);
   const laterStop = f.service.beginRequest(f.projectId, 'local-user', 'Stop again', { editing: false }); f.service.control(f.projectId, laterStop, 'stop');
   f.service.beginRequest(f.projectId, 'local-user', 'Continue with the saved changes', options); assert.equal(f.store.get('execution_control', f.projectId).paused, true, 'replaying an old resume cannot undo a later Stop');
 });

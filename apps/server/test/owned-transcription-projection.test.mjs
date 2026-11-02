@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {renameSync,unlinkSync} from 'node:fs';
 import {join} from 'node:path';
-import {canonical,digest,DomainError,providerProfileArguments} from '@openslate/core';
+import {canonical,digest,DomainError} from '@openslate/core';
 import {OPENAI_TRANSCRIPTION_MODEL,registerExecutionProvider,validateOpenAITranscriptionOptions} from '@openslate/providers';
 import {Engine} from '../dist/execution/engine.js';
-import {DurableExternalAdmission} from '../dist/execution/durable-external-admission.js';
+import {ConfiguredExternalAdmission} from '../dist/execution/configured-external-admission.js';
 import {ExecutionOutputStore} from '../dist/execution/output-store.js';
 import {OpenAITranscriptionExecution} from '../dist/execution/openai-transcription-execution.js';
 import {TranscriptionAudioService} from '../dist/execution/transcription-audio-service.js';
@@ -13,7 +13,6 @@ import {TranscriptionAudioStore} from '../dist/media/transcription-audio-store.j
 import {SpoolTranscriptIngestor} from '../dist/execution/spool-transcript-ingestor.js';
 import {ExecutionIngestionRouter} from '../dist/execution/ingestion-router.js';
 import {EnvironmentMediaCredentials} from '../dist/application/provider-credentials.js';
-import {ExternalAllowanceService,allowanceIssueContextDigest} from '../dist/application/external-allowances.js';
 import {Store} from '../dist/persistence/store.js';
 import {createInstallationBackup} from '../dist/persistence/installation-backup.js';
 import {restoreInstallationBackup} from '../dist/persistence/installation-restore.js';
@@ -29,12 +28,9 @@ async function prepared(t,options={}){const f=await ownedTranscriptionFixture(t,
 async function apply(f){const actor=f.production.beginRequest(f.project.id,'human','Apply this exact saved recording proposal.',{continuationRequestId:f.proposal.requestId});
  return f.service.review(f.project.id,actor,{key:key(),proposalId:f.proposal.id,proposalDigest:digest(f.proposal)});}
 async function admit(f,applied){
- const review=f.store.get('owned_transcription_review',applied.reviewId),input={profileDigest:String(providerProfileArguments(f.profile).profileDigest),profileDefinitionDigest:digest(f.profile),
-  selections:[{candidateId:applied.candidateId,nodeId:review.nodeId,specDigest:review.specDigest}],maxAttempts:1,maxEstimatedMicros:'100',expiresAt:new Date(Date.now()+3600000).toISOString()};
- const actor=f.production.beginRequest(f.project.id,'spender','Approve one exact synthetic test attempt.',{editing:false,scopeIds:[f.project.id],contextDigest:allowanceIssueContextDigest(f.project.id,input)});
- new ExternalAllowanceService(f.store).issue(f.project.id,actor,input);let submits=0;
+ let submits=0;
  const provider=registerExecutionProvider({async submit(){submits++;return{type:'unknown',diagnostic:'private synthetic diagnostic never exposed'};},async lookup(){assert.fail('read view must never query provider');},async poll(){assert.fail('read view must never poll provider');}},{adapter:'openai-transcription',version:'1'});
- const engine=new Engine(f.store,provider,{artifactDir:f.artifactDir,profiles:f.profiles,externalAdmission:new DurableExternalAdmission(f.store,()=>{})});
+ const engine=new Engine(f.store,provider,{artifactDir:f.artifactDir,profiles:f.profiles,externalAdmission:new ConfiguredExternalAdmission(f.store,()=>{})});
  await engine.runReady(f.project.id);assert.equal(submits,1);return rows(f,'attempt').find(attempt=>attempt.candidateId===applied.candidateId);
 }
 function observeBodies(f,t){const original=f.store.db.prepare.bind(f.store.db),reads=[];
@@ -115,13 +111,15 @@ test('applied history remains visible after project and narration changes with a
  assert.equal(JSON.stringify(later).includes('private synthetic diagnostic'),false);
 });
 
-test('a newer proposal and job for the same recording cannot replace another proposal exact application status',async t=>{
- const f=await prepared(t),first=await apply(f),firstView=projectOwnedTranscriptionProposal(f.store,f.project.id,f.proposal.id),oldId=f.proposal.id;
+test('a newer proposal for the same recording cannot replace the exact original application job status',async t=>{
+ const f=await prepared(t),first=await apply(f),attempt=await admit(f,first),oldId=f.proposal.id;
+ const firstView=projectOwnedTranscriptionProposal(f.store,f.project.id,oldId);assert.equal(firstView.execution.attemptId,attempt.id);
  const actor=f.production.beginRequest(f.project.id,'human','Prepare another explicit transcription.');
  const second=await f.service.prepare(f.project.id,actor,f.input({language:'en'}));f.proposal=second;
- const fresh=await apply(f),attempt=await admit(f,fresh);const newer=projectOwnedTranscriptionProposal(f.store,f.project.id,second.id);
- assert.equal(newer.execution.attemptId,attempt.id);assert.equal(newer.execution.generationCandidateId,fresh.candidateId);
+ const fresh=await apply(f),newer=projectOwnedTranscriptionProposal(f.store,f.project.id,second.id);
+ assert.equal(newer.execution.state,'ready');assert.equal(newer.execution.attemptId,null);assert.equal(newer.execution.generationCandidateId,fresh.candidateId);
  assert.deepEqual(projectOwnedTranscriptionProposal(f.store,f.project.id,oldId),firstView);assert.equal(firstView.execution.generationCandidateId,first.candidateId);
+ assert.equal(rows(f,'attempt').length,1);assert.equal(rows(f,'reservation').length,1);
 });
 
 test('corrupt application or attempt metadata becomes explicitly unavailable without losing a verified application receipt',async t=>{
@@ -232,11 +230,8 @@ test('actual waiting proof and completed transcript project truthfully before an
  const bridge=new OpenAITranscriptionExecution({store:f.store,outputStore:outputs,preparation,credentials:new EnvironmentMediaCredentials(()=> 'synthetic-projection-test-key'),
   fetch:async()=>{calls.http++;return new Response(JSON.stringify({text:'Hello.',language:'english',duration:0.1,words:[{word:'Hello.',start:0,end:0.08}]}),{headers:{'content-type':'application/json'}});}});
  const engine=new Engine(f.store,bridge,{artifactDir:f.artifactDir,profiles:f.profiles,outputStore:outputs,submissionPreparation:bridge,
-  outputIngestor:new ExecutionIngestionRouter({transcription:new SpoolTranscriptIngestor(outputs,f.media,files,{artifactDir:f.artifactDir})}),externalAdmission:new DurableExternalAdmission(f.store,()=>{})});
- const input={profileDigest:String(providerProfileArguments(f.profile).profileDigest),profileDefinitionDigest:digest(f.profile),
-  selections:[{candidateId:applied.candidateId,nodeId:review.nodeId,specDigest:review.specDigest}],maxAttempts:1,maxEstimatedMicros:'100',expiresAt:new Date(Date.now()+3600000).toISOString()};
- const actor=f.production.beginRequest(f.project.id,'spender','Approve the exact synthetic projection fixture.',{editing:false,scopeIds:[f.project.id],contextDigest:allowanceIssueContextDigest(f.project.id,input)});
- new ExternalAllowanceService(f.store).issue(f.project.id,actor,input);await engine.runReady(f.project.id);
+  outputIngestor:new ExecutionIngestionRouter({transcription:new SpoolTranscriptIngestor(outputs,f.media,files,{artifactDir:f.artifactDir})}),externalAdmission:new ConfiguredExternalAdmission(f.store,()=>{})});
+ await engine.runReady(f.project.id);
  const waiting=rows(f,'attempt')[0];assert.equal(waiting.phase,'preparing');assert.equal(calls.http,0);
  const project=()=>projectOwnedTranscriptionProposal(f.store,f.project.id,f.proposal.id);assert.equal(project().execution.state,'preparing');assert.equal(project().execution.code,null);
  engine.setPaused(f.project.id,true,'human');assert.equal(project().execution.state,'preparing');assert.equal(project().execution.code,'EXECUTION_PAUSED');engine.setPaused(f.project.id,false,'human');

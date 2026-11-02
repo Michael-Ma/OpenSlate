@@ -8,6 +8,66 @@ The two production packages are `production` and `plan-authoring`. Each declares
 
 Legacy `skills/`, `skills/v2`, `skills/v3` and `skills/v4` are runtime compatibility inputs. Do not edit/delete old versions during prose cleanup. Current `skills/v5` has package version `5.0.0` and retains the `4.0.0` JSON tool contract. It describes configured-provider scene generation and requested audio without usage-approval steps. Package-content successors preserve historical digests instead of rewriting frozen snapshots.
 
+## Guidance releases (v8 and later)
+
+From guidance v8 a project locks a **release**, not two packages. `skills/v8/release.json` pins every package of the release with its digest; each package has a schema 2 manifest with a `role` (`core`, `type`, `craft`, `format`), `routes` (required on type packages, optional on format modifiers, never on core or craft), `requires` and `optional` (`{id, when}` with a closed `when` enum). Schema 1 manifests keep exactly their six fields, so V1–V7 bytes and digests never change.
+
+- `loadSkillRelease` validates pins and digests, one contract, a release version ≥ 8, a closed acyclic dependency graph (required chains at most two deep; craft requires craft; type requires craft or format; core requires nothing), and route coverage (the release `routes` table names one owner or `fallback` for every application film kind, and agrees with every manifest). It then snapshots each package and the release itself (`<snapshotRoot>/<releaseDigest>/release.json`).
+- A schema 2 lock adds `release: {version, releaseDigest}` and pins every release package. Schema 1 locks verify exactly as before.
+- `routeSkills(filmKind, release, conditions)` is pure: core, then the type package from `filmKindRouteKey` (a null or unshipped type package means the release fallback), its format packages, then the `requires` closure and optional packages whose condition holds. A schema 2 activation records the decision (inputs, digest, selected, reasons) and is recomputed from its inputs on activation.
+- Only the routed packages' `SKILL.md` and the release's `inject` core references go into the Director input; the context lists every locked package with its files. Everything else is read with `read_guidance {package, path?}` (7.0.0, free, read-only, any turn), which reads only packages in the conversation's own lock and records a `skill_read` (`via: "read_guidance"`). The allowance is per Director turn (one activation): at most 32 distinct files and 192 KiB; a repeat of a file already read that turn is recorded with `repeat: true` and is free up to 32 repeats. Past it, `GUIDANCE_READ_LIMIT` carries `{readFiles, maxFiles, readBytes, maxBytes, next}` and tells the Director to continue with what it has; the next message starts a fresh allowance. Codex enables only the routed entries.
+- Release `8.1.0` (contract `7.1.0`, `skills/v8.1.0`) is the latest row of `SHIPPED_DIRECTOR_RELEASES`, after `8.0.0` (`skills/v8`), `8.0.1` (`skills/v8.0.1`) and `8.0.2` (`skills/v8.0.2`): new films lock it, and fresh native turns upgrade any shipped identity, including all three 8.0.x releases, to it. Saved locks and already-bound epochs retain their original contract and guidance. `releaseDirectory` maps `N.0.0` to `skills/vN` and any later release to `skills/v<version>`. Word budgets in `release.json` are a CI check (`skillReleaseBudget`), not a runtime one; the shipped-release test also lints non-core packages for permission and decision calls.
+- Contract 7.0.0 adds `propose_visual_style`: a whole-film style card whose option the person picks; the pick saves that look as `project.visualStyle` with an internal, undoable storyboard command (see [the v8 UI contracts](../ai/ui-v8/contracts.md)).
+- Contract 7.1.0 adds the `record_notes` choice `remake_clip {shotIds}` for 1–4 distinct shots from one scene, each with a saved clip and ready keyframe. The Director offers the choice; only a human press starts the existing scene-video confirmation path. It keeps the approved keyframe and crop, reuses saved motion, video prompt, duration and voice, and retains the old clip as current until a successful replacement. `regenerate_keyframe` requests a new frame. On 7.1.0, `confirm_video` is only for clips still to make: a fully saved scene is refused with `SCENE_VIDEO_SAVED` and recovery directs the Director to `remake_clip` for the named shots. The 7.0.0 catalog, digest and note behavior remain frozen.
+
+## Release automation and alignment
+
+Use `pnpm skills:draft` → edit `skills/next/**` → `pnpm skills:release --note "..."` → `pnpm skills:check`. Drafting copies the latest validated shipped release and refuses an existing draft. Authors do not maintain versions or hashes manually. Releasing increments the latest row's version (patch by default, `--minor` or `--major` otherwise), compares package bytes while ignoring only the manifest version value, and uses the loader's existing digest implementation. A changed package gets the new release version; an unchanged package retains its previous version, exact manifest and digest, even across release majors. A release-metadata-only change does not bump packages. `--contract x.y.z` selects a supported release tool contract and updates every package's compatibility before comparison.
+
+The pure planner lives in `packages/director/src/skills/releasing.ts`; filesystem staging, validation, exclusive command locking, publication and rollback live in `scripts/lib/skill-releases.mjs`. The script appends to `skills/shipped-releases.json` without rewriting earlier rows. At server startup the JSON is strictly parsed, schema-checked, checked for unique increasing stable versions, and frozen; malformed identities fail closed. Handler identities are reproduced with `toolCatalog(contract).digest`. The legacy `SHIPPED_DIRECTOR_GUIDANCE` table is unchanged.
+
+Release 8.0.2 is the one recorded version-only repair (`--realign`, `realign: true` in its row). The four packages changed in 8.0.1 now use version 8.0.1; the other eighteen retain 8.0.0. Instruction bytes are unchanged from 8.0.1, and both earlier shipped directories are untouched. The flag requires that exact successor and historical content, so it cannot bypass ordinary no-change refusals later. Already-bound epochs keep their old lock; new projects and eligible fresh native turns use the latest row.
+
+Release 8.1.0 was generated with `pnpm skills:draft`, edits in `skills/next`, then `pnpm skills:release --minor --contract 7.1.0`. Production, plan-authoring, continuity/comedy review and the social-film flow distinguish missing clips, saved-clip remakes and new frames. Selecting the new contract updates every package's compatibility, so all 22 package versions become 8.1.0; historical 8.0.x package bytes, release rows and digests are unchanged.
+
+`pnpm skills:check` and its `pnpm test` test file verify all shipped release/package digests, alignment history, unique rows, directories and the shared `releaseDirectory` resolver. They also construct a lock with the exact production stage-prompt inventory used at runtime, enforce every release's word budgets and retain the non-core permission/decision lint. Temporary snapshots are disposed after checking. A leftover `skills/next/` fails the gate; `OPENSLATE_SKILLS_DRAFT=1` permits local checks during authoring and is named in their output. Unregistered successor directories also fail, exposing interrupted publication rather than overwriting its outcome.
+
+Parallel authors each work in their own worktree on `skills/next`. Whoever merges second drafts from the merged latest row, reapplies edits and re-runs `skills:release`, producing a fresh successor instead of colliding with the first release. See [the authoring workflow](../../skills/README.md#author-and-release-guidance) for command details and recovery after an interrupted command.
+
+## Experimental code mode
+
+`skills/code-plan` is a separate schema 1 instruction package, version `2.0.0`, outside the `skills/v<N>...` release automation.
+Its content digest is pinned as `CODE_PLAN_GUIDANCE_DIGEST`. Its environment binds only the selected runtime and independent
+`code-plan-tools@2` catalog handler; graph recipes, stages, routed releases and graph upgrade targets are not part of this lock.
+The loader accepts bounded non-executable `.ts` references under `references/`, including `studio.d.ts` and `example-plan.ts`.
+They are verified and injected as text, never evaluated by the instruction loader.
+
+Code contracts `0.1.0` and `0.2.0` are deliberately absent from `SUPPORTED_TOOL_CONTRACTS` and `RELEASED_TOOL_CONTRACTS`; graph-version
+comparisons return false for code mode. Existing graph descriptor bytes and digests remain unchanged.
+
+| Code-only tool | Responsibility |
+|---|---|
+| `read_film {}` | Return `CodePlanView` plus `source: string \| null` for its current version |
+| `submit_plan {source, basedOnVersion, summary}` | Submit the complete program as author `director`, using the durable invocation ID; return `{version, diff}` |
+| `set_spend_limit {ceilingMicros, quote}` | 0.2.0: raise or lower this film's limit using quoted human consent; return view and receipt |
+| `retry_step {stepKey, quote}` | 0.2.0: schedule another attempt for a reached retryable failure, retaining earlier liability; return view and receipt |
+
+New code-film locks use `0.2.0`. Existing `0.1.0` locks retain the exact two-tool catalog, `code-plan-tools@1` handler and original package digest; `skills/code-plan-v1` archives the immutable package for runtime-selection changes or snapshot recreation. Code-film settings report the saved catalog instead of silently upgrading it. Graph descriptor bytes/digests are unchanged.
+
+The two new tools require an active editable epoch in a turn started by the person's own message. The nonempty quote must be a whitespace-normalized substring of that original message; automatic repair/failure turns and wrong quotes return CODE_PLAN_PERSON_CONSENT_REQUIRED or CODE_PLAN_CONSENT_QUOTE. There is no chat-specific spend cap; ordinary nonnegative SQLite integer money bounds still apply. A limit below existing liability is refused with the component numbers. Accepted changes persist a domain receipt and a Director thread message; lost tool replies reconcile the receipt without reapplying the mutation. A request-specific hold can defer actual retry dispatch until the turn ends. Programs only have ctx: they can ask a cost-bearing retry/skip choice, then repeat a media call with a stable variant, and cannot invoke retry_step.
+
+Guidance explains failures in plain words, possible spending and safe/consent/none retry meaning. It shows the in-program choice/variant pattern and vertical aspectRatio use. Automatic safe retries are bounded at two per step and survive restart. Unresolved submissions are never blindly retried.
+
+Source is limited to 256 KiB of UTF-8 and summary to 500 characters. `basedOnVersion` is the current integer version, or null
+before the first plan. `CODE_PLAN_REJECTED` retains `details.diff` through transport/refusal replay; stale versions return
+`REVISION_CONFLICT`. Submission recovery uses the port's same-ID replay guarantee. The host-scoped port registration also
+serves fake Director and supervisor tool services constructed without options.
+
+The package documents every `ctx` call, replay by media input identity, deliberate duplicate `variant`s, stable choice IDs,
+unchanged prompt bytes, awaited effects, failure-result branches, and the absence of secrets, paths and external capabilities.
+It describes installed real models and measured local rendering, with explicit fake models/rendering for demo projects. See the
+[code-plan design](../ai/code-plan/DESIGN.md) and [Director runtime](DIRECTOR-RUNTIME.md#experimental-code-plan-director).
+
 ## Model-facing tools
 
 | Tool | Responsibility |

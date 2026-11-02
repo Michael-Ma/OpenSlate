@@ -220,3 +220,91 @@ test('already-aborted known-job polling is local-only, while a safe reported see
  const controller=new AbortController();controller.abort();const stopped=await p.poll('vid_123abc',{signal:controller.signal});unknown(stopped);assert.equal(stopped.error.code,'VIGGLE_H3_CALL_ABORTED');assert.equal(calls,0);
  const result=await p.poll('vid_123abc');assert.equal(result.kind,'completed');assert.equal(result.reported.seed,Number.MAX_SAFE_INTEGER);assert.equal(calls,1);
 });
+
+test('reference multipart preserves ordered uncropped images, no frame fields and explicit enhance=false',async()=>{
+ const request={...base(),durationSeconds:6,resolution:'768p',aspectRatio:'9:16',references:[image(),image(90)],enhance:false};
+ const d=describeViggleH3Request(request);assert.equal(d.mode,'reference');assert.equal(d.enhance,false);
+ assert.notEqual(d.requestDigest,describeViggleH3Request({...request,references:[...request.references].reverse()}).requestDigest);
+ const p=new ViggleH3Provider({apiKey:key,fetch:async(url,init)=>{
+  const form=await new Request(url,{method:'POST',headers:init.headers,body:init.body}).formData();
+  assert.equal(form.get('enhance'),'false');assert.equal(form.has('first_frame_image'),false);assert.equal(form.has('last_frame_image'),false);
+  const images=form.getAll('reference_image');assert.equal(images.length,2);
+  for(let i=0;i<images.length;i++)assert.deepEqual(Buffer.from(await images[i].arrayBuffer()),request.references[i].bytes);
+  return accepted();
+ }});
+ assert.equal((await p.submit(request)).kind,'accepted');
+ for(const patch of [{firstFrame:image()},{lastFrame:image()},{references:[]},{references:Array(5).fill(image())},{durationSeconds:4.9},{enhance:'false'}])
+  assert.throws(()=>describeViggleH3Request({...request,...patch}),ViggleH3ValidationError);
+ const {requestDigest,bodySha256,bodyByteLength,...metadata}=d;
+ assert.equal(viggleH3MetadataDigest(request.prompt,metadata),requestDigest);
+ assert.notEqual(describeViggleH3Request({...request,enhance:true}).requestDigest,requestDigest);
+ const large={...image(),byteLength:20*1024*1024+1};
+ assert.throws(()=>viggleH3MetadataDigest(request.prompt,{...metadata,references:[large]}));
+});
+
+test('complete published Viggle price table and fractional-second rounding',async()=>{
+ const {vigglePriceMicros}=await import('../dist/index.js');
+ const expected={text:[[10,15,25,30,50],[10,15,25,30,50]],first_frame:[[20,25,35,40,60],[10,15,25,30,50]],
+  first_last_frame:[[25,30,40,45,65],[15,25,30,35,55]],reference:[[35,45,50,55,75],[15,25,30,35,55]]};
+ for(const [mode,rates]of Object.entries(expected))for(const [i,resolution]of ['480p','768p','1080p','2k','4k'].entries())for(const [j,enhance]of [true,false].entries())
+  assert.equal(vigglePriceMicros({mode,resolution,enhance,durationSeconds:6}),String(6*rates[j][i]*2000));
+ for(const [mode,price]of Object.entries({reference:'300000',first_frame:'180000',first_last_frame:'300000',text:'180000'}))
+  assert.equal(vigglePriceMicros({mode,resolution:'768p',enhance:false,durationSeconds:6}),price);
+ assert.equal(vigglePriceMicros({mode:'reference',resolution:'768p',enhance:false,durationSeconds:5.01}),'300000');
+ assert.equal(vigglePriceMicros({mode:'first_frame',resolution:'768p',durationSeconds:6}),'300000','omitted enhance preserves vendor default');
+ for(const patch of [{mode:'invalid'},{durationSeconds:NaN},{durationSeconds:16},{resolution:'720p'}])
+  assert.throws(()=>vigglePriceMicros({mode:'text',resolution:'768p',durationSeconds:6,...patch}));
+});
+
+test('historical first-frame digests omit new fields and retain the original semantic encoding',()=>{
+ const request={...base(),firstFrame:image()},d=describeViggleH3Request(request);
+ const original={adapterVersion:'1',model:'MiniMax-H3',mode:'first_frame',prompt:request.prompt,quality:request.quality,durationSeconds:3,
+  resolution:'480p',aspectRatio:'16:9',watermark:false,firstFrame:{sha256:request.firstFrame.sha256,byteLength:request.firstFrame.byteLength,width:1,height:1,mediaType:'image/png'}};
+ assert.equal(d.requestDigest,sha(JSON.stringify(original)));assert.ok(!Object.hasOwn(d,'enhance'));assert.ok(!Object.hasOwn(d,'references'));
+ assert.notEqual(describeViggleH3Request({...request,enhance:false}).requestDigest,d.requestDigest);
+});
+
+test('listVideos uses bounded authenticated call parsing and retains only task identity and UTC creation time', async () => {
+ let calls=0;
+ const p=new ViggleH3Provider({apiKey:key,fetch:async(url,init)=>{
+  calls++;assert.equal(url,'https://apis.viggle.ai/v1/videos?limit=12');assert.equal(init.method,'GET');assert.equal(init.body,undefined);
+  assert.equal(init.redirect,'manual');assert.equal(init.headers.Authorization,`Bearer ${key}`);
+  return json({has_more:true,items:[{id:'vid_new',created_at:'2026-11-01T10:00:00Z',status:'queued',secret:'ignore'},
+   {id:'vid_old',created_at:'2026-11-01T09:00:00Z'}],unrecognized:'ignore'});
+ }});
+ assert.deepEqual(await p.listVideos(12),{kind:'listed',hasMore:true,items:[{id:'vid_new',createdAt:'2026-11-01T10:00:00Z'},
+  {id:'vid_old',createdAt:'2026-11-01T09:00:00Z'}],receipt:{httpStatus:200,requestId:'req_trace'}});
+ for(const limit of [0,-1,101,1.5,'12',null])unknown(await p.listVideos(limit));assert.equal(calls,1);
+});
+
+test('malformed or failed list answers never become empty evidence and cancellation never calls the wire', async () => {
+ const item={id:'vid_listed',created_at:'2026-11-01T10:00:00Z'};
+ const bad=[{},[],{has_more:'false',items:[]},{has_more:false},{has_more:true,items:[]},
+  ...[{...item,id:'wrong_id'},{...item,id:'vid_'+key},{...item,created_at:null},{...item,created_at:'2026-02-30T10:00:00Z'},
+   {...item,created_at:'2026-11-01T10:00:00.000Z'}].map(value=>({has_more:false,items:[value]})),
+  {has_more:false,items:[item,item]}, {has_more:false,items:[{...item,created_at:'2026-11-01T09:00:00Z'},{...item,id:'vid_newer'}]},
+  {has_more:false,items:Array.from({length:13},(_,i)=>({...item,id:`vid_${i}`}))}];
+ for(const body of bad){const p=new ViggleH3Provider({apiKey:key,fetch:async()=>json(body)});unknown(await p.listVideos(12));}
+ for(const response of [()=>json({has_more:false,items:[]},500),()=>new Response('{}',{status:302,headers:{'content-type':'application/json'}}),
+  ()=>new Response('{',{headers:{'content-type':'application/json'}})]){
+  const p=new ViggleH3Provider({apiKey:key,fetch:async()=>response()});unknown(await p.listVideos(12));
+ }
+ let calls=0;const controller=new AbortController();controller.abort();
+ const p=new ViggleH3Provider({apiKey:key,fetch:async()=>{calls++;return json({has_more:false,items:[]});}});
+ unknown(await p.listVideos(12,{signal:controller.signal}));assert.equal(calls,0);
+ assert.deepEqual((await p.listVideos(12)).items,[]);
+});
+
+test('no-status diagnostics allow only error/cause tokens and never invoke error getters or retain messages', async () => {
+ const cause=Object.assign(new Error('private cause '+key),{code:'ECONNRESET',syscall:'read'});
+ const error=new TypeError('private message https://private.invalid '+key,{cause});
+ const p=new ViggleH3Provider({apiKey:key,fetch:async()=>{throw error;}}),result=await p.submit(base());
+ assert.deepEqual(result.error,{code:'VIGGLE_H3_TRANSPORT_OR_RESPONSE_LOSS',category:'protocol',errorName:'TypeError',causeCode:'ECONNRESET',causeName:'Error',causeSyscall:'read'});
+ assert.equal(JSON.stringify(result).includes('private'),false);assert.equal(JSON.stringify(result).includes(key),false);
+ let getters=0;const unsafe={name:'https://private.invalid',cause:{name:key,code:'has spaces',syscall:'read\nsecret'}};
+ const q=new ViggleH3Provider({apiKey:key,fetch:async()=>{throw unsafe;}});
+ assert.deepEqual((await q.submit(base())).error,{code:'VIGGLE_H3_TRANSPORT_OR_RESPONSE_LOSS',category:'protocol'});
+ const trapped=Object.defineProperty({},'name',{get(){getters++;throw Error('must not run');}});
+ Object.defineProperty(trapped,'cause',{get(){getters++;throw Error('must not run');}});
+ const r=new ViggleH3Provider({apiKey:key,fetch:async()=>{throw trapped;}});unknown(await r.submit(base()));assert.equal(getters,0);
+});

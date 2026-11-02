@@ -91,3 +91,12 @@ test('interrupted SQL publication reuses its allocated owned identity, and impor
   const before = f.store.getProject(f.project.id); editStoryboard(f.production, f.project.id, { expectedHeadVersion: before.headVersion, kind: 'soundtrack', field: 'audioId', value: intent.audioId }, randomUUID());
   assert.equal(f.store.getProject(f.project.id).soundtrack.audioId, intent.audioId); assert.equal(f.store.getProject(f.project.id).headVersion, before.headVersion + 1);
 });
+
+test('audio role is stored, filtered before paging, and included in the exact upload identity',async t=>{
+ const f=await fixture(t);
+ const music=await f.request('/uploads?name=Score.wav&role=music',bytes,'score');assert.equal(music.statusCode,200,music.body);assert.equal(music.json().recording.role,'music');
+ const voice=await f.request('/uploads?name=Voice.wav&role=voice',bytes,'voice');assert.equal(voice.statusCode,200,voice.body);
+ assert.equal((await f.request('?role=music')).json().coverage.total,1);assert.equal((await f.request('?role=voice')).json().recordings[0].id,voice.json().recording.id);assert.equal((await f.request('?role=upload')).json().coverage.total,0);
+ assert.equal((await f.request('/uploads?name=Score.wav&role=voice',bytes,'score')).json().error.code,'IDEMPOTENCY_CONFLICT');
+ assert.equal((await f.request('?role=clip')).statusCode,400);assert.equal(f.store.get('narration_audio',music.json().recording.id).role,'music');
+});
