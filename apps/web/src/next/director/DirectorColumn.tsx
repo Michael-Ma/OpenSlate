@@ -32,10 +32,10 @@ export function DirectorColumn() {
   const view = useStudio(shownView);
   const hasFilm = useStudio(directorHasFilm);
   const scene = overview ? currentScene(overview, sceneId) : null;
-  // A code-plan film: its run under the header, and the choices its plan asked at the foot of the thread.
+  // A code-plan film: its run under the header, and the choices its plan asked, each in the reply that asked it.
   const codePlan = useCodePlan();
   const choices = useCodePlanChoices();
-  const timed = useMemo(() => choices.answered.map((card) => ({ key: `choice:${card.choiceId}:${card.optionsDigest}`, at: card.answeredAt, node: <CodePlanChoiceGroup cards={[card]} /> })), [choices.answered]);
+  const timed = useMemo(() => choices.map((card) => ({ key: `choice:${card.choiceId}:${card.optionsDigest}`, at: card.at, waiting: !card.answered && !card.stale, node: <CodePlanChoiceGroup cards={[card]} /> })), [choices]);
   const draft = useComposerDraft();
   const uploads = useComposerUploads();
   // Files dragged over the column: the whole column takes them, with a quiet outline while they hover.
@@ -70,7 +70,7 @@ export function DirectorColumn() {
           {codePlan.enabled ? (
             <>
               <CodePlanRunStrip />
-              <Thread extra={<CodePlanChoiceGroup cards={choices.pending} />} extraCount={choices.count} timed={timed} />
+              <Thread extraCount={choices.length} timed={timed} />
             </>
           ) : <Thread />}
         </>

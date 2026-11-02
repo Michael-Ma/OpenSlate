@@ -18,6 +18,7 @@ import type { FixtureRoute } from "./types.ts";
  * `?codeplan=` opens "Harbour lights" first (the studio lists it before The Last Ferry):
  * - `waiting` (also `on`): version 2 waits on the opening keyframe, three thumbnails; version 1's frames are history.
  * - `confirm`: the same point, as `ctx.keyframe` asks it: one keyframe to confirm, with the ways the clip can use it.
+ * - `retired`: as `confirm`, later: the conversation moved on past the waiting card, and version 1's card has retired.
  * - `budget`: both frames chosen; 1.2's clip would pass the $1 ceiling, so the run is paused (Raise the limit).
  * - `error`: version 3 threw after the first clip; the error is shown and the run stopped.
  * - `done`: everything made, the render plays in Film.
@@ -29,7 +30,7 @@ import type { FixtureRoute } from "./types.ts";
  * the Director move the run on, as the server would. The Last Ferry (a graph film) refuses these routes.
  */
 
-export type CodePlanPreset = "waiting" | "confirm" | "budget" | "error" | "done" | "cropped" | "failed" | "empty";
+export type CodePlanPreset = "waiting" | "confirm" | "retired" | "budget" | "error" | "done" | "cropped" | "failed" | "empty";
 export const CODE_FILM_ID = "harbour-code";
 export const CODE_FILM_NAME = "Harbour lights";
 /** Simulated provider time for one stage of the run. */
@@ -40,7 +41,7 @@ export function codePlanPreset(): CodePlanPreset | null {
   try { value = new URLSearchParams(globalThis.location?.search ?? "").get("codeplan"); } catch { return null; }
   if (value === null) return null;
   if (value === "" || value === "on") return "waiting";
-  return (["waiting", "confirm", "budget", "error", "done", "cropped", "failed", "empty"] as const).find((preset) => preset === value) ?? "waiting";
+  return (["waiting", "confirm", "retired", "budget", "error", "done", "cropped", "failed", "empty"] as const).find((preset) => preset === value) ?? "waiting";
 }
 
 // ---- the story's pieces ------------------------------------------------------------------------
@@ -73,6 +74,8 @@ interface CodeFilm {
   cropped?: boolean;
   /** The opening keyframe is asked as `ctx.keyframe` asks it. */
   confirm?: boolean;
+  /** The conversation moved on past that card, and version 1's card retired when version 2 changed the shot. */
+  retired?: boolean;
   stage: Stage;
   /** The versions written so far (newest first) and the one in use. */
   versions: CodePlanVersionItem[];
@@ -169,14 +172,15 @@ function addVersion(film: CodeFilm, draft: Draft, at: [number, number] | null = 
   film.current = version;
 }
 
-const PRESET_STAGE: Record<CodePlanPreset, Stage> = { waiting: "waiting", confirm: "waiting", budget: "budget", error: "error", done: "done", cropped: "done", failed: "clip_failed", empty: "empty" };
+const PRESET_STAGE: Record<CodePlanPreset, Stage> = { waiting: "waiting", confirm: "waiting", retired: "waiting", budget: "budget", error: "error", done: "done", cropped: "done", failed: "clip_failed", empty: "empty" };
 
 function newFilm(preset: CodePlanPreset): CodeFilm {
   const film: CodeFilm = { stage: PRESET_STAGE[preset], versions: [], sources: new Map(), current: null, history: preset !== "empty", ceilingMicros: preset === "done" || preset === "cropped" || preset === "failed" ? "2000000" : "1000000", pickOpen: 0, pickPier: 1, held: false, stamps: new Map(), pierAttempts: 1 };
   if (preset !== "empty") { addVersion(film, "terminal", [10, 31]); addVersion(film, "harbour", [10, 36]); }
   if (preset === "error") addVersion(film, "bug", [10, 41]);
   film.cropped = preset === "cropped";
-  film.confirm = preset === "confirm";
+  film.confirm = preset === "confirm" || preset === "retired";
+  film.retired = preset === "retired";
   return film;
 }
 
@@ -222,7 +226,8 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
     if (film.confirm) {
       const options = VIDEO_INPUTS.map(([keyframeInput, priceMicros]) => ({ ...FRAMES.open[0]!, keyframeInput, references: [FRAMES.terminal[0]!], priceMicros }));
       const pick = ONE_CHOSEN.includes(stage) ? options[film.pickOpen] : undefined;
-      choices.push({ choiceId: "frame-1.1", optionsDigest: hex("frame-1.1:confirm"), question: "The harbour at dusk", options, ...(pick ? { answer: pick, answeredAt: todayAt(10, 38) } : {}) });
+      choices.push({ choiceId: "frame-1.1", optionsDigest: hex("frame-1.1:confirm"), question: "The harbour at dusk", options, ...(film.retired ? { askedAt: todayAt(10, 37) } : {}), ...(pick ? { answer: pick, answeredAt: todayAt(10, 38) } : {}) });
+      if (film.retired) choices.push({ choiceId: "frame-1.1", optionsDigest: hex("frame-1.1:terminal"), question: "The terminal at night", options: VIDEO_INPUTS.map(([keyframeInput, priceMicros]) => ({ ...FRAMES.terminal[0]!, keyframeInput, references: [], priceMicros })), askedAt: todayAt(10, 32), stale: true });
     } else choice("frame-1.1", FRAMES.open, ONE_CHOSEN.includes(stage) ? film.pickOpen : null, [10, 38]);
   }
   if (PIER_FRAMES.includes(stage) && stage !== "making_1_2" && stage !== "fixed_making") choice("frame-1.2", FRAMES.pier, PIER_CHOSEN.includes(stage) ? film.pickPier : null, [10, 39]);
@@ -340,6 +345,10 @@ export function codeFilmData(projectId: string, name: string, preset: CodePlanPr
     say("m1-reply", "assistant", "I wrote the plan as code: one scene, two shots, three frames for each. Pick the frames in the cards below.", [10, 31]),
     say("m2", "user", "Open on the harbour at dawn instead, with fog. And push in slowly on Mara.", [10, 35]),
     say("m2-reply", "assistant", "Changed 1.1 to the harbour at dawn and 1.2 to a slow push-in. Three new frames for 1.1 are ready; the earlier ones stay in Keyframes as history.", [10, 36]),
+    ...(preset === "retired" ? [
+      say("m3", "user", "Before I confirm: what other openings could work?", [10, 40]),
+      say("m3-reply", "assistant", "Three that would work: the empty ticket booth, Mara's hands on the rail, or the ferry's lights far out. The card above is still yours to confirm.", [10, 41]),
+    ] : []),
     ...(preset === "error" ? [
       say("m3", "user", "Use the frame I picked for 1.1 in 1.2 as well.", [10, 40]),
       say("m3-reply", "assistant", "Done in version 3: 1.2 now starts from the frame chosen for 1.1.", [10, 41]),
@@ -408,7 +417,9 @@ export const codePlanRoutes: FixtureRoute[] = [
     handle(world, [id], body) {
       const film = filmOf(world, id);
       const input = asObject(body);
-      const pending = viewOf(film, id!).choices.find((choice) => choice.answer === undefined && choice.choiceId === input.choiceId);
+      const rows = viewOf(film, id!).choices.filter((choice) => choice.choiceId === input.choiceId);
+      if (rows.some((choice) => choice.stale && choice.optionsDigest === input.optionsDigest)) throw new ApiError("CODE_PLAN_CHOICE_STALE", 409);
+      const pending = rows.find((choice) => choice.answer === undefined);
       if (!pending || pending.optionsDigest !== input.optionsDigest) throw new ApiError("CODE_PLAN_CHOICE", 409);
       const index = pending.options.findIndex((option) => canonicalJson(option) === canonicalJson(input.answer));
       if (index < 0) throw new ApiError("VALIDATION_ERROR", 400);

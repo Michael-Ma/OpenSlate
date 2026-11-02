@@ -90,6 +90,19 @@ test('a confirmed keyframe keeps the picture and says how the clip used it', asy
   assert.doesNotMatch(html, /tell the Director/);
 });
 
+test('a retired card is one quiet line: its picture still opens, and nothing can be chosen', async () => {
+  const { CodePlanChoiceCard } = await choiceCards({ locale: 'zh-CN' });
+  const card = choiceCard(keyframe({ askedAt: '2026-10-29T10:37:00Z', stale: true }));
+  const html = renderToStaticMarkup(React.createElement(CodePlanChoiceCard, { card }));
+  assert.match(html, /class="cp-choice retired"[^>]*data-stale="true"/);
+  assert.match(html, /已失效：它依赖的内容改了/);
+  assert.match(html, /The harbour at dusk/);
+  assert.match(html, /data-act="code-plan-retired-look"/);
+  assert.match(html, /data-artifact="kf"/);
+  assert.doesNotMatch(html, /data-act="code-plan-choose"/);
+  assert.doesNotMatch(html, /tell the Director|告诉导演/);
+});
+
 test('a keyframe made without references is not offered as "and references"', async () => {
   const { CodePlanChoiceCard } = await choiceCards();
   const card = choiceCard(keyframe({ options: [{ ...ref('kf'), keyframeInput: 'keyframe_and_references', references: [], priceMicros: '400000' }] }));
