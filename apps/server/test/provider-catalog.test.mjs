@@ -384,6 +384,31 @@ const viggle = () => ({ label: "Viggle H3", profile: { id: "viggle-h3-pinned", r
   configuration: { model: "MiniMax-H3", settings: { quality: "low", resolution: "480p", aspectRatio: "16:9" } },
   maxConcurrency: 1, unitCostMicros: "900000", maxRetries: 0, minFrames: 90, maxFrames: 450 } });
 
+test("provider and model-settings routes expose second pricing without changing locks, estimates or stored money", async t => {
+  const config = configuration(viggle(), video(), image()), f = fixture(t, config);
+  const catalog = f.catalogs({ configuration: config, enabledExecutions: [{ adapter: "viggle-h3", version: "1" }] });
+  const app = f.appFor(catalog), project = f.service.createProject("Pricing reads", catalog.select(catalog.digest, [viggle().profile.id]));
+  const before = f.store.db.prepare("SELECT kind,id,body FROM entities ORDER BY kind,id").all(), savedLock = structuredClone(lock(f, project)), beforeDigest = catalog.digest;
+  const rows = [];
+  for (const [url, field] of [["/api/providers", "profiles"], [`/api/projects/${project.id}/settings/models`, "options"]]) {
+    const response = await f.req("GET", url, undefined, randomUUID(), app);
+    assert.equal(response.statusCode, 200, response.body);
+    const options = response.json()[field], builtin = options.find(row => row.id === "viggle-h3");
+    assert.deepEqual(builtin.pricing, { unit: "second", modes: [
+      { mode: "reference", microsPerSecond: "50000" }, { mode: "first_frame", microsPerSecond: "30000" },
+      { mode: "first_last_frame", microsPerSecond: "50000" }, { mode: "text", microsPerSecond: "30000" },
+    ], minMicrosPerSecond: "30000", maxMicrosPerSecond: "50000" });
+    assert.equal(options.find(row => row.id === viggle().profile.id).pricing.minMicrosPerSecond, "20000");
+    assert.equal(options.find(row => row.id === viggle().profile.id).estimatedCost.unitMicros, "900000");
+    for (const option of options.filter(row => row.profile.adapter !== "viggle-h3")) assert.equal(Object.hasOwn(option, "pricing"), false);
+    rows.push(builtin);
+  }
+  assert.deepEqual(rows[0], rows[1]);
+  assert.equal(catalog.digest, beforeDigest); assert.deepEqual(lock(f, project), savedLock);
+  assert.deepEqual(f.store.db.prepare("SELECT kind,id,body FROM entities ORDER BY kind,id").all(), before);
+  untouchedAuthority(f, project.id);
+});
+
 test("Viggle profiles reuse exact transport settings with explicit whole-second3..15 bounds without changing MiniMax", () => {
   assert.deepEqual(profilePolicy(viggle().profile), { credential: "viggle-video", media: "video", fixture: false });
   assert.deepEqual(profilePolicy(video().profile), { credential: "minimax-video", media: "video", fixture: false });

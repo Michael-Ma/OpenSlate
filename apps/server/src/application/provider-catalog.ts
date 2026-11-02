@@ -9,6 +9,7 @@ import type { ExecutionIdentity, ExecutionRegistry, OpenAIImageModel, OpenAIImag
 import { preflightAudioProfile } from "../execution/audio-preflight.js";
 import { EnvironmentMediaCredentials } from "./provider-credentials.js";
 import type { MediaCredentialId } from "./provider-credentials.js";
+import { providerPricing } from "../code-plan/model-pricing.js";
 
 const MAX_BYTES = 64 * 1024;
 const BUILT_IN_PROFILES: ProviderProfile[] = structuredClone(DEFAULT_PROFILES);
@@ -270,12 +271,14 @@ export class InstalledProviderCatalog {
     }
     const enabledByHost = !!profile && !policy?.fixture && this.#enabledExecutions.has(canonical({ adapter: profile.adapter, version: profile.executionVersion }));
     const codexImage = profile?.adapter === "codex-image";
+    const pricing = profile ? providerPricing(profile) : undefined;
     const realExecutionEnabled = enabledByHost && registered && valid && !!policy?.media && this.#mediaTools[policy.media]
       && (codexImage ? this.#codexImageConfigured && !!current && effective?.configuration?.settings?.runtimeVersion === CODEX_IMAGE_RUNTIME_VERSION : credentialPresent === true && !credentialUnavailable);
     return { id: object(input) && typeof input.id === "string" && ID.test(input.id) ? input.id : "unavailable",
       label: name ?? current?.label ?? (profile ? `${profile.kind}: ${profile.id}` : "Unsupported saved provider"),
       ...(codexImage ? { usage: { kind: "codex_subscription" as const, unit: "native_turn" as const, quotaEstimateAvailable: false as const } } : {}),
       profile, definitionDigest: profile ? digest(profile) : null, installedDefinition: !!current,
+      ...(pricing ? { pricing } : {}),
       estimatedCost: profile ? { currency: "USD" as const, unitMicros: profile.unitCostMicros,
         basis: policy?.fixture ? "fixture" as const : "host_configured" as const, actualVendorPriceVerified: false as const } : null,
       readiness: { configurationValid: valid, registered,
@@ -285,6 +288,10 @@ export class InstalledProviderCatalog {
         enabledByHost, realExecutionEnabled } };
   }
 }
+
+/** Inferred route contracts: model settings options use these same catalog rows. */
+export type ProviderCatalogView = ReturnType<InstalledProviderCatalog["view"]>;
+export type ProviderOption = ProviderCatalogView["profiles"][number];
 
 /** The existing demo planner hardcodes the original fake image/video profile IDs. */
 export function assertDemoProviderProfiles(profiles: unknown): void {
