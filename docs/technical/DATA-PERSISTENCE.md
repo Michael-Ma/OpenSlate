@@ -12,7 +12,8 @@ OpenSlate's local database owns production state. Conversation history and brows
 | Candidates/grants/attempts | Human generation origin, one-use consumption, dispatch identity, leases and uncertainty |
 | Reviews/reservations/provider-use pins | Exact input approval, retained liabilities and immutable profile identity |
 | Artifacts/receipts | Owned content hashes, provenance, measurements, raw/normalized outputs and recovery |
-| Director/tool records | Runtime selection, locked instructions, turns, questions, output and idempotent tool receipts |
+| Director/tool records | Codex/Claude/fake selection, locked instructions, turns, questions, output and idempotent tool receipts |
+| Code-plan records | Versions, deterministic runs, steps, attempts/liability, choices with askedAt/staleness, reviews, holds and invocation receipts |
 | Events/commands | Monotonic per-project event cursors and replay-safe command results |
 
 The current relational schema stores project heads, generic versioned entities, command receipts, events and installation recovery records. Domain entity kinds encode the component records rather than one SQL table per proposed type. See [schema](../../apps/server/src/persistence/schema.ts) and [store](../../apps/server/src/persistence/store.ts).
@@ -34,7 +35,7 @@ Immutable bytes are published outside short SQLite transactions. Content hashes,
 
 The root `pnpm start` default is `<repository>/.openslate`; development/filtered server commands can use a different working directory. Use one explicit `OPENSLATE_DATA_DIR` to keep the same installation. Keep it outside the public web bundle.
 
-The installation includes SQLite, owned artifacts, raw execution outputs, normalized media/receipts and locked skill snapshots. Provider keys/configuration and external Codex authentication are separate local setup. Backups can contain protected result locators and private project content.
+The installation includes SQLite, owned artifacts, raw execution outputs, normalized media/receipts and locked skill snapshots. Provider keys/configuration and external Codex/Claude authentication are separate local setup. Backups can contain protected result locators and private project content.
 
 Use [media-inclusive installation backup](../implementation/INSTALLATION-RECOVERY.md) for complete same-root recovery. Restore preserves identities, installs quarantine/fences and leaves projects paused after human release.
 

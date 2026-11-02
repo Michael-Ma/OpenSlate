@@ -1,77 +1,77 @@
 # Human live production testing
 
-Start with one six-second shot. There is no API-key approval or usage allowance step. This walkthrough uses real account usage/API credits; the human reviews and starts the generation in OpenSlate. Configured keys enable their providers; they are not an instruction to run an unattended test campaign.
+Use a disposable film and a deliberately bounded real-account test. A configured provider is ready for requested use, without a separate API-key approval or usage allowance. It is not authorization for an unattended test campaign. Offline fixtures and the owner's [Chinese test guide](../ai/code-plan/TEST-INSTRUCTIONS.md) complement this walkthrough.
 
-## 1. Prepare the local studio
+## Local setup
 
-Run `./start.sh --doctor`, then `./start.sh` (or `--restart` after configuration/code changes). Use Node 24, pnpm 10.33.0 and FFmpeg/ffprobe. [Setup](LOCAL-SETUP.md) explains the private ignored `.env.live.local`; [activation](MEDIA-EXECUTION-LAUNCHER.md) lists exact switches and server-only keys. Use an explicit data directory/catalog and preserve existing projects.
+Use Node **24.15.0**, pnpm **10.33.0** and the FFmpeg/ffprobe **8.1.1** pair for development checks. Application startup supports Node 24. Run `pnpm install --frozen-lockfile`, `pnpm setup:test-media` and `pnpm check:toolchain`. [Setup](LOCAL-SETUP.md) and [activation](MEDIA-EXECUTION-LAUNCHER.md) document server-only configuration.
 
-If native Codex is not yet installed, install the supported pinned version in a separate local prefix:
+Keep one absolute data directory for every launch/restart:
+
+```sh
+export OPENSLATE_DATA_DIR="$HOME/openslate-data"
+node scripts/start-local.mjs --doctor
+node scripts/start-local.mjs --no-open
+```
+
+The launcher loads private `.env.live.local`; exported variables take precedence. It prints a browser pairing link for the studio on 3001. Stop an existing instance in its own terminal before changing checkout or data directory; do not kill an arbitrary listener. Use the same command with `--restart` only for the verified installation you intend to rebuild. Never move an existing data directory to fix a setup failure. Older schema versions need a new directory; schema 4 installations remain usable.
+
+## Codex
+
+Install the exact supported version side by side:
 
 ```sh
 npm install --prefix "$HOME/.local/share/openslate-codex-0.162.1" --save-exact @openai/codex@0.162.1
 "$HOME/.local/share/openslate-codex-0.162.1/node_modules/.bin/codex" --version
+"$HOME/.local/share/openslate-codex-0.162.1/node_modules/.bin/codex" login
 ```
 
-Keep `~/.local/share/openslate-codex` untouched: a running older studio may still use it. Install the new version side by side, then restart the studio after review. A configured older binary falls back to the supported versioned installation with a version notice; without that installation setup still refuses.
+Expected version: **`codex-cli 0.162.1`**. Preserve older installations while other studios use them. `OPENSLATE_CODEX_BINARY` selects the Director executable; `OPENSLATE_CODEX_IMAGE_BINARY` selects the separate image worker. Startup can discover the versioned install. A configured old executable uses that supported install with a notice when available, or setup refuses. Historical model choices, media inputs and receipts are not rewritten.
 
-Expected version: `codex-cli 0.162.1`. Sign in locally with that binary if needed. Configure its absolute path for the director/image worker; do not copy auth tokens into the repository or chat. The image worker uses ChatGPT login. Director account setup is separate and can use its selected supported Codex account; `OPENSLATE_OPENAI_API_KEY` only configures media API routes.
+Settings → Models → Director reads actual models from the runtime/account. New selections default to **`gpt-6.1-sol`**, and turns reason at high effort. Choose another returned model if desired; do not assume every account has the same catalog. Existing films retain their chosen model. Run the zero-model-turn setup check before a small writing turn. The image worker uses ChatGPT login and **`gpt-6-astra`** internally; changing the Director model does not change it. `OPENSLATE_OPENAI_API_KEY` is for media API routes, not that ChatGPT login.
 
-| Job | Select installed supported profile | Account consumed |
+## Optional Claude Code
+
+The adapter supports **Claude Code 2.1.312 or later 2.x**, authenticated locally on a Claude Pro/Max/Team/Enterprise plan. Install/sign in with the user's own Claude Code application; `claude --version` and `claude auth status` are local setup checks. Configure `OPENSLATE_CLAUDE_BINARY` if the executable is not `~/.local/bin/claude`. Keep credentials out of the repository, fixtures and chat.
+
+Create a **Code plan (experimental)** film, then select **Claude Code · Opus 5.5** or **Claude Code · Sonnet 5.5** in Settings → Models → Director and save. Setup checks version and plan login without starting a model turn. The selection is unavailable for storyboard films. Claude directs through the same validated code-plan MCP tools; API-key login/fallback is refused. Start with a writing-only message and verify the saved reply's runtime. Codex images still require Codex/ChatGPT setup; video/music/speech still use their separate provider accounts.
+
+## Choose a small route
+
+| Job | Implemented route | Account consumed |
 |---|---|---|
-| Keyframe | Codex images or OpenAI image profile | Codex usage or separate OpenAI API billing |
-| Video | Viggle H3 (six-second example) | Separate Viggle account |
-| Speech | OpenAI speech profile | OpenAI API billing |
-| Recognition | OpenAI transcription profile | OpenAI API billing |
+| Image | Codex images or OpenAI image profile | ChatGPT subscription usage or OpenAI API billing |
+| Video | Viggle H3; direct MiniMax H3 also implemented | Separate configured provider account |
+| Music | Lyria 3.5 for code films | Gemini billing-enabled project |
+| Speech / recognition | OpenAI speech / transcription | OpenAI API billing |
+| Additional code-film video | Seedance (ModelArk), fal Kling/Veo/Wan | Corresponding key, profiles and account/model/region eligibility; live acceptance remains separate |
 
-Profiles are exact saved definitions, not automatic fallbacks. Example dollar estimates are not vendor quotes. Codex image quota/internal image-call count is unknown before a native start. Video result hosts must be explicitly trusted; correct a failed download to recover the existing job rather than submitting another.
+Profiles are saved exact definitions. Example costs are estimates, not vendor bills. Native image quota/internal call counts are not predictable. A failed result download must recover the existing job rather than submit another.
 
-## 2. Create and refine one shot
+## Code-plan film
 
-Create a disposable production project and choose its models; in an existing project use the model settings save/review flow. Completed/in-flight work remains on its original definitions. Set up the native Director and complete the zero-turn local check.
+1. Create **Code plan (experimental)** → **Talk to the Director**, and choose Codex or set Claude Code as above. Check the limit: new default **$4**, unless this browser has a saved new-film preference.
+2. Request one five- or six-second shot, no narration/music/captions for the first test. Inspect the Director's explanation, selected model and estimated cost. Saving a program may generate images; stop at its keyframe confirmation card before any video.
+3. Inspect the actual keyframe and available priced video-input choices. Selecting a thumbnail only opens the viewer. Confirm the intended input: keyframe plus references, references only, or keyframe as first frame, as supported by the model. First-frame mode holds opening composition more closely; reference mode may reframe.
+4. Plan shows shared references and the shot's keyframe/clip progress. Cards stay in their original reply; the run strip links to outstanding choices. Change a shot prompt or reject the story in chat and check affected cards retire after the Director publishes the changed plan. Stale cards cannot be answered. Retirement depends on plan reachability, not a chat keyword.
+5. Observe the original attempt/vendor task through completion. If the program requests `ctx.review`, the Director sees bounded contact sheets, not sound. Film plays the completed render; inspect picture, duration and sound in the actual MP4.
+6. Add music or short speech only as another bounded test. Lyria length is approximate; the plan trims/fades to picture length. Generated clip sound is removed during normalization. Code-film captions, speed/holds/zoom and local effects are program features, not a general timeline editor.
+7. Reopen/restart using the same directory. An unchanged plan should reuse its saved steps, choices and outputs. Revise one shot and verify unrelated paid results remain reused.
 
-Example request:
+Code-film accounting retains charged, possible and in-flight liabilities. Lowering below them is refused. A lost submission is not permission to retry; inspect/reconcile the original attempt. Consent to retry may mean paying twice. Proven non-submission has bounded safe retries; no-status Viggle outcomes have bounded account-list settlement before the app decides whether a safe retry is justified.
 
-> Create one six-second product film shot. Show a brown leather boot on a workshop bench, warm side lighting, slow camera push-in, no lettering. Save story, scene, shot and prompts using this project's models. Save no narration explicitly; stop for my generation reviews.
+## Storyboard film
 
-Inspect saved intent, models and one-shot duration. Iterate in chat or edit the card. Existing material can be brought through Bring a brief; confirm the proposed plan after inspecting it. Saving writing/import interpretation starts no media. A selected-shot discussion should preserve other shots.
+1. Create **Storyboard**, configure the native Codex Director and installed models, then request one six-second product shot: brown boot on a workshop bench, warm side light, slow push-in, no lettering and explicit **No narration**. Inspect saved scene/shot/prompts. Importing text/Markdown produces a proposal to confirm; writing starts no media.
+2. For speech, save a short script and select a stock voice, or import an owned recording. Scene keyframe generation makes missing voice lines. A fitting measured line is accepted automatically; an overlong line offers free **Make N s** / **Keep N s** fit decisions. A one-second voice can sit within six seconds of picture. New voice cloning is unimplemented.
+3. Press **Generate keyframes**, inspect each actual current returned frame, motion, timing, narration and video model. Revise/regenerate only the intended scope. Earlier eligible keyframes remain available in Takes.
+4. Press the scene's video confirmation after all required frames have been opened and narration fits. That one durable server command survives a closed browser/restart and settles any remaining voice before video. There is no separate spending approval or returned-clip acceptance gate.
+5. Audition Film in storyboard order, adjust timing/music, export locally and inspect the actual MP4. Reopen and do one scoped edit, verifying original attempts and unaffected media are preserved.
 
-Compatible narration guidance is an application capability; writing needs no authorization. Before the first context/dispatch of an eligible fresh native turn, shipped older guidance upgrades automatically so the next conversation can write individual shot narration. Already-started epochs retain their saved capability. If customized/unavailable guidance reports an application error, retain the state/error for diagnosis rather than repairing its database.
-
-## 3. Choose silence or accept short voiceover
-
-For picture only, choose **No narration**. Undecided is a visible choice, not implicit silence.
-
-For voiceover, open Audio setup on the shot. Save a short script and click Generate for stock speech, without an approval or allowance dialog, or import your owned recording. Listen, bind actual words/description and range, then accept the displayed words/bytes/timing together. A one-second accepted voice may sit inside the planned six-second shot; **do not pad it to six seconds**. Trim overlong audio or deliberately change picture duration. Existing personal voices need eligible registered IDs; creating a new clone is pending.
-
-Continue the edit to update its plan when needed. Check stale speech proposals are unavailable after script/mode/voice changes. A separate Generate request creates another recording; accepting audio only accepts its words, bytes and timing.
-
-## 4. Generate and review a keyframe
-
-Review the saved scene and click its green **Generate keyframes** check. It queues missing keyframes using the selected image model. Other scenes and completed results are kept. There is no intermediate permission or spending screen.
-
-Inspect the returned actual images, their provenance and account usage. The scene shows every conditioning frame, motion, model and generated duration together. If an image needs revision, edit its direction or prompt, then generate the changed keyframe. Dependent video waits for its next explicit scene check.
-
-## 5. Generate one video and export
-
-Click the green **Approve & generate video** check after all displayed scene frames have loaded and narration timing is ready. That one action reviews the exact frames and actual video recipe, then queues the missing videos. No separate keyframe approval or spending button follows it. A video model must support the generated duration shown in the scene.
-
-Inspect the recorded vendor job, polling of that same job, downloaded/normalized owned video and a playable shot card. Audition picture/accepted voice/music in Timeline, export locally, and inspect duration/picture/sound in the actual MP4. Generated clip sound is removed; the soundtrack uses accepted narration and optional owned music.
-
-Refresh and restart/reopen. Confirm the same attempt/take/export identities remain and no duplicate create occurred. Unknown submission must stay attached to its original attempt/liability until reconciled; missing output is not permission to start over.
-
-## 6. Validate the other live routes and scoped reuse
-
-- **API images:** test the alternate image route in a separate small project so account/provider identity stays clear.
-- **Speech:** generate one exact short stock-voice script, listen/accept current bytes/range and verify overlay playback/export.
-- **Transcription:** recognize one short owned recording; compare returned words/timing with what you hear as candidate evidence for Director attachments. Human transcript adoption is unavailable. Rewritten text is not automatically aligned.
-- **Two-shot edit:** after a successful small run, add a second shot and revise only that shot. Confirm the first image/take is reused, only affected reviews renew and export reflects the edit.
-- **Longer film:** expand only after the small flows pass. Synthetic six-minute tests do not prove real long-form quality.
+For transcription, recognize one short owned recording and compare words/timing by listening. It remains candidate evidence for Director attachments; human transcript adoption is unavailable. Rewritten text does not prove alignment.
 
 ## Report results
 
-Record pass/fail, confusing controls, selected models/account route, actual attempt/vendor job identities, latency, generated dimensions, source/export durations, observed account usage and scoped reuse/restart behavior. Configured estimates remain separate from actual charges.
+Record selected runtime/model/account route, pass/fail, confusing controls, attempt/vendor task identities, latency, dimensions, source/export duration, observed account use, reuse and restart behavior. Keep configured estimates separate from charges. Record errors by code and phase: before submit, unknown create, processing, download, normalization or export. Preserve the original state for diagnosis; exclude keys, tokens, signed URLs and private project content.
 
-For an error, record its code and phase: before submission, unknown create, vendor processing, download, normalization or export. Keep saved state for diagnosis. Exclude keys, local tokens, signed result URLs, credential files and private project text.
-
-See [current status](STATUS.md), [readiness checkpoint](HUMAN-TESTING-READINESS.md), [current scene review](../technical/REVIEW-UI.md) and [audio rehearsal](MANUAL-AUDIO-TESTING.md).
+The [status](STATUS.md), [film-quality results](../ai/film-quality/RESULTS.md), [runtime reference](../technical/DIRECTOR-RUNTIME.md) and [audio rehearsal](MANUAL-AUDIO-TESTING.md) preserve implementation and evidence boundaries. Expand to longer films only after the small flows and human quality review pass.

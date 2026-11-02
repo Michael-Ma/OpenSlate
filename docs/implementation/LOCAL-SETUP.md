@@ -4,7 +4,7 @@ OpenSlate runs from a source checkout on one computer. The launcher installs loc
 
 ## First run
 
-1. Install **Node 24**; with nvm use `nvm install 24` and `nvm use 24`.
+1. Install **Node 24**; development/CI pins 24.15.0, so run `nvm install` and `nvm use` from the checkout.
 2. The pinned package manager is **pnpm 10.33.0**. The launcher can use that version through npx; alternatively install it with `npm install --global pnpm@10.33.0`.
 3. For media import/export, use the verified FFmpeg/ffprobe **8.1.1** pair (`brew install ffmpeg` may select a different release). `pnpm setup:test-media` can build the pinned pair in an isolated repository cache; set `OPENSLATE_FFMPEG` and `OPENSLATE_FFPROBE` to the printed absolute paths when using that pair in the studio. A source build of SQLite may also require Python and compiler tools.
 4. Run `./start.sh --init-config` to create ignored private `.env.live.local`; an existing file is preserved.
@@ -21,11 +21,13 @@ Use an explicit `OPENSLATE_PROVIDER_CONFIG` based on the [example catalog](../..
 | OpenAI image/speech/transcription | `OPENSLATE_OPENAI_API_KEY`; separate image/speech/transcription enable switches |
 | Viggle H3 | `OPENSLATE_VIGGLE_API_KEY`, video enable switch and exact download hosts |
 | Direct MiniMax H3 | `OPENSLATE_MINIMAX_API_KEY`, H3 enable switch and exact download hosts |
+| Lyria music / song analysis | `OPENSLATE_GEMINI_API_KEY`; billing-enabled Gemini project |
+| Seedance / fal video (code films) | `OPENSLATE_MODELARK_API_KEY` / `OPENSLATE_FAL_API_KEY`, exact installed profiles |
 | Codex images | Existing ChatGPT login, absolute supported `OPENSLATE_CODEX_IMAGE_BINARY`; optional existing Codex home |
 
 See [activation variables](MEDIA-EXECUTION-LAUNCHER.md). Local credential presence does not verify provider access, quota or voice eligibility. A selected model or enabled route creates no paid work; review and start the intended operation in the app. Configured providers require no separate usage allowance or spending approval.
 
-The native director is configured separately. Use a pinned Codex 0.153.4 executable and complete its zero-turn local setup check. Its ChatGPT/API login is independent of media API keys; the image worker requires ChatGPT login. OpenSlate does not copy login credentials into project files.
+The native director is configured separately. Use a pinned Codex 0.162.1 executable (default Director model `gpt-6.1-sol`, alternatives from the runtime/account list) and complete its zero-turn local setup check. Its ChatGPT/API login is independent of media API keys; the image worker requires ChatGPT login. OpenSlate does not copy login credentials into project files. Code films can instead choose Claude Code Opus 5.5 or Sonnet 5.5 on a local Claude subscription; 2.1.312 or later 2.x is supported. `OPENSLATE_CLAUDE_BINARY` overrides its default local executable. See [exact installation and runtime tests](MANUAL-LIVE-PRODUCTION.md).
 
 Native Director turns have a **180,000 ms** total deadline, including startup. For a deliberately larger planning task, the host may set `OPENSLATE_DIRECTOR_RUN_TIMEOUT_MS` to an integer from **1,000 to 600,000** before starting the studio. The three-minute default is retained: LIVE-1 showed a native stall after a completed read, with no evidence that a longer default fixes it. Prefer small saved steps. Raising the limit allows more time for one run and never retries an unknown outcome. The thread shows elapsed time and observed tool/native phases; timeout feedback reports confirmed changes, notes and proposals retained by that turn.
 

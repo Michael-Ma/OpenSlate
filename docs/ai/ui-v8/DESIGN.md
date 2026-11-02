@@ -1,5 +1,7 @@
 # v8 UI (step 5): design notes
 
+> Historical design/audit record. Statements about rollout, versions and pending work describe this document's original checkpoint. Use [current status](../../implementation/STATUS.md) and the technical references for today's implementation; linked decisions and evidence are retained.
+
 This is an extension of the Last Ferry system, not a new direction. It uses the existing tokens (`ui/studio.css`) and keeps their colour roles: amber belongs to the Director, white marks the chosen option or the primary action, green marks approved or opened, and app-computed facts are neutral with an icon. No new colours or fonts.
 
 Audience: the person making the film. The primary tasks are to keep recurring people consistent, to decide on a look, and to confirm changes the Director asked for without being surprised by cost. The data is the Last Ferry fixture (fiction).

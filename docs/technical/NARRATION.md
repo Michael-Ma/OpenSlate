@@ -2,6 +2,8 @@
 
 Writing intent, measured audio, transcript evidence and human acceptance are separate records. Text in a shot card does not prove that a usable recording exists or that its words/timing were accepted.
 
+Code films separately use `ctx.speech` and `ctx.music`, journaled by exact inputs and mixed by `ctx.render`. They do not use storyboard narration-fit/acceptance commands. OpenAI transcription of owned attachments remains candidate evidence. See [code-plan rendering](TIMELINE-RENDERING.md#code-plan-editing-and-mastering-030).
+
 ## Current studio paths
 
 - **No narration:** save explicit `none`; use planned shot frames with no fabricated recording.

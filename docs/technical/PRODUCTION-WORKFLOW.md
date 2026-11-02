@@ -1,6 +1,6 @@
 # Production workflow
 
-The director interprets a request and proposes creative work. Trusted workflow predicates derive requirements from the actual proposed mutation and saved evidence, so a model cannot label a video mutation as intake to bypass its rules.
+This section describes storyboard films. Code films use the separate [replay workflow](EXECUTION-ENGINE.md#code-plans-experimental), confirmed shot keyframes and per-film spending ceiling. The director interprets a request and proposes creative work. Trusted workflow predicates derive requirements from the actual proposed mutation and saved evidence, so a model cannot label a video mutation as intake to bypass its rules.
 
 ## Scoped guidance
 

@@ -1,76 +1,64 @@
 # OpenSlate architecture
 
-OpenSlate is a single-user local video studio. The conversational director develops creative intent; the application preserves an editable production and executes selected media work. V0 supports resolved exports up to six minutes. Its browser, Fastify service, SQLite, artifacts, workers and native Codex run on one computer. Cloud model APIs remain supported; multi-host deployment and remote GPU workers are outside this version.
+OpenSlate is a single-user studio running on one computer: React browser UI, Fastify server, SQLite, owned media, workers and native Director processes. Cloud model/media APIs remain supported. The local rendering boundary is up to six minutes; that limit is not evidence of six-minute real-provider quality.
 
-## Capabilities and design choices
+## Two film modes
 
-| Capability | Implemented design |
-|---|---|
-| Conversational filmmaking | A native/fake director reads saved brief, treatment, scenes, shots, media and pending decisions; compatible shipped guidance updates before eligible fresh native turns |
-| Editable production | Stable identities and revision-checked commands preserve unaffected outputs across scoped edits; the next studio uses explicit @ scope, per-control state and alongside human edits |
-| Declarative planning | Restricted TypeScript compiles into a durable graph; no generated JavaScript is evaluated |
-| Human review | Two per-scene generation decisions: create keyframes, then review exact returned frames/motion/video recipe before starting video; configured providers need no separate usage approval |
-| Recovery | Service-issued intents/candidates/attempts, durable receipts and uncertain-submission handling survive interruption |
-| Narration | Explicit silence, script-first or recording-first review and accepted short within-shot voiceover |
-| Playback/export | Synchronized picture/narration/music preview and an exact local FFmpeg render manifest |
-| Provider choice | Separate Settings sections, actual Director model choices and separately saved Director/media settings; immutable media definitions remain pinned |
+| Mode | Planning and execution | Human decisions |
+|---|---|---|
+| Storyboard (`graph`, default) | Canonical brief/scenes/shots and restricted declarations compiled to an immutable operation graph; graph workers use candidates, grants, attempts and bindings | Make keyframes/voice, inspect returned frames and actual video recipe, then confirm scene video. Notes/proposals are separate typed decisions |
+| Code plan (`code`, experimental) | Director submits a full TypeScript program; disposable QuickJS/WASM passes call bounded host methods and reuse content-addressed journal results | Program choices, each declared shot's keyframe/video-input confirmation and a per-film liability ceiling (new default $4) |
 
-These design choices address revision integrity, review and recovery. They do not by themselves establish commercial quality, speed superiority or complete live-provider acceptance.
+Models propose validated changes; application authority stays in OpenSlate. Storyboard declaration compilation never executes generated JavaScript. Code films do evaluate stripped TypeScript, only inside an isolated guest without Node/filesystem/network/secrets. New user direction fences incompatible old epochs, and neither mode can reuse a later request's authority for an earlier preparation.
 
-The only browser entry is `apps/web/src/next`, with Plan, Keyframes, Assets, Film, Start and Settings. It follows the [Last Ferry design](../ai/prototypes/last-ferry/DESIGN.md); the earlier Radix Day/Night workbench is retired. Current routes and durable server confirmation are described in [Application API](../technical/APPLICATION-API.md).
-
-## Ownership
+## Components
 
 ```mermaid
 flowchart TB
-  subgraph Local[One computer]
-    UI[React studio] <--> App[Application services]
-    App <--> DB[(SQLite canonical state)]
-    App <--> Director[Replaceable director adapter]
-    Director --> Bridge[Locked validated tools]
-    Bridge --> App
-    App --> Compiler[Restricted plan compiler]
-    Compiler --> Graph[Immutable operation graph]
-    Graph --> Engine[Durable execution engine]
-    Engine --> Adapters[Registered provider adapters]
-    Engine --> Artifacts[Owned media and receipts]
-    Artifacts --> Timeline[Timeline capture and FFmpeg]
-    DB --> Events[Authenticated project events]
-    Events --> UI
-  end
-  Director --> LLM[Configured LLM service]
-  Adapters --> APIs[Configured media services]
+  UI[React studio] <--> App[Fastify application authority]
+  App <--> Store[(SQLite heads / JSON entities / commands / events)]
+  App --> Director[Codex / Claude Code / fake Director]
+  Director --> MCP[Locked epoch-bound MCP tools]
+  MCP --> App
+  App --> Graph[Storyboard compiler and graph engine]
+  App --> Code[Code-plan replay and journal]
+  Graph --> Execution[Registered execution adapters]
+  Code --> Execution
+  Execution --> Providers[Cloud media providers]
+  Execution --> Local[Owned media / FFmpeg]
+  Local --> UI
 ```
 
-| Owner | Source of truth |
+| Path | Owns |
 |---|---|
-| Application services | Human requests/scopes, creative commits, grants, settings and recovery release |
-| SQLite store | Project/plan revisions, immutable decisions, attempts, receipts and event cursors |
-| Director adapter | Conversation/runtime mechanics and creative proposals; no independent production authority |
-| Compiler | Allowed declarations, exact bindings, graph consistency and reuse/replace impact |
-| Execution engine | Ready-work admission, current-state checks, attempts, liabilities and recovery |
-| Media services | Owned bytes, verified measurements, normalization and immutable output provenance |
-| Browser | Display, drafting and authenticated human commands; caches are replaceable |
+| `packages/core` | Data/public browser contracts, workflows, graph/compiler predicates and tool catalogs |
+| `packages/director` | Codex/Claude/fake conversation adapters, locked instructions, bridge and separate native image worker |
+| `packages/providers` | Fixed registered media contracts/transports |
+| `apps/server` | Requests/authority, supervision, SQLite, graph/code execution, media validation/rendering and recovery |
+| `apps/web/src/next` | The only UI, normalized server projections and authenticated human commands |
+| `skills`, `scripts` | Immutable runtime guidance; launch/test/demo/toolchain/release operations |
 
-## Main loop
+## Turn and execution flow
 
-1. Save the human request, scope and edit holds; revoke incompatible older director authority.
-2. Read current saved evidence and gaps. The director proposes creative changes and a plan through locked typed tools.
-3. Prepare without media effects: validate the mutation footprint, workflow prerequisites, source graph and reuse impact.
-4. Apply against current revisions and request authority. Publish compatible creative/plan changes atomically.
-5. Workers admit only current requested operations. The application checks configured provider readiness, scoped generation origin, exact keyframe reviews, holds, timing and current selection.
-6. Retain provider receipts and outputs durably. Poll/recover the existing job; an uncertain effect is not a retry instruction.
-7. Show the next useful decision, inspect actual frames/motion and audition the timeline. Scoped revisions preserve valid branches and historical attempts.
+1. Save a human message, its explicit scope and request-owned holds; lease a Director turn with an exact tool/guidance lock.
+2. Supply canonical evidence/attachments and current source or storyboard context. Codex 0.162.1 defaults to `gpt-6.1-sol` at high effort; actual alternative models come from the local account/runtime. Claude Code supports Opus 5.5/Sonnet 5.5 for code films on the user's Claude plan. The fake Director supports offline fixtures.
+3. Validate every MCP call under its original epoch. Storyboard changes prepare/apply atomically against revisions; code submissions dry-run and publish only against the matching base version.
+4. Graph workers or code-plan execution admit current work under provider readiness, scope/Stop/holds, exact saved inputs and the mode's review/ceiling rules. Persist submission intent before irreversible effects.
+5. Retain raw observations, normalized owned bytes, measurements and immutable receipts. Unknown submission requires lookup/reconciliation rather than a blind new POST. A late result can remain historical without replacing a new selection.
+6. Events invalidate browser projections. Code passes replay after media/choice changes; identical inputs reuse results. A changed prompt/reference retires only the choices the latest completed pass no longer reaches, leaving cards/answers in their original reply history.
 
-A project revision, a compiled plan, a creative candidate, a provider attempt and a selected artifact are different identities. A retry remains attached to its candidate; a new creative alternative needs its own human origin. Conversation resets do not reset those records.
+The code runtime and graph engine share registered provider adapters, output spooling, ingestion and local media infrastructure; code execution does not fabricate graph grants/candidates. Local render capture freezes owned sources and ranges before FFmpeg. Storyboard exports follow scene/shot order; code films use `ctx.render` rows, optional audio/captions and measured mastering.
 
-## Current limits
+## Persistence and local trust
 
-- One active director turn per project; independent media operations can proceed within saved concurrency limits.
-- 30 fps picture and 48 kHz audio in the local assembly path, up to 360 seconds/64 cuts/65 audio placements, with eight simultaneous mixing lanes.
-- Within-shot voiceover may be shorter than picture; undecided narration is not silently treated as silence.
-- Video normalization removes embedded generated sound. Accepted narration and optional owned music supply the soundtrack.
-- Existing eligible OpenAI custom voice IDs are supported; in-app enrollment from a recording is pending.
-- Local source-checkout launch, private same-root backups and recovery are implemented. Portable relocation, installer packaging, advanced timeline editing and same-machine H3 inference remain later work.
+SQLite stores canonical heads plus versioned JSON entities, command replay receipts and event cursors (schema 4). One fixed absolute `OPENSLATE_DATA_DIR` also holds artifacts, execution output, normalized media and instruction snapshots. Other schema versions are rejected; backup/recovery is same-root and installs quarantine. Credentials and Codex/Claude authentication remain separate local setup.
 
-See [studio behavior](STORYBOARD-STUDIO.md), the [current UI reference](../technical/REVIEW-UI.md), [component references](../technical/README.md), [current evidence](../implementation/STATUS.md) and the [accepted runtime trust boundary](../implementation/RUNTIME-TRUST-DECISION.md).
+Codex uses the accepted exact local policy and trusted installed sandbox. Claude uses fresh restricted processes, explicit MCP configuration, a bounded stream and verified init inventory. The code-plan QuickJS worker is a separate guest boundary. Hash/catalog/configuration checks do not establish independent native code-host/authentication isolation. [Runtime trust decision](../implementation/RUNTIME-TRUST-DECISION.md).
+
+## UI and remaining boundaries
+
+The [Last Ferry design](../ai/prototypes/last-ferry/DESIGN.md) supplies the dark English/Chinese studio: Plan, Keyframes, Assets, Film, Start and Settings. Code films have no separate Keyframes tab; Plan holds references/keyframe/clip progress, Assets holds owned results, and Developer mode reveals Code. Choice cards stay with their originating reply and retire in place. [UI reference](../technical/REVIEW-UI.md).
+
+Local assembly uses 30 fps and 48 kHz, up to 360 seconds/64 clips/65 audio placements/eight audio lanes. Code-plan trims, speed/holds/zoom, captions, sound effects and fades are implemented; a general multitrack editor, transitions, waveforms and streaming remain pending. Existing eligible custom voice IDs are supported; in-app voice-clone enrollment, installers, portable relocation, multi-host deployment and local H3 inference remain outside delivered scope.
+
+[Component references](../technical/README.md), [status/evidence](../implementation/STATUS.md), [studio guide](STORYBOARD-STUDIO.md) and [remaining acceptance](IMPLEMENTATION-PLAN.md) provide current details. Dated designs/reports describe only their own checkpoints.

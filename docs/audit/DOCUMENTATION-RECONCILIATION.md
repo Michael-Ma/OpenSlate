@@ -1,5 +1,7 @@
 # Documentation reconciliation
 
+> Historical design/audit record. Statements about rollout, versions and pending work describe this document's original checkpoint. Use [current status](../implementation/STATUS.md) and the technical references for today's implementation; linked decisions and evidence are retained.
+
 October 3, 2026. Scope: `README.md`, `CONTRIBUTING.md`, and human/developer documentation under `docs/`. Current source is authoritative; historical experiment counts remain dated evidence. No source, tests, provider configuration, credentials, private projects or runtime skill inputs are changed by this cleanup.
 
 ## Kept and updated

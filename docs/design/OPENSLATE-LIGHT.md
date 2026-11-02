@@ -1,5 +1,7 @@
 # Earlier Studio Day / Night design
 
+> Historical design/audit record. Statements about rollout, versions and pending work describe this document's original checkpoint. Use [current status](../implementation/STATUS.md) and the technical references for today's implementation; linked decisions and evidence are retained.
+
 The October 7 Frame Studio Day/Night workbench has been retired on this branch. Its Radix controls, resizable conversation, inline tool cards, purple-blue actions and browser-owned scene sequence describe the earlier UI. Dated verification remains in the [October 7 review](../implementation/OCTOBER-7-DAY-NIGHT-REVIEW.md) and [October 9 authority/recovery review](AUTHORITY-AND-WORKFLOW-REVIEW.md); those checks do not verify the replacement UI.
 
 The current source is `apps/web/src/next`, booted directly from `apps/web/src/main.tsx`. It follows the [Last Ferry design](../ai/prototypes/last-ferry/DESIGN.md) and [UI implementation plan](../ai/UIUX-IMPLEMENTATION-PLAN.md), with delivery recorded in [status](../implementation/STATUS.md).

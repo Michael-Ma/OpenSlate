@@ -1,5 +1,7 @@
 # Authority and workflow review — October 9, 2026
 
+> Historical design/audit record. Statements about rollout, versions and pending work describe this document's original checkpoint. Use [current status](../implementation/STATUS.md) and the technical references for today's implementation; linked decisions and evidence are retained.
+
 This is dated evidence for the earlier UI. The current next-only studio uses a durable server scene-confirmation command rather than the browser-owned sequence/checkpoints described here. See [current studio](STORYBOARD-STUDIO.md), [application routes](../technical/APPLICATION-API.md) and [status](../implementation/STATUS.md). The original results and development-session approval account below retain their historical scope.
 
 ## Outcome

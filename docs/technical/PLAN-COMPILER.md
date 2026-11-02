@@ -1,6 +1,6 @@
 # Plan compiler and atomic changes
 
-The compiler parses a restricted TypeScript declaration and produces an immutable operation graph. It never evaluates generated JavaScript, calls a provider, grants permission or reserves spending.
+The storyboard compiler parses a restricted TypeScript declaration and produces an immutable operation graph. It never evaluates generated JavaScript, calls a provider, grants permission or reserves spending. Code-plan films use a different runtime: submitted programs evaluate only in a bounded QuickJS/WASM guest and call host-validated `ctx` methods. See [code replay](EXECUTION-ENGINE.md#code-plans-experimental).
 
 ## Language and bounds
 
