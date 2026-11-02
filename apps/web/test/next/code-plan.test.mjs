@@ -6,7 +6,7 @@ import { StudioStore } from '../../src/next/store/store.ts';
 import { ApiError } from '../../src/next/api/client.ts';
 import { artifactContentPath, codePlanArtifactContentPath, codePlanVersionPath, CODE_PLAN_PATH } from '../../src/next/api/code-plan.ts';
 import {
-  TONE_CLASS, TONE_GLYPH, limitDraft, answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
+  TONE_CLASS, TONE_GLYPH, chosenArtifacts, limitDraft, answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
   findingMsg, isCodeProject, latestRender, lineDiff, needsAttention, optionArtifact, optionLabel, placeByTime, previousVersion, problemCause, retryPress, runStrip,
   sourcePress, stepProblem, stepRow, stepRows, threadChoices, versionRows,
 } from '../../src/next/model/code-plan.ts';
@@ -87,7 +87,7 @@ test('the run strip says the state, the version and the spend, with pending mone
   const reviewing = runStrip(view({ state: 'reviewing', reviews: [{ id: 'cut', note: 'n', state: 'watching', clipCount: 8, updatedAt: 't' }, { id: 'old', note: 'n', state: 'done', clipCount: 3, updatedAt: 't' }] }), 'en-US');
   assert.equal(en(reviewing.status), 'Director is watching the clips'); assert.equal(reviewing.tone, 'busy'); assert.equal(reviewing.reviewingClips, 8);
   assert.equal(runStrip(view({ state: 'done' }), 'en-US').reviewingClips, null);
-  assert.equal(en(runStrip(view({ state: 'done' }), 'en-US').status), 'Done');
+  assert.equal(en(runStrip(view({ state: 'done', steps: [step('film', 'render', 'succeeded', { reached: true })] }), 'en-US').status), 'Done');
   assert.equal(en(runStrip(view({ state: 'empty', planVersion: null }), 'en-US').status), 'No plan yet');
 });
 
@@ -109,12 +109,12 @@ test('at the ceiling the strip offers one more dollar; an error is said in the p
 test('a choice card finds the chosen option by value and lays media options out as thumbnails', () => {
   const options = [ref('a1'), ref('a2'), ref('a3')];
   const pending = choiceCard({ choiceId: 'frame-1.1', optionsDigest: 'd1', question: 'Which frame?', options });
-  assert.deepEqual([pending.answered, pending.chosen, pending.media, pending.answeredAt], [false, null, true, null]);
+  assert.deepEqual([pending.answered, pending.chosen, pending.media, pending.at, pending.stale], [false, null, true, null, false]);
   assert.deepEqual(pending.options.map((o) => o.label), [null, null, null]);
   // The server echoes the answer as JSON; key order does not matter.
   const answer = { sha256: sha('a'), kind: 'image', artifactId: 'a2' };
   const done = choiceCard({ choiceId: 'frame-1.1', optionsDigest: 'd1', question: 'Which frame?', options, answer, answeredAt: '2026-10-29T10:38:00.000Z' });
-  assert.deepEqual([done.answered, done.chosen, done.answeredAt], [true, 1, '2026-10-29T10:38:00.000Z']);
+  assert.deepEqual([done.answered, done.chosen, done.at], [true, 1, '2026-10-29T10:38:00.000Z']);
   assert.deepEqual(done.options.map((o) => o.chosen), [false, true, false]);
   const mixed = choiceCard({ choiceId: 'tone', optionsDigest: 'd2', question: 'Tone?', options: ['Warm', ref('a4')] });
   assert.equal(mixed.media, false);
@@ -122,16 +122,45 @@ test('a choice card finds the chosen option by value and lays media options out 
   assert.equal(choiceCard({ choiceId: 'x', optionsDigest: 'd', question: 'q', options: [false, 0], answer: false }).chosen, 0, 'a falsy answer is still an answer');
 });
 
-test('the thread lists answered choices first, then the ones still waiting', () => {
+test('the thread lists cards in the order they were asked, undated waiting ones last', () => {
   const choices = [
-    { choiceId: 'b', optionsDigest: 'd', question: 'B?', options: ['x'] },
-    { choiceId: 'a', optionsDigest: 'd', question: 'A?', options: ['x'], answer: 'x', answeredAt: '2026-10-29T10:00:00.000Z' },
+    { choiceId: 'undated', optionsDigest: 'd', question: 'Q', options: ['x'] },
+    { choiceId: 'late', optionsDigest: 'd', question: 'Q', options: ['x'], askedAt: '2026-10-29T10:20:00.000Z' },
+    { choiceId: 'answered', optionsDigest: 'd', question: 'Q', options: ['x'], answer: 'x', answeredAt: '2026-10-29T10:30:00.000Z', askedAt: '2026-10-29T10:10:00.000Z' },
+    { choiceId: 'old-answer', optionsDigest: 'd', question: 'Q', options: ['x'], answer: 'x', answeredAt: '2026-10-29T10:05:00.000Z' },
   ];
-  assert.deepEqual(threadChoices(view({ choices })).map((c) => c.choiceId), ['a', 'b']);
+  assert.deepEqual(threadChoices(view({ choices })).map((c) => c.choiceId), ['old-answer', 'answered', 'late', 'undated']);
   assert.deepEqual(threadChoices(null), []);
 });
 
-test('answered choices sit before the first message written after them', () => {
+test('a card stays where it was asked: answering it later does not move it', () => {
+  const card = choiceCard({ choiceId: 'a', optionsDigest: 'd', question: 'Q', options: ['x'], answer: 'x', askedAt: '2026-10-29T10:10:00.000Z', answeredAt: '2026-10-29T11:00:00.000Z' });
+  assert.equal(card.at, '2026-10-29T10:10:00.000Z');
+  assert.equal(choiceCard({ choiceId: 'a', optionsDigest: 'd', question: 'Q', options: ['x'], answer: 'x', answeredAt: '2026-10-29T11:00:00.000Z' }).at, '2026-10-29T11:00:00.000Z', 'an older row only has its answer');
+});
+
+test('a retired card asks nothing: it is not waiting, and with no time it is gone', () => {
+  const retired = { choiceId: 'old', optionsDigest: 'd', question: 'Q', options: ['x'], askedAt: '2026-10-29T10:10:00.000Z', stale: true };
+  const undated = { choiceId: 'older', optionsDigest: 'd', question: 'Q', options: ['x'], stale: true };
+  const strip = runStrip(view({ choices: [retired, undated] }), 'en-US');
+  assert.equal(strip.waiting, 0);
+  assert.equal(en(strip.status), 'Waiting for results');
+  assert.notEqual(strip.tone, 'attention');
+  assert.deepEqual(threadChoices(view({ choices: [retired, undated] })).map((c) => [c.choiceId, c.stale]), [['old', true]]);
+  const picked = { ...retired, answer: ref('a1'), options: [ref('a1')] };
+  assert.equal(chosenArtifacts(view({ choices: [picked] })).size, 0, 'a retired pick is no longer the film\'s pick');
+});
+
+test('a plan the Director cleared is not a finished film', () => {
+  const cleared = runStrip(view({ state: 'done', steps: [{ key: 'old', kind: 'image', state: 'succeeded', model: 'm', label: 'l', priceMicros: '0', reached: false, updatedAt: 't' }] }), 'en-US');
+  assert.equal(en(cleared.status), 'Waiting for your direction');
+  assert.equal(cleared.tone, 'plain');
+  const made = runStrip(view({ state: 'done', steps: [{ key: 'new', kind: 'render', state: 'succeeded', model: 'm', label: 'l', priceMicros: '0', reached: true, updatedAt: 't' }] }), 'en-US');
+  assert.equal(en(made.status), 'Done');
+  assert.equal(made.tone, 'done');
+});
+
+test('cards sit before the first message written after them', () => {
   const entries = ['2026-10-29T10:30:00Z', null, '2026-10-29T10:36:00Z', '2026-10-29T10:40:00Z'];
   const items = [{ key: 'early', at: '2026-10-29T10:20:00Z' }, { key: 'mid', at: '2026-10-29T10:38:00Z' }, { key: 'late', at: '2026-10-29T11:00:00Z' }, { key: 'none', at: null }];
   const { before, after } = placeByTime(entries, items);
@@ -616,7 +645,7 @@ test('each state has its own tone: failed is not waiting, and done is marked', (
   assert.equal(TONE_CLASS.failed, 'status fail');
   assert.equal(TONE_GLYPH.done, '✓');
   assert.equal(runStrip(view({ state: 'done_with_failures' }), 'en').tone, 'failed');
-  assert.equal(runStrip(view({ state: 'done' }), 'en').tone, 'done');
+  assert.equal(runStrip(view({ state: 'done', steps }), 'en').tone, 'done');
 });
 
 test('the budget meter warns at 80% and turns red at the limit', () => {

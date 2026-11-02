@@ -17,6 +17,7 @@ export const codePlanMessages = {
   "codeplan.state.error": { en: "Stopped by an error", zh: "因错误停止" },
   "codeplan.state.paused_budget": { en: "Paused at the spend limit", zh: "已到花费上限，暂停" },
   "codeplan.state.done": { en: "Done", zh: "已完成" },
+  "codeplan.state.no_direction": { en: "Waiting for your direction", zh: "等你定方向" },
   "codeplan.state.done_with_failures": { en: "Stopped: a step failed", zh: "已停止：有步骤失败" },
   "codeplan.state.unknown": { en: "State {state}", zh: "状态 {state}" },
 
@@ -32,6 +33,7 @@ export const codePlanMessages = {
   "codeplan.limit.below": { en: "It cannot be below the {floor} already spent or started.", zh: "不能低于已花费或进行中的 {floor}。" },
   "codeplan.run.spend": { en: "Spent {spent} of {ceiling}", zh: "已花费 {spent}，上限 {ceiling}" },
   "codeplan.run.spend_pending": { en: "Spent {spent} (+{reserved} pending) of {ceiling}", zh: "已花费 {spent}（另有 {reserved} 待定），上限 {ceiling}" },
+  "codeplan.run.show_choice": { en: "Show {count} waiting", zh: "去确认（{count}）" },
   "codeplan.run.reviewing": { en: "Watching {count} clips to decide the cuts. This step is free.", zh: "正在看 {count} 段素材，决定怎么剪。这一步不花钱。" },
   "codeplan.run.held": { en: "The Director is updating the plan. New paid work waits; work already sent goes on.", zh: "导演正在更新计划。新的付费任务先等待，已发出的任务继续进行。" },
   "codeplan.run.error_title": { en: "The plan stopped with an error", zh: "计划因错误停止" },
@@ -44,6 +46,8 @@ export const codePlanMessages = {
   "codeplan.run.retry": { en: "Read again", zh: "重新读取" },
 
   // ---- choice cards ----
+  "codeplan.choice.retired": { en: "No longer applies: something it depended on changed", zh: "已失效：它依赖的内容改了" },
+  "codeplan.choice.retired_look": { en: "See this picture larger", zh: "放大查看这张图" },
   "codeplan.keyframe.eyebrow": { en: "Confirm the keyframe", zh: "确认关键帧" },
   "codeplan.keyframe.eyebrow_done": { en: "Keyframe confirmed", zh: "关键帧已确认" },
   "codeplan.keyframe.ask": { en: "What should this clip be made from?", zh: "这段视频用什么来生成？" },

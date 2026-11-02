@@ -105,7 +105,7 @@ export interface RunStrip {
   raise: { body: CodePlanCeilingInput; label: Msg; ceiling: string } | null;
   /** state "error": the pass's message, as plain text. */
   error: string | null;
-  /** Choices still waiting for the person. */
+  /** Choices still waiting for the person; a retired card waits for nobody. */
   waiting: number;
   /** reviewing only: how many clips the Director is watching before it cuts. */
   reviewingClips: number | null;
@@ -126,9 +126,11 @@ const share = (part: bigint, whole: bigint) => (whole <= 0n ? 0 : Math.max(0, Ma
 
 export function runStrip(view: CodePlanView, locale: string): RunStrip {
   const ceiling = micros(view.ceilingMicros), spent = micros(view.spentMicros), reserved = micros(view.reservedMicros);
-  const waiting = view.choices.filter((choice) => !answered(choice)).length;
+  const waiting = view.choices.filter((choice) => !answered(choice) && !choice.stale).length;
   const state = view.state;
-  const status = state === "waiting" ? msg(waiting ? "codeplan.state.waiting_choice" : "codeplan.state.waiting") : STATUS[state] ?? msg("codeplan.state.unknown", { state: String(state) });
+  // The Director cleared the plan to talk about ideas: finished, but there is no film to call done.
+  const nothing = state === "done" && !view.steps.some((step) => step.reached);
+  const status = nothing ? msg("codeplan.state.no_direction") : state === "waiting" ? msg(waiting ? "codeplan.state.waiting_choice" : "codeplan.state.waiting") : STATUS[state] ?? msg("codeplan.state.unknown", { state: String(state) });
   const values = { spent: formatMicros(String(spent), locale), ceiling: formatMicros(String(ceiling), locale) };
   const spend = reserved > 0n
     ? msg("codeplan.run.spend_pending", { ...values, reserved: formatMicros(String(reserved), locale) })
@@ -137,7 +139,7 @@ export function runStrip(view: CodePlanView, locale: string): RunStrip {
   return {
     state,
     status,
-    tone: state === "running" || state === "reviewing" ? "busy" : state === "error" || state === "done_with_failures" ? "failed" : state === "paused_budget" || (state === "waiting" && waiting > 0) ? "attention" : state === "done" ? "done" : "plain",
+    tone: state === "running" || state === "reviewing" ? "busy" : state === "error" || state === "done_with_failures" ? "failed" : state === "paused_budget" || (state === "waiting" && waiting > 0) ? "attention" : state === "done" && !nothing ? "done" : "plain",
     held: view.held,
     spend,
     meter: { spent: share(spent, ceiling), reserved: share(reserved, ceiling), level: share(spent, ceiling) >= 1 ? "full" : share(spent, ceiling) >= HIGH_SPEND ? "high" : null },
@@ -192,7 +194,10 @@ export interface ChoiceCard {
   clip: { artifact: StudioArtifactRef; poster: StudioArtifactRef | null; stepKey: string | null } | null;
   /** Every option is a way to use one keyframe: the card shows that picture once, and pressing an option confirms it. */
   keyframe: StudioArtifactRef | null;
-  answeredAt: string | null;
+  /** Its place in the thread: when it was asked, so answering a card never moves it. Older rows only have their answer's time. */
+  at: string | null;
+  /** The latest plan no longer reaches it: it says so and asks nothing. */
+  stale: boolean;
 }
 
 export function choiceCard(choice: CodePlanChoiceView, steps: readonly CodePlanStepView[] = []): ChoiceCard {
@@ -216,12 +221,13 @@ export function choiceCard(choice: CodePlanChoiceView, steps: readonly CodePlanS
     media: options.length > 0 && options.every((option) => option.artifact),
     clip: oneClip && first ? { artifact: first, poster: rows[0]!.poster, stepKey: stepOf(first)?.key ?? null } : null,
     keyframe: oneFrame ? first : null,
-    answeredAt: done && typeof choice.answeredAt === "string" ? choice.answeredAt : null,
+    at: choice.askedAt ?? (done && typeof choice.answeredAt === "string" ? choice.answeredAt : null),
+    stale: choice.stale === true,
   };
 }
 
 /**
- * Where timed items (answered choices) go among the thread's entries: before the first entry written after them.
+ * Where timed items (a film's choices) go among the thread's entries: before the first entry written after them.
  * `entryTimes` are the entries' times in thread order (null: unknown, never compared); an item with no time, or later
  * than every entry, comes after them. Returns the items before each entry and the rest.
  */
@@ -238,11 +244,15 @@ export function placeByTime<T extends { at: string | null }>(entryTimes: readonl
   return { before, after };
 }
 
-/** The thread shows answered choices first (in the order they were asked), then the ones still waiting, last. */
+/**
+ * The cards of the thread, in the order they were asked; a waiting card with no time comes last. A retired card that
+ * was never answered and has no time has nowhere to sit, and nothing left to say.
+ */
 export function threadChoices(view: CodePlanView | null): ChoiceCard[] {
   if (!view) return [];
-  const cards = view.choices.map((choice) => choiceCard(choice, view.steps));
-  return [...cards.filter((card) => card.answered), ...cards.filter((card) => !card.answered)];
+  const cards = view.choices.map((choice) => choiceCard(choice, view.steps)).filter((card) => card.at !== null || !card.stale);
+  const time = (card: ChoiceCard) => (card.at === null ? Number.POSITIVE_INFINITY : Date.parse(card.at));
+  return cards.map((card, index) => ({ card, index })).sort((a, b) => time(a.card) - time(b.card) || a.index - b.index).map(({ card }) => card);
 }
 
 /** The press for one answer: one per choice, and a different option is a different request. */
@@ -398,7 +408,7 @@ export function stepProblem(step: CodePlanStepView, locale: string): StepProblem
 export function chosenArtifacts(view: CodePlanView): Set<string> {
   const ids = new Set<string>();
   for (const choice of view.choices) {
-    if (!answered(choice)) continue;
+    if (!answered(choice) || choice.stale) continue;
     const artifact = optionArtifact(choice.answer);
     if (artifact) ids.add(artifact.artifactId);
   }

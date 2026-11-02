@@ -27,6 +27,8 @@ export interface TimedThreadItem {
   key: string;
   /** When it happened; it is shown before the first message written after it (null: after every message). */
   at: string | null;
+  /** It still needs an answer: with nothing written after it, it is the last thing in the thread, after the Director's questions. */
+  waiting?: boolean;
   node: ReactNode;
 }
 
@@ -39,12 +41,10 @@ const NO_TIMED: TimedThreadItem[] = [];
  * scrolling takes it away (threadScrolled). Scrolled up, a "View new messages" button says something arrived and
  * takes them there.
  */
-export function Thread({ extra = null, extraCount = 0, timed = NO_TIMED }: {
-  /** Cards that belong at the foot of the thread after the Director's questions (a code-plan film's waiting choices). */
-  extra?: ReactNode;
+export function Thread({ extraCount = 0, timed = NO_TIMED }: {
   /** How many cards a film adds to its thread in all: a new one is new content at the bottom, like a new question. */
   extraCount?: number;
-  /** Cards placed among the messages by their time (a code-plan film's answered choices). */
+  /** Cards placed among the messages by their time (a code-plan film's choices). */
   timed?: TimedThreadItem[];
 } = {}) {
   const { t, tm, locale } = useI18n();
@@ -137,13 +137,13 @@ export function Thread({ extra = null, extraCount = 0, timed = NO_TIMED }: {
               <Entry entry={entry} />
             </Fragment>
           ))}
-          {placed?.after.map((item) => <Fragment key={item.key}>{item.node}</Fragment>)}
+          {placed?.after.filter((item) => !item.waiting).map((item) => <Fragment key={item.key}>{item.node}</Fragment>)}
           {view.reviewNotesFailures.map((failure) => <p key={failure.id} className="dir-ending" role="status" data-review-notes="unsaved" data-turn={failure.id}>{tm(failure.message)}</p>)}
           {/* How the latest turn ended reads right under it; a held edit then says what that leaves waiting. */}
           {!view.working && view.ending && <p className="dir-ending" role="status" data-entry="ending">{tm(view.ending)}</p>}
           {view.questions.map((question) => <QuestionCard key={question.id} question={question} />)}
           {view.held.map((held) => <HeldEdits key={held.requestId} held={held} />)}
-          {extra}
+          {placed?.after.filter((item) => item.waiting).map((item) => <Fragment key={item.key}>{item.node}</Fragment>)}
           {view.working && (
             <div className="entry" data-entry="working">
               <div className="byline"><b>{t("director.title")}</b></div>

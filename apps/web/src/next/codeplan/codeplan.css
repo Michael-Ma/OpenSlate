@@ -41,6 +41,11 @@
 .cp-choices{display:flex;flex-direction:column;gap:8px;margin-top:10px}
 .cp-choice{border:1px solid var(--amber-line);background:var(--amber-surface);border-radius:12px;padding:10px 12px 11px;line-height:1.45;min-width:0}
 .cp-choice.done{border-color:var(--hairline);background:var(--raised)}
+.cp-choice.retired{display:flex;align-items:center;gap:10px;padding:6px 10px;border-color:var(--hairline);background:none}
+.cp-choice.retired .cp-thumb{flex:none;width:40px}
+.cp-choice.retired .cp-thumb-pic{aspect-ratio:1}
+.cp-retired-text{margin:0;min-width:0;display:flex;flex-direction:column;font-size:12.5px;color:var(--muted)}
+.cp-retired-text b{font-weight:500;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cp-eyebrow{display:block;color:var(--amber);font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase}
 .cp-choice.done .cp-eyebrow{color:var(--muted)}
 .cp-question{margin:3px 0 0;color:var(--text);overflow-wrap:anywhere}

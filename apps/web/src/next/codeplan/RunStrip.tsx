@@ -6,6 +6,7 @@ import { useGuarded } from "../app/useWriteGuard.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
 import { LimitEditor } from "./LimitEditor.tsx";
+import { showWaitingChoice } from "./ChoiceCards.tsx";
 import "./codeplan.css";
 
 /**
@@ -38,6 +39,7 @@ export function CodePlanRunStrip() {
           {strip.tone === "busy" ? <i className="cp-spin" aria-hidden="true" /> : TONE_GLYPH[strip.tone] ? <span aria-hidden="true">{TONE_GLYPH[strip.tone]}</span> : null}
           {tm(strip.status)}
         </span>
+        {strip.waiting ? <button type="button" className="cp-limit-open" data-act="code-plan-show-choice" onClick={showWaitingChoice}>{t("codeplan.run.show_choice", { count: strip.waiting })}</button> : null}
         {view.planVersion !== null ? <span className="cp-run-ver">{t("codeplan.run.version", { version: view.planVersion })}</span> : null}
         <span className="cp-run-spend" data-act="code-plan-spend">{tm(strip.spend)}</span>
         {!editing ? <button type="button" className="cp-limit-open" data-act="code-plan-limit-open" aria-label={t("codeplan.limit.open_label")} {...guard} onClick={() => setEditing(true)}>{t("codeplan.limit.open")}</button> : null}

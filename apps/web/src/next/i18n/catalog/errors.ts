@@ -41,6 +41,7 @@ export const errors = {
   "error.CODE_PLAN_REJECTED": { en: "The program did not pass its dry run, so nothing was changed.", zh: "程序没有通过试运行，因此没有任何改动。" },
   // The runtime's refusals (apps/server/src/code-plan/index.ts answerChoice / raiseCeiling).
   "error.CODE_PLAN_CHOICE": { en: "This choice has changed. Look at the cards again.", zh: "这个选择已经变化，请再看一下卡片。" },
+  "error.CODE_PLAN_CHOICE_STALE": { en: "This card no longer applies: something it depended on changed.", zh: "这张卡已失效：它依赖的内容改了。" },
   "error.CODE_PLAN_CHOICE_ANSWERED": { en: "This choice already has another answer.", zh: "这个选择已经有了另一个答案。" },
   "error.CODE_PLAN_CEILING": { en: "That spending limit is below what this film has already spent or started.", zh: "这个花费上限低于影片已经花掉或已开始的金额。" },
   "error.CODE_PLAN_RETRY": { en: "This step cannot be retried now; it may have finished or changed. The page has the latest state.", zh: "这个步骤现在不能重试，它可能已经完成或改变了。页面显示的是最新状态。" },

@@ -12,17 +12,23 @@ import { useCodePlan } from "./CodePlanContext.tsx";
 import "./codeplan.css";
 
 /**
- * The choices the plan asked (`ctx.choose`), in the Director's thread: an answered one where it was settled (by its
- * time, between the messages), the ones still waiting at the foot, after the Director's questions. The question is
- * the Director's, so a waiting card is amber like its other questions; media options show as thumbnails, the rest as
- * chips. Pressing an option sends that answer.
+ * The choices the plan asked (`ctx.choose`), in the Director's thread: each stays in the reply that asked it (by its
+ * time, between the messages), and the conversation moves on past it. When something it depended on changes, it
+ * retires where it is. The question is the Director's, so a waiting card is amber like its other questions; media
+ * options show as thumbnails, the rest as chips. Pressing an option sends that answer.
  */
-export function useCodePlanChoices(): { answered: ChoiceCard[]; pending: ChoiceCard[]; count: number } {
+export function useCodePlanChoices(): ChoiceCard[] {
   const { view } = useCodePlan();
-  return useMemo(() => {
-    const cards = threadChoices(view);
-    return { answered: cards.filter((card) => card.answered), pending: cards.filter((card) => !card.answered), count: cards.length };
-  }, [view]);
+  return useMemo(() => threadChoices(view), [view]);
+}
+
+/** Takes the person to the first card still waiting: it may have scrolled away with the conversation. */
+export function showWaitingChoice(): void {
+  const card = document.querySelector<HTMLElement>("#director .cp-choice[data-answered='false']:not([data-stale='true'])");
+  if (!card) return;
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  card.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+  card.querySelector<HTMLElement>("button:not(:disabled)")?.focus({ preventScroll: true });
 }
 
 /** One or more cards in the thread, their pictures read through the code-plan media route. */
@@ -42,6 +48,30 @@ export function CodePlanChoiceGroup({ cards }: { cards: ChoiceCard[] }) {
 export const optionName = (option: ChoiceOption, t: ReturnType<typeof useI18n>["t"]): string =>
   option.label ?? (option.approved === null ? t("codeplan.choice.option", { n: option.index + 1 }) : t(option.approved ? "codeplan.choice.approve" : "codeplan.choice.reject"));
 
+/** A card nothing depends on any more: one quiet line where it was asked, its picture still there to look at. */
+function RetiredChoice({ card }: { card: ChoiceCard }) {
+  const { t } = useI18n();
+  const [looking, setLooking] = useState(false);
+  const first = card.options.find((option) => option.artifact);
+  const artifact = card.keyframe ?? card.clip?.artifact ?? first?.artifact ?? null;
+  const poster = card.clip?.poster ?? first?.poster ?? null;
+  const still = artifact?.kind === "video" ? poster : artifact;
+  return (
+    <section className="cp-choice retired" data-choice={card.choiceId} data-answered={card.answered ? "true" : "false"} data-stale="true" aria-label={card.question || t("codeplan.choice.eyebrow")}>
+      {artifact ? (
+        <button type="button" className="cp-thumb" data-kind={artifact.kind} data-act="code-plan-retired-look" aria-label={t("codeplan.choice.retired_look")} onClick={() => setLooking(true)}>
+          <span className="cp-thumb-pic">{still ? <Picture artifact={still} alt="" /> : null}</span>
+        </button>
+      ) : null}
+      <p className="cp-retired-text">
+        {card.question ? <b>{card.question}</b> : null}
+        <span>{t("codeplan.choice.retired")}</span>
+      </p>
+      {looking && artifact ? <MediaViewer items={[{ key: card.choiceId, artifact, title: card.question || t("codeplan.choice.eyebrow"), ...(poster ? { poster } : {}) }]} start={0} onClose={() => setLooking(false)} /> : null}
+    </section>
+  );
+}
+
 export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
   const { t } = useI18n();
   const store = useStore();
@@ -57,6 +87,7 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
   const [watching, setWatching] = useState(false);
   // Code is mentioned only to developers, who have the Code tab.
   const developer = useDeveloperMode();
+  if (card.stale) return <RetiredChoice card={card} />;
   return (
     <section
       className={`cp-choice${card.answered ? " done" : ""}`}
