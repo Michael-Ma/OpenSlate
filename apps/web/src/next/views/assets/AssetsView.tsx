@@ -175,7 +175,8 @@ function Library() {
 
       <div className="filters">
         <div className="segctl" role="group" aria-label={t("assets.filter.kind")} ref={roles}>
-          {ROLE_FILTERS.map((role) => (
+          {/* Only code plans make reference images, so other films are not offered an empty filter. */}
+          {ROLE_FILTERS.filter((role) => role !== "reference" || library.counts.reference > 0).map((role) => (
             <button key={role} type="button" data-act="role-filter" data-role={role} aria-pressed={active.role === role} onClick={() => setRole(role)}>
               {t(ROLE_LABEL[role])} <span className="n">{library.counts[role]}</span>
             </button>
