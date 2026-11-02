@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { transformWithOxc } from '../../node_modules/vite/dist/node/index.js';
 import { answerPress, choiceCard, CEILING_PRESS, declaredPlan, retryPress, runStrip, stepRows, threadChoices, TONE_CLASS, TONE_GLYPH } from '../../src/next/model/code-plan.ts';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
+import { formatMicros } from '../../src/next/model/price.ts';
 
 /**
  * The code-plan cards rendered as the page renders them: each component file is compiled on its own (imports dropped)
@@ -44,7 +45,7 @@ async function choiceCards({ locale = 'en', guard = { disabled: false, title: un
     Modal: ({ className, labelledBy, children }) => React.createElement('dialog', { className, 'aria-labelledby': labelledBy, open: true }, children),
     useI18n: () => i18n(locale),
     Picture: ({ artifact, alt }) => React.createElement('img', { 'data-artifact': artifact.artifactId, alt }),
-    answerPress, threadChoices,
+    answerPress, threadChoices, formatMicros,
     useGuarded: () => ({ ...guard, 'data-needs': 'server' }),
     CodePlanMedia: ({ children }) => React.createElement('div', { 'data-media': 'code-plan' }, children),
     useStore: () => s,
@@ -54,6 +55,48 @@ async function choiceCards({ locale = 'en', guard = { disabled: false, title: un
 }
 
 const frames = { choiceId: 'frame-1.1', optionsDigest: 'd1', question: 'Which frame should 1.1 start from?', options: [ref('a1'), ref('a2'), ref('a3')] };
+
+const keyframe = (overrides = {}) => ({ choiceId: '1.1-keyframe', optionsDigest: 'k1', question: 'The harbour at dusk', options: [
+  { ...ref('kf'), keyframeInput: 'keyframe_and_references', references: [ref('sheet')], priceMicros: '400000' },
+  { ...ref('kf'), keyframeInput: 'references_only', references: [ref('sheet')], priceMicros: '400000' },
+  { ...ref('kf'), keyframeInput: 'first_frame', references: [ref('sheet')], priceMicros: '240000' },
+], ...overrides });
+
+test('a keyframe to confirm shows one picture and the priced ways to use it, the first as the default', async () => {
+  const card = choiceCard(keyframe());
+  assert.equal(card.keyframe.artifactId, 'kf');
+  assert.equal(card.media, false, 'these are not pictures to compare');
+  assert.deepEqual(card.options.map(option => [option.keyframe.input, option.keyframe.priceMicros, option.artifact]),
+    [['keyframe_and_references', '400000', null], ['references_only', '400000', null], ['first_frame', '240000', null]]);
+  const { CodePlanChoiceCard } = await choiceCards();
+  const html = renderToStaticMarkup(React.createElement(CodePlanChoiceCard, { card }));
+  assert.match(html, /Confirm the keyframe/);
+  assert.match(html, /The harbour at dusk/);
+  assert.deepEqual([...html.matchAll(/data-artifact="([^"]+)"/g)].map((m) => m[1]), ['kf'], 'the picture appears once');
+  assert.deepEqual([...html.matchAll(/data-input="([^"]+)"/g)].map((m) => m[1]), ['keyframe_and_references', 'references_only', 'first_frame']);
+  assert.equal((html.match(/class="cp-input primary"/g) ?? []).length, 1);
+  for (const words of ['Keyframe and references', 'References only', 'Keyframe as first frame', '\\$0\\.40', '\\$0\\.24', 'tell the Director']) assert.match(html, new RegExp(words));
+  assert.doesNotMatch(html, /Compare larger/);
+});
+
+test('a confirmed keyframe keeps the picture and says how the clip used it', async () => {
+  const waiting = keyframe();
+  const card = choiceCard({ ...waiting, answer: waiting.options[2], answeredAt: '2026-11-01T10:00:00.000Z' });
+  const { CodePlanChoiceCard } = await choiceCards();
+  const html = renderToStaticMarkup(React.createElement(CodePlanChoiceCard, { card }));
+  assert.match(html, /Keyframe confirmed/);
+  assert.equal(card.chosen, 2);
+  assert.match(html, /class="cp-input chosen"[^>]*data-input="first_frame"/);
+  assert.doesNotMatch(html, /tell the Director/);
+});
+
+test('a keyframe made without references is not offered as "and references"', async () => {
+  const { CodePlanChoiceCard } = await choiceCards();
+  const card = choiceCard(keyframe({ options: [{ ...ref('kf'), keyframeInput: 'keyframe_and_references', references: [], priceMicros: '400000' }] }));
+  const html = renderToStaticMarkup(React.createElement(CodePlanChoiceCard, { card }));
+  assert.doesNotMatch(html, /Keyframe and references/);
+  assert.match(html, />Keyframe</);
+});
 
 test('a waiting choice: amber card, the question, three thumbnails through the code-plan media, each opening the large view', async () => {
   const { CodePlanChoiceGroup } = await choiceCards();

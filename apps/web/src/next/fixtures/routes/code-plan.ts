@@ -17,6 +17,7 @@ import type { FixtureRoute } from "./types.ts";
  *
  * `?codeplan=` opens "Harbour lights" first (the studio lists it before The Last Ferry):
  * - `waiting` (also `on`): version 2 waits on the opening keyframe, three thumbnails; version 1's frames are history.
+ * - `confirm`: the same point, as `ctx.keyframe` asks it: one keyframe to confirm, with the ways the clip can use it.
  * - `budget`: both frames chosen; 1.2's clip would pass the $1 ceiling, so the run is paused (Raise the limit).
  * - `error`: version 3 threw after the first clip; the error is shown and the run stopped.
  * - `done`: everything made, the render plays in Film.
@@ -28,7 +29,7 @@ import type { FixtureRoute } from "./types.ts";
  * the Director move the run on, as the server would. The Last Ferry (a graph film) refuses these routes.
  */
 
-export type CodePlanPreset = "waiting" | "budget" | "error" | "done" | "cropped" | "failed" | "empty";
+export type CodePlanPreset = "waiting" | "confirm" | "budget" | "error" | "done" | "cropped" | "failed" | "empty";
 export const CODE_FILM_ID = "harbour-code";
 export const CODE_FILM_NAME = "Harbour lights";
 /** Simulated provider time for one stage of the run. */
@@ -39,7 +40,7 @@ export function codePlanPreset(): CodePlanPreset | null {
   try { value = new URLSearchParams(globalThis.location?.search ?? "").get("codeplan"); } catch { return null; }
   if (value === null) return null;
   if (value === "" || value === "on") return "waiting";
-  return (["waiting", "budget", "error", "done", "cropped", "failed", "empty"] as const).find((preset) => preset === value) ?? "waiting";
+  return (["waiting", "confirm", "budget", "error", "done", "cropped", "failed", "empty"] as const).find((preset) => preset === value) ?? "waiting";
 }
 
 // ---- the story's pieces ------------------------------------------------------------------------
@@ -64,10 +65,14 @@ const FRAMES = {
   open: [artifact("2.1", 111), artifact("3.1", 112), artifact("3.2", 113)],
   pier: [artifact("2.2", 121), artifact("2.2-red", 122), artifact("2.3", 123)],
 };
+/** What `ctx.keyframe` offers on a model with references and first frames, with each clip's price. */
+const VIDEO_INPUTS = [["keyframe_and_references", "250000"], ["references_only", "250000"], ["first_frame", "150000"]] as const;
 const CLIP_OPEN = artifact("2.1", 301, "video"), CLIP_PIER = artifact("2.2-red", 302, "video"), RENDER = artifact("2.1", 401, "video");
 
 interface CodeFilm {
   cropped?: boolean;
+  /** The opening keyframe is asked as `ctx.keyframe` asks it. */
+  confirm?: boolean;
   stage: Stage;
   /** The versions written so far (newest first) and the one in use. */
   versions: CodePlanVersionItem[];
@@ -164,13 +169,14 @@ function addVersion(film: CodeFilm, draft: Draft, at: [number, number] | null = 
   film.current = version;
 }
 
-const PRESET_STAGE: Record<CodePlanPreset, Stage> = { waiting: "waiting", budget: "budget", error: "error", done: "done", cropped: "done", failed: "clip_failed", empty: "empty" };
+const PRESET_STAGE: Record<CodePlanPreset, Stage> = { waiting: "waiting", confirm: "waiting", budget: "budget", error: "error", done: "done", cropped: "done", failed: "clip_failed", empty: "empty" };
 
 function newFilm(preset: CodePlanPreset): CodeFilm {
   const film: CodeFilm = { stage: PRESET_STAGE[preset], versions: [], sources: new Map(), current: null, history: preset !== "empty", ceilingMicros: preset === "done" || preset === "cropped" || preset === "failed" ? "2000000" : "1000000", pickOpen: 0, pickPier: 1, held: false, stamps: new Map(), pierAttempts: 1 };
   if (preset !== "empty") { addVersion(film, "terminal", [10, 31]); addVersion(film, "harbour", [10, 36]); }
   if (preset === "error") addVersion(film, "bug", [10, 41]);
   film.cropped = preset === "cropped";
+  film.confirm = preset === "confirm";
   return film;
 }
 
@@ -212,7 +218,13 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
     choices.push({ choiceId, optionsDigest: hex(`${choiceId}:${options.map((o) => o.artifactId).join(",")}`), question: `Which frame should ${choiceId.slice("frame-".length)} start from?`, options,
       ...(pick !== null ? { answer: options[pick], answeredAt: todayAt(...at) } : {}) });
   };
-  if (started && stage !== "making_open") choice("frame-1.1", FRAMES.open, ONE_CHOSEN.includes(stage) ? film.pickOpen : null, [10, 38]);
+  if (started && stage !== "making_open") {
+    if (film.confirm) {
+      const options = VIDEO_INPUTS.map(([keyframeInput, priceMicros]) => ({ ...FRAMES.open[0]!, keyframeInput, references: [FRAMES.terminal[0]!], priceMicros }));
+      const pick = ONE_CHOSEN.includes(stage) ? options[film.pickOpen] : undefined;
+      choices.push({ choiceId: "frame-1.1", optionsDigest: hex("frame-1.1:confirm"), question: "The harbour at dusk", options, ...(pick ? { answer: pick, answeredAt: todayAt(10, 38) } : {}) });
+    } else choice("frame-1.1", FRAMES.open, ONE_CHOSEN.includes(stage) ? film.pickOpen : null, [10, 38]);
+  }
   if (PIER_FRAMES.includes(stage) && stage !== "making_1_2" && stage !== "fixed_making") choice("frame-1.2", FRAMES.pier, PIER_CHOSEN.includes(stage) ? film.pickPier : null, [10, 39]);
   // Unanswered first, then answered, each in first-seen order (the contract's order).
   choices.sort((a, b) => Number(a.answer !== undefined) - Number(b.answer !== undefined));
@@ -352,7 +364,7 @@ function codeFilmAssets(view: CodePlanView): AssetItem[] {
   const takes = new Map<string, number>();
   return view.steps.flatMap((step) => {
     if (step.state !== "succeeded" || !step.artifact) return [];
-    const role = roles[step.kind], group = `${step.shotId ?? ""}:${role}`, takeIndex = (takes.get(group) ?? 0) + 1;
+    const role = step.kind === "image" && !step.shotId ? "reference" : roles[step.kind], group = `${step.shotId ?? ""}:${role}`, takeIndex = (takes.get(group) ?? 0) + 1;
     takes.set(group, takeIndex);
     return [{ artifact: step.artifact, role, stepKey: step.key, ...(step.shotId ? { shotId: step.shotId, sceneId: "harbour", takeIndex } : {}),
       current: step.reached && (step.kind !== "image" || chosen.has(step.artifact.artifactId)), source: "demo" as const, label: step.label, createdAt: step.updatedAt,

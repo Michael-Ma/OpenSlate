@@ -44,6 +44,18 @@ export const codePlanMessages = {
   "codeplan.run.retry": { en: "Read again", zh: "重新读取" },
 
   // ---- choice cards ----
+  "codeplan.keyframe.eyebrow": { en: "Confirm the keyframe", zh: "确认关键帧" },
+  "codeplan.keyframe.eyebrow_done": { en: "Keyframe confirmed", zh: "关键帧已确认" },
+  "codeplan.keyframe.ask": { en: "What should this clip be made from?", zh: "这段视频用什么来生成？" },
+  "codeplan.keyframe.look": { en: "See this keyframe larger", zh: "放大查看这张关键帧" },
+  "codeplan.keyframe.note": { en: "Choosing starts this shot's clip. To change the picture, tell the Director.", zh: "选择后开始生成这个镜头的视频。想改画面，直接在对话里告诉导演。" },
+  "codeplan.keyframe.input.keyframe_and_references": { en: "Keyframe and references", zh: "关键帧 + 参考图" },
+  "codeplan.keyframe.input.keyframe_only": { en: "Keyframe", zh: "关键帧" },
+  "codeplan.keyframe.input.references_only": { en: "References only", zh: "只用参考图" },
+  "codeplan.keyframe.input.first_frame": { en: "Keyframe as first frame", zh: "关键帧作首帧" },
+  "codeplan.keyframe.hint.keyframe_and_references": { en: "Closest to this picture, but the framing can shift", zh: "最接近这张图，但构图可能有变化" },
+  "codeplan.keyframe.hint.references_only": { en: "Leaves this picture out; the model frames the shot", zh: "不用这张图，构图由模型决定" },
+  "codeplan.keyframe.hint.first_frame": { en: "Starts exactly from this picture, without the references", zh: "从这张图开始动，构图最稳，不带参考图" },
   "codeplan.choice.group": { en: "Choices from the plan", zh: "计划里的选择" },
   "codeplan.choice.eyebrow": { en: "The plan asks", zh: "计划请你选择" },
   "codeplan.choice.eyebrow_done": { en: "You chose", zh: "你已选择" },

@@ -3,6 +3,7 @@ import { useI18n } from "../i18n/I18n.tsx";
 import { Picture } from "../keyframes/parts.tsx";
 import { MediaViewer, useNaturalAspect, ViewerClip } from "../media/Viewer.tsx";
 import { answerPress, threadChoices, type ChoiceCard, type ChoiceOption } from "../model/code-plan.ts";
+import { formatMicros } from "../model/price.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { Modal } from "../views/plan/Modal.tsx";
 import { useDeveloperMode } from "../app/useDeveloperMode.ts";
@@ -63,18 +64,28 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
       data-answered={card.answered ? "true" : "false"}
       aria-label={card.question || t("codeplan.choice.eyebrow")}
     >
-      <span className="cp-eyebrow">{t(card.answered ? "codeplan.choice.eyebrow_done" : "codeplan.choice.eyebrow")}</span>
+      <span className="cp-eyebrow">{t(card.keyframe ? (card.answered ? "codeplan.keyframe.eyebrow_done" : "codeplan.keyframe.eyebrow") : card.answered ? "codeplan.choice.eyebrow_done" : "codeplan.choice.eyebrow")}</span>
       {card.question ? <p className="cp-question">{card.question}</p> : null}
       {card.clip ? (
         <button type="button" className="cp-thumb cp-review-clip" data-kind="video" data-act="code-plan-watch" aria-label={t("codeplan.choice.watch")} onClick={() => setWatching(true)}>
           <span className="cp-thumb-pic">{card.clip.poster ? <Picture artifact={card.clip.poster} alt="" /> : null}<span className="cp-thumb-play" aria-hidden="true">▶</span></span>
         </button>
       ) : null}
+      {card.keyframe ? (
+        <button type="button" className="cp-thumb cp-keyframe" data-kind="image" data-act="code-plan-keyframe-look" aria-label={t("codeplan.keyframe.look")} onClick={() => setWatching(true)}>
+          <ThumbPicture artifact={card.keyframe} poster={null} />
+        </button>
+      ) : null}
+      {watching && card.keyframe ? (
+        <MediaViewer items={[{ key: card.choiceId, artifact: card.keyframe, title: card.question || t("codeplan.keyframe.eyebrow") }]} start={0} onClose={() => setWatching(false)} />
+      ) : null}
+      {card.keyframe && !card.answered ? <p className="cp-input-ask">{t("codeplan.keyframe.ask")}</p> : null}
       {watching && card.clip ? (
         <MediaViewer items={[{ key: card.choiceId, artifact: card.clip.artifact, title: card.question || t("codeplan.choice.watch"), ...(card.clip.poster ? { poster: card.clip.poster } : {}), ...(card.clip.stepKey ? { stepKey: card.clip.stepKey } : {}) }]} start={0} onClose={() => setWatching(false)} />
       ) : null}
-      <div className={`cp-options${card.media ? " media" : ""}`}>
+      <div className={`cp-options${card.media ? " media" : ""}${card.keyframe ? " inputs" : ""}`}>
         {card.options.map((option) => {
+          if (option.keyframe) return <VideoInputOption key={option.index} option={option} primary={option.index === 0 && !card.answered} off={off} offTitle={!card.answered && guard.disabled ? guard.title : undefined} onChoose={choose} />;
           const name = optionName(option, t);
           if (option.artifact) {
             // A press opens the options large, this one first; a paid clip never starts from a press on a thumbnail.
@@ -111,8 +122,22 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
       ) : null}
       {sending ? <p className="cp-choice-note" role="status">{t("codeplan.choice.sending")}</p> : null}
       {unconfirmed ? <p className="cp-choice-note" role="status" data-act="code-plan-unconfirmed">{t("codeplan.choice.unconfirmed")}</p> : null}
-      {!card.answered && !sending && !unconfirmed ? <p className="cp-choice-note">{t(developer ? "codeplan.choice.cost" : "codeplan.choice.cost_plain")}</p> : null}
+      {!card.answered && !sending && !unconfirmed ? <p className="cp-choice-note">{t(card.keyframe ? "codeplan.keyframe.note" : developer ? "codeplan.choice.cost" : "codeplan.choice.cost_plain")}</p> : null}
     </section>
+  );
+}
+
+/** One way for this shot's clip to use its keyframe. A press confirms the picture and starts the clip, so it says what that costs. */
+function VideoInputOption({ option, primary, off, offTitle, onChoose }: { option: ChoiceOption; primary: boolean; off: boolean; offTitle: string | undefined; onChoose(option: ChoiceOption): void }) {
+  const { t, locale } = useI18n();
+  const { input, priceMicros, references } = option.keyframe!;
+  const name = t(input === "keyframe_and_references" && references === 0 ? "codeplan.keyframe.input.keyframe_only" : `codeplan.keyframe.input.${input}` as const);
+  return (
+    <button type="button" className={`cp-input${option.chosen ? " chosen" : ""}${primary ? " primary" : ""}`} data-act="code-plan-choose" data-option={option.index} data-input={input}
+      aria-pressed={option.chosen} disabled={off} title={offTitle} onClick={() => onChoose(option)}>
+      <span className="cp-input-name">{option.chosen ? <span aria-hidden="true">✓ </span> : null}{name}{priceMicros ? <span className="cp-input-price"> · {formatMicros(priceMicros, locale)}</span> : null}</span>
+      <span className="cp-input-hint">{t(`codeplan.keyframe.hint.${input}` as const)}</span>
+    </button>
   );
 }
 

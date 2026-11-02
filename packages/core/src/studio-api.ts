@@ -645,7 +645,7 @@ export interface ProjectListItem {
 }
 
 /** character_sheet: one four-view character reference image (front, side, back, face), bound into that character's keyframes once approved. */
-export type AssetRole = "keyframe" | "clip" | "voice" | "music" | "upload" | "document" | "export" | "character_sheet";
+export type AssetRole = "keyframe" | "reference" | "clip" | "voice" | "music" | "upload" | "document" | "export" | "character_sheet";
 
 // ---------------------------------------------------------------------------
 // Files sent with a Director message (composer attach, drop and paste)
