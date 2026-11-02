@@ -12,5 +12,9 @@
     "--enable-libx264",
     "--enable-zlib"
   ],
-  "requiredEncoders": ["libx264", "aac", "pcm_s16le", "png", "mjpeg"]
+  "requiredEncoders": ["libx264", "aac", "pcm_s16le", "png", "mjpeg"],
+  "requiredDecoders": ["hevc", "png", "mjpeg", "webp", "gif", "bmp", "tiff", "h264", "vp9", "mpeg4", "mpeg2video", "flv", "wmv2", "h263", "aac", "mp3", "flac", "vorbis", "opus", "pcm_s16le", "pcm_s16be"],
+  "linuxRequiredDecoders": ["libdav1d"],
+  "requiredDemuxers": ["mov", "matroska", "png_pipe", "jpeg_pipe", "webp_pipe", "gif", "bmp_pipe", "tiff_pipe"],
+  "linuxConfigure": ["--enable-libdav1d"]
 }
