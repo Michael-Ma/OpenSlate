@@ -6,7 +6,7 @@ import { StudioStore } from '../../src/next/store/store.ts';
 import { ApiError } from '../../src/next/api/client.ts';
 import { artifactContentPath, codePlanArtifactContentPath, codePlanVersionPath, CODE_PLAN_PATH } from '../../src/next/api/code-plan.ts';
 import {
-  TONE_CLASS, TONE_GLYPH, chosenArtifacts, limitDraft, answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
+  TONE_CLASS, TONE_GLYPH, chosenArtifacts, makingMsg, makingNow, makingOf, limitDraft, answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
   findingMsg, isCodeProject, latestRender, lineDiff, needsAttention, optionArtifact, optionLabel, placeByTime, previousVersion, problemCause, retryPress, runStrip,
   sourcePress, stepProblem, stepRow, stepRows, threadChoices, versionRows,
 } from '../../src/next/model/code-plan.ts';
@@ -158,6 +158,48 @@ test('a plan the Director cleared is not a finished film', () => {
   const made = runStrip(view({ state: 'done', steps: [{ key: 'new', kind: 'render', state: 'succeeded', model: 'm', label: 'l', priceMicros: '0', reached: true, updatedAt: 't' }] }), 'en-US');
   assert.equal(en(made.status), 'Done');
   assert.equal(made.tone, 'done');
+});
+
+test('what is being made: by what it is for, queued apart, held at the limit apart', () => {
+  const at = (minutes) => new Date(Date.now() - minutes * 60000).toISOString();
+  const steps = [
+    step('sheet', 'image', 'in_flight', { updatedAt: at(0) }),
+    step('frame-1', 'image', 'in_flight', { shotId: 's1', updatedAt: at(3) }),
+    step('frame-2', 'image', 'absent', { shotId: 's2' }),
+    step('clip-1', 'video', 'in_flight', { shotId: 's1', updatedAt: at(12) }),
+    step('old', 'image', 'in_flight', { reached: false }),
+  ];
+  const now = makingNow(view({ state: 'running', steps }));
+  assert.deepEqual(now.items.map(en), ['1 reference', '1 keyframe', '1 clip']);
+  assert.equal(now.queued, 1);
+  assert.deepEqual(now.items.map(zh), ['参考图 1 张', '关键帧 1 张', '视频 1 段']);
+  assert.equal(makingNow(view({ state: 'done', steps: [step('a', 'image', 'succeeded')] })), null, 'nothing on its way');
+  assert.equal(makingNow(view({ state: 'paused_budget', steps: [step('clip', 'video', 'absent')] })), null, 'held at the limit is said by the strip already');
+  const v = view({ state: 'running' });
+  assert.equal(en(makingMsg(makingOf(steps[0], v))), 'Making…');
+  assert.equal(zh(makingMsg(makingOf(steps[1], v))), '生成中 · 3 分钟');
+  assert.equal(en(makingMsg(makingOf(steps[2], v))), 'Queued');
+  assert.equal(en(makingMsg(makingOf(steps[3], v))), 'Still waiting for the service (12 min)');
+  assert.equal(en(makingMsg(makingOf(steps[2], view({ state: 'paused_budget' })))), 'Waiting for a higher limit');
+  assert.equal(makingOf(steps[4], v), null, 'history is not waited for');
+});
+
+test('Plan lists the shared pictures and says what each shot is waiting for', () => {
+  const steps = [
+    step('sheet', 'image', 'succeeded', { artifact: ref('sheet') }),
+    step('plate', 'image', 'in_flight'),
+    step('frame-1', 'image', 'succeeded', { shotId: 's1', artifact: ref('f1') }),
+    step('frame-1b', 'image', 'in_flight', { shotId: 's1' }),
+    step('frame-2', 'image', 'absent', { shotId: 's2' }),
+    step('clip-1', 'video', 'in_flight', { shotId: 's1' }),
+    step('gone', 'image', 'succeeded', { reached: false, artifact: ref('gone') }),
+  ];
+  const plan = declaredPlan(view({ state: 'running', steps, declarations: { scenes: [], shots: [{ id: 's1' }, { id: 's2' }] } }));
+  assert.deepEqual(plan.references.map((r) => [r.stepKey, r.artifact?.artifactId ?? null, r.making?.state ?? null]), [['sheet', 'sheet', null], ['plate', null, 'making']]);
+  const [one, two] = plan.loose;
+  assert.equal(one.picture.artifactId, 'f1');
+  assert.deepEqual([one.making.picture?.state, one.making.clip?.state], ['making', 'making'], 'a new frame is on its way while the old one shows');
+  assert.deepEqual([two.picture, two.making.picture?.state, two.making.clip], [null, 'queued', null]);
 });
 
 test('cards sit before the first message written after them', () => {

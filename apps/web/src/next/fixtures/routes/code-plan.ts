@@ -18,6 +18,7 @@ import type { FixtureRoute } from "./types.ts";
  * `?codeplan=` opens "Harbour lights" first (the studio lists it before The Last Ferry):
  * - `waiting` (also `on`): version 2 waits on the opening keyframe, three thumbnails; version 1's frames are history.
  * - `confirm`: the same point, as `ctx.keyframe` asks it: one keyframe to confirm, with the ways the clip can use it.
+ * - `making`: 1.1's frame chosen; its clip and 1.2's three frames are being made, and stay so (nothing moves on).
  * - `retired`: as `confirm`, later: the conversation moved on past the waiting card, and version 1's card has retired.
  * - `budget`: both frames chosen; 1.2's clip would pass the $1 ceiling, so the run is paused (Raise the limit).
  * - `error`: version 3 threw after the first clip; the error is shown and the run stopped.
@@ -30,7 +31,7 @@ import type { FixtureRoute } from "./types.ts";
  * the Director move the run on, as the server would. The Last Ferry (a graph film) refuses these routes.
  */
 
-export type CodePlanPreset = "waiting" | "confirm" | "retired" | "budget" | "error" | "done" | "cropped" | "failed" | "empty";
+export type CodePlanPreset = "waiting" | "confirm" | "making" | "retired" | "budget" | "error" | "done" | "cropped" | "failed" | "empty";
 export const CODE_FILM_ID = "harbour-code";
 export const CODE_FILM_NAME = "Harbour lights";
 /** Simulated provider time for one stage of the run. */
@@ -41,7 +42,7 @@ export function codePlanPreset(): CodePlanPreset | null {
   try { value = new URLSearchParams(globalThis.location?.search ?? "").get("codeplan"); } catch { return null; }
   if (value === null) return null;
   if (value === "" || value === "on") return "waiting";
-  return (["waiting", "confirm", "retired", "budget", "error", "done", "cropped", "failed", "empty"] as const).find((preset) => preset === value) ?? "waiting";
+  return (["waiting", "confirm", "making", "retired", "budget", "error", "done", "cropped", "failed", "empty"] as const).find((preset) => preset === value) ?? "waiting";
 }
 
 // ---- the story's pieces ------------------------------------------------------------------------
@@ -172,7 +173,7 @@ function addVersion(film: CodeFilm, draft: Draft, at: [number, number] | null = 
   film.current = version;
 }
 
-const PRESET_STAGE: Record<CodePlanPreset, Stage> = { waiting: "waiting", confirm: "waiting", retired: "waiting", budget: "budget", error: "error", done: "done", cropped: "done", failed: "clip_failed", empty: "empty" };
+const PRESET_STAGE: Record<CodePlanPreset, Stage> = { waiting: "waiting", confirm: "waiting", making: "making_1_2", retired: "waiting", budget: "budget", error: "error", done: "done", cropped: "done", failed: "clip_failed", empty: "empty" };
 
 function newFilm(preset: CodePlanPreset): CodeFilm {
   const film: CodeFilm = { stage: PRESET_STAGE[preset], versions: [], sources: new Map(), current: null, history: preset !== "empty", ceilingMicros: preset === "done" || preset === "cropped" || preset === "failed" ? "2000000" : "1000000", pickOpen: 0, pickPier: 1, held: false, stamps: new Map(), pierAttempts: 1 };

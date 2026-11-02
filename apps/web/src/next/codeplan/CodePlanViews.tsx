@@ -1,11 +1,11 @@
 import type { CodePlanView } from "@openslate/core/public";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { numberLocale } from "../i18n/translate.ts";
 import { Picture } from "../keyframes/parts.tsx";
 import { useArtifactUrl } from "../media/useArtifactUrl.ts";
 import { MediaViewer, type ViewerItem } from "../media/Viewer.tsx";
-import { artifactRefOf, declaredPlan, latestRender, stepRow, stepRows, type DeclaredPlan, type DeclaredShot, type StepRow } from "../model/code-plan.ts";
+import { artifactRefOf, declaredPlan, latestRender, makingMsg, stepRow, stepRows, type DeclaredPlan, type DeclaredShot, type Making, type StepRow } from "../model/code-plan.ts";
 import { CodePlanMedia, useMode } from "../store/react.tsx";
 import { Thumb } from "../views/plan/ShotRow.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
@@ -37,7 +37,9 @@ export function CodePlanPlanView() {
   const developer = useDeveloperMode();
   const { view } = useCodePlan();
   const waiting = useNotReady();
-  const plan = useMemo(() => (view ? declaredPlan(view) : null), [view]);
+  // Waiting minutes move on while something is being made, without a new view.
+  const minute = useMinute(!!view?.steps.some((step) => step.reached && step.state === "in_flight"));
+  const plan = useMemo(() => (view ? declaredPlan(view) : null), [view, minute]);
   // Each shot's frame and clip open in one viewer, in film order.
   const media = useMemo(() => (plan ? shotMedia(plan) : []), [plan]);
   const [viewing, setViewing] = useState<number | null>(null);
@@ -53,6 +55,19 @@ export function CodePlanPlanView() {
           {/* Before the first pass ends, an empty list only means the run has not reached the declarations yet. */}
           {!plan.scenes.length && !plan.loose.length ? <ViewMessage title={t(view?.lastPassAt ? "codeplan.plan.no_rows" : "codeplan.plan.first_pass")} /> : null}
           <div className="scenes">
+            {plan.references.length ? (
+              <section className="scene panel cp-refs" data-scene="references" aria-label={t("codeplan.plan.references")}>
+                <div className="scene-top">
+                  <h2>{t("codeplan.plan.references")}</h2>
+                  <span className="meta">{t("codeplan.plan.references_note")}</span>
+                </div>
+                <div className="cp-ref-row">
+                  {plan.references.map((ref, index) => ref.artifact
+                    ? <Thumb key={ref.stepKey} label={String(index + 1)} picture={ref.artifact} dimmed={false} empty={null} onOpen={() => open(`ref:${ref.stepKey}`)} />
+                    : ref.making ? <MakingThumb key={ref.stepKey} label={String(index + 1)} making={ref.making} /> : null)}
+                </div>
+              </section>
+            ) : null}
             {plan.scenes.map((scene) => (
               <section key={scene.key} className="scene panel" data-scene={scene.key} aria-label={scene.title || t("codeplan.plan.scene", { n: scene.ordinal })}>
                 <div className="scene-top">
@@ -77,9 +92,32 @@ export function CodePlanPlanView() {
   );
 }
 
-/** Every shot's keyframe and clip, for the viewer. */
+/** A minute counter that ticks only while `active`, so waiting times stay true on screen. */
+function useMinute(active: boolean): number {
+  const [minute, setMinute] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setMinute((value) => value + 1), 60000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return minute;
+}
+
+/** Where a picture or clip will appear: what the run is doing about it. */
+function MakingThumb({ label, making }: { label: string; making: Making }) {
+  const { tm } = useI18n();
+  return (
+    <div className="thumb empty cp-making" data-making={making.state} role="status">
+      <span className="badge">{label}</span>
+      {making.state === "making" ? <i className="cp-spin" aria-hidden="true" /> : null}
+      <span>{tm(makingMsg(making))}</span>
+    </div>
+  );
+}
+
+/** Every shared picture, then every shot's keyframe and clip, for the viewer. */
 function shotMedia(plan: DeclaredPlan): ViewerItem[] {
-  const items: ViewerItem[] = [];
+  const items: ViewerItem[] = plan.references.flatMap((ref) => (ref.artifact ? [{ key: `ref:${ref.stepKey}`, artifact: ref.artifact, title: ref.label, stepKey: ref.stepKey }] : []));
   for (const shot of [...plan.scenes.flatMap((scene) => scene.shots), ...plan.loose]) {
     const title = shot.purpose || shot.label;
     if (shot.picture) items.push({ key: `${shot.key}:frame`, artifact: shot.picture, title, ...(shot.pictureStep ? { stepKey: shot.pictureStep } : {}) });
@@ -89,15 +127,20 @@ function shotMedia(plan: DeclaredPlan): ViewerItem[] {
 }
 
 function DeclaredShotRow({ shot, onOpen }: { shot: DeclaredShot; onOpen(key: string): void }) {
-  const { t } = useI18n();
+  const { t, tm } = useI18n();
   const meta = [shot.framing, shot.seconds !== null ? t("codeplan.plan.seconds", { seconds: shot.seconds }) : "", shot.motion ? t("codeplan.plan.motion", { motion: shot.motion }) : ""].filter(Boolean).join(" · ");
   return (
     <li className="shot-row cp-shot-row" data-shot={shot.key}>
       <div className="cp-shot-media">
-        <Thumb label={shot.label} picture={shot.picture} dimmed={false} empty={{ id: "codeplan.plan.no_keyframe" }} onOpen={shot.picture ? () => onOpen(`${shot.key}:frame`) : undefined} />
-        {shot.clip?.poster ? <Thumb label="▶" picture={shot.clip.poster} dimmed={false} empty={null} onOpen={() => onOpen(`${shot.key}:clip`)} /> : null}
+        {!shot.picture && shot.making.picture ? <MakingThumb label={shot.label} making={shot.making.picture} />
+          : <Thumb label={shot.label} picture={shot.picture} dimmed={false} empty={{ id: "codeplan.plan.no_keyframe" }} onOpen={shot.picture ? () => onOpen(`${shot.key}:frame`) : undefined} />}
+        {shot.clip?.poster ? <Thumb label="▶" picture={shot.clip.poster} dimmed={false} empty={null} onOpen={() => onOpen(`${shot.key}:clip`)} />
+          : shot.making.clip ? <MakingThumb label="▶" making={shot.making.clip} /> : null}
       </div>
       <div className="shot-main">
+        {/* A new take on its way, while the last one still shows. */}
+        {shot.picture && shot.making.picture ? <div className="cp-shot-making" role="status">{t("codeplan.making.new_keyframe", { status: tm(makingMsg(shot.making.picture)) })}</div> : null}
+        {shot.clip?.poster && shot.making.clip ? <div className="cp-shot-making" role="status">{t("codeplan.making.new_clip", { status: tm(makingMsg(shot.making.clip)) })}</div> : null}
         <b>{shot.purpose || <span className="muted">{t("plan.shot.no_purpose")}</span>}</b>
         {meta ? <div className="shot-meta">{meta}</div> : null}
         {shot.prompt ? <div className="shot-prompt">{t("plan.shot.picture", { prompt: shot.prompt })}</div> : null}
