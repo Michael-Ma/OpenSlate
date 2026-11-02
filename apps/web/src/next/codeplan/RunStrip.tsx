@@ -34,7 +34,7 @@ export function CodePlanRunStrip() {
   }
   const strip = runStrip(view, numberLocale(locale));
   const making = makingNow(view);
-  const makingText = making && (!making.items.length ? t("codeplan.making.only_queued", { count: making.queued })
+  const makingText = making && (making.items.length || making.queued) && (!making.items.length ? t("codeplan.making.only_queued", { count: making.queued })
     : t(making.queued ? "codeplan.making.line_queued" : "codeplan.making.line", { items: labelList(making.items.map(tm), locale), count: making.queued }));
   return (
     <section className="cp-run" aria-label={t("codeplan.run.label")} data-state={view.state} data-held={strip.held ? "true" : undefined}>
@@ -59,6 +59,8 @@ export function CodePlanRunStrip() {
           <span>{makingText}</span>
         </button>
       ) : null}
+      {/* Sent and never answered: no spinner, since nothing is known to be working on it. */}
+      {making?.unknown ? <p className="cp-run-note" role="status" data-act="code-plan-unknown" title={t("codeplan.making.unknown_hint")}>{t("codeplan.making.unknown_line", { count: making.unknown })}</p> : null}
       {strip.reviewingClips ? <p className="cp-run-note" role="status" data-act="code-plan-reviewing">{t("codeplan.run.reviewing", { count: strip.reviewingClips })}</p> : null}
       {strip.held ? <p className="cp-run-note" role="status" data-act="code-plan-held">{t("codeplan.run.held")}</p> : null}
       {strip.error !== null || view.state === "error" ? (

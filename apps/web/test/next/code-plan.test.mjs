@@ -18,6 +18,7 @@ import { createBody, planningStep, stepFits } from '../../src/next/model/start-n
 import { runCreation } from '../../src/next/model/start-commands.ts';
 import { searchWithView, shownView, viewFromSearch, viewTabs } from '../../src/next/model/shell.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
+import { msg } from '../../src/next/model/types.ts';
 
 const en = (m) => translateMsg('en', m);
 const zh = (m) => translateMsg('zh-CN', m);
@@ -184,6 +185,19 @@ test('what is being made: by what it is for, queued apart, held at the limit apa
   assert.equal(makingOf(steps[4], v), null, 'history is not waited for');
   assert.equal(makingOf(steps[2], view({ state: 'error' })), null, 'after an error nothing will send it');
   assert.equal(makingOf(steps[2], view({ state: 'done_with_failures' })), null);
+});
+
+test('a step the service never answered is said where it would appear, not dropped', () => {
+  const steps = [step('sheet', 'image', 'unknown'), step('frame-1', 'image', 'unknown', { shotId: 's1' }), step('failed', 'image', 'unknown', { error: { code: 'X', retry: 'none', mayHaveCharged: true } })];
+  const v = view({ state: 'waiting', steps, declarations: { scenes: [], shots: [{ id: 's1' }] } });
+  assert.equal(en(makingMsg(makingOf(steps[0], v))), 'No answer from the service');
+  assert.equal(makingOf(steps[2], v), null, 'a step with a reported problem is shown by its problem note instead');
+  const plan = declaredPlan(v);
+  assert.equal(plan.references[0].making.state, 'unknown');
+  assert.equal(plan.loose[0].making.picture.state, 'unknown');
+  const now = makingNow(v);
+  assert.deepEqual([now.items.length, now.queued, now.unknown], [0, 0, 2]);
+  assert.equal(zh(msg('codeplan.making.unknown_line', { count: 2 })), '2 项没有收到服务回应');
 });
 
 test('Plan lists the shared pictures and says what each shot is waiting for', () => {

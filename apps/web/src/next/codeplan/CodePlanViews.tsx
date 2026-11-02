@@ -11,6 +11,7 @@ import { Thumb } from "../views/plan/ShotRow.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
 import { useDeveloperMode } from "../app/useDeveloperMode.ts";
 import { StepCard, StepProblemNote, StepStatus, ViewHead, ViewMessage, stepLabel, stepStatus } from "./parts.tsx";
+import { msg } from "../model/types.ts";
 import "../views/plan/plan.css";
 import "./codeplan.css";
 
@@ -107,7 +108,7 @@ function useMinute(active: boolean): number {
 function MakingThumb({ label, making }: { label: string; making: Making }) {
   const { tm } = useI18n();
   return (
-    <div className="thumb empty cp-making" data-making={making.state} role="status">
+    <div className="thumb empty cp-making" data-making={making.state} role="status" title={making.state === "unknown" ? tm(msg("codeplan.making.unknown_hint")) : undefined}>
       <span className="badge">{label}</span>
       {making.state === "making" ? <i className="cp-spin" aria-hidden="true" /> : null}
       <span>{tm(makingMsg(making))}</span>

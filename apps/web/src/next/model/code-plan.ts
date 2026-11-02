@@ -488,7 +488,8 @@ export interface DeclaredShot {
 
 /** A step the person is waiting for: being made, queued behind others, or held at the spend limit. */
 export interface Making {
-  state: "making" | "queued" | "budget";
+  /** unknown: sent, but the service never answered; it may still arrive, and it may have charged. */
+  state: "making" | "queued" | "budget" | "unknown";
   /** Whole minutes since it was sent (making only). */
   minutes: number;
 }
@@ -559,33 +560,37 @@ export function makingOf(step: CodePlanStepView, view: Pick<CodePlanView, "state
   // Unsent work waits only while the run is still going; after an error or the end nothing will send it.
   if (step.state === "absent" && view.state === "paused_budget") return { state: "budget", minutes: 0 };
   if (step.state === "absent" && (view.state === "running" || view.state === "waiting" || view.state === "reviewing")) return { state: "queued", minutes: 0 };
+  // Lost in transit: say so where the picture or clip would be, instead of dropping the placeholder.
+  if (step.state === "unknown" && !step.error) return { state: "unknown", minutes: 0 };
   return null;
 }
 
 /** The busiest of two: something being made says more than something queued. */
-const busier = (a: Making | null, b: Making | null): Making | null => (!a ? b : !b ? a : a.state === "making" ? a : b.state === "making" ? b : a);
+const busier = (a: Making | null, b: Making | null): Making | null => (!a ? b : !b ? a : a.state === "making" ? a : b.state === "making" ? b : a.state === "unknown" ? a : b.state === "unknown" ? b : a);
 
 /** How a placeholder says it: making (with minutes, or slow), queued, or held at the limit. */
 export function makingMsg(making: Making): Msg {
   if (making.state === "queued") return msg("codeplan.making.queued");
+  if (making.state === "unknown") return msg("codeplan.making.unknown");
   if (making.state === "budget") return msg("codeplan.step.budget");
   if (making.minutes * 60000 >= SLOW_STEP_MS) return msg("codeplan.step.slow", { minutes: making.minutes });
   return making.minutes ? msg("codeplan.making.minutes", { minutes: making.minutes }) : msg("codeplan.step.in_flight");
 }
 
 /** What the run is making now, by what each thing is for, and how many more wait their turn. Null when nothing is on its way. */
-export function makingNow(view: CodePlanView): { items: Msg[]; queued: number } | null {
+export function makingNow(view: CodePlanView): { items: Msg[]; queued: number; unknown: number } | null {
   const counts = { reference: 0, keyframe: 0, clip: 0, voice: 0, music: 0, render: 0 };
-  let queued = 0;
+  let queued = 0, unknown = 0;
   for (const step of view.steps) {
     const making = makingOf(step, view);
     if (!making || making.state === "budget") continue;
     if (making.state === "queued") { queued += 1; continue; }
+    if (making.state === "unknown") { unknown += 1; continue; }
     const role = step.kind === "image" ? (step.shotId ? "keyframe" : "reference") : step.kind === "video" ? "clip" : step.kind === "speech" ? "voice" : step.kind;
     counts[role] += 1;
   }
   const items = (Object.keys(counts) as (keyof typeof counts)[]).filter((role) => counts[role] > 0).map((role) => msg(`codeplan.making.${role}`, { count: counts[role] }));
-  return items.length || queued ? { items, queued } : null;
+  return items.length || queued || unknown ? { items, queued, unknown } : null;
 }
 
 /** Each shot's newest made clip. */
