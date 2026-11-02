@@ -182,6 +182,8 @@ test('what is being made: by what it is for, queued apart, held at the limit apa
   assert.equal(en(makingMsg(makingOf(steps[3], v))), 'Still waiting for the service (12 min)');
   assert.equal(en(makingMsg(makingOf(steps[2], view({ state: 'paused_budget' })))), 'Waiting for a higher limit');
   assert.equal(makingOf(steps[4], v), null, 'history is not waited for');
+  assert.equal(makingOf(steps[2], view({ state: 'error' })), null, 'after an error nothing will send it');
+  assert.equal(makingOf(steps[2], view({ state: 'done_with_failures' })), null);
 });
 
 test('Plan lists the shared pictures and says what each shot is waiting for', () => {

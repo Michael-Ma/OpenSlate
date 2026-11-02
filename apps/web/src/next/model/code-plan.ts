@@ -556,7 +556,9 @@ function bestPictures(view: CodePlanView, keyOf: (step: CodePlanStepView) => str
 export function makingOf(step: CodePlanStepView, view: Pick<CodePlanView, "state">, now = Date.now()): Making | null {
   if (!step.reached) return null;
   if (step.state === "in_flight") return { state: "making", minutes: Math.max(0, Math.floor((now - Date.parse(step.updatedAt)) / 60000)) };
-  if (step.state === "absent") return { state: view.state === "paused_budget" ? "budget" : "queued", minutes: 0 };
+  // Unsent work waits only while the run is still going; after an error or the end nothing will send it.
+  if (step.state === "absent" && view.state === "paused_budget") return { state: "budget", minutes: 0 };
+  if (step.state === "absent" && (view.state === "running" || view.state === "waiting" || view.state === "reviewing")) return { state: "queued", minutes: 0 };
   return null;
 }
 
