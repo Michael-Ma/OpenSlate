@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
-import { codexState, directorRequest, directorRow, draftFrom, draftProblems, reviewRequest, reviewSwitch, selectionFor } from '../../src/next/model/settings-director.ts';
+import { codexNoticeMsg, codexState, directorRequest, directorRow, draftFrom, draftProblems, reviewRequest, reviewSwitch, selectionFor } from '../../src/next/model/settings-director.ts';
 
 const en = (m) => translateMsg('en', m);
 const setup = (patch = {}) => ({
@@ -29,6 +29,41 @@ test('before a check the current model is still offered; no Codex makes the Code
   assert.equal(en(missing.choices[0].reason), 'Codex not found');
   assert.equal(en(directorRow(setup({ modelCatalogStatus: 'blocked' })).choices[0].reason), 'Codex needs attention');
   assert.equal(en(directorRow(setup({ busy: true, changeAvailable: false })).locked), "Wait for the Director's current turn to finish.");
+});
+
+const claude = (patch = {}) => ({ status: 'ready', binaryPath: '/Users/you/.local/bin/claude', version: '2.1.312', reason: null, available: true,
+  models: [{ id: 'claude-opus-5-5', label: 'Opus 5.5' }, { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }], ...patch });
+
+test('a code-plan film also offers Claude Code, on the Claude plan', () => {
+  const row = directorRow(setup({ claude: claude() }));
+  assert.deepEqual(row.choices.map((c) => c.value), ['native:gpt-6-astra', 'native:gpt-6-astra-mini', 'claude:claude-opus-5-5', 'claude:claude-sonnet-5-5', 'fake']);
+  const opus = row.choices[2];
+  assert.deepEqual([opus.runtime, opus.model, opus.label, opus.ready, en(opus.estimate)], ['claude', 'claude-opus-5-5', 'Opus 5.5', true, 'uses your Claude plan']);
+  assert.equal(directorRow(setup()).choices.some((c) => c.runtime === 'claude'), false, 'a server without Claude Code offers none');
+});
+
+test('Claude Code that is missing, blocked, or in a storyboard film cannot be chosen, and says why', () => {
+  assert.equal(en(directorRow(setup({ claude: claude({ status: 'missing', binaryPath: null }) })).choices[2].reason), 'Claude Code not found');
+  assert.equal(en(directorRow(setup({ claude: claude({ status: 'blocked', reason: 'Sign in to Claude Code first' }) })).choices[2].reason), "Claude Code isn't ready: Sign in to Claude Code first");
+  assert.equal(directorRow(setup({ claude: claude({ available: false }) })).choices.some((c) => c.runtime === 'claude'), false, 'a storyboard film is not offered Claude Code');
+  const kept = directorRow(setup({ claude: claude({ available: false }), selection: { mode: 'claude', model: 'claude-sonnet-5-5' } }));
+  assert.equal(kept.selected, 'claude:claude-sonnet-5-5');
+  assert.equal(en(kept.choices.find((c) => c.value === kept.selected).reason), 'only for code-plan films');
+});
+
+test('choosing Claude Code saves its program and model, after the first conversation as a change', () => {
+  const current = setup({ claude: claude() });
+  const selection = selectionFor(current, 'claude:claude-sonnet-5-5');
+  assert.deepEqual(selection, { mode: 'claude', model: 'claude-sonnet-5-5', binaryPath: '/Users/you/.local/bin/claude' });
+  assert.deepEqual(directorRequest(current, selection), { path: '/director/change', body: { expectedSelectionDigest: 'd'.repeat(64), selection } });
+  assert.equal(directorRow(setup({ claude: claude(), selection })).selected, 'claude:claude-sonnet-5-5');
+});
+
+test('a Codex program of another version runs the supported one instead, and Settings says so without blocking', () => {
+  const notice = { code: 'DIRECTOR_CODEX_VERSION_MISMATCH', expectedVersion: '0.162.1', foundVersion: '0.153.4', binaryPath: '/old/codex', installPath: '/new/codex' };
+  assert.equal(en(codexNoticeMsg(setup({ codexNotice: notice }))), 'The chosen Codex program is version 0.153.4, so OpenSlate runs its supported Codex 0.162.1 instead.');
+  assert.equal(codexState(setup({ codexNotice: notice })), 'ready');
+  assert.equal(codexNoticeMsg(setup()), null);
 });
 
 test('Codex state comes from the last setup check', () => {

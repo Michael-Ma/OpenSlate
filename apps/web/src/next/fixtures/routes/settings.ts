@@ -1,4 +1,5 @@
 import { ApiError } from "../../api/client.ts";
+import { CODE_FILM_ID, isCodeFilm } from "./code-plan.ts";
 import type { DirectorSelection, DirectorSetup } from "../../model/settings-director.ts";
 import type { PersonalVoice } from "../../model/settings-voice.ts";
 import { STOCK_VOICES } from "../../model/settings-voice.ts";
@@ -153,7 +154,10 @@ function apply(world: FixtureWorld, body: unknown) {
 
 // ---- Director --------------------------------------------------------------------------------
 
-function directorSetup(world: FixtureWorld): DirectorSetup {
+/** A film asked under its own id is a code-plan film of the sample studio; the sample film's own paths carry none. */
+const codeFilm = (world: FixtureWorld, projectId: string | undefined): boolean => !!projectId && isCodeFilm(world, projectId);
+
+function directorSetup(world: FixtureWorld, projectId?: string): DirectorSetup {
   const s = state(world);
   // On a first run no film is open; the archived sample film stands in for none, so its setup is not answered.
   if (computer(world).firstRun) throw new ApiError("NOT_FOUND", 404);
@@ -165,30 +169,37 @@ function directorSetup(world: FixtureWorld): DirectorSetup {
     locked: true, modelCalls: 4,
     modelChoices: s.catalogStatus === "ready" ? [{ id: "gpt-6.1-sol", label: "gpt-6.1-sol" }, { id: "gpt-6-astra", label: "gpt-6-astra" }, { id: "gpt-6-astra-mini", label: "gpt-6-astra-mini" }] : [],
     modelCatalogStatus: s.catalogStatus, modelCatalogCheckedAt: s.catalogStatus === "unchecked" ? null : "2026-10-15T10:40:00.000Z",
+    // Claude Code is installed and signed in on this sample computer; it directs code-plan films only.
+    claude: { status: "ready", binaryPath: CLAUDE_BINARY, version: "2.1.312", reason: null, available: codeFilm(world, projectId),
+      models: [{ id: "claude-opus-5-5", label: "Opus 5.5" }, { id: "claude-sonnet-5-5", label: "Sonnet 5.5" }] },
   };
 }
 
+const CLAUDE_BINARY = "/Users/you/.local/bin/claude";
+
 /** GET /director/models: Codex's read-only setup check, which fills the model list (blocked on a computer without Codex). */
-function checkCodex(world: FixtureWorld): DirectorSetup {
-  directorSetup(world);
+function checkCodex(world: FixtureWorld, projectId?: string): DirectorSetup {
+  directorSetup(world, projectId);
   state(world).catalogStatus = computer(world).codex ? "ready" : "blocked";
-  return directorSetup(world);
+  return directorSetup(world, projectId);
 }
 
-function changeDirector(world: FixtureWorld, body: unknown) {
+function changeDirector(world: FixtureWorld, body: unknown, projectId?: string) {
   const s = state(world);
   const input = body as { expectedSelectionDigest?: string; selection?: DirectorSelection } | null;
-  if (!input?.selection || !["fake", "native"].includes(input.selection.mode)) throw new ApiError("VALIDATION_ERROR", 400);
+  if (!input?.selection || !["fake", "native", "claude"].includes(input.selection.mode)) throw new ApiError("VALIDATION_ERROR", 400);
   if (input.expectedSelectionDigest !== hex("director", s.directorRevision)) throw new ApiError("DIRECTOR_SELECTION_STALE", 409);
   if (world.director.status === "running") throw new ApiError("DIRECTOR_SETUP_BUSY", 409);
   const next = input.selection;
   if (next.mode === "native" && (!next.binaryPath?.startsWith("/") || !next.model)) throw new ApiError("VALIDATION_ERROR", 400);
+  if (next.mode === "claude" && !codeFilm(world, projectId)) throw new ApiError("DIRECTOR_RUNTIME_UNSUPPORTED", 409);
+  if (next.mode === "claude" && !["claude-opus-5-5", "claude-sonnet-5-5"].includes(next.model ?? "")) throw new ApiError("VALIDATION_ERROR", 400);
   world.update(() => {
-    s.director = next.mode === "fake" ? { mode: "fake" } : { mode: "native", binaryPath: next.binaryPath!, model: next.model!, ...(next.codexHome ? { codexHome: next.codexHome } : {}) };
+    s.director = next.mode === "fake" ? { mode: "fake" } : next.mode === "claude" ? { mode: "claude", binaryPath: next.binaryPath ?? CLAUDE_BINARY, model: next.model! } : { mode: "native", binaryPath: next.binaryPath!, model: next.model!, ...(next.codexHome ? { codexHome: next.codexHome } : {}) };
     s.directorRevision += 1;
     s.catalogStatus = next.mode === "native" ? "ready" : s.catalogStatus;
   });
-  return { ...directorSetup(world), readiness: next.mode === "native" ? { status: "ready" } : null, readinessSelectionDigest: hex("director", s.directorRevision), selectionMatchesCommand: true };
+  return { ...directorSetup(world, projectId), readiness: next.mode === "native" ? { status: "ready" } : null, readinessSelectionDigest: hex("director", s.directorRevision), selectionMatchesCommand: true };
 }
 
 // ---- voices -------------------------------------------------------------------------------------
@@ -259,17 +270,18 @@ function setReview(world: FixtureWorld, body: unknown) {
 }
 
 export const settingsRoutes: FixtureRoute[] = [
-  { method: "GET", match: /^\/settings\/models$/, handle: (world) => modelStatus(world) },
+  { method: "GET", match: new RegExp(`^(?:/api/projects/${CODE_FILM_ID})?/settings/models$`), handle: (world) => modelStatus(world) },
   { method: "POST", match: /^\/settings\/models\/preview$/, handle: (world, _params, body) => preview(world, body) },
   { method: "POST", match: /^\/settings\/models\/apply$/, handle: (world, _params, body) => apply(world, body) },
-  { method: "GET", match: /^\/director\/setup$/, handle: (world) => directorSetup(world) },
-  { method: "GET", match: /^\/director\/models$/, handle: (world) => checkCodex(world) },
-  { method: "POST", match: /^\/director\/change$/, handle: (world, _params, body) => changeDirector(world, body) },
+  // The sample film's paths are relative; the sample code-plan film (?codeplan=) asks under its own id. Start answers films it makes.
+  { method: "GET", match: new RegExp(`^(?:/api/projects/(${CODE_FILM_ID}))?/director/setup$`), handle: (world, [id]) => directorSetup(world, id) },
+  { method: "GET", match: new RegExp(`^(?:/api/projects/(${CODE_FILM_ID}))?/director/models$`), handle: (world, [id]) => checkCodex(world, id) },
+  { method: "POST", match: new RegExp(`^(?:/api/projects/(${CODE_FILM_ID}))?/director/change$`), handle: (world, [id], body) => changeDirector(world, body, id) },
   // The sample film already had conversations, so its Director is chosen: a first setup is refused like the server does.
   { method: "POST", match: /^\/director\/setup$/, handle: () => { throw new ApiError("DIRECTOR_SELECTION_LOCKED", 409); } },
-  { method: "GET", match: /^\/settings\/director-review$/, handle: (world) => ({ enabled: state(world).review }) },
+  { method: "GET", match: new RegExp(`^(?:/api/projects/${CODE_FILM_ID})?/settings/director-review$`), handle: (world) => ({ enabled: state(world).review }) },
   { method: "POST", match: /^\/settings\/director-review$/, handle: (world, _params, body) => setReview(world, body) },
-  { method: "GET", match: /^\/settings\/voice$/, handle: (world) => ({ headVersion: world.snapshot.project.headVersion, narratorVoice: state(world).narratorVoice }) },
+  { method: "GET", match: new RegExp(`^(?:/api/projects/${CODE_FILM_ID})?/settings/voice$`), handle: (world) => ({ headVersion: world.snapshot.project.headVersion, narratorVoice: state(world).narratorVoice }) },
   { method: "POST", match: /^\/settings\/voice$/, handle: (world, _params, body) => setNarrator(world, body) },
   { method: "GET", match: /^\/narration\/personal-voices$/, handle: (world) => ({ headVersion: world.snapshot.project.headVersion, voices: structuredClone(state(world).voices) }) },
   { method: "POST", match: /^\/narration\/personal-voices$/, handle: (world, _params, body) => register(world, body) },
