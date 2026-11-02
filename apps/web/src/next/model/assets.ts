@@ -10,7 +10,7 @@ import { msg, type Msg, type Target } from "./types.ts";
  * overview's scenes and shots are read; nothing here talks to the server.
  */
 
-export const ROLE_FILTERS = ["all", "keyframe", "clip", "voice", "music", "upload", "document", "export"] as const;
+export const ROLE_FILTERS = ["all", "keyframe", "reference", "clip", "voice", "music", "upload", "document", "export"] as const;
 export type RoleFilter = (typeof ROLE_FILTERS)[number];
 /** "all", "film" (whole film only) or a scene id. */
 export type SceneFilter = string;
@@ -20,7 +20,7 @@ export interface AssetFilters {
 }
 export const ALL_ASSETS: AssetFilters = { role: "all", scene: "all" };
 
-const ROLE_ORDER: Record<AssetRole, number> = { keyframe: 0, clip: 1, voice: 2, music: 3, upload: 4, document: 5, export: 6, character_sheet: 7 };
+const ROLE_ORDER: Record<AssetRole, number> = { keyframe: 0, reference: 1, clip: 2, voice: 3, music: 4, upload: 5, document: 6, export: 7, character_sheet: 8 };
 
 /** Unique per stored file. Artifact ids alone are not enough: a take can reuse its id with new bytes. */
 export const assetKey = (item: Pick<AssetItem, "artifact">): string => `${item.artifact.kind}:${item.artifact.artifactId}:${item.artifact.sha256}`;
@@ -140,6 +140,8 @@ export function titleMsg(item: AssetItem, overview: AssetPlaces, items: readonly
     case "keyframe":
       if (!shot) return take ? msg("assets.label.keyframe_former", { take }) : msg("assets.kind.keyframe");
       return take ? msg("assets.label.keyframe", { shot: shot.label, take }) : msg("assets.label.keyframe_plain", { shot: shot.label });
+    case "reference":
+      return take ? msg("assets.label.reference", { take }) : msg("assets.kind.reference");
     case "clip":
       if (!shot) return take ? msg("assets.label.clip_former", { take }) : msg("assets.kind.clip");
       return take ? msg("assets.label.clip", { shot: shot.label, take }) : msg("assets.label.clip_plain", { shot: shot.label });

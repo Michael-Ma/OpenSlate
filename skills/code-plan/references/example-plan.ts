@@ -10,14 +10,13 @@ export default async function film(ctx: Studio): Promise<void> {
   ];
   for (const { id, title } of shots) await ctx.shot({ id, sceneId: "scene-1", title });
   // Small offline fixture: a real recurring cast/set first needs the shared references in film-craft.md.
-  // Each shot is its own pipeline and all start together: a shot's choice appears as soon as its own frames exist,
+  // One keyframe per shot. All pipelines start together: a shot's card appears as soon as its frame exists,
   // and its clip runs while the person is still choosing for the next shot.
   const clips = await Promise.all(shots.map(async ({ id, frame: framePrompt, motion }) => {
-    const frames = await Promise.all(["a", "b", "c"].map(variant => ctx.image({ model: "fake-image", shot: id, prompt: framePrompt, variant })));
-    const options = frames.flatMap(result => result.ok ? [result.artifact] : []);
-    if (!options.length) { await ctx.log(`No frames for ${id}`); return null; }
-    const frame = await ctx.choose(`${id}-keyframe`, { question: `Choose a frame for ${id}`, options });
-    const clip = await ctx.video({ model: "fake-video", shot: id, references: [frame], prompt: motion, durationSeconds: 6 });
+    const keyframe = await ctx.keyframe(id, { model: "fake-image", prompt: framePrompt,
+      video: { model: "fake-video", durationSeconds: 6, aspectRatio: "16:9" } });
+    if (!keyframe.ok) { await ctx.log(`No frame for ${id}`); return null; }
+    const clip = await ctx.video({ ...keyframe.input, model: "fake-video", shot: id, prompt: motion, durationSeconds: 6, aspectRatio: "16:9" });
     // Fake clips share their bytes. Retain the actual motion in the fixture timeline too.
     if (clip.ok) return { artifact: clip.artifact, motion };
     // In real films, fill these amounts from read_film.models (the fixture video costs $0).
@@ -28,7 +27,7 @@ export default async function film(ctx: Studio): Promise<void> {
       question: `${cost}Retry this shot for an estimated additional $0.00 (offline fixture), or skip?`, options: ["retry", "skip"],
     });
     if (answer !== "retry") return null;
-    const retried = await ctx.video({ model: "fake-video", shot: id, references: [frame], prompt: motion, durationSeconds: 6, variant: "person-retry-1" });
+    const retried = await ctx.video({ ...keyframe.input, model: "fake-video", shot: id, prompt: motion, durationSeconds: 6, aspectRatio: "16:9", variant: "person-retry-1" });
     if (!retried.ok) { await ctx.log(`The retried clip for ${id} also failed. Please choose how to continue in chat.`); return null; }
     return { artifact: retried.artifact, motion };
   }));
@@ -41,7 +40,7 @@ export default async function film(ctx: Studio): Promise<void> {
   const timeline = ready.map((clip, index) => ({ ...clip, ...cuts[index], fit: "cover" as const }));
   // Make the score once the final cut length is known; adapt fake-music to an installed model from read_film.
   const filmSamples = cuts.reduce((sum, cut) => sum + cut.durationFrames, 0) * 1600;
-  const music = await ctx.music({ model: "fake-music", prompt: "Warm, reflective piano and soft strings at a slow tempo", durationSeconds: filmSamples / 48000 });
+  const music = await ctx.music({ model: "fake-music", prompt: "Warm, reflective piano and soft strings at a slow tempo", durationSeconds: Math.ceil(filmSamples / 48000 / 30) * 30 });
   if (!music.ok) { await ctx.log("Music failed; choose how to continue before rendering."); return; }
   const leadIn = music.leadInSamples ?? 0;
   if ((music.durationSamples ?? 0) - leadIn < filmSamples) {

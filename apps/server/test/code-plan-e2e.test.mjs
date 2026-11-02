@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { codePlanFixture, runCodePlanOfflineFlow } from "./code-plan-e2e-fixture.mjs";
 
-test("real HTTP code-plan stack goes from a human message to frame choices, motion edit and lookup recovery", { timeout: 30000 }, async t => {
+test("real HTTP code-plan stack goes from a human message to keyframe confirmation, motion edit and lookup recovery", { timeout: 30000 }, async t => {
   const f = await codePlanFixture(); t.after(() => f.close());
   t.mock.method(globalThis, "fetch", () => assert.fail("The offline flow must not call the network"));
   const summary = await runCodePlanOfflineFlow(f);
   assert.equal(summary.finalState, "done"); assert.deepEqual(summary.versions, [1, 2, 3, 4]);
-  assert.deepEqual(summary.edit.newSteps, ["render", "video"]); assert.equal(summary.edit.reusedSteps, 8);
+  assert.deepEqual(summary.edit.newSteps, ["render", "video"]); assert.equal(summary.edit.reusedSteps, 4);
 });
 
 const source = body => `export default async function film(ctx: Studio): Promise<void> { ${body} }`;

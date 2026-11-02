@@ -35,7 +35,7 @@ import "./assets.css";
 
 const EMPTY: AssetItem[] = [];
 const ROLE_LABEL = {
-  all: "assets.role.all", keyframe: "assets.role.keyframe", clip: "assets.role.clip", voice: "assets.role.voice",
+  all: "assets.role.all", keyframe: "assets.role.keyframe", reference: "assets.role.reference", clip: "assets.role.clip", voice: "assets.role.voice",
   music: "assets.role.music", upload: "assets.role.upload", document: "assets.role.document", export: "assets.role.export",
 } as const satisfies Record<RoleFilter, string>;
 
@@ -175,7 +175,8 @@ function Library() {
 
       <div className="filters">
         <div className="segctl" role="group" aria-label={t("assets.filter.kind")} ref={roles}>
-          {ROLE_FILTERS.map((role) => (
+          {/* Only code plans make reference images, so other films are not offered an empty filter. */}
+          {ROLE_FILTERS.filter((role) => role !== "reference" || library.counts.reference > 0).map((role) => (
             <button key={role} type="button" data-act="role-filter" data-role={role} aria-pressed={active.role === role} onClick={() => setRole(role)}>
               {t(ROLE_LABEL[role])} <span className="n">{library.counts[role]}</span>
             </button>

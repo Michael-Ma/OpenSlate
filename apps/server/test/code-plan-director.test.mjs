@@ -275,18 +275,20 @@ test('pinned example executes every ctx call through JSON, stable choices, varia
   const result=await runSandbox({source:example,now:1,seed:1,call:(method,args)=>{
     calls.push({method,args});
     if(method==='scene'||method==='shot')return args[0];if(method==='log')return null;if(method==='choose')return args[1].options[0];
+    if(method==='keyframe'){const frame=artifact('image');return{ok:true,frame,choice:'first_frame',input:{firstFrame:frame}};}
     if(method==='video'&&!args[0].variant)return{ok:false,error:{code:'FAILED',message:'Fixture fallback',retry:'consent',mayHaveCharged:true}};
     const item=artifact(method==='image'?'image':method==='music'?'audio':'video');return{ok:true,artifact:item,artifacts:[item],...(method==='music'?{leadInSamples:12000,durationSamples:600000}:{})};
   }});
   assert.equal(result.state,'done',JSON.stringify(result));
-  assert.equal(calls.filter(c=>c.method==='image').length,6);
-  assert.deepEqual(calls.filter(c=>c.method==='choose').map(c=>c.args[0]),['shot-1-keyframe','shot-2-keyframe','shot-1-retry','shot-2-retry']);
+  assert.equal(calls.filter(c=>c.method==='keyframe').length,2);
+  assert.deepEqual(calls.filter(c=>c.method==='choose').map(c=>c.args[0]),['shot-1-retry','shot-2-retry']);
   assert.equal(calls.filter(c=>c.method==='music').length,1);
+  assert.equal(calls.find(c=>c.method==='music').args[0].durationSeconds,30);
   assert.deepEqual(calls.find(c=>c.method==='render').args[0].audio.map(row=>[row.startSample,row.durationSamples,row.fadeOutSamples]),[[12000,480000,96000],[undefined,undefined,undefined]]);
   assert.deepEqual(calls.filter(c=>c.method==='review').map(c=>c.args[0]),['first-cut']);
   const motions = [...example.matchAll(/motion: "([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(calls.filter(c=>c.method==='video').map(c=>c.args[0].prompt), [...motions, ...motions]);
-  assert.ok(calls.filter(c=>c.method==='image').every(c=>!motions.includes(c.args[0].prompt)));
+  assert.ok(calls.filter(c=>c.method==='keyframe').every(c=>!motions.includes(c.args[1].prompt)));
   assert.equal(calls.filter(c=>c.method==='video').length,4);assert.equal(calls.filter(c=>c.method==='render').length,1);
   assert.deepEqual(calls.find(c=>c.method==='render').args[0].timeline.map(row=>row.motion),
     [...example.matchAll(/motion: "([^"]+)"/g)].map(match => match[1]));
@@ -431,6 +433,6 @@ test('0.2.0 films retain their guidance, tool handler and ctx API without new fr
     readFileSync(join(repositoryRoot, 'skills/code-plan-v2/references/example-plan.ts'), 'utf8'));
   assert.doesNotMatch(references.find(row => row.path === 'references/studio.d.ts').content, /review\(/);
   assert.throws(() => parseToolArguments('read_clip_frames', { artifactId: 'clip' }, '0.2.0'), { code: 'NOT_FOUND' });
-  const result = await runSandbox({ source: 'export default async function(ctx) { if (typeof ctx.review !== "undefined") throw Error("leaked review"); }', now: 1, seed: 1, reviewEnabled: false, call: () => assert.fail('host call') });
+  const result = await runSandbox({ source: 'export default async function(ctx) { if (typeof ctx.review !== "undefined") throw Error("leaked review"); }', now: 1, seed: 1, filmQualityEnabled: false, call: () => assert.fail('host call') });
   assert.equal(result.state, 'done');
 });

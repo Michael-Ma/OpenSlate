@@ -35,11 +35,11 @@ export function codePlanAssets(store: Store, project: ProjectRecord): AssetItem[
     const step = produced.get(record.id), recording = audio.get(record.id), shotId = step ? links.get(step.key) : undefined;
     const shot = shotId ? shots.get(shotId) : undefined, sceneId = typeof shot?.sceneId === "string" ? shot.sceneId : undefined;
     const scene = sceneId ? scenes.get(sceneId) : undefined;
-    const role: AssetRole = step ? roles[step.kind] : record.artifact.kind === "document" ? "document"
+    const role: AssetRole = step ? step.kind === "image" && !shotId ? "reference" : roles[step.kind] : record.artifact.kind === "document" ? "document"
       : recording ? audioLibraryRole(project, recording, labels.get(record.id))
       : record.origin === "supplied_image" || record.origin === "supplied_video" ? "upload"
       : record.origin === "local_render" ? "export" : record.artifact.kind === "image" ? "keyframe" : record.artifact.kind === "video" ? "clip" : "voice";
-    const group = `${shotId ?? ""}:${role}`, numbered = role === "keyframe" || role === "clip", takeIndex = (counts.get(group) ?? 0) + 1;
+    const group = `${shotId ?? ""}:${role}`, numbered = role === "keyframe" || role === "reference" || role === "clip", takeIndex = (counts.get(group) ?? 0) + 1;
     if (numbered) counts.set(group, takeIndex);
     const ref = record.artifact, frameChoices = step?.kind === "image" ? choices.filter(choice => choice.options.some(option => sameImage(option, { ...ref }))) : [];
     const reference = media.imageReferences.get(record.id);

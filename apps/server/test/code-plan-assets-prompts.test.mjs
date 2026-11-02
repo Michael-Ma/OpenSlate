@@ -206,13 +206,16 @@ test('fit warning counts severe cover placements, skips missing sizes and leaves
 });
 
 test('offline adapter execution publishes inspectable assets, actual call settings and render warnings across restart', async t => {
-  const f = await realCodeFixture(t);
+  const f = await realCodeFixture(t, {videoSeconds:5});
   await f.submit(`export default async function(ctx) {
     ctx.scene({id:'scene'}); ctx.shot({id:'opening',sceneId:'scene'});
-    const frame=await ctx.image({model:'${codexImageProfile.id}',prompt:'Dawn',shot:'opening'}); if(!frame.ok) return;
-    const clip=await ctx.video({model:'${videoProfile.id}',firstFrame:frame.artifact,prompt:'Drift',durationSeconds:3,aspectRatio:'9:16',shot:'opening'});
+    const frame=await ctx.keyframe('opening',{model:'${codexImageProfile.id}',prompt:'Dawn',video:{model:'${videoProfile.id}',durationSeconds:5,aspectRatio:'9:16'}}); if(!frame.ok) return;
+    const clip=await ctx.video({model:'${videoProfile.id}',firstFrame:frame.frame,prompt:'Drift',durationSeconds:5,aspectRatio:'9:16',shot:'opening'});
     if(clip.ok) await ctx.render({timeline:[{artifact:clip.artifact,fit:'cover'}],width:90,height:160});
   }`);
+  for(let pass=0;pass<12&&!f.plans.choices(f.project.id).length;pass++)await f.tick();
+  const choice=f.plans.choices(f.project.id)[0];assert.ok(choice);
+  f.plans.answer(f.project.id,{choiceId:choice.choiceId,optionsDigest:choice.optionsDigest,answer:choice.options.find(option=>option.keyframeInput==='first_frame')});
   await f.finish();
   const view = f.plans.view(f.project.id), steps = new Map(view.steps.map(step => [step.kind, step]));
   const assets = projectAssets(f.service, f.store.getProject(f.project.id));
@@ -223,9 +226,9 @@ test('offline adapter execution publishes inspectable assets, actual call settin
   assert.equal(image.call.adapter, 'codex-image'); assert.equal(image.call.providerModel, 'gpt-6-astra');
   assert.deepEqual(image.output, { width: 320, height: 320 });
   assert.equal(video.call.adapter, 'viggle-h3'); assert.equal(video.call.settings.aspectRatio, '9:16');
-  assert.equal(video.call.settings.durationSeconds, 3); assert.equal(video.call.settings.resolution, '480p'); assert.ok(video.call.taskId);
+  assert.equal(video.call.settings.durationSeconds, 5); assert.equal(video.call.settings.resolution, '480p'); assert.ok(video.call.taskId);
   assert.deepEqual(video.call.firstFrameCrop, { sourceWidth: 320, sourceHeight: 320, width: 180, height: 320 });
-  assert.deepEqual(video.output, { width: 160, height: 90, durationSeconds: 3 }); assert.deepEqual(video.firstFrame, steps.get('image').artifact);
+  assert.deepEqual(video.output, { width: 160, height: 90, durationSeconds: 5 }); assert.deepEqual(video.firstFrame, steps.get('image').artifact);
   assert.deepEqual(steps.get('render').fitWarning, { clips: 1, keptPercent: 32 });
   const calls = { ...f.calls }; await f.restart();
   assert.deepEqual(projectAssets(f.service, f.store.getProject(f.project.id)), assets);

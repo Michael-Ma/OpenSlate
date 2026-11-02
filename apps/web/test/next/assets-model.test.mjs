@@ -32,7 +32,7 @@ test('the library groups the whole film first, then each scene and shot in film 
   const view = assetLibrary(library(), overview, ALL_ASSETS);
   assert.equal(view.total, 16);
   assert.equal(view.shown, 16);
-  assert.deepEqual(view.counts, { all: 16, keyframe: 6, clip: 3, voice: 3, music: 2, upload: 2, document: 0, export: 0 });
+  assert.deepEqual(view.counts, { all: 16, keyframe: 6, reference: 0, clip: 3, voice: 3, music: 2, upload: 2, document: 0, export: 0 });
   assert.ok(view.film);
   // Imported pictures keep no file name in the library, so the two are numbered, oldest first.
   assert.deepEqual(view.film.tiles.map((t) => en(t.title)), ['low-tide.mp3', 'foghorn-theme.wav', 'Imported image 1', 'Imported image 2']);
@@ -299,4 +299,13 @@ test('a code plan\'s unchosen frame reads Not chosen, and its step facts replace
 test('within a shot, the frame in use comes first', () => {
   const unchosen = { ...kf('1.1', 1), current: false, createdAt: at(9, 0) }, chosen = { ...kf('1.1', 2), current: true, createdAt: at(10, 0) };
   assert.deepEqual([unchosen, chosen].sort(compareAssets).map((item) => item.takeIndex), [chosen.takeIndex, unchosen.takeIndex]);
+});
+
+test('a reference image is named and counted apart from keyframes', () => {
+  const item = { ...kf('Character sheet', 2), role: 'reference', shotId: undefined };
+  assert.equal(en(titleMsg(item, overview)), 'Reference image 2');
+  assert.equal(zh(titleMsg(item, overview)), '参考图 2');
+  const counts = roleCounts([item, kf('1.1 frame', 1)]);
+  assert.equal(counts.reference, 1);
+  assert.equal(counts.keyframe, 1);
 });

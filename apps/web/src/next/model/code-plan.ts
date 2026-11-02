@@ -152,6 +152,16 @@ export function runStrip(view: CodePlanView, locale: string): RunStrip {
 
 export const answered = (choice: Pick<CodePlanChoiceView, "answer" | "answeredAt">): boolean => choice.answeredAt !== undefined || choice.answer !== undefined;
 
+/** How a shot's clip uses its keyframe (`ctx.keyframe`); the first the model allows is the default. */
+export type KeyframeInput = "keyframe_and_references" | "references_only" | "first_frame";
+const KEYFRAME_INPUTS: readonly string[] = ["keyframe_and_references", "references_only", "first_frame"];
+
+/** An option of a keyframe to confirm: the plan's flat artifact plus how the clip would use it and what that costs. */
+function keyframeOption(value: unknown): NonNullable<ChoiceOption["keyframe"]> | null {
+  if (!isObject(value) || typeof value.keyframeInput !== "string" || !KEYFRAME_INPUTS.includes(value.keyframeInput)) return null;
+  return { input: value.keyframeInput as KeyframeInput, priceMicros: typeof value.priceMicros === "string" ? value.priceMicros : null, references: Array.isArray(value.references) ? value.references.length : 0 };
+}
+
 export interface ChoiceOption {
   index: number;
   /** Exactly as the plan passed it; the answer sends this value back. */
@@ -163,6 +173,8 @@ export interface ChoiceOption {
   poster: StudioArtifactRef | null;
   /** The option's own `approved` field, when the plan asks to pass or reject something. */
   approved: boolean | null;
+  /** A way for this shot's clip to use its keyframe. */
+  keyframe: { input: KeyframeInput; priceMicros: string | null; references: number } | null;
   chosen: boolean;
 }
 
@@ -178,6 +190,8 @@ export interface ChoiceCard {
   media: boolean;
   /** Every option is the same clip: the card shows that one clip, and its options are what to do with it. */
   clip: { artifact: StudioArtifactRef; poster: StudioArtifactRef | null; stepKey: string | null } | null;
+  /** Every option is a way to use one keyframe: the card shows that picture once, and pressing an option confirms it. */
+  keyframe: StudioArtifactRef | null;
   answeredAt: string | null;
 }
 
@@ -188,17 +202,20 @@ export function choiceCard(choice: CodePlanChoiceView, steps: readonly CodePlanS
   const rows = (Array.isArray(choice.options) ? choice.options : []).slice(0, 24).map((value, index): ChoiceOption => {
     const artifact = optionArtifact(value);
     return { index, value, artifact, label: optionLabel(value), poster: artifactRefOf(stepOf(artifact)?.poster), approved: isObject(value) && typeof value.approved === "boolean" ? value.approved : null,
-      chosen: answer !== null && canonicalJson(value) === answer };
+      keyframe: keyframeOption(value), chosen: answer !== null && canonicalJson(value) === answer };
   });
   // Two options on one clip are not two clips to compare: they are two answers about it.
   const first = rows[0]?.artifact ?? null;
   const oneClip = rows.length > 1 && first?.kind === "video" && rows.every((option) => option.artifact?.artifactId === first.artifactId);
-  const options = oneClip ? rows.map((option) => ({ ...option, artifact: null })) : rows;
+  // One picture with ways to use it is a keyframe to confirm, not pictures to compare.
+  const oneFrame = rows.length > 0 && first?.kind === "image" && rows.every((option) => option.keyframe && option.artifact?.artifactId === first.artifactId);
+  const options = oneClip || oneFrame ? rows.map((option) => ({ ...option, artifact: null })) : rows;
   const chosen = options.find((option) => option.chosen)?.index ?? null;
   return {
     choiceId: choice.choiceId, optionsDigest: choice.optionsDigest, question: text(choice.question, 500), options, answered: done, chosen,
     media: options.length > 0 && options.every((option) => option.artifact),
     clip: oneClip && first ? { artifact: first, poster: rows[0]!.poster, stepKey: stepOf(first)?.key ?? null } : null,
+    keyframe: oneFrame ? first : null,
     answeredAt: done && typeof choice.answeredAt === "string" ? choice.answeredAt : null,
   };
 }

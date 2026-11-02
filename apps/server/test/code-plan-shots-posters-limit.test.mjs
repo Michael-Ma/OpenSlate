@@ -41,7 +41,7 @@ for (const kind of ["image", "video", "speech"]) test(`${kind}: shot is bounded 
 
 test("adding, changing and removing shot on a saved plan buys nothing and read_film follows the latest reached pass", async t => {
   const f = await codePlanFixture(); t.after(() => f.close());
-  const p = await f.create(); await save(f, p.id, source("")); await done(f, p.id);
+  const p = await f.create(); await save(f, p.id, source("").replace('await ctx.shot({id:"opening",sceneId:"scene"});', "")); await done(f, p.id);
   const calls = structuredClone(f.calls), attempts = f.store.list("attempt", p.id), first = await f.view(p.id);
   const receipts = f.store.list("code_plan_execution", p.id);
   for (const shot of ['shot:"opening"', 'shot:"renamed"', '']) {

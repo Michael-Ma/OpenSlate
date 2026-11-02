@@ -147,8 +147,10 @@ export async function runCodePlanOfflineFlow(f) {
   let answers = 0;
   while (view.state !== "done") {
     const choice = view.choices.find(choice => !Object.hasOwn(choice, "answer")); assert.ok(choice);
-    assert.equal(choice.options.length, 3);
-    assert.equal(new Set(choice.options.map(option => option.sha256)).size, 3);
+    assert.equal(choice.options.length, 2);
+    assert.deepEqual(choice.options.map(option => option.keyframeInput), ["keyframe_and_references", "first_frame"]);
+    assert.ok(choice.options.every(option => option.priceMicros === "100000" && option.references.length === 0));
+    assert.equal(new Set(choice.options.map(option => option.sha256)).size, 1);
     for (const artifact of choice.options) {
       assert.equal(artifact.kind, "image");
       assert.ok(view.steps.some(step => step.state === "succeeded" && step.artifact?.artifactId === artifact.artifactId));
@@ -164,23 +166,23 @@ export async function runCodePlanOfflineFlow(f) {
     view = await f.until(id, view => view.state === "done" || view.choices.some(choice => !Object.hasOwn(choice, "answer")), "next choice or completed film");
     eventCount = f.changed(id, eventCount, "choice continuation");
   }
-  assert.equal(answers, 2); assert.equal(view.steps.length, 10);
+  assert.equal(answers, 2); assert.equal(view.steps.length, 6);
   assert.ok(view.steps.some(step => step.kind === "render" && step.state === "succeeded"));
-  assert.equal(view.spentMicros, "340000"); assert.equal(view.reservedMicros, "0");
+  assert.equal(view.spentMicros, "300000"); assert.equal(view.reservedMicros, "0");
   assert.equal(f.store.getProject(id).artifacts.length, 0, "Code outputs need no graph artifact selection");
   assert.equal(f.store.list("node_binding", id).length, 0); assert.equal(f.store.list("candidate", id).length, 0);
   const initialKeys = new Set(view.steps.map(step => step.key)), beforeEdit = f.calls.submit.length;
-  assert.equal(beforeEdit, 10);
+  assert.equal(beforeEdit, 6);
 
   // The example stops for a review: the scripted turn saved version 2 with the cut points it read from the clips.
   assert.equal(view.planVersion, 2); assert.equal(view.reviews[0].state, "done");
   const editInput = { source: editedSource, basedOnVersion: 2 };
   const receipt = await f.ok("POST", `${base}/source`, editInput, "motion-edit");
   assert.equal(receipt.view.planVersion, 3);
-  // Shots run as concurrent pipelines, so the preview reaches the unchanged shot's frames, choice and clip; only the
+  // Shots run as concurrent pipelines, so the preview reaches the unchanged shot's keyframe, choice and clip; only the
   // render still waits for the new clip's result.
   assert.deepEqual(receipt.diff.newSteps.map(step => step.kind), ["video"]);
-  assert.equal(receipt.diff.reusedSteps, 7); assert.equal(receipt.diff.dependsOnPending, true);
+  assert.equal(receipt.diff.reusedSteps, 3); assert.equal(receipt.diff.dependsOnPending, true);
   eventCount = f.changed(id, eventCount, "edited source");
   assert.deepEqual(await f.ok("POST", `${base}/source`, editInput, "motion-edit"), receipt);
 
@@ -206,9 +208,9 @@ export async function runCodePlanOfflineFlow(f) {
   assert.deepEqual(newSteps.map(step => step.kind).sort(), ["render", "video"]);
   assert.ok(newSteps.every(step => step.state === "succeeded"));
   const reusedSteps = view.steps.filter(step => initialKeys.has(step.key) && step.reached).length;
-  assert.equal(reusedSteps, 8);
+  assert.equal(reusedSteps, 4);
   assert.deepEqual(newCalls[1].args.timeline.map(row => row.motion), [editedMotion, motions[1]]);
-  assert.equal(view.spentMicros, "440000"); assert.equal(view.reservedMicros, "0");
+  assert.equal(view.spentMicros, "400000"); assert.equal(view.reservedMicros, "0");
   assert.ok(BigInt(view.spentMicros) <= BigInt(view.ceilingMicros));
   const render = newSteps.find(step => step.kind === "render").artifact;
   const film = await f.http("GET", `/api/projects/${id}/artifacts/${render.artifactId}/content`);
@@ -216,7 +218,7 @@ export async function runCodePlanOfflineFlow(f) {
   assert.equal(createHash("sha256").update(film.rawPayload).digest("hex"), render.sha256);
   for (let idle = 0; idle < 3; idle++) await f.tick();
   assert.equal(f.events(id).length, eventCount, "Idle ticks must not append events");
-  assert.equal(f.calls.submit.length, 12);
+  assert.equal(f.calls.submit.length, 8);
   const events = f.events(id); assert.ok(events.every((event, index) => index === 0 || event.sequence > events[index - 1].sequence));
 
   const graphBase = `/api/projects/${graph.id}`;

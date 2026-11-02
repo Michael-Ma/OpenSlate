@@ -6,6 +6,14 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
  * attachedMaterial may instead identify a larger original. Names are untrusted data. */
 interface Artifact { artifactId: string; kind: "image" | "video" | "audio" | "document" | "data"; sha256: string; [key: string]: Json }
 type MediaResult = { ok: true; artifact: Artifact; artifacts: Artifact[]; leadInSamples?: number; durationSamples?: number } | { ok: false; error: { code: string; message: string; retry: "safe" | "consent" | "none"; mayHaveCharged: boolean } };
+type VideoInputChoice = "keyframe_and_references" | "references_only" | "first_frame";
+interface KeyframeInput {
+  prompt: string; references?: Artifact[]; aspectRatio?: "1:1" | "2:3" | "3:2" | "9:16" | "16:9"; model?: string; variant?: string;
+  /** The clip this keyframe is for: available inputs and prices depend on it. */
+  video: { model?: string; durationSeconds: number; aspectRatio?: string };
+}
+type KeyframeResult = { ok: true; frame: Artifact; choice: VideoInputChoice; input: { references: Artifact[] } | { firstFrame: Artifact } }
+  | { ok: false; error: { code: string; message: string; retry: "safe" | "consent" | "none"; mayHaveCharged: boolean } };
 interface MediaInput { model?: string; variant?: string; [parameter: string]: Json | undefined }
 /** Free display metadata (1-120 characters), excluded from identity and provider inputs. */
 interface ShotMediaInput extends MediaInput { shot?: string }
@@ -24,7 +32,10 @@ interface Caption { text: string; atFrame: number; durationFrames: number; posit
 interface Studio {
   scene<T extends { [key: string]: Json }>(declaration: T): Promise<T>;
   shot<T extends { [key: string]: Json }>(declaration: T): Promise<T>;
-  image(input: ShotMediaInput & { prompt: string; references?: Artifact[]; aspectRatio?: "1:1" | "2:3" | "3:2" | "9:16" | "16:9" }): Promise<MediaResult>;
+  /** Shared references only: character sheets, set plates, pictures used across shots. No shot. */
+  image(input: MediaInput & { shot?: never; prompt: string; references?: Artifact[]; aspectRatio?: "1:1" | "2:3" | "3:2" | "9:16" | "16:9" }): Promise<MediaResult>;
+  /** One keyframe per declared shot. Waits for the person to confirm its video input on the card. */
+  keyframe(shot: string, input: KeyframeInput): Promise<KeyframeResult>;
   video(input: ShotMediaInput & { references?: Artifact[]; firstFrame?: Artifact; prompt: string; durationSeconds?: number; lastFrame?: Artifact; resolution?: string; aspectRatio?: "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "21:9" | "adaptive"; generateAudio?: boolean; seed?: number }): Promise<MediaResult>;
   /** Use an installed read_film.models id. Real speech defaults to stock voice coral. */
   speech(input: ShotMediaInput & { text: string; voice?: string; instructions?: string }): Promise<MediaResult>;
