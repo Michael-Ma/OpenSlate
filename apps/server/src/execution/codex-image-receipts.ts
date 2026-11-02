@@ -2,8 +2,8 @@ import { providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, invariant, providerProfileArguments } from '@openslate/core';
 import type { NativeDiagnostic,ProviderProfile } from '@openslate/core';
 import { safeNativeDiagnostic } from '../application/native-diagnostics.js';
-import { codexImageCanvasValid, describeCodexImageInput } from '@openslate/providers';
-import type { CodexImageAspect, CodexImageDescription, CodexImagePrepared, ExecutionRequest } from '@openslate/providers';
+import { CODEX_IMAGE_RUNTIME_VERSION, isRecordedCodexImageRuntime, codexImageCanvasValid, describeCodexImageInput } from '@openslate/providers';
+import type { CodexImageRuntimeVersion, CodexImageAspect, CodexImageDescription, CodexImagePrepared, ExecutionRequest } from '@openslate/providers';
 import type { Attempt } from './engine.js';
 import { assertOutputReceiptIdentity } from './output-store.js';
 import type { OutputReceipt } from './output-store.js';
@@ -46,18 +46,18 @@ export function codexImageTurnCanvas(args:ExecutionRequest['args']):{width:numbe
   invariant(codexImageCanvasValid(args.width,args.height,aspect),'CODEX_IMAGE_PREFLIGHT_INVALID','Codex image canvas must match its turn policy');
   return {width:args.width as number,height:args.height as number,...(aspect===undefined?{}:{aspect:aspect as CodexImageAspect})};
 }
-export function assertCodexImageOperationOptions(profile:ProviderProfile,args:ExecutionRequest['args']):void {
+export function assertCodexImageOperationOptions(profile:ProviderProfile,args:ExecutionRequest['args'],options:{historical?:boolean}={}):void {
   const expected=providerProfileArguments(profile);
   codexFields(profile.configuration,['model','settings']); const settings=profile.configuration.settings; codexFields(settings,['runtimeVersion','directorModel','width','height']);
   codexFields(args,[...Object.keys(expected),'prompt','width','height',...(Object.hasOwn(args,'aspect')?['aspect']:[]),'settings']); codexFields(args.settings,[]);
   const canvas=codexImageTurnCanvas(args);
   invariant(profile.kind==='image' && profile.adapter==='codex-image' && profile.executionVersion==='1'
     && profile.unitCostMicros==='0' && profile.maxRetries===0 && profile.maxConcurrency===1
-    && profile.configuration.model==='codex-image-generation' && settings.runtimeVersion==='0.153.4' && settings.directorModel==='gpt-6-astra'
+    && profile.configuration.model==='codex-image-generation' && (settings.runtimeVersion===CODEX_IMAGE_RUNTIME_VERSION || options.historical && isRecordedCodexImageRuntime(settings.runtimeVersion)) && settings.directorModel==='gpt-6-astra'
     && settings.width===1024 && settings.height===1024 && (canvas.aspect!==undefined || args.width===settings.width && args.height===settings.height)
     && Object.entries(expected).every(([key,value])=>canonical(args[key])===canonical(value)) && typeof args.prompt==='string',
   'CODEX_IMAGE_PREFLIGHT_INVALID','Codex image options must match the exact pinned usage profile');
-  describeCodexImageInput({attemptId:'preflight',requestDigest:'a'.repeat(64),prompt:args.prompt as string,...canvas,runtimeVersion:'0.153.4',model:'gpt-6-astra',images:[]});
+  describeCodexImageInput({attemptId:'preflight',requestDigest:'a'.repeat(64),prompt:args.prompt as string,...canvas,runtimeVersion:settings.runtimeVersion as CodexImageRuntimeVersion,model:'gpt-6-astra',images:[]});
 }
 export function assertCodexImageExecutionProfile(profile:ProviderProfile,attempt:Attempt):void {
   codexFields(profile,['id','revision','kind','adapter','executionVersion','configuration','maxConcurrency','unitCostMicros','maxRetries']);
@@ -70,16 +70,16 @@ export function assertCodexImageExecutionProfile(profile:ProviderProfile,attempt
 }
 export function assertCodexImageExecutionMapping(attempt:Attempt,mapping:CodexImageExecutionMapping):void {
   base(attempt,mapping,['profileDigest','profileDefinitionDigest','profileDefinition','capabilityLockId','capabilityLockDigest','estimatedMicros','transport','native','references']);
-  assertCodexImageExecutionProfile(mapping.profileDefinition,attempt); assertCodexImageOperationOptions(mapping.profileDefinition,attempt.request.args);
+  assertCodexImageExecutionProfile(mapping.profileDefinition,attempt); assertCodexImageOperationOptions(mapping.profileDefinition,attempt.request.args,{historical:true});
   codexFields(mapping.native,['runtime','session']); codexFields(mapping.native.runtime,['version','runtimeVersion','runtimeDigest','configurationDigest','model','authMode']);
   codexFields(mapping.native.session,['threadId','turnInputDigest']);
   const runtime=mapping.native.runtime, transport=mapping.transport;
   invariant(mapping.profileDigest===attempt.request.profile!.digest && mapping.profileDefinitionDigest===digest(mapping.profileDefinition)
     && codexId(mapping.capabilityLockId) && codexHash(mapping.capabilityLockDigest) && mapping.estimatedMicros==='0'
-    && runtime.version===1 && runtime.runtimeVersion==='0.153.4' && runtime.model==='gpt-6-astra' && runtime.authMode==='chatgpt'
+    && runtime.version===1 && isRecordedCodexImageRuntime(runtime.runtimeVersion) && runtime.runtimeVersion===mapping.profileDefinition.configuration?.settings?.runtimeVersion && runtime.model==='gpt-6-astra' && runtime.authMode==='chatgpt'
     && codexHash(runtime.runtimeDigest) && codexHash(runtime.configurationDigest) && codexId(mapping.native.session.threadId)
     && Array.isArray(transport.images) && canonical(transport)===canonical(describeCodexImageInput({attemptId:attempt.id,requestDigest:digest(attempt.request),
-      prompt:attempt.request.args.prompt as string,...codexImageTurnCanvas(attempt.request.args),runtimeVersion:'0.153.4',model:'gpt-6-astra',images:transport.images}))
+      prompt:attempt.request.args.prompt as string,...codexImageTurnCanvas(attempt.request.args),runtimeVersion:runtime.runtimeVersion,model:'gpt-6-astra',images:transport.images}))
     && mapping.native.session.turnInputDigest===transport.turnInputDigest && mapping.references.length===attempt.request.inputs.length
     && transport.images.length===attempt.request.inputs.length && mapping.references.every((ref,index)=>{
       codexFields(ref,['artifactId','artifactDigest']); const input=attempt.request.inputs[index],image=transport.images[index];

@@ -1,6 +1,7 @@
 import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { homedir } from 'node:os';
 
 const switches = ['IMAGE_GENERATION', 'H3_GENERATION', 'VIGGLE_H3_GENERATION', 'CODEX_IMAGE_GENERATION', 'SPEECH_GENERATION', 'TRANSCRIPTION'];
 const credentials = [
@@ -12,7 +13,7 @@ const validKey = value => typeof value === 'string' && value.length > 0 && value
 const runProbe = (command, args) => spawnSync(command, args, { encoding: 'utf8', timeout: 5000, maxBuffer: 65536 });
 
 /** Read-only local diagnostics. Never installs, writes credentials, starts a service or calls a provider. */
-export function inspectSetup({ root, environment = process.env, nodeVersion = process.versions.node, probe = runProbe } = {}) {
+export function inspectSetup({ root, environment = process.env, nodeVersion = process.versions.node, probe = runProbe, home = homedir() } = {}) {
   root = resolve(root ?? process.cwd());
   const checks = [], tools = {};
   const add = (id, label, state, detail, action = null) => checks.push({ id, label, state, detail, action });
@@ -52,10 +53,20 @@ export function inspectSetup({ root, environment = process.env, nodeVersion = pr
     add(provider.variable, 'Video output hosts', valid ? 'ready' : 'blocked', valid ? 'Explicit output hosts configured; not contacted.' : `${provider.variable} needs the documented HTTPS output host names.`, `Set ${provider.variable} to the provider's comma-separated output host names; do not include schemes, paths or wildcards.`);
   }
   if (environment.OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION === '1') {
-    const binary = environment.OPENSLATE_CODEX_IMAGE_BINARY;
-    const versionProbe = binary && isAbsolute(binary) ? probe(binary, ['--version']) : null;
-    const valid = versionProbe?.status === 0 && versionProbe.stdout?.trim() === 'codex-cli 0.153.4';
-    add('codex-image', 'Codex image runtime', valid ? 'ready' : 'blocked', valid ? 'Pinned runtime found; sign-in and quota are checked before dispatch.' : 'An absolute path to the pinned Codex 0.153.4 executable is required.', 'Set OPENSLATE_CODEX_IMAGE_BINARY. Follow docs/implementation/MANUAL-LIVE-PRODUCTION.md for installation and sign-in.');
+    const configured = environment.OPENSLATE_CODEX_IMAGE_BINARY;
+    const pinned = join(home, '.local/share/openslate-codex-0.162.1/node_modules/.bin/codex');
+    const configuredPath = typeof configured === 'string' && isAbsolute(configured) && configured.length <= 4096 && !configured.includes('\0');
+    const configuredProbe = configuredPath ? probe(configured, ['--version']) : null;
+    const configuredValid = configuredProbe?.status === 0 && configuredProbe.stdout?.trim() === 'codex-cli 0.162.1';
+    const pinnedProbe = configuredPath && !configuredValid && existsSync(pinned) ? probe(pinned, ['--version']) : null;
+    const fallback = pinnedProbe?.status === 0 && pinnedProbe.stdout?.trim() === 'codex-cli 0.162.1';
+    const binary = configuredValid ? configured : fallback ? pinned : configured;
+    const versionProbe = configuredValid ? configuredProbe : fallback ? pinnedProbe : configuredProbe;
+    const valid = versionProbe?.status === 0 && versionProbe.stdout?.trim() === 'codex-cli 0.162.1';
+    tools.codexImage = binary ?? null;
+    add('codex-image', 'Codex image runtime', valid ? fallback ? 'warning' : 'ready' : 'blocked',
+      valid ? fallback ? 'DIRECTOR_CODEX_VERSION_MISMATCH: configured binary does not report 0.162.1; using the supported side-by-side install. Sign-in and quota are checked before dispatch.' : 'Pinned runtime found; sign-in and quota are checked before dispatch.' : 'An absolute path to the pinned Codex 0.162.1 executable is required.',
+      `Install with npm install --prefix "${join(home, '.local/share/openslate-codex-0.162.1')}" --save-exact @openai/codex@0.162.1; set OPENSLATE_CODEX_IMAGE_BINARY to ${pinned}. Follow docs/implementation/MANUAL-LIVE-PRODUCTION.md for sign-in.`);
   }
   if (environment.OPENSLATE_PROVIDER_CONFIG) {
     try {

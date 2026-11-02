@@ -19,8 +19,8 @@ async function fixture(t, scenario = "complete") {
     bridge: { projectId: "project", endpoint: "http://127.0.0.1:12345", credential: "fixed-opaque-fixture-credential", entrypoint: join(root, "bridge.mjs") } };
   const log = join(root, "protocol.jsonl");
   const runtime = new CodexDirectorRuntime({ command: { file: process.execPath, args: [fileURLToPath(new URL("runtime-fixture.mjs", import.meta.url))] },
-    cwd: root, model: "fake-model", env: { FIXTURE_SCENARIO: scenario, FIXTURE_LOG: log }, runtimeVersion: "0.153.4",
-    policy: { mode: "local", id: "fixture", runtimeVersion: "0.153.4", config: { default_permissions: "fixture", permissions: { fixture: { filesystem: { "/": "none" }, network: { enabled: false } } } } },
+    cwd: root, model: "fake-model", env: { FIXTURE_SCENARIO: scenario, FIXTURE_LOG: log }, runtimeVersion: "0.162.1",
+    policy: { mode: "local", id: "fixture", runtimeVersion: "0.162.1", config: { default_permissions: "fixture", permissions: { fixture: { filesystem: { "/": "none" }, network: { enabled: false } } } } },
     limits: { ...PROTOCOL_FIXTURE_LIMITS } });
   return { root, path, image, input, runtime, log };
 }

@@ -29,8 +29,8 @@ function fixture(t, createRuntime, mutateInput = input => input) {
 
 function native(root) {
   // Every case below refuses before version checking; there is no native executable or model to call.
-  return new CodexDirectorRuntime({ command: { file: join(root, 'no-native-executable') }, cwd: root, env: {}, model: 'fixture', runtimeVersion: '0.153.4',
-    policy: { mode: 'local', id: 'fixture', runtimeVersion: '0.153.4', config: { default_permissions: 'fixture', permissions: { fixture: { network: { enabled: false } } } } } });
+  return new CodexDirectorRuntime({ command: { file: join(root, 'no-native-executable') }, cwd: root, env: {}, model: 'fixture', runtimeVersion: '0.162.1',
+    policy: { mode: 'local', id: 'fixture', runtimeVersion: '0.162.1', config: { default_permissions: 'fixture', permissions: { fixture: { network: { enabled: false } } } } } });
 }
 
 async function assertRefused(f, code) {

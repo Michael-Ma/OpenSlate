@@ -9,11 +9,13 @@ Run `./start.sh --doctor`, then `./start.sh` (or `--restart` after configuration
 If native Codex is not yet installed, install the supported pinned version in a separate local prefix:
 
 ```sh
-npm install --prefix "$HOME/.local/share/openslate-codex" --save-exact @openai/codex@0.153.4
-"$HOME/.local/share/openslate-codex/node_modules/.bin/codex" --version
+npm install --prefix "$HOME/.local/share/openslate-codex-0.162.1" --save-exact @openai/codex@0.162.1
+"$HOME/.local/share/openslate-codex-0.162.1/node_modules/.bin/codex" --version
 ```
 
-Expected version: `codex-cli 0.153.4`. Sign in locally with that binary if needed. Configure its absolute path for the director/image worker; do not copy auth tokens into the repository or chat. The image worker uses ChatGPT login. Director account setup is separate and can use its selected supported Codex account; `OPENSLATE_OPENAI_API_KEY` only configures media API routes.
+Keep `~/.local/share/openslate-codex` untouched: a running older studio may still use it. Install the new version side by side, then restart the studio after review. A configured older binary falls back to the supported versioned installation with a version notice; without that installation setup still refuses.
+
+Expected version: `codex-cli 0.162.1`. Sign in locally with that binary if needed. Configure its absolute path for the director/image worker; do not copy auth tokens into the repository or chat. The image worker uses ChatGPT login. Director account setup is separate and can use its selected supported Codex account; `OPENSLATE_OPENAI_API_KEY` only configures media API routes.
 
 | Job | Select installed supported profile | Account consumed |
 |---|---|---|

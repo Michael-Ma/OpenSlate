@@ -59,10 +59,10 @@ test('a retained successful Director check shows its program, version and origin
 });
 
 test('a cheap current version check is Found rather than Not checked, without claiming a historical setup or sign-in', () => {
-  const versionOnly = setup({ modelCatalogStatus: 'unchecked', modelChoices: [], codexVersion: '0.153.4', lastSuccessfulCheck: null });
+  const versionOnly = setup({ modelCatalogStatus: 'unchecked', modelChoices: [], codexVersion: '0.162.1', lastSuccessfulCheck: null });
   const before = structuredClone(versionOnly), row = computerView(null, versionOnly, null).rows[0];
   assert.equal(en(row.status), 'Found'); assert.equal(row.tone, 'ok');
-  assert.equal(en(row.detail), 'Codex 0.153.4 · /usr/local/bin/codex. Version check only; sign-in and model setup are checked before the next Director turn.');
+  assert.equal(en(row.detail), 'Codex 0.162.1 · /usr/local/bin/codex. Version check only; sign-in and model setup are checked before the next Director turn.');
   assert.match(translateMsg('zh-CN', row.detail), /仅检查了版本/);
   assert.deepEqual(versionOnly, before); assert.equal(versionOnly.modelCatalogStatus, 'unchecked');
   assert.equal(en(computerView(null, setup({ ...versionOnly, modelCatalogStatus: 'blocked' }), null).rows[0].status), 'Needs attention');

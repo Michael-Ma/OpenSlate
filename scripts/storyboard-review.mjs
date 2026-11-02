@@ -70,7 +70,7 @@ await app.listen({host:'127.0.0.1',port});
 const url=`http://127.0.0.1:${port}/#connect=${sessions.issueLaunch()}`;
 writeFileSync(join(root,'launch.txt'),url,{mode:0o600});console.log(JSON.stringify({root,url,projectId:project.id}));
 if(process.argv.includes('--native')) { try {
- const setup=await director.configure(project.id,{mode:'native',binaryPath:director.defaults.binaryPath,model:'gpt-6-astra'},randomUUID());
+ const setup=await director.configure(project.id,{mode:'native',binaryPath:director.defaults.binaryPath,model:'gpt-6.1-sol'},randomUUID());
  const actor=service.beginRequest(project.id,'local-user','Read the saved scene and shot details. Explain the current storyboard, where per-shot narration writing intent belongs, and what happens after a direct shot edit. Do not modify anything, start generation, create grants or call media APIs. Keep the answer concise.',{editing:false});
  director.enqueue(project.id,actor); director.tick(); await director.settle();
  const report={status:director.status(project.id),turns:store.list('director_turn',project.id).map(x=>({state:x.state})),messages:service.snapshot(project.id).conversation,attempts:engine.attempts(project.id).length,grants:store.list('grant',project.id).length};

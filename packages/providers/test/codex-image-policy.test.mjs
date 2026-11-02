@@ -4,10 +4,10 @@ import { canonical, digest } from "@openslate/core";
 import { codexImageCanvasValid, codexImageTurnText, describeCodexImageInput } from "../dist/index.js";
 
 const input = (extra = {}) => ({ attemptId: "attempt-1", requestDigest: "a".repeat(64), prompt: "A cat eyeing toast", width: 1024, height: 1024,
-  runtimeVersion: "0.153.4", model: "gpt-6-astra", images: [{ artifactId: "ref-1", sha256: "b".repeat(64), byteLength: 100 }], ...extra });
+  runtimeVersion: "0.162.1", model: "gpt-6-astra", images: [{ artifactId: "ref-1", sha256: "b".repeat(64), byteLength: 100 }], ...extra });
 
 test("codex-image-turn-v1 stays byte-for-byte: same body, digest and turn text as before v2", () => {
-  const value = input(), description = describeCodexImageInput(value);
+  const value = input({ runtimeVersion: "0.153.4" }), description = describeCodexImageInput(value);
   // The original v1 body, written out literally: saved receipts reconcile against exactly this digest.
   const body = { version: 1, policy: "codex-image-turn-v1", attemptId: value.attemptId, requestDigest: value.requestDigest, prompt: value.prompt,
     width: 1024, height: 1024, runtimeVersion: "0.153.4", model: "gpt-6-astra", images: value.images };

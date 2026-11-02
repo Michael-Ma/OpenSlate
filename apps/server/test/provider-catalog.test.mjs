@@ -387,7 +387,7 @@ test("Viggle and MiniMax remain different saved choices and default profile byte
 
 test("Codex image catalog pins the supported worker without claiming a media API credential or quota estimate", () => {
   const row = { label: "Codex images", profile: { id: "codex-keyframes", revision: "manual-live-1", kind: "image", adapter: "codex-image", executionVersion: "1",
-    configuration: { model: "codex-image-generation", settings: { runtimeVersion: "0.153.4", directorModel: "gpt-6-astra", width: 1024, height: 1024 } }, maxConcurrency: 1, unitCostMicros: "0", maxRetries: 0 } };
+    configuration: { model: "codex-image-generation", settings: { runtimeVersion: "0.162.1", directorModel: "gpt-6-astra", width: 1024, height: 1024 } }, maxConcurrency: 1, unitCostMicros: "0", maxRetries: 0 } };
   assert.deepEqual(profilePolicy(row.profile), { credential: null, media: "image", fixture: false });
   const catalog = new InstalledProviderCatalog({ configuration: configuration(row) });
   const visible = catalog.view().profiles.find(value => value.profile.id === row.profile.id);

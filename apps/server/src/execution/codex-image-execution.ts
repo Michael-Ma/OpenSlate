@@ -190,6 +190,6 @@ export class CodexImageExecution implements ExecutionProvider {
       }finally{await file.close();}
       stopped(signal);inspectCodexImagePng(bytes);images.push({artifactId:reference.id,sha256:reference.artifact.sha256,byteLength:bytes.byteLength,bytes});
     }
-    return {attemptId:attempt.id,requestDigest:digest(attempt.request),prompt:attempt.request.args.prompt as string,...codexImageTurnCanvas(attempt.request.args),runtimeVersion:'0.153.4',model:'gpt-6-astra',images};
+    return {attemptId:attempt.id,requestDigest:digest(attempt.request),prompt:attempt.request.args.prompt as string,...codexImageTurnCanvas(attempt.request.args),runtimeVersion:'0.162.1',model:'gpt-6-astra',images};
   }
 }

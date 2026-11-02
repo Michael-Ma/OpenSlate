@@ -72,7 +72,7 @@ test('another view can open Assets on one kind of file', async (t) => {
 
 test('a setup refusal keeps bounded Codex version details in the error toast', async t => {
   const { ApiError } = await import('../../src/next/api/client.ts');
-  const details = { expectedVersion: '0.153.4', foundVersion: '0.162.0-alpha.4', binaryPath: '/opt/selected-codex', installPath: '/opt/openslate-codex' };
+  const details = { expectedVersion: '0.162.1', foundVersion: '0.162.0-alpha.4', binaryPath: '/opt/selected-codex', installPath: '/opt/openslate-codex' };
   const { store } = await studio(t, { client: port => ({ get closed() { return port.closed; }, events: port.events.bind(port),
     async request(path, options) { if (options?.method === 'POST') throw new ApiError('DIRECTOR_CODEX_VERSION_MISMATCH', 409, details); return port.request(path, options); } }) });
   assert.equal(await store.command('settings:director', {}, () => ({ path: '/api/projects/last-ferry/director/setup', body: {} })), undefined);

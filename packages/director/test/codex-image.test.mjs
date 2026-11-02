@@ -10,7 +10,7 @@ import { ImageRpc } from "../dist/media/image-rpc.js";
 import { CODEX_RUNTIME_LIMITS } from "../dist/runtime/policy.js";
 const entry=fileURLToPath(new URL("codex-image-fixture.mjs",import.meta.url));
 const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6XsAAAAASUVORK5CYII=","base64");
-const input=()=>({attemptId:"attempt-1",requestDigest:"a".repeat(64),prompt:"A small blue boot",width:1024,height:1024,runtimeVersion:"0.153.4",model:"gpt-6-astra",images:[]});
+const input=()=>({attemptId:"attempt-1",requestDigest:"a".repeat(64),prompt:"A small blue boot",width:1024,height:1024,runtimeVersion:"0.162.1",model:"gpt-6-astra",images:[]});
 async function fixture(t,scenario="inline",timeoutMs=2000) {
  const root=await realpath(await mkdtemp(join(tmpdir(),"openslate-codex-image-"))),nativeHome=join(root,"home"),codexHome=join(nativeHome,".codex");
  await mkdir(codexHome,{recursive:true});
@@ -235,4 +235,10 @@ test("a codex-image-turn-v2 portrait turn asks for 1024x1536 through the same si
  assert.match(text,/9:16 portrait frame and generate it at 1024x1536/);assert.match(text,/"policy":"codex-image-turn-v2"/);
  assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
  const legacy=await fixture(t);assert.notEqual(prepared.session.turnInputDigest,(await run(legacy,input())).prepared.session.turnInputDigest);
+});
+
+test('a historical runtime input cannot prepare a new native image turn', async t => {
+ const f=await fixture(t);
+ await assert.rejects(f.worker.prepare({...input(),runtimeVersion:'0.153.4'}),{code:'CODEX_IMAGE_VERSION_UNSUPPORTED'});
+ assert.deepEqual(await f.records(),[]);
 });

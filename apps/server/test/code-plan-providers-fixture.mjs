@@ -50,7 +50,7 @@ export async function realCodeFixture(t, changes = {}) {
     return client;
   } };
   f.transport = {
-    async prepare(input) { f.calls.prepare++; return { runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
+    async prepare(input) { f.calls.prepare++; return { runtime:{version:1,runtimeVersion:'0.162.1',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
       session:{threadId:`thread-${input.attemptId}`,turnInputDigest:describeCodexImageInput(input).turnInputDigest} }; },
     async start(prepared) { f.calls.start++; assert.equal(f.store.list('codex_image_execution_dispatch', f.project.id).length, f.calls.start);
       if (f.controls.lostStart) throw Error('lost native reply after turn start');

@@ -4,7 +4,21 @@ import type { PrivateCodexHome } from "./private-home.js";
 
 export type CodexConfigValue = string | number | boolean | readonly CodexConfigValue[] | { readonly [key: string]: CodexConfigValue };
 /** Updating this requires regenerating protocol fixtures and rerunning compatibility evidence. */
-export const CODEX_PROTOCOL_VERSION = "0.153.4";
+export const CODEX_PROTOCOL_VERSION = "0.162.1";
+/** Pinned native surface reductions shared by setup and execution; not independent credential isolation proof. */
+export const CODEX_DISABLED_FEATURES = ["apps", "plugins", "remote_plugin", "hooks", "shell_tool", "shell_snapshot", "unified_exec", "browser_use",
+  "browser_use_external", "computer_use", "in_app_browser", "image_generation", "memories", "multi_agent", "multi_agent_v2",
+  "skill_search", "skill_mcp_dependency_install", "tool_suggest", "sleep_tool", "workspace_dependencies", "code_mode", "unbounded_connection_retries"];
+const FEATURE_KEYS = new Set([...CODEX_DISABLED_FEATURES, "code_mode_host", "skip_host_skill_discovery", "default_mode_request_user_input"]);
+/** 0.162.1 strict config rejects unknown feature keys. Omit unknown *disabled* reductions;
+ * never silently enable an unverified capability or weaken the rest of strict config. */
+export function supportedCodexConfig(config: Readonly<Record<string, CodexConfigValue>>): Record<string, CodexConfigValue> {
+  return Object.fromEntries(Object.entries(config).filter(([key, value]) => {
+    if (!key.startsWith("features.") || FEATURE_KEYS.has(key.slice("features.".length))) return true;
+    requireRuntime(value === false, "RUNTIME_CONFIG_INVALID", "An unverified native feature cannot be enabled");
+    return false;
+  }));
+}
 /** Pinned config/read serialization emits these absent optional fields as null.
  * Preserve every other field: stripping arbitrary nulls or comparing subsets could hide drift. */
 export function normalizePermissionProfile(value: unknown): unknown {
@@ -83,6 +97,7 @@ export function validateOptions(supplied: CodexDirectorOptions): CodexDirectorOp
     typeof value.model === "string" && /^[A-Za-z0-9_.:/-]{1,120}$/.test(value.model), "RUNTIME_CONFIG_INVALID", "Runtime paths and model must be explicit");
   requireRuntime(Object.entries(value.env).every(([key, item]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && typeof item === "string" && !item.includes("\0")),
     "RUNTIME_CONFIG_INVALID", "Invalid explicit runtime environment");
+  policy.config = supportedCodexConfig(policy.config);
   if (value.privateCodexHome !== undefined) {
     requireRuntime(value.privateCodexHome && [value.privateCodexHome.home, value.privateCodexHome.authSource].every(path =>
       typeof path === "string" && isAbsolute(path) && path.length <= 4096 && !/[\x00-\x1f\x7f]/.test(path)) &&

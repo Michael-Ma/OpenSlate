@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { CODEX_PROTOCOL_VERSION, normalizePermissionProfile, toml, validateOptions } from "./policy.js";
+import { CODEX_DISABLED_FEATURES as DISABLED, CODEX_PROTOCOL_VERSION, normalizePermissionProfile, toml, validateOptions } from "./policy.js";
 import type { CodexConfigValue, CodexDirectorOptions, CodexRuntimeLimits } from "./policy.js";
 import { CodexTransport } from "./transport.js";
 import { object, requireRuntime, RuntimeFault } from "./validation.js";
@@ -29,7 +29,7 @@ export interface LocalCodexReadiness {
   checkedAt: string;
   runtimeVersion: typeof CODEX_PROTOCOL_VERSION;
   model: string;
-  /** Account-advertised text models supporting this adapter's low reasoning effort. */
+  /** Account-advertised text models supporting this adapter's high reasoning effort. */
   modelChoices?: LocalCodexModelChoice[];
   checks: Record<"binary" | "account" | "model" | "catalog" | "policy", LocalCodexSetupCheck>;
   /** Only a parsed version, never arbitrary child output or paths. */
@@ -49,10 +49,6 @@ export interface LocalCodexSetupOptions { signal?: AbortSignal }
 
 const PROFILE = "openslate_local";
 const READ_METHODS = ["initialize", "config/read", "skills/list", "account/read", "model/list"] as const;
-// Mirrors the pinned adapter's launch reductions. These settings are not independent isolation proof.
-const DISABLED = ["apps", "plugins", "remote_plugin", "hooks", "shell_tool", "shell_snapshot", "unified_exec", "browser_use",
-  "browser_use_external", "computer_use", "in_app_browser", "image_generation", "memories", "multi_agent", "multi_agent_v2",
-  "skill_search", "skill_mcp_dependency_install", "tool_suggest", "sleep_tool", "workspace_dependencies", "code_mode", "unbounded_connection_retries"];
 const validPath = (value: unknown): value is string => typeof value === "string" && isAbsolute(value) && value.length <= 4096 && !value.includes("\0");
 const within = (parent: string, child: string): boolean => {
   const delta = relative(parent, child);
@@ -134,7 +130,7 @@ async function verifyVersion(options: ReturnType<typeof validateOptions>, signal
         : new RuntimeFault("SETUP_BINARY_FAILED", "Selected native binary could not be checked", classifyNativeDiagnostic(error))); return; }
       const version = /^codex-cli (\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.+-]{1,120})?)$/.exec(stdout.trim())?.[1] ?? null;
       readiness.binaryVersion = { expectedVersion: CODEX_PROTOCOL_VERSION, foundVersion: version };
-      if (version !== CODEX_PROTOCOL_VERSION) no(new RuntimeFault("SETUP_VERSION_MISMATCH", "Select the pinned Codex 0.153.4 installation"));
+      if (version !== CODEX_PROTOCOL_VERSION) no(new RuntimeFault("SETUP_VERSION_MISMATCH", "Select the pinned Codex 0.162.1 installation"));
       else yes();
     });
   });

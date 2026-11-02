@@ -121,3 +121,13 @@ test("V1 expired or lost preparation cannot be recreated or resumed as a first i
   assertReadOnly(await f.records(), f.options.codexHome);
   assert.equal(await readFile(f.configPath, "utf8"), f.configBytes);
 });
+
+test('a 0.153.4 receipt reads its original hashed binary even when the configured new binary differs', async t => {
+  const f = await legacyFixture(t);
+  await f.history([f.completed(await f.saveImage())]);
+  const worker = f.make({ command: { file: join(f.options.directory, 'new-binary-must-not-run'), args: [entry] } });
+  const outcome = await worker.lookup(f.prepared, { turnId: 'turn-legacy' });
+  assert.equal(outcome.kind, 'completed', outcome.code); assert.deepEqual(Buffer.from(outcome.bytes), png);
+  assertReadOnly(await f.records(), f.options.codexHome);
+  assert.equal(await readFile(f.configPath, 'utf8'), f.configBytes);
+});

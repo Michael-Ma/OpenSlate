@@ -277,7 +277,7 @@ test('the Codex setup gets a long timeout; a lost reply asks the film before cal
 });
 
 test('B22: first-film version refusals retain their code and detailed reason in the sheet', async () => {
-  const details = { expectedVersion: '0.153.4', foundVersion: '0.162.0-alpha.4', binaryPath: '/bundled/codex', installPath: '/supported/codex' };
+  const details = { expectedVersion: '0.162.1', foundVersion: '0.162.0-alpha.4', binaryPath: '/bundled/codex', installPath: '/supported/codex' };
   const film = { id: 'first', name: 'First' };
   for (const duringRead of [true, false]) {
     let toast = null;

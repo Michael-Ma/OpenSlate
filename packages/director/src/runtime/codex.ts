@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { toolCatalog } from "@openslate/core";
-import { normalizePermissionProfile, toml, validateOptions } from "./policy.js";
+import { CODEX_DISABLED_FEATURES as DISABLED, normalizePermissionProfile, toml, validateOptions } from "./policy.js";
 import type { CodexConfigValue, CodexDirectorOptions } from "./policy.js";
 import { CodexTransport, timeout, type RpcMessage } from "./transport.js";
 import { prepareDirectorImages } from "./images.js";
@@ -10,11 +10,6 @@ import { preparePrivateCodexHome } from "./private-home.js";
 import type { DirectorQuestion, DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent, DirectorStartOptions } from "./types.js";
 
 const SERVER = "openslate";
-// These reduce native surface area; they are not a filesystem/credential isolation proof.
-const DISABLED = ["apps", "plugins", "remote_plugin", "hooks", "shell_tool", "shell_snapshot", "unified_exec", "browser_use",
-  "browser_use_external", "computer_use", "in_app_browser", "image_generation", "memories", "multi_agent", "multi_agent_v2",
-  "skill_search", "skill_mcp_dependency_install", "tool_suggest", "sleep_tool", "workspace_dependencies", "code_mode", "unbounded_connection_retries"];
-
 function redact(value: string, secrets: readonly string[]): string {
   for (const secret of secrets) if (secret) value = value.replaceAll(secret, "[redacted]");
   return value;
@@ -65,7 +60,7 @@ function questions(value: unknown): DirectorQuestion[] {
 
 /**
  * One native process per authority epoch/run. Persistent thread IDs never carry application authority.
- * Protocol shape is pinned to the 0.153.4 compatibility fixtures, including experimental named permissions.
+ * Protocol shape is pinned to the 0.162.1 compatibility fixtures, including experimental named permissions.
  * Reference: https://developers.openai.com/codex/app-server . A new native version requires new evidence.
  */
 export class CodexDirectorRuntime implements DirectorRuntime {

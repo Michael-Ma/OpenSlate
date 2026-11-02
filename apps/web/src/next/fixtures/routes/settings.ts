@@ -163,7 +163,7 @@ function directorSetup(world: FixtureWorld): DirectorSetup {
     // The host's suggestion for this computer: no path when it has no Codex.
     defaults: { binaryPath: computer(world).codex ? CODEX_DEFAULTS.binaryPath : "", model: CODEX_DEFAULTS.model },
     locked: true, modelCalls: 4,
-    modelChoices: s.catalogStatus === "ready" ? [{ id: "gpt-6-astra", label: "gpt-6-astra" }, { id: "gpt-6-astra-mini", label: "gpt-6-astra-mini" }] : [],
+    modelChoices: s.catalogStatus === "ready" ? [{ id: "gpt-6.1-sol", label: "gpt-6.1-sol" }, { id: "gpt-6-astra", label: "gpt-6-astra" }, { id: "gpt-6-astra-mini", label: "gpt-6-astra-mini" }] : [],
     modelCatalogStatus: s.catalogStatus, modelCatalogCheckedAt: s.catalogStatus === "unchecked" ? null : "2026-10-15T10:40:00.000Z",
   };
 }
