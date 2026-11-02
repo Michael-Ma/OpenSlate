@@ -2,9 +2,10 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export function studioUrl(code: string, development = false): string {
+export function studioUrl(code: string, port = 3001): string {
   if (!/^[A-Za-z0-9_-]{43}$/.test(code)) throw new Error("Invalid studio launch code");
-  return `http://127.0.0.1:${development ? 5173 : 3001}/#connect=${code}`;
+  if (port !== 3001 && port !== 5173) throw new Error(`Unsupported studio port ${port}; expected 3001 or 5173`);
+  return `http://127.0.0.1:${port}/#connect=${code}`;
 }
 
 /** Fixed local destinations and argument arrays; never run a URL through a shell. */
