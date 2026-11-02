@@ -72,7 +72,7 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
 
   const editButton = data && !draft && (
     <button type="button" className="pill sm" data-act="director-edit" disabled={!!offline || data.busy} title={offline ?? (data.busy ? t("set.director.busy") : undefined)} onClick={edit}>
-      {t(native ? "set.director.change" : "set.director.setup_codex")}
+      {t(native ? "set.director.change" : data.selection.mode === "claude" ? "set.director.switch_codex" : "set.director.setup_codex")}
     </button>
   );
 

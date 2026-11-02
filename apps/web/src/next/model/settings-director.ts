@@ -237,15 +237,17 @@ export interface ReviewSwitch {
  * A 404 (a server older than B10) is kept as a fallback.
  */
 export function reviewSwitch(read: { data: DirectorReview | null; status: number | null; error: string | null }, setup: DirectorSetup | null): ReviewSwitch {
-  const native = setup?.selection.mode !== "fake";
-  const note = msg(native ? "set.review.body" : "set.review.body_demo");
+  const native = setup?.selection.mode !== "fake", claude = setup?.selection.mode === "claude";
+  // Whose plan a review uses follows the Director: Codex, Claude Code, or the free scripted demo.
+  const note = msg(claude ? "set.review.body_claude" : native ? "set.review.body" : "set.review.body_demo");
   const off = (id: MessageId): ReviewSwitch => ({ on: false, disabled: true, reason: msg(id), note });
   if (read.status === 404 || read.error === "NOT_FOUND") return off("set.review.unavailable");
   if (read.error) return off("set.review.read_failed");
   if (!read.data || !setup) return { on: false, disabled: true, reason: null, note };
   const on = read.data.enabled;
   const state = codexState(setup);
-  if (native && (state === "missing" || state === "blocked")) return { on, disabled: !on, reason: msg("set.review.needs_codex"), note };
+  if (setup.selection.mode === "native" && (state === "missing" || state === "blocked")) return { on, disabled: !on, reason: msg("set.review.needs_codex"), note };
+  if (claude && setup.claude && (setup.claude.status === "missing" || setup.claude.status === "blocked")) return { on, disabled: !on, reason: msg("set.review.needs_claude"), note };
   return { on, disabled: false, reason: null, note };
 }
 

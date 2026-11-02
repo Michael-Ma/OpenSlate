@@ -67,6 +67,15 @@ test('a Codex program of another version runs the supported one instead, and Set
   assert.equal(codexNoticeMsg(setup({ codexNotice: notice, selection: { mode: 'claude', model: 'claude-opus-5-5' } })), null, 'not while Claude Code directs');
 });
 
+test('with Claude Code directing, review notes count against the Claude plan and Codex is not required', () => {
+  const read = { data: { enabled: true }, status: 200, error: null };
+  const setupClaude = setup({ selection: { mode: 'claude', model: 'claude-opus-5-5' }, claude: claude(), modelCatalogStatus: 'blocked' });
+  const sw = reviewSwitch(read, setupClaude);
+  assert.match(en(sw.note), /Claude plan/);
+  assert.deepEqual([sw.disabled, sw.reason], [false, null], 'a blocked Codex does not matter while Claude Code directs');
+  assert.equal(en(reviewSwitch(read, setup({ selection: { mode: 'claude', model: 'claude-opus-5-5' }, claude: claude({ status: 'missing' }) })).reason), 'Needs Claude Code to be ready.');
+});
+
 test('Codex state comes from the last setup check', () => {
   assert.equal(codexState(setup()), 'ready');
   assert.equal(codexState(setup({ modelCatalogStatus: 'unchecked' })), 'unchecked');
