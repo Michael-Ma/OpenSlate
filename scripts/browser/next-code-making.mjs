@@ -33,6 +33,8 @@ export const scenarios = [
       await making.click();
       await page.waitForSelector("main.work[data-view='plan'][data-code-plan='true']");
 
+      const refs = page.locator("[data-scene='references']");
+      expect((await refs.locator("button.thumb").count()) === 1, "the shared picture is listed once under References");
       const pier = page.locator(".cp-shot-row[data-shot='1.2'] .cp-making");
       expect((await pier.count()) === 1 && /Making/.test(await pier.innerText()), "1.2's keyframe is shown as being made");
       const harbour = page.locator(".cp-shot-row[data-shot='1.1']");

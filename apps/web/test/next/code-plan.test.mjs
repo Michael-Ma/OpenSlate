@@ -196,6 +196,10 @@ test('Plan lists the shared pictures and says what each shot is waiting for', ()
   ];
   const plan = declaredPlan(view({ state: 'running', steps, declarations: { scenes: [], shots: [{ id: 's1' }, { id: 's2' }] } }));
   assert.deepEqual(plan.references.map((r) => [r.stepKey, r.artifact?.artifactId ?? null, r.making?.state ?? null]), [['sheet', 'sheet', null], ['plate', null, 'making']]);
+  // Pictures passed in as literals (an upload, an earlier sheet) come from the server's list, first use first, once each.
+  const literal = declaredPlan(view({ state: 'waiting', steps: steps.slice(2), references: [ref('upload'), ref('sheet-old'), ref('upload'), ref('f1'), { kind: 'video', artifactId: 'clip', sha256: sha('c') }],
+    declarations: { scenes: [], shots: [{ id: 's1' }, { id: 's2' }] } }));
+  assert.deepEqual(literal.references.map((r) => [r.key, r.stepKey]), [['upload', null], ['sheet-old', null]], 'a shot\'s own keyframe and a clip are not references');
   const [one, two] = plan.loose;
   assert.equal(one.picture.artifactId, 'f1');
   assert.deepEqual([one.making.picture?.state, one.making.clip?.state], ['making', 'making'], 'a new frame is on its way while the old one shows');

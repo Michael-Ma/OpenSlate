@@ -5,7 +5,8 @@ import { runInNewContext } from 'node:vm';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { transformWithOxc } from '../../node_modules/vite/dist/node/index.js';
-import { answerPress, choiceCard, CEILING_PRESS, declaredPlan, retryPress, runStrip, stepRows, threadChoices, TONE_CLASS, TONE_GLYPH } from '../../src/next/model/code-plan.ts';
+import { answerPress, choiceCard, CEILING_PRESS, declaredPlan, makingMsg, makingNow, retryPress, runStrip, stepRows, threadChoices, TONE_CLASS, TONE_GLYPH } from '../../src/next/model/code-plan.ts';
+import { labelList } from '../../src/next/model/director.ts';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
 import { formatMicros } from '../../src/next/model/price.ts';
 
@@ -32,6 +33,7 @@ function store(pending = {}, unconfirmed = () => false) {
     pending,
     answerCodePlanChoice: (choice, answer) => { calls.push(['answer', choice.choiceId, answer]); return Promise.resolve(undefined); },
     setCodePlanCeiling: (current, body) => { calls.push(['raise', current.ceilingMicros, body]); return Promise.resolve(undefined); },
+    setView: (view) => calls.push(['view', view]),
     unconfirmed,
   };
 }
@@ -173,7 +175,7 @@ async function runStripComponent({ locale = 'en', codePlan, s = store(), guard =
   return (await load('RunStrip.tsx', ['CodePlanRunStrip'], {
     useI18n: () => i18n(locale),
     numberLocale: (l) => (l === 'zh-CN' ? 'zh-CN' : 'en-US'),
-    CEILING_PRESS, runStrip, TONE_CLASS, TONE_GLYPH, useState: (initial) => [initial, () => {}], LimitEditor: () => null,
+    CEILING_PRESS, runStrip, makingNow, labelList, TONE_CLASS, TONE_GLYPH, useState: (initial) => [initial, () => {}], LimitEditor: () => null,
     useGuarded: () => ({ ...guard, 'data-needs': 'run' }),
     useStore: () => s,
     useStudio: (select) => select({ pending: s.pending }),
@@ -190,6 +192,21 @@ test('the run strip: state chip, version, spend with pending money, and the held
   assert.match(html, /Spent \$0\.24 \(\+\$0\.57 pending\) of \$1\.00/);
   assert.match(html, /The Director is updating the plan/);
   assert.doesNotMatch(html, /code-plan-raise/);
+});
+
+test('the run strip says what is being made and leads to Plan', async () => {
+  const s = store();
+  const steps = [
+    { key: 'f1', kind: 'image', state: 'in_flight', model: 'm', label: 'l', priceMicros: '0', reached: true, updatedAt: new Date().toISOString(), shotId: 's1' },
+    { key: 'f2', kind: 'image', state: 'in_flight', model: 'm', label: 'l', priceMicros: '0', reached: true, updatedAt: new Date().toISOString(), shotId: 's2' },
+    { key: 'c1', kind: 'video', state: 'in_flight', model: 'm', label: 'l', priceMicros: '300000', reached: true, updatedAt: new Date().toISOString(), shotId: 's1' },
+    { key: 'c2', kind: 'video', state: 'absent', model: 'm', label: 'l', priceMicros: '300000', reached: true, updatedAt: new Date().toISOString(), shotId: 's2' },
+  ];
+  const Strip = await runStripComponent({ codePlan: { view: view({ state: 'running', steps }) }, s, locale: 'zh-CN' });
+  const html = renderToStaticMarkup(React.createElement(Strip));
+  assert.match(html, /data-act="code-plan-show-making" title="在 Plan 里查看"><i class="cp-spin"[^>]*><\/i><span>正在生成：关键帧 2[ \u00a0]张和视频 1[ \u00a0]段，另有 1 项排队<\/span>/);
+  const Quiet = await runStripComponent({ codePlan: { view: view({ state: 'done' }) } });
+  assert.doesNotMatch(renderToStaticMarkup(React.createElement(Quiet)), /code-plan-show-making/);
 });
 
 test('paused at the ceiling the strip offers +$1 (white, primary) and raising sends the next ceiling', async () => {
@@ -291,13 +308,25 @@ test('a render step is named "Film render", not "No prompt"; other unlabelled st
 test('Plan before the first pass ends says the plan is running, not that it declares nothing', async () => {
   const parts = await load('parts.tsx', ['ViewHead', 'ViewMessage', 'StepCard', 'StepStatus', 'stepLabel'], { useI18n: () => i18n('en') });
   const plan = async (codePlan) => (await load('CodePlanViews.tsx', ['CodePlanPlanView'], {
-    useI18n: () => i18n('en'), useCodePlan: () => ({ error: null, loading: false, reload() {}, ...codePlan }), declaredPlan, useDeveloperMode: () => false, useState: React.useState, MediaViewer: () => null,
-    CodePlanMedia: ({ children }) => React.createElement('div', null, children), ...parts,
+    useI18n: () => i18n('en'), useCodePlan: () => ({ error: null, loading: false, reload() {}, ...codePlan }), declaredPlan, makingMsg, useDeveloperMode: () => false, useState: React.useState, useEffect: React.useEffect, MediaViewer: () => null,
+    CodePlanMedia: ({ children }) => React.createElement('div', null, children), Thumb: ({ label, picture }) => React.createElement('span', { className: 'thumb', 'data-picture': picture?.artifactId ?? '' }, label), Picture: () => null, ...parts,
   })).CodePlanPlanView;
   const Running = await plan({ view: view({ planVersion: 1, state: 'running', lastPassAt: null }) });
   assert.match(renderToStaticMarkup(React.createElement(Running)), /The plan is running\. Its scenes and shots appear when it reaches them\./);
   const Empty = await plan({ view: view({ planVersion: 1, state: 'done', lastPassAt: '2026-10-29T22:45:40Z' }) });
   assert.match(renderToStaticMarkup(React.createElement(Empty)), /This version declares no scenes or shots\./);
+  // While pictures and clips are on their way, Plan shows each where it will appear.
+  const now = new Date().toISOString(), step = (key, kind, state, extra = {}) => ({ key, kind, state, model: 'm', label: key, priceMicros: '0', reached: true, updatedAt: now, ...extra });
+  const Making = await plan({ view: view({ planVersion: 1, state: 'running', lastPassAt: now, declarations: { scenes: [], shots: [{ id: 's1' }, { id: 's2' }] }, steps: [
+    step('sheet', 'image', 'succeeded', { artifact: ref('sheet') }), step('plate', 'image', 'in_flight'),
+    step('f1', 'image', 'succeeded', { shotId: 's1', artifact: ref('f1') }), step('c1', 'video', 'in_flight', { shotId: 's1' }), step('f2', 'image', 'absent', { shotId: 's2' }),
+  ] }) });
+  const html = renderToStaticMarkup(React.createElement(Making));
+  assert.match(html, /data-scene="references" aria-label="References"/);
+  assert.match(html, /data-picture="sheet"/);
+  assert.equal((html.match(/class="thumb empty cp-making"/g) ?? []).length, 3, 'the plate, 1\'s clip and 2\'s keyframe');
+  assert.match(html, /data-shot="s2"[\s\S]*?data-making="queued"[^>]*>[\s\S]*?Queued/);
+  assert.match(html, /data-shot="s1"[\s\S]*?data-picture="f1"[\s\S]*?data-making="making"/);
 });
 
 test('a failed step says what happened in plain words; Retry asks first when it may charge again, then retries', async () => {

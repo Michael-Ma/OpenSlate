@@ -493,9 +493,11 @@ export interface Making {
   minutes: number;
 }
 
-/** A shared picture of the current plan: an image step tied to no shot (character sheets, empty sets, uploads' copies). */
+/** A shared picture of the current plan: uploads, character sheets, empty sets; made, or on its way. */
 export interface DeclaredReference {
-  stepKey: string;
+  key: string;
+  /** The image step that makes it; null for an upload. */
+  stepKey: string | null;
   label: string;
   artifact: StudioArtifactRef | null;
   making: Making | null;
@@ -643,12 +645,23 @@ export function declaredPlan(view: CodePlanView): DeclaredPlan {
   });
   // A shot's own picture is never also listed as shared, even when an older plan left it without a shot.
   const shown = new Set([...scenes.flatMap((scene) => scene.shots), ...loose].flatMap((shot) => (shot.picture ? [shot.picture.artifactId] : [])));
-  const references = view.steps.flatMap((step): DeclaredReference[] => {
-    if (step.kind !== "image" || step.shotId || !step.reached) return [];
+  // What the plan's steps take as references (the server knows their inputs), then shared pictures it makes now.
+  const references: DeclaredReference[] = [], listed = new Set<string>();
+  for (const value of Array.isArray(view.references) ? view.references.slice(0, 24) : []) {
+    const artifact = artifactRefOf(value);
+    if (!artifact || artifact.kind !== "image" || shown.has(artifact.artifactId) || listed.has(artifact.artifactId)) continue;
+    const step = view.steps.find((row) => row.artifact?.artifactId === artifact.artifactId);
+    listed.add(artifact.artifactId);
+    references.push({ key: artifact.artifactId, stepKey: step?.key ?? null, label: step ? text(step.label, 200) : "", artifact, making: null });
+  }
+  for (const step of view.steps) {
+    if (step.kind !== "image" || step.shotId || !step.reached) continue;
     const artifact = step.state === "succeeded" ? artifactRefOf(step.artifact) : null;
     const now = makingOf(step, view);
-    return (artifact && !shown.has(artifact.artifactId)) || now ? [{ stepKey: step.key, label: text(step.label, 200), artifact, making: now }] : [];
-  });
+    if (artifact ? shown.has(artifact.artifactId) || listed.has(artifact.artifactId) : !now) continue;
+    if (artifact) listed.add(artifact.artifactId);
+    references.push({ key: artifact?.artifactId ?? step.key, stepKey: step.key, label: text(step.label, 200), artifact, making: now });
+  }
   return { scenes, loose, references, shotCount: shotRows.length, seconds: Math.round(seconds * 10) / 10 };
 }
 

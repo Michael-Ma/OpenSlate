@@ -18,7 +18,8 @@ import type { FixtureRoute } from "./types.ts";
  * `?codeplan=` opens "Harbour lights" first (the studio lists it before The Last Ferry):
  * - `waiting` (also `on`): version 2 waits on the opening keyframe, three thumbnails; version 1's frames are history.
  * - `confirm`: the same point, as `ctx.keyframe` asks it: one keyframe to confirm, with the ways the clip can use it.
- * - `making`: 1.1's frame chosen; its clip and 1.2's three frames are being made, and stay so (nothing moves on).
+ * - `making`: 1.1's frame chosen; its clip and 1.2's three frames are being made, and stay so (nothing moves on). The
+ *   plan passes the terminal picture to every frame as a shared reference.
  * - `retired`: as `confirm`, later: the conversation moved on past the waiting card, and version 1's card has retired.
  * - `budget`: both frames chosen; 1.2's clip would pass the $1 ceiling, so the run is paused (Raise the limit).
  * - `error`: version 3 threw after the first clip; the error is shown and the run stopped.
@@ -77,6 +78,8 @@ interface CodeFilm {
   confirm?: boolean;
   /** The conversation moved on past that card, and version 1's card retired when version 2 changed the shot. */
   retired?: boolean;
+  /** The plan passes a shared picture to its frames (`making`). */
+  shared?: boolean;
   stage: Stage;
   /** The versions written so far (newest first) and the one in use. */
   versions: CodePlanVersionItem[];
@@ -182,6 +185,7 @@ function newFilm(preset: CodePlanPreset): CodeFilm {
   film.cropped = preset === "cropped";
   film.confirm = preset === "confirm" || preset === "retired";
   film.retired = preset === "retired";
+  film.shared = preset === "making";
   return film;
 }
 
@@ -254,6 +258,7 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
     declarations: { scenes: film.current === null ? [] : [{ id: "harbour", title: terminal ? "Closing time" : "Harbour at dawn", purpose: "Mara waits for the last ferry." }], shots },
     steps,
     choices,
+    ...(film.shared ? { references: [FRAMES.terminal[0]!] } : {}),
     versions: film.versions.slice(0, 50),
     logs: ONE_CHOSEN.includes(stage) ? ["1.1: frame chosen", ...(stage === "clip_failed" ? ["1.2: the clip failed (SUBMISSION_RESPONSE_LOST); stopping"] : []), ...(stage === "rendering" || stage === "done" ? ["Rendering 2 clips"] : [])] : [],
     lastPassAt: started ? new Date().toISOString() : null,

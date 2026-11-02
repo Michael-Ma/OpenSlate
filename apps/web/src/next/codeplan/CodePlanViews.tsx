@@ -63,8 +63,8 @@ export function CodePlanPlanView() {
                 </div>
                 <div className="cp-ref-row">
                   {plan.references.map((ref, index) => ref.artifact
-                    ? <Thumb key={ref.stepKey} label={String(index + 1)} picture={ref.artifact} dimmed={false} empty={null} onOpen={() => open(`ref:${ref.stepKey}`)} />
-                    : ref.making ? <MakingThumb key={ref.stepKey} label={String(index + 1)} making={ref.making} /> : null)}
+                    ? <Thumb key={ref.key} label={String(index + 1)} picture={ref.artifact} dimmed={false} empty={null} onOpen={() => open(`ref:${ref.key}`)} />
+                    : ref.making ? <MakingThumb key={ref.key} label={String(index + 1)} making={ref.making} /> : null)}
                 </div>
               </section>
             ) : null}
@@ -117,7 +117,7 @@ function MakingThumb({ label, making }: { label: string; making: Making }) {
 
 /** Every shared picture, then every shot's keyframe and clip, for the viewer. */
 function shotMedia(plan: DeclaredPlan): ViewerItem[] {
-  const items: ViewerItem[] = plan.references.flatMap((ref) => (ref.artifact ? [{ key: `ref:${ref.stepKey}`, artifact: ref.artifact, title: ref.label, stepKey: ref.stepKey }] : []));
+  const items: ViewerItem[] = plan.references.flatMap((ref) => (ref.artifact ? [{ key: `ref:${ref.key}`, artifact: ref.artifact, title: ref.label, ...(ref.stepKey ? { stepKey: ref.stepKey } : {}) }] : []));
   for (const shot of [...plan.scenes.flatMap((scene) => scene.shots), ...plan.loose]) {
     const title = shot.purpose || shot.label;
     if (shot.picture) items.push({ key: `${shot.key}:frame`, artifact: shot.picture, title, ...(shot.pictureStep ? { stepKey: shot.pictureStep } : {}) });
