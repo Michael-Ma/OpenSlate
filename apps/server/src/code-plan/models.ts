@@ -1,13 +1,14 @@
-import { vigglePriceMicros, VIGGLE_PRICE_CREDITS, seedancePriceMicros, falVideoPriceMicros, seedanceModel, falVideoModel } from "@openslate/providers";
-import type { VideoImageSize, ViggleH3Resolution } from "@openslate/providers";
+import { VIGGLE_PRICE_CREDITS } from "@openslate/providers";
+import type { VideoImageSize } from "@openslate/providers";
 import type { JsonObject } from "@openslate/core";
 import type { ArtifactRecord } from "../execution/engine.js";
-import { codeOnlyVideoAdapter, videoI2vOptions } from "../execution/video-i2v-options.js";
-import { canonical, digest, invariant, moneyMicros } from "@openslate/core";
+import { canonical, digest, invariant } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import { profilePolicy, type InstalledProviderCatalog } from "../application/provider-catalog.js";
 import type { Store } from "../persistence/store.js";
-import { CODE_PLAN_MODELS, videoMode, videoModes, type CodePlanModel } from "./identity.js";
+import { CODE_PLAN_MODELS, videoModes, type CodePlanModel } from "./identity.js";
+import { hasDurationPrice, videoDefaults } from "./model-pricing.js";
+export { modelPrice } from "./model-pricing.js";
 import { videoCapabilities } from "./video-capabilities.js";
 import { codePlanArtifacts } from "./artifacts.js";
 import { assertImageReferenceRecords, imageCapabilities } from "../execution/codex-image-plan.js";
@@ -46,37 +47,16 @@ export function projectModels(store: Store, projectId: string, catalog?: Install
   for (const profile of real) {
     if (!["image", "video", "speech", "music"].includes(profile.kind)) continue;
     invariant(profile.id !== "local-render", "CODE_PLAN_MODEL", "The profile id local-render is reserved for local assembly");
-    const video = codeOnlyVideoAdapter(profile.adapter);
-    const row = video ? profile.adapter === "seedance" ? seedanceModel(profile.configuration!.model) : falVideoModel(profile.configuration!.model) : undefined;
-    const minimum = (profile.minFrames ?? 0) / 30, maximum = (profile.maxFrames ?? 180) / 30;
-    const durations = row && "durations" in row ? row.durations : null;
-    const durationSeconds = durations ? durations.find(s => s >= minimum && s <= maximum)! : Math.min(maximum, Math.max(row?.minSeconds ?? minimum, 6, minimum));
     models[profile.id] = { kind: profile.kind as CodePlanModel["kind"], profile: structuredClone(profile),
       profileDefinitionDigest: digest(profile), priceMicros: profile.unitCostMicros,
       // Viggle and N2 adapters price exact inputs; other adapters retain configured estimates.
-      priceUnit: video || profile.adapter === "viggle-h3" ? "input" : "call",
-      defaults: profile.kind === "video" ? { durationSeconds, ...(video ? { resolution: profile.configuration!.settings!.resolution!, aspectRatio: profile.configuration!.settings![profile.adapter === "seedance" ? "ratio" : "aspectRatio"] ?? (profile.configuration!.model.includes("veo") ? "auto" : "adaptive"), generateAudio: profile.configuration!.settings!.generateAudio ?? false } : {}) }
+      priceUnit: hasDurationPrice(profile) ? "input" : "call",
+      defaults: profile.kind === "video" ? videoDefaults(profile)
         : profile.kind === "music" ? { instrumental: true } : profile.kind === "speech" ? { voice: "coral", instructions: "" } : {} };
   }
   return withImageValidation(models);
 }
 
-/** Exact input-based rules live in the adapters; legacy profiles keep their configured per-call estimate. */
-export function modelPrice(model: CodePlanModel, input?: JsonObject, firstFrame?: VideoImageSize): string {
-  if (model.profile?.adapter === "viggle-h3") {
-    invariant(input, "CODE_PLAN_INPUT", "Viggle pricing requires the exact input");
-    return vigglePriceMicros({ mode: videoMode(input), resolution: model.profile.configuration!.settings!.resolution as ViggleH3Resolution,
-      durationSeconds: Number(input.durationSeconds), enhance: false });
-  }
-  if (model.profile && codeOnlyVideoAdapter(model.profile.adapter)) {
-    invariant(input, "CODE_PLAN_INPUT", "Input-based pricing requires the exact media parameters");
-    const options = videoI2vOptions(model.profile, input);
-    if (model.profile.adapter === "fal-video-i2v") return falVideoPriceMicros(options.model, options, options.seconds);
-    invariant(firstFrame || videoMode(input) === "text", "CODE_PLAN_INPUT", "Seedance pricing requires owned image dimensions");
-    return seedancePriceMicros(options.model, { ...options, ratio: options.aspectRatio }, { seconds: options.seconds, ...(firstFrame ? { firstFrame } : {}) });
-  }
-  return moneyMicros(model.priceMicros ?? "0").toString();
-}
 export function codePlanPriceFrame(store: Pick<Store, "list">, projectId: string, input: JsonObject): VideoImageSize | undefined {
   const frame = input.firstFrame ?? (Array.isArray(input.references) ? input.references[0] : undefined);
   if (!frame || typeof frame !== "object" || Array.isArray(frame)) return;
