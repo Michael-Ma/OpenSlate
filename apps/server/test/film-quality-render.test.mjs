@@ -1,6 +1,6 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
@@ -18,6 +18,7 @@ import { projectFixture } from './execution-fixture.mjs';
 import { CodePlanRuntime } from '../dist/code-plan/index.js';
 import { CodePlanExecution } from '../dist/code-plan/execution.js';
 import { FakeProvider } from '@openslate/providers';
+import { findCjkCaptionFont, loadTestToolchain, mediaConfigure, mediaDecoderSupport, mediaDemuxerSupport, requiredMediaDecoders, requireTestToolchain } from '../../../scripts/test-toolchain.mjs';
 
 const run = promisify(execFile), ffmpeg = process.env.OPENSLATE_FFMPEG_PATH, ffprobe = process.env.OPENSLATE_FFPROBE_PATH;
 const invalid = /Row|row|Caption|caption|frames|placements|length/;
@@ -48,6 +49,51 @@ before(async () => {
   sounds = new Map(); for (const name of SOUND_NAMES) sounds.set(name, await media.supplySound(name));
 });
 after(async () => { if (root) await rm(root, { recursive: true, force: true }); });
+
+test('toolchain CJK preflight agrees with the caption renderer and fails clearly with an absent font override', () => {
+  assert.equal(findCjkCaptionFont(), systemCaptionFont(true)?.family);
+  assert.ok(systemCaptionFont(true)?.sha256, 'The renderer found a readable CJK font file');
+  assert.throws(() => requireTestToolchain({ fontLookup: () => undefined }), /CJK caption font:.*unavailable.*apt-get install fonts-noto-cjk/);
+  const linux = ['Noto Sans CJK SC', 'Noto Sans CJK', 'Noto Sans SC'];
+  for (const family of linux) assert.equal(findCjkCaptionFont({ platform: 'linux', catalog: { has: name => name === family } }), family);
+  assert.equal(findCjkCaptionFont({ platform: 'linux', catalog: { has: name => name === 'DejaVu Sans' } }), undefined, 'Font fallback cannot masquerade as CJK support');
+});
+
+test('same-version FFmpeg overrides missing AV1, HEVC or still-image demuxers fail before uploads run', () => {
+  const profile = loadTestToolchain();
+  const decoders = spawnSync(ffmpeg, ['-hide_banner', '-decoders'], { encoding: 'utf8' });
+  assert.equal(decoders.status, 0);
+  for (const missing of requiredMediaDecoders(profile, 'linux')) {
+    const probe = () => ({ status: 0, stdout: decoders.stdout.split('\n').filter(line => line.trim().split(/\s+/)[1] !== missing).join('\n') });
+    assert.deepEqual(mediaDecoderSupport(ffmpeg, profile, probe, 'linux'), { ready: false, missing: [missing] });
+  }
+  for (const missing of ['libdav1d', 'hevc']) {
+    const probe = (path, args) => {
+      const result = spawnSync(path, args, { encoding: 'utf8' });
+      if (args.includes('-decoders')) result.stdout = result.stdout.split('\n').filter(line => line.trim().split(/\s+/)[1] !== missing).join('\n');
+      return result;
+    };
+    assert.throws(() => requireTestToolchain({ probe, platform: 'linux' }), new RegExp(`media decoders:.*missing: ${missing}.*setup:test-media`));
+  }
+  const demuxers = spawnSync(ffmpeg, ['-hide_banner', '-demuxers'], { encoding: 'utf8' });
+  assert.equal(demuxers.status, 0);
+  const probe = (path, args) => args.includes('-demuxers')
+    ? { status: 0, stdout: demuxers.stdout.split('\n').filter(line => !line.trim().split(/\s+/)[1]?.split(',').includes('mov')).join('\n') }
+    : spawnSync(path, args, { encoding: 'utf8' });
+  assert.deepEqual(mediaDemuxerSupport(ffmpeg, profile, probe), { ready: false, missing: ['mov'] });
+  assert.throws(() => requireTestToolchain({ probe }), /media demuxers:.*missing: mov/);
+  assert.equal(mediaDecoderSupport(ffmpeg, profile, () => ({ status: 1, stdout: decoders.stdout })).ready, false, 'A failed listing is not a successful probe');
+});
+
+test('only Linux adds dav1d to the pinned build; macOS configure flags stay unchanged', () => {
+  const profile = loadTestToolchain();
+  assert.deepEqual(mediaConfigure(profile, 'darwin'), profile.media.configure);
+  assert.deepEqual(mediaConfigure(profile, 'linux'), [...profile.media.configure, '--enable-libdav1d']);
+  assert.ok(profile.media.requiredDecoders.includes('hevc'));
+  assert.ok(requiredMediaDecoders(profile, 'linux').includes('libdav1d'));
+  assert.equal(requiredMediaDecoders(profile, 'darwin').includes('libdav1d'), false, 'The Mac source build keeps its existing library prerequisites');
+  assert.ok(profile.media.requiredDemuxers.includes('mov'));
+});
 
 for (const speed of [0.5, 0.75, 1, 1.25, 1.5, 2]) test(`speed ${speed} gives rounded film frames and probed duration`, async () => {
   const row = clip(video, { durationFrames: 31, speed }), m = await manifest({ clips: [row] }), result = await media.render(m), probe = await probed(result.artifact.path);

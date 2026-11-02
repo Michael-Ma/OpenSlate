@@ -16,6 +16,8 @@ import {
   loadTestToolchain,
   managedMediaPrefix,
   mediaEncoderSupport,
+  mediaDecodeSupport,
+  mediaConfigure,
   repositoryRoot,
 } from "./test-toolchain.mjs";
 const profile = loadTestToolchain(),
@@ -24,7 +26,8 @@ const profile = loadTestToolchain(),
 const tools = ["ffmpeg", "ffprobe"].map((tool) => findTestMediaTool(tool));
 if (
   tools.every((tool) => tool.path) &&
-  mediaEncoderSupport(tools[0].path, profile).ready
+  mediaEncoderSupport(tools[0].path, profile).ready &&
+  mediaDecodeSupport(tools[0].path, profile)
 ) {
   console.log(
     `Test media tools already match FFmpeg ${expected}: ${tools.map((tool) => tool.path).join(", ")}`,
@@ -44,6 +47,8 @@ if (
     throw new Error(
       "libx264 development files are required. macOS: brew install x264 pkg-config; Ubuntu: apt-get install build-essential pkg-config nasm libx264-dev zlib1g-dev.",
     );
+  if (process.platform === "linux" && spawnSync("pkg-config", ["--exists", "dav1d"]).status !== 0)
+    throw new Error("AV1/AVIF decoding requires dav1d development files on Linux. Ubuntu: apt-get install libdav1d-dev.");
   const cache = join(repositoryRoot, ".cache/test-toolchain");
   mkdirSync(cache, { recursive: true });
   const work = await mkdtemp(join(cache, "build-")),
@@ -83,7 +88,7 @@ if (
     const source = join(work, `ffmpeg-${expected}`);
     await run(
       "./configure",
-      [`--prefix=${install}`, ...profile.media.configure],
+      [`--prefix=${install}`, ...mediaConfigure(profile)],
       source,
     );
     await run(
@@ -102,8 +107,9 @@ if (
       )
         throw new Error(`Built ${tool} does not match ${expected}.`);
     }
-    if (!mediaEncoderSupport(join(install, "bin", "ffmpeg"), profile).ready)
-      throw new Error("The built media tools are missing required codecs.");
+    if (!mediaEncoderSupport(join(install, "bin", "ffmpeg"), profile).ready ||
+        !mediaDecodeSupport(join(install, "bin", "ffmpeg"), profile))
+      throw new Error("The built media tools are missing required encoders, decoders or demuxers.");
     writeFileSync(
       join(install, "openslate-test-media.json"),
       JSON.stringify(profile.media, null, 2) + "\n",

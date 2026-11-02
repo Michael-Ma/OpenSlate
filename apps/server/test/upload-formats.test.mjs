@@ -2,6 +2,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -26,24 +27,25 @@ const exec = promisify(execFile);
 const ffmpegPath = process.env.OPENSLATE_FFMPEG_PATH ?? '/opt/homebrew/bin/ffmpeg';
 const ffprobePath = process.env.OPENSLATE_FFPROBE_PATH ?? '/opt/homebrew/bin/ffprobe';
 const generator = process.env.U1_FIXTURE_FFMPEG_PATH ?? ffmpegPath;
-const skips = [], results = [];
-let sources, jpeg, pillow;
+const results = [];
+const compressedSamples = new Set(['basic.bmp', 'basic.tiff', 'audio.wav', 'audio.aiff', 'audio.aif']);
+async function sample(name) {
+  const compressed=compressedSamples.has(name),bytes=await readFile(new URL(`./fixtures/upload-formats/${name}${compressed?'.gz':''}`, import.meta.url));
+  return compressed?gunzipSync(bytes):bytes;
+}
+let sources, jpeg;
 async function command(path,args) { return exec(path,args,{timeout:60000,maxBuffer:2*1024*1024}); }
 async function generate(name,args) {
   const path=join(sources,name);
   await command(generator,['-nostdin','-v','error','-y',...args,'-threads','1',path]);return readFile(path);
 }
-function skip(t,name,reason) { skips.push({name,reason});results.push({name,result:'skip',reason});t.skip(reason); }
-function missingEncoder(error) { return /Unknown encoder|Encoder .* not found|Error selecting an encoder|not a suitable output format|Unable to choose an output format|not compiled/i.test(error.stderr ?? error.message); }
 before(async()=>{
   sources=await mkdtemp(join(tmpdir(),'openslate-upload-format-sources-'));
   jpeg=await generate('noise.jpg',['-f','lavfi','-i','testsrc2=s=1200x800,noise=alls=100:allf=u','-frames:v','1','-c:v','mjpeg','-q:v','2']);
   assert.ok(jpeg.length>200*1024,`regression JPEG is ${jpeg.length} bytes`);
-  await generate('noise.png',['-f','lavfi','-i','testsrc2=s=1200x800,noise=alls=40:allf=u','-frames:v','1']);
-  try { await command('python3',['-c','import PIL']);pillow=true; } catch {pillow=false;}
 });
 after(async()=>{
-  console.log('U1_FORMAT_RESULTS '+JSON.stringify({ffmpeg:ffmpegPath,generator,results,skips}));
+  console.log('U1_FORMAT_RESULTS '+JSON.stringify({ffmpeg:ffmpegPath,generator,results,skips:[]}));
   await rm(sources,{recursive:true,force:true});
 });
 async function fixture(t) {
@@ -78,23 +80,20 @@ async function picture(t,name,bytes,width,height) {
 }
 const basic=[['PNG','png','png'],['JPEG .jpg','jpg','mjpeg'],['JPEG .jpeg','jpeg','mjpeg'],['GIF','gif','gif'],['BMP','bmp','bmp'],['TIFF','tiff','tiff']];
 for(const [label,ext,codec] of basic) test(`HTTP picture: ${label}`,async t=>{
-  const bytes=codec==='mjpeg'?jpeg:await generate(`basic.${ext}`,['-f','lavfi','-i','testsrc2=s=1200x800,noise=alls=40:allf=u','-frames:v','1','-c:v',codec]);
+  const bytes=codec==='mjpeg'?jpeg:await sample(`basic.${ext}`);
   const {stored}=await picture(t,`picture.${ext}`,bytes,1200,800);if(codec==='png')assert.deepEqual(stored,bytes);
 });
-for(const [name,format,options] of [
-  ['JPEG progressive','JPEG',{progressive:true}],['JPEG grayscale','JPEG',{mode:'L'}],['JPEG CMYK','JPEG',{mode:'CMYK'}],
-  ['WebP lossy','WEBP',{}],['WebP lossless','WEBP',{lossless:true}],['animated WebP','WEBP',{animated:true}],['multi-frame TIFF','TIFF',{animated:true}],
+for(const [name,file] of [
+  ['JPEG progressive','jpeg-progressive.jpg'],['JPEG grayscale','jpeg-grayscale.jpg'],['JPEG CMYK','jpeg-cmyk.jpg'],
+  ['WebP lossy','webp-lossy.webp'],['WebP lossless','webp-lossless.webp'],['animated WebP','webp-animated.webp'],['multi-frame TIFF','tiff-multipage.tiff'],
 ]) test(`HTTP picture: ${name}`,async t=>{
-  if(!pillow)return skip(t,name,'Pillow unavailable for image variant packaging; source pixels are generated with FFmpeg');
-  const out=join(sources,`${name.replaceAll(' ','-')}.picture`);
-  await command('python3',['-c',`from PIL import Image\nimport json,sys\no=json.loads(sys.argv[4]);im=Image.open(sys.argv[1]).convert(o.pop('mode','RGB'));a=o.pop('animated',False);im.save(sys.argv[2],format=sys.argv[3],save_all=a,append_images=[Image.new(im.mode,im.size,'white')] if a else [],**o)`,join(sources,'noise.png'),out,format,JSON.stringify(options)]);
-  const bytes=await readFile(out);
+  const out=join(sources,file),bytes=await sample(file);await writeFile(out,bytes);
   if(name==='animated WebP') {
     // Establish the installed decoder's support independently of the importer.
     try {await command(ffmpegPath,['-nostdin','-v','error','-xerror',...imageInputArgs(imageFormat(bytes)),'-i',out,'-frames:v','1','-f','null','-']);}
     catch {
       const f=await fixture(t),r=await f.upload(bytes,'animation.webp');assert.equal(r.json().error?.code,'IMAGE_FORMAT_UNSUPPORTED',r.body);assert.match(r.json().error.message,/animated WebP/);
-      return skip(t,name,'Installed WebP decoder cannot decode animation; HTTP returns IMAGE_FORMAT_UNSUPPORTED naming animated WebP');
+      results.push({name,result:'pass',outcome:'IMAGE_FORMAT_UNSUPPORTED naming animated WebP'});return;
     }
   }
   const result = await picture(t,`${name}.bin`,bytes,1200,800);
@@ -105,33 +104,30 @@ for(const [name,format,options] of [
   }
 });
 for(const name of ['AVIF','HEIC','HEIF','HEIC grid']) test(`HTTP picture: ${name}`,async t=>{
-  let bytes;
-  try {
-    if(name==='AVIF') bytes=await generate('image.avif',['-f','lavfi','-i','testsrc2=s=320x180','-frames:v','1','-c:v','libsvtav1','-svtav1-params','lp=1','-f','avif']);
-    else {
-      const tile=await generate('hevc-tile.mp4',['-f','lavfi','-i','testsrc2=s=320x180','-frames:v','1','-c:v','libx265','-x265-params','log-level=error:pools=none:frame-threads=1:info=0','-tag:v','hvc1']);
-      bytes=heif(tile,{grid:name==='HEIC grid',brand:name==='HEIF'?'mif1':'heic'});
-    }
-  } catch(error) {if(missingEncoder(error))return skip(t,name,error.stderr.slice(-500));throw error;}
+  const bytes=name==='AVIF'?await sample('image.avif'):heif(await sample('hevc-tile.mp4'),{grid:name==='HEIC grid',brand:name==='HEIF'?'mif1':'heic'});
   const source=join(sources,`${name}.source`);await writeFile(source,bytes);
   try{await command(ffmpegPath,['-nostdin','-v','error','-xerror',...imageInputArgs(imageFormat(bytes)),'-i',source,'-map','0:v:0','-frames:v','1','-f','null','-']);}
-  catch(error){const f=await fixture(t),r=await f.upload(bytes,`${name}.bin`);assert.equal(r.json().error?.code,'IMAGE_FORMAT_UNSUPPORTED',r.body);assert.match(r.json().error.message,new RegExp(name.split(' ')[0]));return skip(t,name,`Decoder unavailable: ${error.stderr.slice(-300)}`);}
+  catch(error){
+    const f=await fixture(t),r=await f.upload(bytes,`${name}.bin`);
+    assert.equal(r.json().error?.code,'IMAGE_FORMAT_UNSUPPORTED',r.body);
+    assert.match(r.json().error.message,new RegExp(name.split(' ')[0]));
+    // Preserve the unsupported-format diagnostics, but missing required
+    // decoding must fail this test rather than turn it into a skip.
+    throw error;
+  }
   const normalized = await picture(t,`${name}.wrong-extension`,bytes,name==='HEIC grid'?640:320,name==='HEIC grid'?360:180);
   if(name==='HEIC grid') {
+    await writeFile(join(sources,'hevc-tile.mp4'),await sample('hevc-tile.mp4'));
     const expected=await generate('expected-grid.png',['-i',join(sources,'hevc-tile.mp4'),'-filter_complex','[0:v]split=4[a][b][c][d];[a][b][c][d]xstack=inputs=4:layout=0_0|320_0|0_180|320_180','-frames:v','1','-map_metadata','-1']);
     assert.deepEqual(normalized.stored,expected,'every tile must reach the complete picture');
   }
 });
 test('HTTP HEIC selects the primary image when auxiliary items are present',async t=>{
-  let tile;
-  try { tile=await generate('primary-tile.mp4',['-f','lavfi','-i','testsrc2=s=320x180','-frames:v','1','-c:v','libx265','-x265-params','log-level=error:pools=none:frame-threads=1:info=0','-tag:v','hvc1']); }
-  catch(error) { if(missingEncoder(error))return skip(t,'HEIC primary item',error.stderr.slice(-300));throw error; }
+  const tile=await sample('hevc-tile.mp4');
   await picture(t,'primary.heic',heif(tile,{items:2}),320,180);
 });
 test('HTTP HEIC phone-size grid metadata supports 48 tiles',async t=>{
-  let tile;
-  try { tile=await generate('tile48.mp4',['-f','lavfi','-i','testsrc2=s=320x180','-frames:v','1','-c:v','libx265','-x265-params','log-level=error:pools=none:frame-threads=1:info=0','-tag:v','hvc1']); }
-  catch(error) { if(missingEncoder(error))return skip(t,'HEIC 48 tiles',error.stderr.slice(-300));throw error; }
+  const tile=await sample('hevc-tile.mp4');
   await picture(t,'phone-grid.heic',heif(tile,{grid:true,columns:8,rows:6}),2560,1080);
 });
 test('HTTP 24 MP JPEG and oversized PNG scale to the storage bounds',async t=>{
@@ -142,7 +138,7 @@ test('HTTP 24 MP JPEG and oversized PNG scale to the storage bounds',async t=>{
 });
 test('HTTP EXIF orientation 6 stores a portrait picture',async t=>{await picture(t,'portrait.jpeg',exif6(jpeg),800,1200);});
 test('HTTP animated GIF uses the first frame',async t=>{
-  const bytes=await generate('animated.gif',['-f','lavfi','-i','testsrc2=s=320x180:r=2:d=1','-frames:v','2','-c:v','gif']);
+  const bytes=await sample('animated.gif');await writeFile(join(sources,'animated.gif'),bytes);
   const {stored}=await picture(t,'animated.gif',bytes,320,180);
   const expected=await generate('gif-first.png',['-i',join(sources,'animated.gif'),'-frames:v','1','-map_metadata','-1']);
   assert.deepEqual(stored,expected);
@@ -161,13 +157,13 @@ test('HTTP SVG and truncated JPEG refuse without artifacts; failed import resend
   await readable(f,retried.json().artifact);
 });
 
-const videos=[['mp4 H264','mp4','libx264'],['mp4 HEVC','mp4','libx265'],['MOV','mov','libx264'],['M4V','m4v','libx264','mp4'],['WebM VP9','webm','vp9'],['WebM AV1','webm','libsvtav1'],['MKV','mkv','libx264'],['AVI','avi','mpeg4'],['MPEG','mpeg','mpeg2video'],['MPG','mpg','mpeg2video'],['FLV','flv','flv'],['WMV','wmv','wmv2'],['3GP','3gp','h263']];
-for(const [label,ext,codec,muxer] of videos) test(`HTTP video: ${label}`,async t=>{
-  let bytes;try{bytes=await generate(`video-${codec}.${ext}`,['-f','lavfi','-i',`testsrc2=s=${ext==='3gp'?'176x144':'320x180'}:r=30:d=1`,'-an','-c:v',codec,...(codec==='libx265'?['-x265-params','log-level=error:pools=none:frame-threads=1:info=0']:codec==='libsvtav1'?['-svtav1-params','lp=1']:[]),...(muxer?['-f',muxer]:[])]);}catch(error){if(missingEncoder(error))return skip(t,label,error.stderr.slice(-300));throw error;}
+const videos=[['mp4 H264','mp4','video.mp4'],['mp4 HEVC','mp4','video-hevc.mp4'],['MOV','mov','video.mov'],['M4V','m4v','video.m4v'],['WebM VP9','webm','video-vp9.webm'],['WebM AV1','webm','video-av1.webm'],['MKV','mkv','video.mkv'],['AVI','avi','video.avi'],['MPEG','mpeg','video.mpeg'],['MPG','mpg','video.mpg'],['FLV','flv','video.flv'],['WMV','wmv','video.wmv'],['3GP','3gp','video.3gp']];
+for(const [label,ext,file] of videos) test(`HTTP video: ${label}`,async t=>{
+  const bytes=await sample(file);
   const f=await fixture(t),r=await f.request('POST',`/media/uploads?expectedHeadVersion=0&name=video.${ext}`,bytes);assert.equal(r.statusCode,200,r.body);assert.equal(r.json().artifact.kind,'video');await readable(f,r.json().artifact);results.push({name:label,result:'pass',inputBytes:bytes.length});
 });
-const audios=[['wav','pcm_s16le'],['mp3','mp3'],['m4a','aac'],['aac','aac','adts'],['flac','flac'],['ogg','vorbis'],['oga','vorbis','ogg'],['opus','opus','opus'],['aiff','pcm_s16be'],['aif','pcm_s16be','aiff'],['weba','libopus','webm']];
-for(const [ext,codec,muxer] of audios) test(`HTTP audio: ${ext}`,async t=>{
-  let bytes;try{bytes=await generate(`audio.${ext}`,['-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=1','-ac','2','-c:a',codec,...(['vorbis','opus'].includes(codec)?['-strict','experimental']:[]),...(muxer?['-f',muxer]:[])]);}catch(error){if(missingEncoder(error))return skip(t,ext,error.stderr.slice(-300));throw error;}
+const audios=['wav','mp3','m4a','aac','flac','ogg','oga','opus','aiff','aif','weba'];
+for(const ext of audios) test(`HTTP audio: ${ext}`,async t=>{
+  const bytes=await sample(`audio.${ext}`);
   const f=await fixture(t),r=await f.request('POST',`/audio-library/uploads?role=upload&name=audio.${ext}`,bytes);assert.equal(r.statusCode,200,r.body);assert.ok(r.json().recording.samples>0);results.push({name:ext,result:'pass',inputBytes:bytes.length});
 });

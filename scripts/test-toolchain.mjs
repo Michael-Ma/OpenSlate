@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 export const repositoryRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -28,6 +29,12 @@ export function loadTestToolchain(root = repositoryRoot) {
     !media.requiredEncoders.every(
       (name) => typeof name === "string" && /^[a-z0-9_]+$/.test(name),
     ) ||
+    [media.requiredDecoders, media.linuxRequiredDecoders, media.requiredDemuxers].some(
+      (names) => names !== undefined && (!Array.isArray(names) || !names.length ||
+        !names.every((name) => typeof name === "string" && /^[a-z0-9_]+$/.test(name))),
+    ) ||
+    (media.linuxConfigure !== undefined && (!Array.isArray(media.linuxConfigure) ||
+      !media.linuxConfigure.every((arg) => typeof arg === "string" && /^--[a-z0-9-]+$/.test(arg)))) ||
     !Array.isArray(media.configure) ||
     !media.configure.every(
       (arg) => typeof arg === "string" && /^--[a-z0-9-]+$/.test(arg),
@@ -121,11 +128,48 @@ export function mediaEncoderSupport(path, profile, probe = probeCommand) {
   );
   return { ready: result.status === 0 && !missing.length, missing };
 }
+export function requiredMediaDecoders(profile, platform = process.platform) {
+  return [...profile.media.requiredDecoders ?? [], ...(platform === "linux" ? profile.media.linuxRequiredDecoders ?? [] : [])];
+}
+export function mediaDecoderSupport(path, profile, probe = probeCommand, platform = process.platform) {
+  const result = probe(path, ["-hide_banner", "-decoders"]);
+  const available = new Set((result.stdout ?? "").split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .filter((fields) => /^[VAS][A-Z.]{5}$/.test(fields[0] ?? ""))
+    .map((fields) => fields[1]));
+  const missing = requiredMediaDecoders(profile, platform).filter((name) => !available.has(name));
+  return { ready: result.status === 0 && !missing.length, missing };
+}
+export function mediaDemuxerSupport(path, profile, probe = probeCommand) {
+  const result = probe(path, ["-hide_banner", "-demuxers"]);
+  const available = new Set((result.stdout ?? "").split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .filter((fields) => fields[0] === "D")
+    .flatMap((fields) => (fields[1] ?? "").split(",")));
+  const missing = (profile.media.requiredDemuxers ?? []).filter((name) => !available.has(name));
+  return { ready: result.status === 0 && !missing.length, missing };
+}
+export function mediaDecodeSupport(path, profile, probe = probeCommand) {
+  return mediaDecoderSupport(path, profile, probe).ready && mediaDemuxerSupport(path, profile, probe).ready;
+}
+export function mediaConfigure(profile, platform = process.platform) {
+  return [...profile.media.configure, ...(platform === "linux" ? profile.media.linuxConfigure ?? [] : [])];
+}
+// Use the same native catalog and accepted families as systemCaptionFont, without
+// requiring a server build. CI installs dependencies before this preflight.
+export function findCjkCaptionFont({ platform = process.platform, catalog } = {}) {
+  catalog ??= createRequire(join(repositoryRoot, "apps/server/package.json"))("@napi-rs/canvas").GlobalFonts;
+  const preferred = platform === "darwin" ? ["PingFang SC", "Hiragino Sans GB", "Heiti SC"]
+    : platform === "win32" ? ["Microsoft YaHei"] : ["Noto Sans CJK SC", "Noto Sans CJK", "Noto Sans SC"];
+  return preferred.find((name) => catalog.has(name));
+}
 export function inspectTestToolchain({
   root = repositoryRoot,
   environment = process.env,
   nodeVersion = process.versions.node,
   probe = probeCommand,
+  fontLookup = findCjkCaptionFont,
+  platform = process.platform,
 } = {}) {
   const profile = loadTestToolchain(root),
     checks = [];
@@ -180,7 +224,23 @@ export function inspectTestToolchain({
       ready: supported.ready,
       action: "Run pnpm setup:test-media to build the required codec profile.",
     });
+    for (const [name, required, inspect] of [
+      ["media decoders", requiredMediaDecoders(profile, platform), mediaDecoderSupport],
+      ["media demuxers", profile.media.requiredDemuxers, mediaDemuxerSupport],
+    ]) {
+      if (!required) continue;
+      const supported = inspect(tools.ffmpeg, profile, probe, platform);
+      checks.push({ name, expected: required.join(", "),
+        actual: supported.ready ? "available" : "missing: " + supported.missing.join(", "),
+        ready: supported.ready,
+        action: "Run pnpm setup:test-media to build the required decode profile (Ubuntu: install libdav1d-dev first)." });
+    }
   }
+  let font, fontError;
+  try { font = fontLookup(); } catch (error) { fontError = error.message; }
+  checks.push({ name: "CJK caption font", expected: "a supported CJK system font",
+    actual: font ?? fontError ?? "unavailable", ready: !!font,
+    action: "Ubuntu: apt-get install fonts-noto-cjk. macOS: enable PingFang SC, Hiragino Sans GB or Heiti SC. Run pnpm install before checking the native font catalog." });
   return {
     profile,
     checks,
