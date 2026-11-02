@@ -117,11 +117,14 @@ export class ClaudeCodeDirectorRuntime implements DirectorRuntime {
       if (problem) throw problem;
       gateDirectory = await mkdtemp(join(cwd, ".claude-director-"));
       const gate = join(gateDirectory, "ready");
+      const systemPromptFile = join(gateDirectory, "system-prompt.txt");
+      await writeFile(systemPromptFile, system, { mode: 0o600, flag: "wx" });
+      if (problem) throw problem;
       const args = ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", ...claudeIsolationArgs(),
         "--no-session-persistence", "--model", config.model ?? "claude-opus-5-5", "--effort", "high",
         "--permission-mode", "dontAsk", "--permission-prompts", "none", "--tools", "", "--allowedTools", "mcp__openslate__*",
         "--strict-mcp-config", "--mcp-config", JSON.stringify({ mcpServers: { openslate: { command: process.execPath, args: [input.bridge.entrypoint],
-          env: { ...bridgeEnvironment(input), OPENSLATE_BRIDGE_READY_FILE: gate } } } }), "--system-prompt", system];
+          env: { ...bridgeEnvironment(input), OPENSLATE_BRIDGE_READY_FILE: gate } } } }), "--system-prompt-file", systemPromptFile];
       child = spawnClaude(config.command, args, cwd, this.#env);
       const processChild = child;
       let processCode: number | null = null;

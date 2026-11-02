@@ -1,5 +1,5 @@
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { toolCatalog } from '../../core/dist/index.js';
@@ -15,6 +15,11 @@ export async function runFakeClaude(configPath) {
   if (args.includes('auth') && args.includes('status')) {
     console.log(JSON.stringify(config.auth ?? { loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' }));
     process.exitCode = config.auth?.loggedIn === false ? 1 : 0; return;
+  }
+  if (args.includes('--system-prompt-file')) {
+    const path = args[args.indexOf('--system-prompt-file') + 1];
+    record({ systemPrompt: { path, base64: readFileSync(path).toString('base64'),
+      mode: statSync(path).mode & 0o777, directoryMode: statSync(dirname(path)).mode & 0o777 } });
   }
   if (config.scenario === 'no-input') { process.exit(1); }
   const isolated = args.includes('--safe-mode') && args.includes('--restricted') && args[args.indexOf('--setting-sources') + 1] === '';

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createServer } from 'node:http';
 import { ClaudeCodeDirectorRuntime, setupLocalClaudeCode } from '../dist/index.js';
 import { toolCatalog } from '../../core/dist/index.js';
@@ -10,9 +10,20 @@ import { fakeClaude } from './claude-code-helpers.mjs';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const waitFor = async (fn) => { for (let i=0;i<500;i++) { const value=fn(); if(value)return value; await delay(10); } throw new Error('Fixture did not reach its barrier'); };
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const promptFile = f => f.records().find(row=>row.systemPrompt)?.systemPrompt;
+const assertPromptRemoved = f => {
+  const prompt = promptFile(f); assert.ok(prompt, 'the fake CLI read the system prompt file');
+  assert.equal(existsSync(prompt.path), false, 'the system prompt file was removed');
+  assert.equal(existsSync(dirname(prompt.path)), false, 'the private run directory was removed');
+  assert.deepEqual(readdirSync(f.cwd).filter(name=>name.startsWith('.claude-director-')), []);
+};
 
 test('Claude print flags, canonical instructions, bounded pictures and the MCP-only environment', async t => {
   const f = fakeClaude(t), events = [];
+  const skillText = 'IMMUTABLE SKILL TEXT\r\n剪辑 🎬\n', referenceText = 'REFERENCE TEXT\r\n\n';
+  writeFileSync(f.input.skills[0].path, skillText);
+  const reference = join(f.cwd, 'reference.md'); writeFileSync(reference, referenceText);
+  f.input.skills.push({name:'reference',path:reference});
   const image = Buffer.alloc(24); Buffer.from([137,80,78,71,13,10,26,10]).copy(image); image.write('IHDR',12); image.writeUInt32BE(1,16); image.writeUInt32BE(1,20);
   const path = join(f.cwd,'picture.png'); writeFileSync(path,image);
   const result = await f.runtime.start({...f.input, images:[{path,mediaType:'image/png',sha256:createHash('sha256').update(image).digest('hex')}]}, {onEvent:event=>events.push(event)});
@@ -23,19 +34,38 @@ test('Claude print flags, canonical instructions, bounded pictures and the MCP-o
   assert.equal(value('--model'),'claude-opus-5-5');assert.equal(value('--permission-mode'),'dontAsk');assert.equal(value('--permission-prompts'),'none');assert.equal(value('--setting-sources'),'');
   assert.equal(JSON.parse(value('--settings')).disableAllHooks,true);assert.equal(argv.includes('--bare'),false,'bare deliberately disables subscription auth');
   assert.equal(JSON.parse(value('--settings')).env.CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS,'1','safe mode alone retains built-in agents in 2.1.312');
-  const system=value('--system-prompt'); for(const part of ["You are OpenSlate's director.",'Use canonical application context','CANONICAL APPLICATION CONTEXT','IMMUTABLE SKILL TEXT'])assert.ok(system.includes(part));
+  assert.equal(argv.includes('--system-prompt'),false);
+  const prompt=promptFile(f);assert.ok(prompt);assert.equal(value('--system-prompt-file'),prompt.path);
+  assert.equal(prompt.mode,0o600);assert.equal(prompt.directoryMode,0o700);
+  const system=Buffer.from(prompt.base64,'base64');
   const codex=readFileSync(new URL('../src/runtime/codex.ts',import.meta.url),'utf8');
   const base=JSON.parse(/baseInstructions: ("[^\n]*"),/.exec(codex)[1]);
   const dev=JSON.parse(/developerInstructions: ("[^\n]*")/.exec(codex)[1])+JSON.parse(/\+ ("The following OpenSlate[^\n]*")/.exec(codex)[1]);
-  assert.equal(system,[base,dev+f.input.context,'IMMUTABLE SKILL TEXT'].join('\n\n'),'base and developer instructions exactly match Codex');
+  assert.deepEqual(system,Buffer.from([base,dev+f.input.context,skillText,referenceText].join('\n\n')),'M2 base, developer, context and ordered skills remain byte-identical');
   const config=JSON.parse(value('--mcp-config'));assert.deepEqual(Object.keys(config.mcpServers),['openslate']);
   const bridge=config.mcpServers.openslate;assert.equal(bridge.command,process.execPath);assert.deepEqual(bridge.args,[f.input.bridge.entrypoint]);
   assert.equal(bridge.env.OPENSLATE_BRIDGE_CREDENTIAL,f.input.bridge.credential);assert.equal(bridge.env.OPENSLATE_BRIDGE_ENDPOINT,f.input.bridge.endpoint);assert.equal(bridge.env.OPENSLATE_BRIDGE_TOOL_CONTRACT,'0.3.0');assert.ok(bridge.env.OPENSLATE_BRIDGE_READY_FILE.startsWith(f.cwd));
+  assert.equal(dirname(prompt.path),dirname(bridge.env.OPENSLATE_BRIDGE_READY_FILE));
+  assert.equal(dirname(dirname(prompt.path)),f.cwd);assert.ok(dirname(prompt.path).startsWith(join(f.cwd,'.claude-director-')));
   for(const row of f.records().filter(row=>row.env))assert.deepEqual(Object.keys(row.env).filter(key=>key!=='__CF_USER_TEXT_ENCODING').sort(),['HOME','LANG','PATH','TMPDIR','USER']);
   const sent=f.records().find(row=>row.input).input;assert.equal(sent.message.content[0].text,f.input.text);assert.deepEqual(sent.message.content[1],{type:'image',source:{type:'base64',media_type:'image/png',data:image.toString('base64')}});
   assert.deepEqual(events.map(e=>e.kind),['runtime_started','turn_started','activity','activity','assistant_message','activity','activity','assistant_message']);
   assert.equal(events.at(-1).phase,'final');assert.equal(result.nativeThreadId,'fixture-session');assert.equal(result.nativeTurnId,'fixture-session');
   assert.ok(!JSON.stringify(events).includes('PRIVATE')); assert.ok(!JSON.stringify(events).includes(f.input.bridge.credential));
+  assertPromptRemoved(f);
+});
+
+test('Claude starts with a 2 MiB context in the system prompt file instead of argv',async t=>{
+  const f=fakeClaude(t),context='x'.repeat(2*1024*1024);
+  const result=await f.runtime.start({...f.input,context});
+  assert.equal(result.status,'completed',JSON.stringify(result));assert.equal(result.dispatched,true);
+  const argv=f.records().find(row=>row.argv?.includes('-p')).argv;
+  assert.ok(argv.includes('--system-prompt-file'));assert.equal(argv.includes('--system-prompt'),false);
+  assert.ok(Buffer.byteLength(argv.join('\0'))<16*1024,'only the prompt path goes through argv');
+  const system=Buffer.from(promptFile(f).base64,'base64');
+  assert.ok(system.length>2*1024*1024);assert.ok(system.includes(Buffer.from(context)));
+  assert.ok(system.subarray(-'IMMUTABLE SKILL TEXT'.length).equals(Buffer.from('IMMUTABLE SKILL TEXT')));
+  assertPromptRemoved(f);
 });
 
 test('planted personal instructions, hook and MCP configuration are excluded by the launch contract',async t=>{
@@ -70,6 +100,7 @@ for(const [scenario,code] of [['error','CLAUDE_CODE_FAILED'],['limit','CLAUDE_CO
     const f=fakeClaude(t,{scenario}),events=[];const result=await f.runtime.start(f.input,{onEvent:e=>events.push(e)});
     assert.equal(result.status,'failed',JSON.stringify(result));assert.equal(result.error.code,code);assert.equal(result.dispatched,true);
     assert.ok(!JSON.stringify({...result,events}).includes('private diagnostic'));assert.equal(f.records().filter(row=>row.argv?.includes('-p')).length,1);
+    assertPromptRemoved(f);
   });
 
 test('unexpected process exit and broken stream keep dispatched completion unknown',async t=>{
@@ -94,9 +125,11 @@ for(const cause of ['abort','timeout','close'])test(`Claude ${cause} kills the e
   const runtime=new ClaudeCodeDirectorRuntime({...f.options,runTimeoutMs:cause==='timeout'?2000:10000});t.after(()=>runtime.close());
   const abort=new AbortController(),run=runtime.start(f.input,{signal:abort.signal});
   const pid=await waitFor(()=>f.records().find(row=>row.descendant)?.descendant);
+  assert.ok(existsSync(promptFile(f).path),'the prompt exists while the CLI is running');
   if(cause==='abort')abort.abort();if(cause==='close')await runtime.close();
   const result=await run;assert.equal(result.status,cause==='timeout'?'unknown':'interrupted',JSON.stringify(result));assert.equal(result.dispatched,true);
   await waitFor(()=>!alive(pid));
+  assertPromptRemoved(f);
   if(cause==='close')await assert.rejects(runtime.start(f.input),{code:'RUNTIME_CLOSED'});
 });
 
