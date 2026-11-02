@@ -12,8 +12,8 @@ function fixture(t) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'package.json'), JSON.stringify({ packageManager: 'pnpm@10.33.0' }));
   const calls = [];
-  const probe = (command, args) => { calls.push({ command, args }); return { status: 0, stdout: command === 'pnpm' ? '10.33.0\n' : command === '/codex' ? 'codex-cli 0.153.4\n' : 'local tool\n' }; };
-  return { root, probe, calls, environment: { PATH: '/local/bin' }, nodeVersion: '24.15.0' };
+  const probe = (command, args) => { calls.push({ command, args }); return { status: 0, stdout: command === 'pnpm' ? '10.33.0\n' : command === '/codex' ? 'codex-cli 0.162.1\n' : 'local tool\n' }; };
+  return { root, probe, calls, home: root, environment: { PATH: '/local/bin' }, nodeVersion: '24.15.0' };
 }
 
 test('demo readiness is local, does not expose credentials and does not claim provider access', t => {
@@ -54,7 +54,7 @@ test('explicit invalid executable does not silently fall back and enabled Codex 
   assert.equal(report.checks.find(check => check.id === 'codex-image').state, 'blocked');
   input.environment.OPENSLATE_CODEX_IMAGE_BINARY = '/codex';
   input.environment.OPENSLATE_FFMPEG = '/local/bin/ffmpeg';
-  input.probe = command => ({ status: 0, stdout: command === 'pnpm' ? '10.33.0' : command === '/codex' ? 'codex-cli 0.153.4' : 'tool' });
+  input.probe = command => ({ status: 0, stdout: command === 'pnpm' ? '10.33.0' : command === '/codex' ? 'codex-cli 0.162.1' : 'tool' });
   assert.equal(inspectSetup(input).ready, true);
 });
 
@@ -99,4 +99,22 @@ test('config initialization writes a private disabled template once and preserve
   const retained = invoke(); assert.equal(retained.status, 0, retained.stderr); assert.match(retained.stdout, /preserved/);
   assert.equal(readFileSync(join(input.root, '.env.live.local'), 'utf8'), existing);
   assert.equal(retained.stdout.includes('private-config-fixture'), false); assert.equal(retained.stderr.includes('private-config-fixture'), false);
+});
+
+test('an old configured image binary uses the supported side-by-side installation with a notice', t => {
+  const input=fixture(t),pinned=join(input.home,'.local/share/openslate-codex-0.162.1/node_modules/.bin/codex');
+  mkdirSync(join(input.home,'.local/share/openslate-codex-0.162.1/node_modules/.bin'),{recursive:true});writeFileSync(pinned,'fixture');
+  Object.assign(input.environment,{OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION:'1',OPENSLATE_CODEX_IMAGE_BINARY:'/old-codex'});
+  input.probe=command=>({status:0,stdout:command==='pnpm'?'10.33.0':command==='/old-codex'?'codex-cli 0.153.4':command===pinned?'codex-cli 0.162.1':'tool'});
+  const report=inspectSetup(input),check=report.checks.find(row=>row.id==='codex-image');
+  assert.equal(report.ready,true);assert.equal(report.tools.codexImage,pinned);assert.equal(check.state,'warning');assert.match(check.detail,/DIRECTOR_CODEX_VERSION_MISMATCH/);
+  input.environment.OPENSLATE_CODEX_IMAGE_BINARY='codex';
+  assert.equal(inspectSetup(input).ready,false,'relative paths stay invalid even when the supported prefix exists');
+});
+
+test('a missing supported image installation refuses an old path and prints the exact install command', t => {
+  const input=fixture(t);Object.assign(input.environment,{OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION:'1',OPENSLATE_CODEX_IMAGE_BINARY:'/old-codex'});
+  input.probe=command=>({status:0,stdout:command==='pnpm'?'10.33.0':command==='/old-codex'?'codex-cli 0.153.4':'tool'});
+  const report=inspectSetup(input),check=report.checks.find(row=>row.id==='codex-image');
+  assert.equal(report.ready,false);assert.equal(check.state,'blocked');assert.match(check.action,/npm install --prefix .*openslate-codex-0\.162\.1.* --save-exact @openai\/codex@0\.162\.1/);
 });

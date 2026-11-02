@@ -24,6 +24,7 @@ import { LocalMediaExecutor } from "../execution/local-media-executor.js";
 import { ConfiguredExternalAdmission } from "../execution/configured-external-admission.js";
 import { CodexImageExecution } from "../execution/codex-image-execution.js";
 import { assertCodexImageOperationOptions } from "../execution/codex-image-receipts.js";
+import { resolveConfiguredCodexBinary } from "./codex-binary.js";
 import { OpenAIImageExecution } from "../execution/openai-image-execution.js";
 import { MiniMaxH3Execution } from "../execution/minimax-h3-execution.js";
 import { ViggleH3Execution } from "../execution/viggle-h3-execution.js";
@@ -88,12 +89,15 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
     && [injectedCodex.prepare, injectedCodex.start, injectedCodex.lookup].every(method => typeof method === "function")
     && (injectedCodex.release === undefined || typeof injectedCodex.release === "function"),
     "MEDIA_EXECUTION_CONFIGURATION", "Use a complete trusted Codex image transport");
-  const codexImageConfigured = injectedCodex !== undefined || executable(configuration.codexImageBinary ?? null);
+  const selectedCodex = !injectedCodex && configuration.codexImage && configuration.codexImageBinary
+    ? resolveConfiguredCodexBinary(configuration.codexImageBinary) : undefined;
+  if (selectedCodex?.diagnostic) console.warn(JSON.stringify({ kind: "codex_image_runtime_notice", ...selectedCodex.diagnostic }));
+  const codexImageConfigured = injectedCodex !== undefined || executable(selectedCodex?.binaryPath ?? configuration.codexImageBinary ?? null);
   invariant(!configuration.codexImage || codexImageConfigured, "MEDIA_EXECUTION_CODEX_REQUIRED",
     "Enabled Codex image generation requires an executable pinned native binary");
   const nativeWorker = !injectedCodex && configuration.codexImage ? new CodexImageWorkerTransport({ directory: join(resolve(options.dataDirectory), "codex-images"),
     startupTimeoutMs,
-    command: { file: configuration.codexImageBinary! }, nativeHome: homedir(), codexHome: configuration.codexImageHome ?? join(homedir(), ".codex"),
+    command: { file: selectedCodex!.binaryPath }, nativeHome: homedir(), codexHome: configuration.codexImageHome ?? join(homedir(), ".codex"),
     env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, SHELL: "/bin/sh", CI: "1", NO_COLOR: "1" } }) : undefined;
   let closing: Promise<void> | undefined;
   // Capture the trusted instance and methods once. Later option mutation cannot replace the route.

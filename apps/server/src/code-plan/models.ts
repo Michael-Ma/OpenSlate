@@ -5,7 +5,7 @@ import type { ArtifactRecord } from "../execution/engine.js";
 import { codeOnlyVideoAdapter, videoI2vOptions } from "../execution/video-i2v-options.js";
 import { canonical, digest, invariant, moneyMicros } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
-import type { InstalledProviderCatalog } from "../application/provider-catalog.js";
+import { profilePolicy, type InstalledProviderCatalog } from "../application/provider-catalog.js";
 import type { Store } from "../persistence/store.js";
 import { CODE_PLAN_MODELS, videoMode, videoModes, type CodePlanModel } from "./identity.js";
 import { videoCapabilities } from "./video-capabilities.js";
@@ -15,12 +15,17 @@ import { assertImageReferenceRecords, imageCapabilities } from "../execution/cod
 export interface CodePlanCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; localExecution?: unknown; [key: string]: unknown }
 export const supportedCodePlanAdapters = new Set(["codex-image", "openai-image", "viggle-h3", "minimax-h3", "openai-speech", "seedance", "fal-video-i2v", "gemini-lyria"]);
 
-/** Catalog definitions and the project lock must agree byte for byte. Readiness never supplies a replacement profile. */
+/** Current definitions match byte for byte. Retired Codex image locks remain available for journal replay only;
+ * dispatch still requires a current installed definition and current-runtime preflight. */
 export function projectModels(store: Store, projectId: string, catalog?: InstalledProviderCatalog): Record<string, CodePlanModel> {
   const project = store.getProject(projectId), lock = store.get<CodePlanCapabilityLock>("capability_lock", project.capabilityLockId);
   const installed = catalog?.view().profiles ?? [];
+  const recordedCodex = (profile: ProviderProfile): boolean => {
+    if (profile.adapter !== "codex-image" || profile.configuration?.settings?.runtimeVersion !== "0.153.4") return false;
+    try { profilePolicy(profile, { historical: true }); return true; } catch { return false; }
+  };
   const real = lock?.profiles.filter(profile => supportedCodePlanAdapters.has(profile.adapter)
-    && installed.some(row => row.installedDefinition && canonical(row.profile) === canonical(profile))) ?? [];
+    && (recordedCodex(profile) || installed.some(row => row.installedDefinition && canonical(row.profile) === canonical(profile)))) ?? [];
   // A saved real lock must fail closed if its installation disappears; never turn it into a fixture project.
   const hasRealLock = lock?.profiles.some(profile => profile.adapter !== "fake") ?? false;
   const withImageValidation = (models: Record<string, CodePlanModel>) => {

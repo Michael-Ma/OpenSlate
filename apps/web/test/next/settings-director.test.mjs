@@ -100,8 +100,8 @@ test('the review switch before its read, after a failed read, and on a server wi
 
 test('Settings retains an attempted Codex version diagnosis with expected, found, program and supported install in both languages', async () => {
   const { codexDiagnostic } = await import('../../src/next/model/settings-director.ts');
-  const diagnostic = { code: 'DIRECTOR_CODEX_VERSION_MISMATCH', expectedVersion: '0.153.4', foundVersion: '0.162.0-alpha.4',
-    binaryPath: '/Applications/ChatGPT.app/codex', installPath: '/Users/fixture/.local/share/openslate-codex/node_modules/.bin/codex' };
+  const diagnostic = { code: 'DIRECTOR_CODEX_VERSION_MISMATCH', expectedVersion: '0.162.1', foundVersion: '0.162.0-alpha.4',
+    binaryPath: '/Applications/ChatGPT.app/codex', installPath: '/Users/fixture/.local/share/openslate-codex-0.162.1/node_modules/.bin/codex' };
   assert.equal(codexDiagnostic(setup()), null);
   // The attempted setup may have failed before saving: the film can still be using the demo.
   const failed = setup({ selection: { mode: 'fake' }, codexDiagnostic: diagnostic });
@@ -119,7 +119,7 @@ test('Settings retains an attempted Codex version diagnosis with expected, found
 
 test('unknown native version output gets localized guidance without echoing arbitrary child diagnostics', async () => {
   const { errorMsg } = await import('../../src/next/i18n/translate.ts');
-  const details = { expectedVersion: '0.153.4', foundVersion: null, binaryPath: '/opt/codex', installPath: '/opt/openslate-codex' };
+  const details = { expectedVersion: '0.162.1', foundVersion: null, binaryPath: '/opt/codex', installPath: '/opt/openslate-codex' };
   const message = errorMsg('DIRECTOR_CODEX_VERSION_MISMATCH', details);
   assert.match(translateMsg('en', message), /could not be recognized/);
   assert.match(translateMsg('zh-CN', message), /无法识别/);

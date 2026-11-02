@@ -36,7 +36,7 @@ test("setup generates exact local policy using two no-turn sessions and private 
   assert.equal(result.runtimeOptions.limits.startupTimeoutMs, PROTOCOL_FIXTURE_LIMITS.startupTimeoutMs);
   assert.doesNotThrow(() => new CodexDirectorRuntime(result.runtimeOptions));
   const policy = result.runtimeOptions.policy;
-  assert.equal(policy.mode, "local"); assert.equal(policy.runtimeVersion, "0.153.4");
+  assert.equal(policy.mode, "local"); assert.equal(policy.runtimeVersion, "0.162.1");
   assert.deepEqual(policy.config.permissions.openslate_local, { network: { enabled: false }, filesystem: {
     ":root": "deny", ":minimal": "read", [f.input.directories.projection]: "read", [f.input.directories.snapshots]: "read",
     [await realpath(process.execPath)]: "read" } });
@@ -290,7 +290,7 @@ for (const [scenario, foundVersion] of [['version', '0.0.1'], ['version-alpha', 
 test(`setup records a bounded parsed version for ${scenario} before any account session`, async t => {
   const f = await fixture(t, scenario), result = await setupLocalCodex(f.input);
   assert.equal(result.readiness.issues[0].code, 'SETUP_VERSION_MISMATCH');
-  assert.deepEqual(result.readiness.binaryVersion, { expectedVersion: '0.153.4', foundVersion });
+  assert.deepEqual(result.readiness.binaryVersion, { expectedVersion: '0.162.1', foundVersion });
   assert.equal(result.runtimeOptions, undefined); assert.deepEqual((await f.records()).map(row => row.kind), ['version']);
   assert.ok(!JSON.stringify(result).includes('PRIVATE')); assert.ok(!JSON.stringify(result).includes(f.root));
 });

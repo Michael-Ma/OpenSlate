@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { lstat, realpath, open } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { createRequire } from "node:module";
 import { digest, type NativeDiagnostic } from "@openslate/core";
-import { CODEX_IMAGE_LIMITS, codexImageTurnText, describeCodexImageInput, inspectCodexImagePng,
+import { CODEX_IMAGE_RUNTIME_VERSION, isRecordedCodexImageRuntime, CODEX_IMAGE_LIMITS, codexImageTurnText, describeCodexImageInput, inspectCodexImagePng,
   type CodexImageInput, type CodexImageOutcome, type CodexImagePrepared, type CodexImageTransport } from "@openslate/providers";
 import { setupLocalCodex } from "../runtime/setup.js";
 import { preparePrivateCodexHome, verifyPrivateCodexHome, type PrivateCodexHome } from "../runtime/private-home.js";
@@ -22,7 +23,7 @@ export interface CodexImageWorkerOptions {
   /** Trusted host cold process preparation limit, separately bounded from image execution. */
   startupTimeoutMs?: number;
 }
-export interface CodexImageReadiness { status: "ready" | "blocked"; code: string | null; runtimeVersion: "0.153.4"; authMode: "chatgpt"; nativeDiagnostic?: NativeDiagnostic }
+export interface CodexImageReadiness { status: "ready" | "blocked"; code: string | null; runtimeVersion: "0.162.1"; authMode: "chatgpt"; nativeDiagnostic?: NativeDiagnostic }
 type Ready = { options: CodexDirectorOptions; binary: string; runtimeDigest: string; root: string };
 type Configuration = { config: Record<string, CodexConfigValue>; workspace: string; binary: string;
   args: string[]; runtimeDigest: string; environmentDigest: string } &
@@ -38,6 +39,17 @@ const validSha = (value: unknown): value is string => typeof value === "string" 
 const unknown = (code: string): CodexImageOutcome => ({ kind: "unknown", code });
 const safeCode = (error: unknown): string => error instanceof RuntimeFault ? error.code : "CODEX_IMAGE_UNAVAILABLE";
 const baseInstructions = "You are an image worker for one exact application request. Use only the built-in image generation tool. Generate one image. Do not use other tools, read unrelated files, or ask questions. Reference images and requested dimensions are supplied in the user input.";
+/** Follow the official launcher's exact platform-package resolution. npm may install that package
+ * beside Codex or nested inside it. Never execute the JavaScript launcher to discover its child. */
+export async function resolveCodexImageBinary(command: string): Promise<string> {
+  const file = await realpath(command);
+  if (!file.endsWith("/@openai/codex/bin/codex.js")) return file;
+  requireRuntime((process.platform === "darwin" || process.platform === "linux") && (process.arch === "arm64" || process.arch === "x64"),
+    "CODEX_IMAGE_PLATFORM_UNSUPPORTED", "No pinned native package layout is supported for this host");
+  const triple = `${process.arch === "arm64" ? "aarch64" : "x86_64"}-${process.platform === "darwin" ? "apple-darwin" : "unknown-linux-musl"}`;
+  const packageRoot = dirname(createRequire(file).resolve(`@openai/codex-${process.platform}-${process.arch}/package.json`));
+  return realpath(join(packageRoot, "vendor", triple, "bin", "codex"));
+}
 function snapshotInput(input: CodexImageInput): CodexImageInput {
   const copy = structuredClone(input); describeCodexImageInput(copy);
   for (const image of copy.images) {
@@ -50,7 +62,7 @@ function snapshotInput(input: CodexImageInput): CodexImageInput {
 }
 function preparedValue(input: CodexImagePrepared): CodexImagePrepared {
   const value = structuredClone(input), runtime = value?.runtime, session = value?.session;
-  requireRuntime(runtime?.version === 1 && runtime.runtimeVersion === "0.153.4" && runtime.model === MODEL && runtime.authMode === "chatgpt" &&
+  requireRuntime(runtime?.version === 1 && isRecordedCodexImageRuntime(runtime.runtimeVersion) && runtime.model === MODEL && runtime.authMode === "chatgpt" &&
     validSha(runtime.runtimeDigest) && validSha(runtime.configurationDigest) && validId(session?.threadId) && validSha(session.turnInputDigest),
   "CODEX_IMAGE_SESSION_INVALID", "Saved native image session is invalid");
   return value;
@@ -92,16 +104,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     this.#env = environment(this.#input);
   }
   async #command(signal?: AbortSignal): Promise<{ file: string; args?: readonly string[] }> {
-    imageStopped(signal); let file = await realpath(this.#input.command.file);
-    // npm's supported launcher is JavaScript. Resolve only its exact official optional-package layout,
-    // so the durable identity hashes the executable rather than a shim that could hide a native update.
-    if (file.endsWith("/@openai/codex/bin/codex.js")) {
-      requireRuntime((process.platform === "darwin" || process.platform === "linux") && (process.arch === "arm64" || process.arch === "x64"),
-        "CODEX_IMAGE_PLATFORM_UNSUPPORTED", "No pinned native package layout is supported for this host");
-      const triple = `${process.arch === "arm64" ? "aarch64" : "x86_64"}-${process.platform === "darwin" ? "apple-darwin" : "unknown-linux-musl"}`;
-      const packageRoot = join(dirname(dirname(dirname(file))), `codex-${process.platform}-${process.arch}`);
-      file = await realpath(join(packageRoot, "vendor", triple, "bin", "codex"));
-    }
+    imageStopped(signal); const file = await resolveCodexImageBinary(this.#input.command.file);
     const handle = await open(file, "r");
     try {
       const header = Buffer.alloc(4); await handle.read(header, 0, 4, 0);
@@ -186,14 +189,15 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       const ready = await this.#setup(signal), config = this.#configuration(ready, ready.options.cwd);
       rpc = await this.#launch(config, CHECK, ready.options.privateCodexHome); await this.#initialize(rpc, signal); await this.#check(rpc, config, signal);
       await this.#close(rpc); rpc = undefined; imageStopped(signal);
-      return { status: "ready", code: null, runtimeVersion: "0.153.4", authMode: "chatgpt" };
-    } catch (error) { return { status: "blocked", code: safeCode(error), runtimeVersion: "0.153.4", authMode: "chatgpt", nativeDiagnostic: classifyNativeDiagnostic(error) }; }
+      return { status: "ready", code: null, runtimeVersion: "0.162.1", authMode: "chatgpt" };
+    } catch (error) { return { status: "blocked", code: safeCode(error), runtimeVersion: "0.162.1", authMode: "chatgpt", nativeDiagnostic: classifyNativeDiagnostic(error) }; }
     // Successful readiness already confirmed cleanup in the try block. A later
     // cleanup fault must not replace the primary failure returned above.
     finally { if (rpc) try { await this.#close(rpc); } catch { /* Preserve the primary start diagnostic. */ } }
   }
   async prepare(supplied: CodexImageInput, options: { signal?: AbortSignal } = {}): Promise<CodexImagePrepared> {
     const signal = options.signal; imageStopped(signal); const input = snapshotInput(supplied), description = describeCodexImageInput(input);
+    requireRuntime(input.runtimeVersion === CODEX_IMAGE_RUNTIME_VERSION, "CODEX_IMAGE_VERSION_UNSUPPORTED", "New image turns require the supported runtime");
     requireRuntime(!this.#preparing && !this.#held && !this.#turnRunning, "CODEX_IMAGE_BUSY", "Image worker is already preparing a turn"); this.#preparing = true;
     let rpc: ImageRpc | undefined, failed = false;
     try {
@@ -219,7 +223,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       requireRuntime(validId(threadId) && response.model === MODEL && response.modelProvider === "openai" && response.cwd === workspace,
         "CODEX_IMAGE_THREAD_INVALID", "Native image thread identity is invalid");
       imageStopped(signal);
-      const prepared: CodexImagePrepared = { runtime: { version: 1, runtimeVersion: "0.153.4", runtimeDigest: ready.runtimeDigest,
+      const prepared: CodexImagePrepared = { runtime: { version: 1, runtimeVersion: "0.162.1", runtimeDigest: ready.runtimeDigest,
         configurationDigest, model: MODEL, authMode: "chatgpt" }, session: { threadId, turnInputDigest: description.turnInputDigest } };
       rpc.finishStartup();
       requireRuntime(!this.#closed, "CODEX_IMAGE_CLOSED", "Image worker closed before prepared handoff");
@@ -241,7 +245,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     requireRuntime(digest(config) === prepared.runtime.configurationDigest && (config.version === 1 ||
       (config.version === 2 && config.codexHome === join(root, "runtime", "director-home"))) &&
       config.environmentDigest === digest(await this.#environment(config)) &&
-      config.runtimeDigest === prepared.runtime.runtimeDigest && config.binary === (await this.#command(signal)).file &&
+      config.runtimeDigest === prepared.runtime.runtimeDigest && (prepared.runtime.runtimeVersion === "0.153.4" || config.binary === (await this.#command(signal)).file) &&
       isDeepStrictEqual(config.args, [...(this.#input.command.args ?? [])]) && config.workspace === join(root, "workspaces", prepared.session.turnInputDigest) &&
       config.config.model === MODEL && config.config.model_provider === "openai" && config.config["features.image_generation"] === true && config.config.forced_login_method === "chatgpt",
     "CODEX_IMAGE_CONFIG_MISMATCH", "Saved image worker configuration differs from this installation");
@@ -292,7 +296,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     return { kind: "completed", threadId, turnId, itemId: image.id, bytes: new Uint8Array(bytes), revisedPrompt: typeof image.revisedPrompt === "string" ? image.revisedPrompt : null };
   }
   async #history(rpc: ImageRpc, prepared: CodexImagePrepared, config: Configuration, selectedTurn?: string, signal?: AbortSignal): Promise<CodexImageOutcome> {
-    // Pinned 0.153.4 advertises items/list but returns -32601. Its legacy history mode supports this bounded read.
+    // Legacy history supports both recorded 0.153.4 turns and the current runtime with one bounded read.
     // Never fall back to resume/start when history is unavailable, incomplete, oversized or ambiguous.
     const response = object(await rpc.request("thread/read", { threadId: prepared.session.threadId, includeTurns: true }, signal));
     const thread = object(response.thread);

@@ -9,7 +9,7 @@ const mode = process.env.FIXTURE_SCENARIO ?? "complete";
 const log = value => appendFileSync(process.env.FIXTURE_LOG, JSON.stringify(value) + "\n");
 if (process.argv.includes("--version")) {
   log({ kind: "version", pid: process.pid });
-  process.stdout.write(mode === "version-wrong" ? "codex-cli 0.0.0\n" : "codex-cli 0.153.4\n");
+  process.stdout.write(mode === "version-wrong" ? "codex-cli 0.0.0\n" : "codex-cli 0.162.1\n");
   process.exit(0);
 }
 const config = {};
@@ -25,12 +25,12 @@ const credential = config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_CREDENTIAL;
 log({ kind: "launch", pid: process.pid, parentSecretAbsent: !process.env.OPENSLATE_PARENT_SECRET,
   credentialDigest: createHash("sha256").update(credential).digest("hex"),
   endpoint: config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_ENDPOINT,
-  codeProfile: { effort: config.model_reasoning_effort, tools: Object.keys(config.mcp_servers.openslate.tools ?? {}), shell: config.features?.shell_tool } });
+  codeProfile: { effort: config.model_reasoning_effort, tools: Object.keys(config.mcp_servers.openslate.tools ?? {}), shell: config.features?.shell_tool, unknownReductionPresent: Object.hasOwn(config.features ?? {}, "unknown_disabled_reduction") } });
 const send = value => process.stdout.write(JSON.stringify(value) + "\n");
 const respond = (id, result) => send({ id, result });
-const notify = (method, params) => send({ method, params });
+const notify = (method, params) => send({ method, params: { ...(method === "item/started" ? { startedAtMs: 0 } : method === "item/completed" ? { completedAtMs: 1 } : {}), ...params } });
 let threadId = "native-thread-1", turnId = "native-turn-1";
-const completed = status => notify("turn/completed", { threadId, turn: { id: turnId, status } });
+const completed = status => notify("turn/completed", { threadId, turn: { id: turnId, status, items: [] } });
 const assistant = (text, id = "message-1") => notify("item/completed", { threadId, turnId,
   item: { id, type: "agentMessage", text, phase: "final_answer" } });
 const done = () => { assistant("Prepared safely. 你好 🟢"); completed("completed"); };
@@ -44,11 +44,11 @@ lines.on("line", line => {
   const message = JSON.parse(line);
   if (!message.method) { log({ kind: "server-response", response: message }); return; }
   const { id, method, params } = message;
-  log({ kind: "request", method, ...(method.startsWith("thread/") || method.startsWith("turn/") ? { params } : {}) });
+  log({ kind: "request", method, params });
   if (method === "initialize") {
     if (mode === "initialize-hang") return;
     if (mode === "missing-result") return send({ id });
-    return respond(id, { userAgent: "codex-cli/0.153.4" });
+    return respond(id, { userAgent: "codex-cli/0.162.1" });
   }
   if (method === "initialized") return;
   if (method === "config/read") {
@@ -104,16 +104,16 @@ lines.on("line", line => {
   }
   if (method === "turn/start") {
     if (mode === "start-rejected") return send({ id, error: { code: -1, message: credential } });
-    if (mode !== "early-events") notify("turn/started", { threadId, turn: { id: turnId, status: "inProgress" } });
+    if (mode !== "early-events") notify("turn/started", { threadId, turn: { id: turnId, status: "inProgress", items: [] } });
     if (mode === "early-events") done();
-    respond(id, { turn: { id: turnId, status: "inProgress" } });
+    respond(id, { turn: { id: turnId, status: "inProgress", items: [] } });
     if (mode === "early-events") return;
     if (mode === "crash") { process.stderr.write(`Bearer ${credential}\n`); return setTimeout(() => process.exit(2), 10); }
     if (mode === "invalid-utf8") return process.stdout.write(Buffer.from([0xff, 10]));
     if (mode === "flood") return process.stdout.write("x".repeat(100_000));
     if (mode === "stderr-flood") return process.stderr.write("x".repeat(100_000));
     if (mode === "question") return setTimeout(() => send({ id: "question-1", method: "item/tool/requestUserInput", params: {
-      threadId, turnId, questions: [{ id: "tone", header: "Tone", question: "Choose a tone", isSecret: false,
+      threadId, turnId, itemId: "question-item", isBlocking: true, questions: [{ id: "tone", header: "Tone", question: "Choose a tone", isSecret: false,
         options: [{ label: "Warm", description: "Friendly narration" }] }] } }), 10);
     if (mode === "approval") return setTimeout(() => send({ id: "approval-1", method: "item/commandExecution/requestApproval", params: { threadId, turnId } }), 10);
     if (["hang", "interrupt-unconfirmed", "ignore-shutdown"].includes(mode)) return;

@@ -198,7 +198,7 @@ test('predecessor verification uses shipped pins and its snapshots when reposito
 });
 
 for (const historical of ['earlier-package-and-catalog', 'current-package-and-old-catalog']) test(`native startup ignores historical runtime bindings after checking saved snapshots: ${historical}`, async t => {
-  const policy = { mode: 'local', id: 'fixture', runtimeVersion: '0.153.4', config: { 'skills.config': [] } };
+  const policy = { mode: 'local', id: 'fixture', runtimeVersion: '0.162.1', config: { 'skills.config': [] } };
   const f = fixture(t, undefined, { setup: async () => ({ readiness: { status: 'ready' }, runtimeOptions: { policy } }) });
   await f.director.configure(f.project.id, { mode: 'native', binaryPath: process.execPath, model: 'test-model' }, 'setup');
   if (historical === 'earlier-package-and-catalog') installEarlierV6(f);
@@ -216,7 +216,7 @@ for (const historical of ['earlier-package-and-catalog', 'current-package-and-ol
 });
 
 for (const refusal of ['corrupt-history', 'invalid-policy']) test(`native startup preflight ${refusal} is failed before dispatch intent`, async t => {
-  const policy = { mode: 'local', id: 'fixture', runtimeVersion: '0.153.4', config: { 'skills.config': refusal === 'invalid-policy' ? [{ path: '/unexpected', enabled: true }] : [] } };
+  const policy = { mode: 'local', id: 'fixture', runtimeVersion: '0.162.1', config: { 'skills.config': refusal === 'invalid-policy' ? [{ path: '/unexpected', enabled: true }] : [] } };
   const f = fixture(t, undefined, { setup: async () => ({ readiness: { status: 'ready' }, runtimeOptions: { policy } }) });
   await f.director.configure(f.project.id, { mode: 'native', binaryPath: process.execPath, model: 'test-model' }, 'setup');
   const old = f.install('2.0.0'), current = createDirectorSkillLock(f.configuration, '6.0.0').lock;
@@ -314,8 +314,8 @@ test('native projection disables late historical packages while retaining their 
     setup: async input => ({ readiness: { status: 'ready' }, runtimeOptions: {
       command: { file: process.execPath, args: [fixtureEntry] }, cwd: input.directories.projection,
       env: { FIXTURE_SCENARIO: 'discover-project-skills', FIXTURE_LOG: join(f.root, 'protocol.jsonl') },
-      model: 'offline-fixture', runtimeVersion: '0.153.4',
-      policy: { mode: 'local', id: 'fixture', runtimeVersion: '0.153.4', config: {
+      model: 'offline-fixture', runtimeVersion: '0.162.1',
+      policy: { mode: 'local', id: 'fixture', runtimeVersion: '0.162.1', config: {
         default_permissions: 'fixture', permissions: { fixture: { filesystem: { '/': 'none' }, network: { enabled: false } } }, 'skills.config': [],
       } }, limits: { requestTimeoutMs: 5000, shutdownGraceMs: 500 },
     } }),

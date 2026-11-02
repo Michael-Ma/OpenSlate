@@ -242,10 +242,10 @@ export const scenarios = [
       await page.fill("dialog.start-sheet [data-act='plan-text']", "Scene 1: the harbour at night. Scene 2: the ferry's lights in the fog.");
       await expectText(page, "dialog.start-sheet .plan-row .count", /^70 of 12,000 characters$/);
       // The collapsed line names each paid default with its price.
-      await expectText(page, "dialog.start-sheet .impact", /all ready: Codex · gpt-6-astra Director \(uses your Codex plan\), OpenAI gpt-image-2 keyframes \(about \$0\.04 a keyframe\), MiniMax H3 video \(about \$0\.50 a clip\),/);
+      await expectText(page, "dialog.start-sheet .impact", /all ready: Codex · gpt-6.1-sol Director \(uses your Codex plan\), OpenAI gpt-image-2 keyframes \(about \$0\.04 a keyframe\), MiniMax H3 video \(about \$0\.50 a clip\),/);
       await page.click("dialog.start-sheet [data-act='see-models']");
       await expectText(page, "dialog.start-sheet .mrow[data-job='keyframes']", /OpenAI gpt-image-2\s+about \$0\.04 a keyframe\s+✓ ready/);
-      await expectText(page, "dialog.start-sheet .mrow[data-job='director']", /Codex · gpt-6-astra/);
+      await expectText(page, "dialog.start-sheet .mrow[data-job='director']", /Codex · gpt-6.1-sol/);
       await expectText(page, "dialog.start-sheet .sheet-foot", /Creating a film is free\./);
       await shot(page, "start-new-plan-1440");
       // Arrow keys move between first steps.
@@ -424,7 +424,7 @@ export const scenarios = [
       await expectText(page, "dialog.start-sheet .sheet-head h2", /^Film created$/);
       await expectText(page, "dialog.start-sheet .sheet-foot .grow", /^Crossing is in your films\.$/);
       await expectText(page, "dialog.start-sheet [data-act='create-film']", /^Check the Director again$/);
-      await expectText(page, "dialog.start-sheet .mrow[data-job='director']", /Codex · gpt-6-astra[\s\S]*still being checked/);
+      await expectText(page, "dialog.start-sheet .mrow[data-job='director']", /Codex · gpt-6.1-sol[\s\S]*still being checked/);
       expect(await page.locator("dialog.start-sheet [data-summary='models'], dialog.start-sheet [data-act='see-models']").count() === 0, "The sheet still offers the models as a choice after the film was made");
       await noErrorToast(page, "An error toast sits behind the sheet");
       await inFront(page, "dialog.start-sheet .impact.cost", "The sheet's refusal is not in front");

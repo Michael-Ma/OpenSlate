@@ -25,7 +25,7 @@ import type { SkillCapabilityLock } from "@openslate/director";
 import { snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
 import { readCodexStartupTimeout, readDirectorRunTimeout } from "./director-run-config.js";
 import { logNativeDiagnostic, safeNativeDiagnostic } from "./native-diagnostics.js";
-import { findLocalCodexBinary, supportedCodexInstall } from "./codex-binary.js";
+import { selectLocalCodexBinary, resolveConfiguredCodexBinary, supportedCodexInstall, type CodexVersionDiagnostic } from "./codex-binary.js";
 import type { LocalMediaService } from "../media/local-media.js";
 import type { CodePlanPort } from "../code-plan/port.js";
 import { prepareCodePlanUploads } from "../code-plan/uploads.js";
@@ -36,7 +36,6 @@ interface SavedSelection { id: string; projectId: string; selection: LocalDirect
 interface SelectionCommand { id: string; projectId: string; selectionDigest: string; state: "pending" | "completed" }
 type Setup = typeof setupLocalCodex;
 type Ready = Awaited<ReturnType<Setup>>;
-interface CodexVersionDiagnostic { code: "DIRECTOR_CODEX_VERSION_MISMATCH"; expectedVersion: string; foundVersion: string | null; binaryPath: string; installPath: string }
 interface SuccessfulCodexCheck { binaryPath: string; version: string; checkedAt: string }
 /** Diagnostic evidence only: never cached runtime options, native configuration, sign-in data or authority. */
 interface SavedCodexCheck {
@@ -44,6 +43,7 @@ interface SavedCodexCheck {
   modelChoices?: { id: string; label: string }[];
   lastSuccessfulCheck: SuccessfulCodexCheck | null;
   diagnostic: CodexVersionDiagnostic | null;
+  notice?: CodexVersionDiagnostic;
   nativeDiagnostic?: NativeDiagnostic;
 }
 export interface LocalDirectorOptions {
@@ -58,6 +58,8 @@ export interface LocalDirectorOptions {
   setup?: Setup;
   makeRuntime?: (result: Ready) => DirectorRuntime;
   defaults?: { binaryPath: string; model: string; codexHome?: string };
+  /** Trusted host/test override for the supported installation prefix's home. */
+  codexInstallHome?: string;
   /** Trusted local executable for selected-reference thumbnails. No browser path input. */
   ffmpegPath?: string;
   media?: LocalMediaService;
@@ -74,6 +76,9 @@ export class LocalDirectorController {
   private readonly modelReadiness = new Map<string, Ready["readiness"]>();
   private readonly modelChecks = new Map<string, Promise<Ready["readiness"]>>();
   private readonly binaryDiagnostics = new Map<string, CodexVersionDiagnostic>();
+  private readonly binaryNotices = new Map<string, CodexVersionDiagnostic>();
+  private readonly effectiveBinaryPaths = new Map<string, string>();
+  private readonly defaultBinaryDiagnostic: CodexVersionDiagnostic | undefined;
   private readonly setupEpoch = new Map<string, number>();
   private readonly shutdown = new AbortController();
   private readonly activeNativeRuntimes = new Set<DirectorRuntime>();
@@ -87,7 +92,9 @@ export class LocalDirectorController {
     if (config.runTimeoutMs !== undefined) readDirectorRunTimeout({ OPENSLATE_DIRECTOR_RUN_TIMEOUT_MS: String(config.runTimeoutMs) });
     if (config.startupTimeoutMs !== undefined) readCodexStartupTimeout({ OPENSLATE_CODEX_STARTUP_TIMEOUT_MS: String(config.startupTimeoutMs) });
     this.setup = config.setup ?? setupLocalCodex;
-    this.defaults = config.defaults ?? { binaryPath: findLocalCodexBinary(), model: "gpt-6-astra" };
+    const discovered = config.defaults ? null : selectLocalCodexBinary({ home: config.codexInstallHome });
+    this.defaults = config.defaults ?? { binaryPath: discovered!.binaryPath, model: "gpt-6.1-sol" };
+    this.defaultBinaryDiagnostic = discovered?.diagnostic;
     try { this.imageProjector = config.ffmpegPath ? new KeyframeProjector(service, { ffmpegPath: config.ffmpegPath, ...(config.media ? { media: config.media } : {}) }) : null; }
     catch (error) { if (!['ENOENT', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; this.imageProjector = null; }
     this.attachmentProjector = new DirectorImageProjector(service, { ...(this.imageProjector && config.ffmpegPath ? { ffmpegPath: config.ffmpegPath } : {}), ...(config.media ? { media: config.media } : {}) });
@@ -138,7 +145,7 @@ export class LocalDirectorController {
   mode(projectId: string): "fake" | "native" { return this.service.store.get<SavedSelection>("project_director_selection", projectId)?.selection.mode ?? "fake"; }
   /** No account discovery or model call; sign-in remains unknown on this version-only read. */
   async codexStatus(projectId?: string) {
-    const binary = projectId ? this.modelSelection(projectId).binaryPath : this.defaults.binaryPath;
+    const binary = projectId ? this.effectiveBinary(projectId, this.modelSelection(projectId)) : this.defaults.binaryPath;
     const version = await toolVersion(binary, "codex");
     return { found: version !== null, version, pinnedVersion: CODEX_PROTOCOL_VERSION, signedIn: null };
   }
@@ -146,14 +153,21 @@ export class LocalDirectorController {
   async inspectSettings(projectId: string) {
     this.service.store.getProject(projectId);
     const selection = this.modelSelection(projectId), identity = this.modelKey(projectId, selection);
-    const version = await toolVersion(selection.binaryPath, "codex");
+    const version = await toolVersion(this.effectiveBinary(projectId, selection), "codex");
     const settings = this.settings(projectId), unchanged = identity === this.modelKey(projectId, this.modelSelection(projectId));
     return { ...settings, codexVersion: unchanged ? version : null, codexDiagnostic: settings.codexDiagnostic ??
       (unchanged && version && version !== CODEX_PROTOCOL_VERSION ? this.versionDiagnostic(selection, version) : null) };
   }
   private versionDiagnostic(selection: LocalDirectorSelection, foundVersion: string | null): CodexVersionDiagnostic {
     return { code: "DIRECTOR_CODEX_VERSION_MISMATCH", expectedVersion: CODEX_PROTOCOL_VERSION, foundVersion,
-      binaryPath: selection.binaryPath!, installPath: supportedCodexInstall() };
+      binaryPath: selection.binaryPath!, installPath: supportedCodexInstall(this.config.codexInstallHome) };
+  }
+  private effectiveBinary(projectId: string, selection: LocalDirectorSelection): string {
+    const resolved = resolveConfiguredCodexBinary(selection.binaryPath!, { home: this.config.codexInstallHome });
+    const notice = resolved.diagnostic ?? (selection.binaryPath === this.defaults.binaryPath ? this.defaultBinaryDiagnostic : undefined);
+    if (notice) this.binaryNotices.set(projectId, notice); else this.binaryNotices.delete(projectId);
+    this.effectiveBinaryPaths.set(projectId, resolved.binaryPath);
+    return resolved.binaryPath;
   }
   private recordVersionDiagnostic(projectId: string, selection: LocalDirectorSelection, readiness: Ready["readiness"]) {
     const diagnostic = readiness.issues?.some(issue => issue.code === "SETUP_VERSION_MISMATCH")
@@ -216,7 +230,9 @@ export class LocalDirectorController {
         : catalog.status === "ready" ? "ready" as const : "blocked" as const, modelCatalogCheckedAt: catalog?.checkedAt ?? null,
       lastSuccessfulCheck: structuredClone(storedCheck?.lastSuccessfulCheck ?? null),
       nativeDiagnostic: safeNativeDiagnostic(catalog?.nativeDiagnostic) ?? (catalog?.status === "blocked" ? { category: "native_unknown" as const } : null),
-      codexDiagnostic: this.binaryDiagnostics.has(projectId) ? structuredClone(this.binaryDiagnostics.get(projectId)!) : storedCheck?.diagnostic ?? null };
+      codexDiagnostic: this.binaryDiagnostics.has(projectId) ? structuredClone(this.binaryDiagnostics.get(projectId)!) : storedCheck?.diagnostic ?? null,
+      codexNotice: structuredClone(this.binaryNotices.get(projectId) ?? storedCheck?.notice
+        ?? (selection.binaryPath === this.defaults.binaryPath ? this.defaultBinaryDiagnostic ?? null : null)) };
   }
   private modelSelection(projectId: string): LocalDirectorSelection {
     const selection = this.service.store.get<SavedSelection>("project_director_selection", projectId)?.selection;
@@ -240,11 +256,12 @@ export class LocalDirectorController {
     const id = this.checkKey(projectId, selection), previous = this.savedCheck(projectId, selection);
     const checkedAt = readiness.checkedAt ?? new Date().toISOString();
     const lastSuccessfulCheck = readiness.status === "ready"
-      ? { binaryPath: selection.binaryPath!, version: CODEX_PROTOCOL_VERSION, checkedAt } : previous?.lastSuccessfulCheck ?? null;
+      ? { binaryPath: this.effectiveBinaryPaths.get(projectId) ?? selection.binaryPath!, version: CODEX_PROTOCOL_VERSION, checkedAt } : previous?.lastSuccessfulCheck ?? null;
     const diagnostic = this.recordVersionDiagnostic(projectId, selection, readiness);
     const nativeDiagnostic = safeNativeDiagnostic(readiness.nativeDiagnostic) ?? (readiness.status === "blocked" ? { category: "native_unknown" as const } : undefined);
     this.service.store.put<SavedCodexCheck>("director_local_check", id, projectId, { id, projectId, status: readiness.status, checkedAt,
       ...(readiness.modelChoices === undefined ? {} : { modelChoices: structuredClone(readiness.modelChoices) }), lastSuccessfulCheck, diagnostic,
+      ...(this.binaryNotices.has(projectId) ? { notice: structuredClone(this.binaryNotices.get(projectId)!) } : {}),
       ...(nativeDiagnostic ? { nativeDiagnostic } : {}) });
     if (nativeDiagnostic) logNativeDiagnostic("director_setup", projectId, nativeDiagnostic);
   }
@@ -411,7 +428,7 @@ export class LocalDirectorController {
       this.saveCheck(projectId, selection, result.readiness);
       const diagnostic = this.binaryDiagnostics.get(projectId);
       if (diagnostic && result.readiness.issues?.some(issue => issue.code === "SETUP_VERSION_MISMATCH"))
-        throw new DomainError(diagnostic.code, `Codex ${diagnostic.expectedVersion} is required; found ${diagnostic.foundVersion ?? "an unrecognized version"} at ${diagnostic.binaryPath}. The supported installation is ${diagnostic.installPath}.`, diagnostic);
+        throw new DomainError(diagnostic.code, `Codex ${diagnostic.expectedVersion} is required; found ${diagnostic.foundVersion ?? "an unrecognized version"} at ${diagnostic.binaryPath}. Install it with npm install --prefix "${dirname(dirname(dirname(diagnostic.installPath)))}" --save-exact @openai/codex@${diagnostic.expectedVersion}. The supported installation is ${diagnostic.installPath}.`, diagnostic);
       if (result.readiness.status !== "ready" || !result.runtimeOptions)
         throw new DomainError("DIRECTOR_SETUP_REQUIRED", "Codex setup checks did not pass. Verify the selected binary, model and existing Codex sign-in.",
           { nativeDiagnostic: safeNativeDiagnostic(result.readiness.nativeDiagnostic) ?? { category: "native_unknown" } });
@@ -424,7 +441,7 @@ export class LocalDirectorController {
   private checkLocal(projectId: string, selection: LocalDirectorSelection): Promise<Ready> {
     invariant(!this.shutdown.signal.aborted, "DIRECTOR_SHUTTING_DOWN", "Director is shutting down");
     const root = resolve(this.config.dataDirectory, "native", projectId), projection = join(root, "workspace");
-    const checking = this.setup({ command: { file: selection.binaryPath! }, model: selection.model!, nativeHome: homedir(), codexHome: selection.codexHome ?? join(homedir(), ".codex"),
+    const checking = this.setup({ command: { file: this.effectiveBinary(projectId, selection) }, model: selection.model!, nativeHome: homedir(), codexHome: selection.codexHome ?? join(homedir(), ".codex"),
       limits: { ...(this.config.runTimeoutMs === undefined ? {} : { runTimeoutMs: this.config.runTimeoutMs }),
         ...(this.config.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.config.startupTimeoutMs }) },
       env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, SHELL: "/bin/sh", NO_COLOR: "1", CI: "1" },

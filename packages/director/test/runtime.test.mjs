@@ -29,9 +29,9 @@ async function fixture(t, scenario = "complete", overrides = {}) {
     bridge: { endpoint: "http://127.0.0.1:12345", projectId: "project-1", credential: randomBytes(32).toString("base64url"), entrypoint: bridgeEntry } };
   const options = { command: { file: process.execPath, args: [entry] }, cwd: root,
     env: { FIXTURE_SCENARIO: scenario, FIXTURE_LOG: join(root, "protocol.jsonl"), FIXTURE_SKILLS: JSON.stringify(input.skills) },
-    model: "fake-model", runtimeVersion: "0.153.4",
+    model: "fake-model", runtimeVersion: "0.162.1",
     // Local native trust is explicit; fake protocol tests are not independent isolation proof.
-    policy: { mode: "local", id: "fixture", runtimeVersion: "0.153.4",
+    policy: { mode: "local", id: "fixture", runtimeVersion: "0.162.1",
       config: { default_permissions: "fixture", permissions: { fixture: { network: { enabled: false }, filesystem: { "/": "none" } } } } },
     limits: { ...PROTOCOL_FIXTURE_LIMITS },
     ...overrides };

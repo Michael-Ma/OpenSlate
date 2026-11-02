@@ -12,7 +12,7 @@ import {projectFixture} from './execution-fixture.mjs';
 const ffmpegPath=process.env.OPENSLATE_FFMPEG_PATH??(existsSync('/opt/homebrew/bin/ffmpeg')?'/opt/homebrew/bin/ffmpeg':'/usr/bin/ffmpeg');
 const ffprobePath=process.env.OPENSLATE_FFPROBE_PATH??(existsSync('/opt/homebrew/bin/ffprobe')?'/opt/homebrew/bin/ffprobe':'/usr/bin/ffprobe');
 export const codexImageProfile={id:'codex-image-v1',revision:'v1',kind:'image',adapter:'codex-image',executionVersion:'1',maxConcurrency:1,unitCostMicros:'0',maxRetries:0,
-  configuration:{model:'codex-image-generation',settings:{runtimeVersion:'0.153.4',directorModel:'gpt-6-astra',width:1024,height:1024}}};
+  configuration:{model:'codex-image-generation',settings:{runtimeVersion:'0.162.1',directorModel:'gpt-6-astra',width:1024,height:1024}}};
 export const codexApiProfile={...codexImageProfile,id:'api-image',adapter:'openai-image',unitCostMicros:'1000',configuration:{model:OPENAI_IMAGE_MODEL,settings:{width:1024,height:1024,quality:'medium'}}};
 const codex=codexImageProfile,api=codexApiProfile;
 export const codexRuntimeConfiguration=()=>({image:false,codexImage:true,h3:false,speech:false,transcription:false,viggleH3:false,
@@ -21,7 +21,7 @@ export function codexImageFixture(t,changes={}) {
   const directory=mkdtempSync(join(tmpdir(),'openslate-codex-runtime-')),store=new Store(join(directory,'openslate.sqlite')),fakeProvider=new FakeProvider(join(directory,'fake-provider.sqlite'));
   t.after(()=>{if(store.db.open)store.close();if(fakeProvider.db.open)fakeProvider.close();rmSync(directory,{recursive:true,force:true});});
   const calls={prepare:0,start:0,lookup:0,api:0,credentials:0},transport={
-    async prepare(input){calls.prepare++;return {runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
+    async prepare(input){calls.prepare++;return {runtime:{version:1,runtimeVersion:'0.162.1',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
       session:{threadId:'thread-injected',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};},
     async start(){calls.start++;return {kind:'unknown',code:'INJECTED_UNKNOWN'};},
     async lookup(){calls.lookup++;return {kind:'unknown',code:'INJECTED_UNKNOWN'};},

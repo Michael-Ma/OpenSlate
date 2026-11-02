@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {chmodSync,mkdirSync,mkdtempSync,readdirSync,realpathSync,rmSync} from 'node:fs';
+import {chmodSync,mkdirSync,mkdtempSync,readdirSync,realpathSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -19,7 +19,7 @@ function writable(path){chmodSync(path,0o755);for(const item of readdirSync(path
 function fixture(t,overrides={}){
   const root=mkdtempSync(join(tmpdir(),'openslate-local-controller-')),store=new Store(join(root,'app.sqlite')),provider=new FakeProvider(join(root,'fake.sqlite'));
   const engine=new Engine(store,provider,{artifactDir:join(root,'artifacts')}),service=new ProductionService(store,engine),calls=[],setups=[];
-  const config={repositoryRoot,dataDirectory:root,endpoint:'http://127.0.0.1:3001',defaults:{binaryPath:process.execPath,model:'test-model'},
+  const config={repositoryRoot,dataDirectory:root,codexInstallHome:join(root,'supported-install-home'),endpoint:'http://127.0.0.1:3001',defaults:{binaryPath:process.execPath,model:'test-model'},
     setup:async input=>{setups.push(input);return{readiness:{status:'ready',model:input.model},runtimeOptions:{}};},
     makeRuntime:()=>({id:'codex-app-server',start:async(input,options)=>{calls.push(input);await options.onEvent({...input,kind:'runtime_started',nativeThreadId:`thread-${input.turnId}`});return done(input);}}),...overrides};
   const director=new LocalDirectorController(service,config),token=randomBytes(32).toString('base64url'),app=createApp({service,director,runtimeSettings:director,localToken:token});
@@ -60,7 +60,7 @@ test('successful local check survives controller restart with exact program, pin
   await f.director.close();const restarted=new LocalDirectorController(f.service,f.config);t.after(()=>restarted.close());
   const restored=restarted.settings(project.id);
   assert.equal(restored.modelCatalogStatus,'ready');assert.equal(restored.modelCatalogCheckedAt,checkedAt);
-  assert.deepEqual(restored.lastSuccessfulCheck,{binaryPath:f.native.binaryPath,version:'0.153.4',checkedAt});
+  assert.deepEqual(restored.lastSuccessfulCheck,{binaryPath:f.native.binaryPath,version:'0.162.1',checkedAt});
   assert.deepEqual(restored.modelChoices,[{id:f.native.model,label:'Fixture'}]);
   restored.lastSuccessfulCheck.binaryPath='caller-supplied';assert.equal(restarted.settings(project.id).lastSuccessfulCheck.binaryPath,f.native.binaryPath);
   assert.equal(checks,1);assert.equal(f.calls.length,0);assert.equal(f.store.list('native_model_start',project.id).length,0);
@@ -68,7 +68,7 @@ test('successful local check survives controller restart with exact program, pin
   assert.deepEqual(Object.keys(rows[0]).sort(),['checkedAt','diagnostic','id','lastSuccessfulCheck','modelChoices','projectId','status']);
   const reopenedStore=new Store(join(f.root,'app.sqlite')),reopenedService=new ProductionService(reopenedStore,new Engine(reopenedStore,f.provider,{artifactDir:join(f.root,'artifacts')}));
   const reopened=new LocalDirectorController(reopenedService,f.config);
-  try { assert.deepEqual(reopened.settings(project.id).lastSuccessfulCheck,{binaryPath:f.native.binaryPath,version:'0.153.4',checkedAt}); }
+  try { assert.deepEqual(reopened.settings(project.id).lastSuccessfulCheck,{binaryPath:f.native.binaryPath,version:'0.162.1',checkedAt}); }
   finally { await reopened.close();reopenedStore.close(); }
 });
 
@@ -90,7 +90,7 @@ test('a failed latest local check survives restart and never turns older success
   await f.director.close();
   const restarted=new LocalDirectorController(f.service,f.config);t.after(()=>restarted.close());const settings=restarted.settings(project.id);
   assert.equal(settings.modelCatalogStatus,'blocked');assert.equal(settings.modelCatalogCheckedAt,'2026-10-16T13:00:00.000Z');
-  assert.deepEqual(settings.lastSuccessfulCheck,{binaryPath:f.native.binaryPath,version:'0.153.4',checkedAt});assert.equal(f.calls.length,0);
+  assert.deepEqual(settings.lastSuccessfulCheck,{binaryPath:f.native.binaryPath,version:'0.162.1',checkedAt});assert.equal(f.calls.length,0);
 });
 
 test('failed first check remains blocked after restart and has no fabricated successful check',async t=>{
@@ -239,13 +239,13 @@ test('default binary suggestions honor the image worker configuration without pr
 test('version mismatch errors and Settings name expected, found, selected path and supported install without saving the failed choice',async t=>{
   let matches=false;
   const f=fixture(t,{setup:async input=>matches?{readiness:{status:'ready',model:input.model},runtimeOptions:{}}:
-    {readiness:{status:'blocked',binaryVersion:{expectedVersion:'0.153.4',foundVersion:'0.162.0-alpha.4'},issues:[{code:'SETUP_VERSION_MISMATCH',message:'local issue'}]}}});
+    {readiness:{status:'blocked',binaryVersion:{expectedVersion:'0.162.1',foundVersion:'0.162.0-alpha.4'},issues:[{code:'SETUP_VERSION_MISMATCH',message:'local issue'}]}}});
   const project=f.service.createProject('Pinned runtime'),path=`/api/projects/${project.id}/director/setup`;
   const response=await f.req('POST',path,f.native,'version-setup');assert.equal(response.statusCode,409,response.body);
   const details=response.json().error.details;
   assert.deepEqual({code:response.json().error.code,expectedVersion:details.expectedVersion,foundVersion:details.foundVersion,binaryPath:details.binaryPath},
-    {code:'DIRECTOR_CODEX_VERSION_MISMATCH',expectedVersion:'0.153.4',foundVersion:'0.162.0-alpha.4',binaryPath:f.native.binaryPath});
-  assert.ok(details.installPath.endsWith('/.local/share/openslate-codex/node_modules/.bin/codex'));
+    {code:'DIRECTOR_CODEX_VERSION_MISMATCH',expectedVersion:'0.162.1',foundVersion:'0.162.0-alpha.4',binaryPath:f.native.binaryPath});
+  assert.ok(details.installPath.endsWith('/.local/share/openslate-codex-0.162.1/node_modules/.bin/codex'));
   for(const value of [details.expectedVersion,details.foundVersion,details.binaryPath,details.installPath])assert.ok(response.json().error.message.includes(value));
   assert.deepEqual((await f.req('GET',path)).json().codexDiagnostic,details);assert.equal(f.director.mode(project.id),'fake');assert.equal(f.calls.length,0);
   assert.equal(f.store.list('director_selection_command',project.id)[0].state,'pending');
@@ -254,7 +254,7 @@ test('version mismatch errors and Settings name expected, found, selected path a
 });
 test('read-only model checks expose the same version diagnosis without configuring or starting a turn',async t=>{
   const f=fixture(t,{setup:async()=>({readiness:{status:'blocked',issues:[{code:'SETUP_VERSION_MISMATCH',message:'local issue'}],
-    binaryVersion:{expectedVersion:'0.153.4',foundVersion:'0.162.0-alpha.4'}}})}),project=f.service.createProject('Models blocked');
+    binaryVersion:{expectedVersion:'0.162.1',foundVersion:'0.162.0-alpha.4'}}})}),project=f.service.createProject('Models blocked');
   const result=await f.director.models(project.id);assert.equal(result.modelCatalogStatus,'blocked');
   assert.equal(result.codexDiagnostic.foundVersion,'0.162.0-alpha.4');assert.equal(result.codexDiagnostic.binaryPath,f.native.binaryPath);
   assert.equal(result.selection.mode,'fake');assert.equal(f.calls.length,0);assert.equal(f.store.list('project_director_selection',project.id).length,0);
@@ -263,7 +263,7 @@ test('read-only model checks expose the same version diagnosis without configuri
 test('an older version inspection cannot replace the successful setup diagnosis for the same program',async t=>{
   const entered=gate(),release=gate();let checks=0;
   const f=fixture(t,{setup:async input=>{if(++checks===1){entered.resolve();await release.promise;return{readiness:{status:'blocked',issues:[{code:'SETUP_VERSION_MISMATCH',message:'local issue'}],
-    binaryVersion:{expectedVersion:'0.153.4',foundVersion:'0.162.0-alpha.4'}}};}
+    binaryVersion:{expectedVersion:'0.162.1',foundVersion:'0.162.0-alpha.4'}}};}
     return{readiness:{status:'ready',model:input.model,modelChoices:[{id:input.model,label:input.model}]},runtimeOptions:{}};}});
   const project=f.service.createProject('Racing version check'),older=f.director.models(project.id);await entered.promise;
   await f.director.configure(project.id,f.native,'newer-check');release.resolve();const current=await older;
@@ -299,4 +299,37 @@ test(`setup ${category} survives restart without raw messages or automatic nativ
   assert.deepEqual(restarted.settings(project.id).nativeDiagnostic,nativeDiagnostic);
   assert.equal(JSON.stringify({rows,logs,settings}).includes(raw),false);
   assert.equal(f.calls.length,0);assert.equal(f.store.list('native_model_start',project.id).length,0);
+});
+
+test('new films default to gpt-6.1-sol while a saved gpt-6-astra film retains its selection on reopen', async t => {
+  const home=realpathSync(mkdtempSync(join(tmpdir(),'openslate-default-pin-'))),binary=join(home,'.local/share/openslate-codex-0.162.1/node_modules/.bin/codex');
+  mkdirSync(join(home,'.local/share/openslate-codex-0.162.1/node_modules/.bin'),{recursive:true});
+  writeFileSync(binary,'#!/bin/sh\nprintf "codex-cli 0.162.1\\n"\n',{mode:0o700});
+  t.after(()=>rmSync(home,{recursive:true,force:true}));
+  const f=fixture(t,{defaults:undefined,codexInstallHome:home}),fresh=f.service.createProject('New film');
+  assert.equal(f.director.settings(fresh.id).defaults.model,'gpt-6.1-sol');
+  const existing=f.service.createProject('Existing film'),selection={mode:'native',binaryPath:binary,model:'gpt-6-astra'};
+  await f.director.configure(existing.id,selection,'old-model');
+  const saved=f.store.get('project_director_selection',existing.id);
+  const reopened=new LocalDirectorController(f.service,{...f.config,defaults:undefined});t.after(()=>reopened.close());
+  assert.equal(reopened.settings(existing.id).selection.model,'gpt-6-astra');
+  assert.equal(reopened.settings(fresh.id).defaults.model,'gpt-6.1-sol');
+  assert.deepEqual(f.store.get('project_director_selection',existing.id),saved);assert.equal(f.calls.length,0);
+});
+
+test('a saved old executable uses the supported pin and exposes a notice without blocking readiness or rewriting selection', async t => {
+  const home=realpathSync(mkdtempSync(join(tmpdir(),'openslate-fallback-pin-'))),binary=join(home,'.local/share/openslate-codex-0.162.1/node_modules/.bin/codex'),old=join(home,'old-codex');
+  mkdirSync(join(home,'.local/share/openslate-codex-0.162.1/node_modules/.bin'),{recursive:true});
+  writeFileSync(binary,'#!/bin/sh\nprintf "codex-cli 0.162.1\\n"\n',{mode:0o700});
+  writeFileSync(old,'#!/bin/sh\nprintf "codex-cli 0.153.4\\n"\n',{mode:0o700});
+  t.after(()=>rmSync(home,{recursive:true,force:true}));
+  const f=fixture(t,{codexInstallHome:home}),project=f.service.createProject('Old path'),selection={mode:'native',binaryPath:old,model:'gpt-6-astra'};
+  await f.director.configure(project.id,selection,'use-old-path');
+  const saved=f.store.get('project_director_selection',project.id),settings=await f.director.inspectSettings(project.id);
+  assert.equal(f.setups[0].command.file,binary);assert.equal(settings.modelCatalogStatus,'unchecked');assert.equal(settings.codexVersion,'0.162.1');
+  assert.equal(settings.codexDiagnostic,null);assert.equal(settings.codexNotice.code,'DIRECTOR_CODEX_VERSION_MISMATCH');
+  assert.equal(settings.codexNotice.foundVersion,'0.153.4');assert.equal(settings.codexNotice.binaryPath,old);
+  assert.equal(settings.lastSuccessfulCheck.binaryPath,binary);assert.deepEqual(f.store.get('project_director_selection',project.id),saved);
+  const reopened=new LocalDirectorController(f.service,f.config);t.after(()=>reopened.close());
+  assert.equal(reopened.settings(project.id).codexNotice.foundVersion,'0.153.4');assert.equal(reopened.settings(project.id).codexDiagnostic,null);
 });

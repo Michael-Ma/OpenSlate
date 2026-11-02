@@ -8,7 +8,7 @@ const scenario = "ready";
 const log = value => appendFileSync(process.env.SETUP_FIXTURE_LOG, JSON.stringify({ pid: process.pid, ...value }) + "\n");
 if (process.argv.includes("--version")) {
   log({ kind: "version" });
-  process.stdout.write(`codex-cli ${scenario === "version" ? "0.0.1" : "0.153.4"}\n`);
+  process.stdout.write(`codex-cli ${scenario === "version" ? "0.0.1" : "0.162.1"}\n`);
   process.exit(0);
 }
 // Deliberately follow CODEX_HOME, as native discovery and app-server do. The
@@ -45,7 +45,7 @@ lines.on("line", line => {
   if (method === "initialize") {
     if (scenario === "hang") return;
     if (scenario === "approval") { send({ id: "auth-request", method: "account/chatgptAuthTokens/refresh", params: {} }); return; }
-    return respond(id, { userAgent: "codex-cli/0.153.4" });
+    return respond(id, { userAgent: "codex-cli/0.162.1" });
   }
   if (method === "config/read") {
     if (imageProcess && imageScenario === "mcp-drift") config.mcp_servers.unexpected = { enabled: true, command: "PRIVATE_MUST_NOT_RUN" };
@@ -91,7 +91,7 @@ lines.on("line", line => {
     return respond(id, { data: scenario === "model" ? [] : [{ model: process.env.SETUP_FIXTURE_MODEL,
       inputModalities: ["text"], supportedReasoningEfforts: [{ reasoningEffort: scenario === "effort" ? "low" : "high" }] }], nextCursor: null });
   }
-  if (method === "modelProvider/capabilities/read") return respond(id,{imageGeneration:imageScenario!=="capability",namespaceTools:true,webSearch:true});
+  if (method === "modelProvider/capabilities/read") return respond(id,{imageGeneration:imageScenario!=="capability",webSearch:true});
   if (method === "thread/start") {
     const threadId="thread-"+process.cwd().split("/").at(-1).slice(0,20);
     const thread={id:threadId,cwd:process.cwd(),modelProvider:"openai",historyMode:params.historyMode,turns:[]};saveHistory(thread);
@@ -135,7 +135,7 @@ lines.on("line", line => {
     send({method:"turn/started",params:{threadId:startedThread,turn:{id:turnId,status:"inProgress",items:[]}}});
     if(imageScenario!=="lost-ack")respond(id,{turn:{id:turnId,status:"inProgress",items:[]}});
     if(pending)return;
-    for(const row of turn.items)send({method:"item/completed",params:{threadId,turnId,item:row}});
+    for(const row of turn.items)send({method:"item/completed",params:{threadId,turnId,completedAtMs:1,item:row}});
     if(imageScenario==="conflicting-item")turn.items[0]={...item,revisedPrompt:"Changed completion"};
     send({method:"turn/completed",params:{threadId,turn}});return;
   }

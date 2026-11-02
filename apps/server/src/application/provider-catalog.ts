@@ -2,7 +2,7 @@ import { codeOnlyVideoAdapter, assertVideoI2vProfile } from "../execution/video-
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { canonical, DEFAULT_PROFILES, digest, invariant, moneyMicros, providerProfileArguments, snapshotLocalExecution } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
-import { describeOpenAIImageRequest, FAL_H3_LIPSYNC_MODEL, FAL_H3_LIPSYNC_RESOLUTIONS, falH3LipSyncPriceMicros, validateViggleH3Settings } from "@openslate/providers";
+import { CODEX_IMAGE_RUNTIME_VERSION, isRecordedCodexImageRuntime, describeOpenAIImageRequest, FAL_H3_LIPSYNC_MODEL, FAL_H3_LIPSYNC_RESOLUTIONS, falH3LipSyncPriceMicros, validateViggleH3Settings } from "@openslate/providers";
 import type { FalH3LipSyncResolution } from "@openslate/providers";
 import { lipSyncAudioSamples } from "../execution/lip-sync.js";
 import type { ExecutionIdentity, ExecutionRegistry, OpenAIImageModel, OpenAIImageQuality, ViggleH3Settings } from "@openslate/providers";
@@ -37,7 +37,7 @@ function label(value: unknown): value is string {
     && !/\b[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/^(?:\/|~\/)/.test(value);
 }
 /** Pure fixed-profile validation; does not inspect credentials, readiness or registration. */
-export function profilePolicy(profile: ProviderProfile): { credential: MediaCredentialId | null; media: "image" | "video" | "audio" | null; fixture: boolean } {
+export function profilePolicy(profile: ProviderProfile, options: { historical?: boolean } = {}): { credential: MediaCredentialId | null; media: "image" | "video" | "audio" | null; fixture: boolean } {
   exact(profile, ["id", "revision", "kind", "adapter", "executionVersion", "configuration", "maxConcurrency", "unitCostMicros", "maxRetries", "minFrames", "maxFrames"]);
   providerProfileArguments(profile);
   invariant(integer(profile.maxConcurrency, 1, 64) && integer(profile.maxRetries, 0, 3) && typeof profile.unitCostMicros === "string",
@@ -64,7 +64,7 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
     "PROVIDER_CATALOG_INVALID", "Codex images require one concurrent turn, no automatic retries and zero API-dollar accounting");
     exact(configuration.settings, ["runtimeVersion", "directorModel", "width", "height"]);
     const settings = configuration.settings;
-    invariant(settings.runtimeVersion === "0.153.4" && settings.directorModel === "gpt-6-astra"
+    invariant((settings.runtimeVersion === CODEX_IMAGE_RUNTIME_VERSION || options.historical && isRecordedCodexImageRuntime(settings.runtimeVersion)) && settings.directorModel === "gpt-6-astra"
       && settings.width === 1024 && settings.height === 1024,
     "PROVIDER_CATALOG_INVALID", "Use the pinned Codex runtime, director model and 1024-square canvas preferences");
     return { credential: null, media: "image", fixture: false };
@@ -244,7 +244,7 @@ export class InstalledProviderCatalog {
   }
   private describe(input: unknown, name?: string) {
     let valid = true, policy: ReturnType<typeof profilePolicy> | undefined;
-    try { policy = profilePolicy(input as ProviderProfile); } catch { valid = false; }
+    try { policy = profilePolicy(input as ProviderProfile, { historical: true }); } catch { valid = false; }
     const profile = valid ? structuredClone(input) as ProviderProfile : null;
     const current = profile ? this.#definitions.find(item => item.profile.id === profile.id && canonical(item.profile) === canonical(profile)) : undefined;
     let registered = false;
@@ -257,7 +257,7 @@ export class InstalledProviderCatalog {
     const enabledByHost = !!profile && !policy?.fixture && this.#enabledExecutions.has(canonical({ adapter: profile.adapter, version: profile.executionVersion }));
     const codexImage = profile?.adapter === "codex-image";
     const realExecutionEnabled = enabledByHost && registered && valid && !!policy?.media && this.#mediaTools[policy.media]
-      && (codexImage ? this.#codexImageConfigured : credentialPresent === true && !credentialUnavailable);
+      && (codexImage ? this.#codexImageConfigured && profile?.configuration?.settings?.runtimeVersion === CODEX_IMAGE_RUNTIME_VERSION : credentialPresent === true && !credentialUnavailable);
     return { id: object(input) && typeof input.id === "string" && ID.test(input.id) ? input.id : "unavailable",
       label: name ?? current?.label ?? (profile ? `${profile.kind}: ${profile.id}` : "Unsupported saved provider"),
       ...(codexImage ? { usage: { kind: "codex_subscription" as const, unit: "native_turn" as const, quotaEstimateAvailable: false as const } } : {}),

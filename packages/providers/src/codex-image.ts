@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { canonical, digest, invariant } from "@openslate/core";
 
+export const CODEX_IMAGE_RUNTIME_VERSION = '0.162.1';
+/** Historical versions describe immutable receipts only; workers admit the current pin for new turns. */
+export type CodexImageRuntimeVersion = typeof CODEX_IMAGE_RUNTIME_VERSION | '0.153.4';
+export const isRecordedCodexImageRuntime = (value: unknown): value is CodexImageRuntimeVersion =>
+  value === CODEX_IMAGE_RUNTIME_VERSION || value === '0.153.4';
+
 export const CODEX_IMAGE_LIMITS = Object.freeze({ promptBytes: 32768, references: 8, referenceBytes: 4 * 1024 ** 2,
   totalReferenceBytes: 24 * 1024 ** 2, outputBytes: 32 * 1024 ** 2, dimension: 4096, revisedPromptBytes: 32768 });
 export interface CodexImageReference { artifactId: string; sha256: string; byteLength: number; bytes: Uint8Array }
@@ -10,9 +16,9 @@ export type CodexImageAspect = '16:9' | '9:16' | '1:1';
 export const CODEX_IMAGE_V2_CANVASES: Readonly<Record<CodexImageAspect, Readonly<{ width: number; height: number }>>> = Object.freeze({
   '16:9': Object.freeze({ width: 1536, height: 1024 }), '9:16': Object.freeze({ width: 1024, height: 1536 }), '1:1': Object.freeze({ width: 1024, height: 1024 }) });
 export interface CodexImageInput { attemptId: string; requestDigest: string; prompt: string; width: number; height: number;
-  runtimeVersion: '0.153.4'; model: 'gpt-6-astra'; images: CodexImageReference[]; aspect?: CodexImageAspect }
+  runtimeVersion: CodexImageRuntimeVersion; model: 'gpt-6-astra'; images: CodexImageReference[]; aspect?: CodexImageAspect }
 interface CodexImageDescriptionBase { attemptId: string; requestDigest: string;
-  prompt: string; width: number; height: number; runtimeVersion: '0.153.4'; model: 'gpt-6-astra';
+  prompt: string; width: number; height: number; runtimeVersion: CodexImageRuntimeVersion; model: 'gpt-6-astra';
   images: Array<Omit<CodexImageReference, 'bytes'>>; turnInputDigest: string }
 export type CodexImageDescription = (CodexImageDescriptionBase & { version: 1; policy: 'codex-image-turn-v1' })
   | (CodexImageDescriptionBase & { version: 2; policy: 'codex-image-turn-v2'; aspect: CodexImageAspect });
@@ -22,7 +28,7 @@ export function codexImageCanvasValid(width: unknown, height: unknown, aspect: u
   if (typeof aspect !== 'string' || !Object.hasOwn(CODEX_IMAGE_V2_CANVASES, aspect)) return false;
   const canvas = CODEX_IMAGE_V2_CANVASES[aspect as CodexImageAspect]; return width === canvas.width && height === canvas.height;
 }
-export interface CodexImagePrepared { runtime: { version: 1; runtimeVersion: '0.153.4'; runtimeDigest: string; configurationDigest: string; model: 'gpt-6-astra'; authMode: 'chatgpt' };
+export interface CodexImagePrepared { runtime: { version: 1; runtimeVersion: CodexImageRuntimeVersion; runtimeDigest: string; configurationDigest: string; model: 'gpt-6-astra'; authMode: 'chatgpt' };
   session: { threadId: string; turnInputDigest: string } }
 export type CodexImageOutcome = { kind: 'unknown'; code: string } | { kind: 'pending'; threadId: string; turnId: string }
   | { kind: 'failed'; threadId: string; turnId: string; code: 'USAGE_LIMIT' | 'TURN_FAILED' | 'TURN_INTERRUPTED' | 'IMAGE_FAILED' | 'NO_IMAGE' }
@@ -39,7 +45,7 @@ export function describeCodexImageInput(input: Omit<CodexImageInput, 'images'> &
   invariant(!Object.hasOwn(input, 'aspect') || input.aspect !== undefined, 'CODEX_IMAGE_INPUT_INVALID', 'Invalid bounded Codex image turn requirements');
   invariant(typeof input.prompt === 'string' && input.prompt.trim().length > 0 && Buffer.byteLength(input.prompt) <= CODEX_IMAGE_LIMITS.promptBytes
     && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(input.attemptId) && sha(input.requestDigest)
-    && input.runtimeVersion === '0.153.4' && input.model === 'gpt-6-astra' && codexImageCanvasValid(input.width, input.height, input.aspect)
+    && isRecordedCodexImageRuntime(input.runtimeVersion) && input.model === 'gpt-6-astra' && codexImageCanvasValid(input.width, input.height, input.aspect)
     && Array.isArray(input.images) && input.images.length <= CODEX_IMAGE_LIMITS.references,
   'CODEX_IMAGE_INPUT_INVALID', 'Invalid bounded Codex image turn requirements');
   let total = 0;

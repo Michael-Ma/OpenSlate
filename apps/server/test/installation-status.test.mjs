@@ -28,7 +28,7 @@ function fixture(t, { version = CODEX_PROTOCOL_VERSION, configured = false, brok
   const ffprobe = broken ? join(root, 'missing') : binary('ffprobe', 'ffprobe version 8.1.1 local build');
   const store = new Store(join(root, 'db.sqlite')), provider = new FakeProvider(join(root, 'fake.sqlite'));
   const service = new ProductionService(store, new Engine(store, provider, { artifactDir: join(root, 'artifacts') }));
-  const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL('../../../', import.meta.url)), dataDirectory: root,
+  const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL('../../../', import.meta.url)), dataDirectory: root, codexInstallHome: join(root, 'supported-install-home'),
     endpoint: 'http://127.0.0.1:3199', defaults: { binaryPath: codex, model: 'fixture-model' }, setup: async () => { throw Error('A status read must never start setup'); } });
   const providerCatalog = new InstalledProviderCatalog({ credentials: new EnvironmentMediaCredentials(() => configured ? secret : undefined),
     enabledExecutions: configured ? [{ adapter: 'openai-speech', version: '1' }] : [],
@@ -80,7 +80,7 @@ test('Settings recognizes an app-bundled prerelease mismatch before setup and id
   const setup = response.json(); assert.equal(setup.codexVersion, '0.162.0-alpha.4');
   assert.equal(setup.codexDiagnostic.code, 'DIRECTOR_CODEX_VERSION_MISMATCH'); assert.equal(setup.codexDiagnostic.expectedVersion, CODEX_PROTOCOL_VERSION);
   assert.equal(setup.codexDiagnostic.foundVersion, '0.162.0-alpha.4'); assert.equal(setup.codexDiagnostic.binaryPath, setup.defaults.binaryPath);
-  assert.ok(setup.codexDiagnostic.installPath.endsWith('/.local/share/openslate-codex/node_modules/.bin/codex'));
+  assert.ok(setup.codexDiagnostic.installPath.endsWith('/.local/share/openslate-codex-0.162.1/node_modules/.bin/codex'));
   assert.equal(f.store.list('native_model_start', project.id).length, 0); assert.equal(f.store.list('project_director_selection', project.id).length, 0);
 });
 

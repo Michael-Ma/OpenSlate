@@ -70,7 +70,7 @@ test('legacy pre-dispatch receipts remain valid and diagnostics cannot smuggle r
 });
 
 test('forged API-auth prepared identity cannot receive a native marker',async t=>{
-  const f=await fixture(t,{prepare:async input=>({runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'api'},session:{threadId:'wrong-auth',turnInputDigest:describeCodexImageInput(input).turnInputDigest}})});
+  const f=await fixture(t,{prepare:async input=>({runtime:{version:1,runtimeVersion:'0.162.1',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'api'},session:{threadId:'wrong-auth',turnInputDigest:describeCodexImageInput(input).turnInputDigest}})});
   assert.equal((await f.bridge.submit(f.request,f.context)).type,'rejected');assert.equal(f.calls.start,0);assert.equal(rows(f,'codex_image_execution_mapping').length,0);
 });
 
@@ -80,7 +80,7 @@ for(const mode of ['lease','pause','hold','shot'])test(`original ${mode} fence i
     if(mode==='pause'){const row=f.store.get('execution_control',f.selected.projectId);f.store.put('execution_control',f.selected.projectId,f.selected.projectId,{...row,paused:true});}
     if(mode==='hold')f.store.insert('hold',randomUUID(),f.selected.projectId,{scopeId:f.selected.projectId,active:true,requestId:f.selected.human.requestId});
     if(mode==='shot'){const p=f.store.getProject(f.selected.projectId);f.store.saveProject({...p,shots:p.shots.map(shot=>({...shot,imagePrompt:'changed'}))},p.headVersion);}
-    return {runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},session:{threadId:'prepared-before-race',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};
+    return {runtime:{version:1,runtimeVersion:'0.162.1',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},session:{threadId:'prepared-before-race',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};
   }});
   assert.equal((await f.bridge.submit(f.request,f.context)).type,mode==='lease'?'unknown':'rejected');assert.equal(f.calls.start,0);assert.equal(rows(f,'codex_image_execution_dispatch').length,0);
   assert.equal(rows(f,'codex_image_execution_result').length,mode==='lease'?0:1);
@@ -100,7 +100,7 @@ for(const mode of ['stop','prompt edit','Director message'])test(`${mode} during
         editStoryboard(f.production,project.id,{kind:'shot',id:project.shots[0].id,field:'imagePrompt',value:'A new human direction',expectedHeadVersion:project.headVersion},randomUUID());
       }else actor=f.production.beginRequest(f.selected.projectId,'local-user','Discuss another direction',{editing:true});
     }
-    return {runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
+    return {runtime:{version:1,runtimeVersion:'0.162.1',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
       session:{threadId:'prepared-before-human-change',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};
   }});
   assert.equal((await f.bridge.submit(f.request,f.context)).type,'rejected');
@@ -151,7 +151,7 @@ test('a reconciler fences an old worker still awaiting native preparation before
   let ready,finish;const preparing=new Promise(resolve=>{ready=resolve;}),resume=new Promise(resolve=>{finish=resolve;});
   const f=await fixture(t,{prepare:async input=>{
     ready();await resume;
-    return {runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
+    return {runtime:{version:1,runtimeVersion:'0.162.1',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
       session:{threadId:'late-preparation',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};
   }});
   const submission=f.bridge.submit(f.request,f.context);await preparing;
@@ -188,7 +188,7 @@ for(const prepared of [false,true])test(`a new lease reconciles ${prepared?'prep
 test('an expired preparation lease cannot record no-start until a reconciler owns a fresh lease',async t=>{
   const f=await fixture(t,{prepare:async(input,f)=>{
     f.expire();
-    return {runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
+    return {runtime:{version:1,runtimeVersion:'0.162.1',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
       session:{threadId:'expired-preparation',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};
   }});
   assert.equal((await f.bridge.submit(f.request,f.context)).type,'unknown');assert.equal(rows(f,'codex_image_execution_result').length,0);
@@ -196,7 +196,7 @@ test('an expired preparation lease cannot record no-start until a reconciler own
 });
 
 test('caller request and original cancellation are captured before any awaited native work',async t=>{
-  const controller=new AbortController();const f=await fixture(t,{prepare:async input=>{controller.abort();return {runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},session:{threadId:'cancelled',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};}});
+  const controller=new AbortController();const f=await fixture(t,{prepare:async input=>{controller.abort();return {runtime:{version:1,runtimeVersion:'0.162.1',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},session:{threadId:'cancelled',turnInputDigest:describeCodexImageInput(input).turnInputDigest}};}});
   const request=structuredClone(f.request),running=f.bridge.submit(request,{...f.context,signal:controller.signal});request.args.prompt='mutated';await running;
   assert.equal(f.calls.start,0);assert.equal(rows(f,'codex_image_execution_result')[0].observation.code,'LOCAL_CANCELLED');
 });

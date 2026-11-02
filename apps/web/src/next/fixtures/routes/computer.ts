@@ -14,7 +14,7 @@ import type { FixtureRoute } from "./types.ts";
  * - `slow-models`: GET /api/providers answers after a moment.
  */
 
-export const CODEX_DEFAULTS = { binaryPath: "/usr/local/bin/codex", model: "gpt-6-astra" } as const;
+export const CODEX_DEFAULTS = { binaryPath: "/usr/local/bin/codex", model: "gpt-6.1-sol" } as const;
 const SLOW_MODELS_MS = 2500;
 const DIGEST = "c".repeat(64);
 const CHANGED_DIGEST = "b".repeat(64);
@@ -75,7 +75,7 @@ function option(id: string, label: string, kind: MediaKind, adapter: string, mic
 export function catalogProfiles(world: FixtureWorld): ProviderOption[] {
   const { keys, codex } = computer(world);
   const viggle = option("viggle-h3", "MiniMax H3 via Viggle", "video", "viggle-h3", "450000", false);
-  const codexImage = option("codex-image", `Codex image · ${CODEX_DEFAULTS.model}`, "image", "codex-image", "0", codex, { usage: { kind: "codex_subscription", unit: "native_turn", quotaEstimateAvailable: false } });
+  const codexImage = option("codex-image", "Codex image · gpt-6-astra", "image", "codex-image", "0", codex, { usage: { kind: "codex_subscription", unit: "native_turn", quotaEstimateAvailable: false } });
   codexImage.readiness = { ...codexImage.readiness, credential: { required: false, present: null, backendUnavailable: false, apiValidated: false }, nativeAccess: { configured: codex, authentication: "checked_before_dispatch", quota: "unverified" } };
   return [
     option("fake-image-v1", "Demo image", "image", "fake", "100", keys),
