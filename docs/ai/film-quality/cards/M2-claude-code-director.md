@@ -1,6 +1,6 @@
 # M2 · Claude Code can be a code film's Director, on the owner's Claude plan
 
-Read `docs/ai/uiux-plan/codex/RULES.md` first; its hard rules apply in full. M1 (Codex 0.162.1) is merged; build on it. You own `packages/director/**`, `apps/server/**`, `packages/core/**` where a shared type needs a field, and their tests. Do not edit `apps/web/src/**` except fixtures and tests; the lead builds the Settings UI against the contract in section 5. If you need another file, edit it and say so in your report.
+Read `docs/ai/uiux-plan/codex/RULES.md` first; its hard rules apply in full. Card M1 (Codex 0.162.1, default `gpt-6.1-sol`) runs at the same time in another worktree. Stay out of its files: `packages/director/src/runtime/{codex,setup,policy,transport}.ts`, `packages/director/src/media/**`, `packages/providers/**`, `apps/server/src/application/{codex-binary,provider-catalog}.ts`, `apps/server/src/execution/codex-image-*.ts`, `scripts/setup-readiness.mjs` and tests that pin the Codex version. In `apps/server/src/application/local-director.ts` M1 changes only the default model; leave that line alone. Put Claude setup in a new file. If you need the bridge environment, move `bridgeEnvironment` out of `codex.ts` into a new shared module and change only its call site in `codex.ts`. Otherwise you own `packages/director/**`, `apps/server/**`, `packages/core/**` where a shared type needs a field, and their tests. Do not edit `apps/web/src/**` except fixtures and tests; the lead builds the Settings UI against the contract in section 5. If you need another file, edit it and say so in your report.
 
 ## Goal
 
@@ -30,7 +30,7 @@ New `packages/director/src/runtime/claude-code.ts`, exported from `runtime/index
 
 ## 4. Nothing else changes
 
-Codex stays the default Director (`gpt-6.1-sol` after M1). Codex images, Viggle, Lyria and every step key, price and receipt are untouched. A film on Claude Code that switches back to Codex works on its next turn.
+Codex stays the default Director (M1 makes it `gpt-6.1-sol`). Codex images, Viggle, Lyria and every step key, price and receipt are untouched. A film on Claude Code that switches back to Codex works on its next turn.
 
 ## 5. Contract for the Settings UI
 
