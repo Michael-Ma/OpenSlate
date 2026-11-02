@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import {
   assertSourceChecksum,
   findTestMediaTool,
+  findCjkCaptionFont,
   inspectTestToolchain,
   loadTestToolchain,
   managedMediaPrefix,
@@ -167,4 +168,14 @@ test("a corrupt download is rejected before extraction and cache identities sepa
 test("a same-version media binary missing required codecs cannot pass the parity gate", (t) => {
   const f = fixture(t, { missingEncoder: "png" });
   assert.throws(() => requireTestToolchain(f), /missing: png/);
+});
+
+test("a missing Linux CJK font fails the toolchain with the Ubuntu install hint", (t) => {
+  const f = fixture(t), roots = [join(f.root, "fonts")];
+  mkdirSync(roots[0]);
+  const options = { platform: "linux", roots, catalog: { has: () => false, registerFromPath: () => assert.fail("No font exists to register") } };
+  assert.equal(findCjkCaptionFont(options), undefined);
+  const toolchain = { ...f, platform: "linux", fontLookup: () => findCjkCaptionFont(options) };
+  assert.equal(inspectTestToolchain(toolchain).ready, false);
+  assert.throws(() => requireTestToolchain(toolchain), /CJK caption font:.*unavailable.*apt-get install fonts-noto-cjk/);
 });
