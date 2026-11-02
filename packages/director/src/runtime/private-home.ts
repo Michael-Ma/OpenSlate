@@ -1,9 +1,13 @@
-import { lstat, mkdir, readFile, readlink, readdir, realpath, stat, symlink, unlink } from "node:fs/promises";
+import { lstat, mkdir, readlink, readdir, realpath, stat, symlink, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { requireRuntime, RuntimeFault } from "./validation.js";
 
 /** Backend-only paths. The selected credential file is linked, never opened or copied. */
 export interface PrivateCodexHome { home: string; authSource: string }
+
+/** A workspace-write permission profile otherwise makes Codex persist trust for cwd's Git root.
+ * Pin only the application workspace, without discovering or trusting its ancestors. */
+export const untrustedCodexProjects = (workspace: string) => ({ [workspace]: { trust_level: "untrusted" } });
 
 const within = (parent: string, child: string): boolean => {
   const delta = relative(parent, child);
@@ -15,37 +19,35 @@ const validPath = (value: unknown): value is string => typeof value === "string"
 const forbidden = new Set(["agents.md", "agents.override.md", "instructions.md", "config.toml", "managed_config.toml",
   "prompts", "rules", "skills", "plugins"]);
 
-/** Read-only history must remain available after sign-out, without repairing a sign-in link. */
-export async function verifyPrivateCodexHome(home: string): Promise<void> {
+async function verifyDirectory(home: string): Promise<void> {
   requireRuntime(validPath(home) && home !== dirname(home), "SETUP_PATH_OVERLAP", "The Director home must be an explicit private directory");
   requireRuntime(await realpath(dirname(home)) === dirname(home), "SETUP_DIRECTORY_CHANGED", "An application directory changed after setup");
   const directory = await lstat(home);
   requireRuntime(directory.isDirectory() && !directory.isSymbolicLink() && await realpath(home) === home,
     "SETUP_DIRECTORY_CHANGED", "The Director home changed after setup");
+}
+
+/** Read-only history must remain available after sign-out, without repairing a sign-in link. */
+export async function verifyPrivateCodexHome(home: string): Promise<void> {
+  await verifyDirectory(home);
   for (const name of await readdir(home)) {
-    if (!forbidden.has(name.toLowerCase())) continue;
-    requireRuntime(name === "config.toml" && await onlyOwnTrust(join(home, name), dirname(dirname(home))),
+    requireRuntime(!forbidden.has(name.toLowerCase()),
       "SETUP_INSTRUCTIONS_UNEXPECTED", "The private Director home contains unexpected instruction or settings files");
   }
 }
 
-/**
- * Codex records that it trusts a thread's working directory by writing `[projects."<cwd>"] trust_level = "trusted"`
- * into its home's config.toml (the image worker's prepared thread does this). That file is accepted only when it holds
- * nothing but such entries for directories inside this application's own root; any other setting is still refused.
- */
-async function onlyOwnTrust(path: string, root: string): Promise<boolean> {
-  const entry = await lstat(path);
-  if (!entry.isFile() || entry.isSymbolicLink() || entry.size > 64 * 1024) return false;
-  const lines = (await readFile(path, "utf8")).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  if (!lines.length || lines.length % 2) return false;
-  for (let i = 0; i < lines.length; i += 2) {
-    const header = /^\[projects\."([^"\\]+)"\]$/.exec(lines[i]!);
-    if (!header || lines[i + 1] !== 'trust_level = "trusted"') return false;
-    const project = header[1]!;
-    if (!validPath(project) || project === root || !within(root, project)) return false;
+/** No file config is an application input. Remove old copied settings and Codex's
+ * previous auto-trust records on every preparation; never open the owner's config. */
+async function discardConfig(home: string): Promise<void> {
+  const path = join(home, "config.toml");
+  try {
+    const entry = await lstat(path);
+    requireRuntime(entry.isFile() && !entry.isSymbolicLink(), "SETUP_INSTRUCTIONS_UNEXPECTED",
+      "The private Director settings file must not be a directory or link");
+    await unlink(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  return true;
 }
 
 /** Recheck before every launch: a setup result does not authorize later filesystem aliases. */
@@ -63,6 +65,8 @@ export async function preparePrivateCodexHome(value: PrivateCodexHome): Promise<
   requireRuntime(await realpath(parent) === parent && await realpath(selectedHome) === selectedHome,
     "SETUP_DIRECTORY_CHANGED", "A selected application or authentication directory changed after setup");
   await mkdir(value.home, { recursive: true, mode: 0o700 });
+  await verifyDirectory(value.home);
+  await discardConfig(value.home);
   await verifyPrivateCodexHome(value.home);
   const link = join(value.home, "auth.json");
   try {

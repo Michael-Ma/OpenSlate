@@ -23,6 +23,7 @@ const verifying = Array.isArray(config.skills?.config);
 const home = process.env.CODEX_HOME, auth = home ? join(home, "auth.json") : undefined;
 log({ kind: "launch", verifying, parentSecretAbsent: !process.env.SETUP_PARENT_SECRET,
   home: process.env.HOME, codexHome: home,
+  projects: config.projects, fileConfigPresent: existsSync(join(home, "config.toml")),
   instructionSources: home ? ["AGENTS.md", "AGENTS.override.md"].map(name => join(home, name)).filter(existsSync) : [],
   ...(auth && existsSync(auth) ? { authIsLink: lstatSync(auth).isSymbolicLink(), authLinkTarget: readlinkSync(auth) } : {}) });
 const send = value => process.stdout.write(JSON.stringify(value) + "\n");
@@ -48,6 +49,7 @@ lines.on("line", line => {
     if (verifying && scenario === "project-budget-drift") config.project_doc_max_bytes = 32768;
     if (verifying && scenario === "project-fallback-drift") config.project_doc_fallback_filenames = ["FALLBACK.md"];
     if (verifying && scenario === "project-markers-drift") config.project_root_markers = [".git"];
+    if (verifying && scenario === "project-trust-drift") config.projects[process.cwd()].trust_level = "trusted";
     if (verifying && scenario === "policy") config.permissions.openslate_local.filesystem["/unexpected-root"] = "read";
     if (verifying && scenario === "permissions-null") {
       Object.assign(config.permissions.openslate_local, { description: null, extends: null, workspace_roots: null });

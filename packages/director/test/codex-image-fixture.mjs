@@ -31,6 +31,7 @@ function largePng() { const body=Buffer.concat([Buffer.from("tEXt"),Buffer.alloc
 const readHistory = () => JSON.parse(readFileSync(join(process.cwd(), "fixture-history.json"),"utf8"));
 const saveHistory = value => writeFileSync(join(process.cwd(), "fixture-history.json"), JSON.stringify(value));
 log({ kind: "launch", verifying, imageProcess, strictConfig: process.argv.includes("--strict-config"), mcpServers: Object.keys(config.mcp_servers),
+  projects: config.projects, fileConfigPresent: existsSync(join(process.env.CODEX_HOME, "config.toml")), cwd: process.cwd(),
   parentSecretAbsent: !process.env.SETUP_PARENT_SECRET,
   apiEnvironmentAbsent: !process.env.OPENAI_API_KEY && !process.env.CODEX_API_KEY && !process.env.OPENAI_BASE_URL, home: process.env.HOME, codexHome: process.env.CODEX_HOME });
 const send = value => process.stdout.write(JSON.stringify(value) + "\n");
@@ -51,6 +52,7 @@ lines.on("line", line => {
     if (imageProcess && imageScenario === "project-budget-drift") config.project_doc_max_bytes = 32768;
     if (imageProcess && imageScenario === "project-fallback-drift") config.project_doc_fallback_filenames = ["FALLBACK.md"];
     if (imageProcess && imageScenario === "project-markers-drift") config.project_root_markers = [".git"];
+    if (imageProcess && imageScenario === "project-trust-drift") config.projects[process.cwd()].trust_level = "trusted";
     if (imageProcess && imageScenario === "mcp-drift") config.mcp_servers.unexpected = { enabled: true, command: "PRIVATE_MUST_NOT_RUN" };
     if(imageScenario==="close-setup" && !imageProcess && !verifying) {
       const started=Date.now(),wait=setInterval(()=>{

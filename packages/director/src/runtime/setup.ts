@@ -8,7 +8,7 @@ import { CodexTransport } from "./transport.js";
 import { object, requireRuntime, RuntimeFault } from "./validation.js";
 import { classifyNativeDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
 import type { NativeDiagnostic } from "@openslate/core";
-import { preparePrivateCodexHome } from "./private-home.js";
+import { preparePrivateCodexHome, untrustedCodexProjects } from "./private-home.js";
 
 export interface LocalCodexSetupInput {
   command: { file: string; args?: readonly string[] };
@@ -99,6 +99,7 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
     [await realpath(process.execPath)]: "read" }, network: { enabled: false } };
   const config: Record<string, CodexConfigValue> = {
     default_permissions: PROFILE, permissions: { [PROFILE]: profile }, sqlite_home: state, log_dir: logs,
+    projects: untrustedCodexProjects(projection),
     model: input.model, model_provider: "openai", model_reasoning_effort: "high", approval_policy: "never", web_search: "disabled",
     ...CODEX_PROJECT_ISOLATION_CONFIG, "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none",
     "skills.bundled.enabled": false,
@@ -266,7 +267,8 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
         config.model_reasoning_effort === "high" && config.web_search === "disabled" && config.check_for_update_on_startup === false &&
         object(config.analytics).enabled === false && object(config.feedback).enabled === false && object(config.history).persistence === "none" &&
         config.sqlite_home === runtime.policy.config.sqlite_home && config.log_dir === runtime.policy.config.log_dir &&
-        projectIsolationMatches(config) && object(config.features).code_mode_host === true && object(config.features).skip_host_skill_discovery === true &&
+        projectIsolationMatches(config) && isDeepStrictEqual(config.projects, untrustedCodexProjects(runtime.cwd)) &&
+        object(config.features).code_mode_host === true && object(config.features).skip_host_skill_discovery === true &&
         object(object(config.skills).bundled).enabled === false &&
         object(config.features).default_mode_request_user_input === true &&
         DISABLED.every(name => object(config.features)[name] === false) && object(config.shell_environment_policy).inherit === "none" &&

@@ -44,6 +44,7 @@ test("setup generates exact local policy using two no-turn sessions and private 
   assert.equal(policy.config.sqlite_home, join(f.input.directories.storage, "native-state"));
   assert.equal(policy.config["features.default_mode_request_user_input"], true);
   assert.equal(policy.config["skills.bundled.enabled"], false);
+  assert.deepEqual(policy.config.projects, { [f.input.directories.projection]: { trust_level: "untrusted" } });
   assert.equal(policy.config["mcp_servers.inherited.enabled"], false);
   assert.deepEqual(policy.config["skills.config"], [{ path: f.input.env.SETUP_FIXTURE_SKILL, enabled: false }]);
   assert.ok(!JSON.stringify(policy).includes("INHERITED_TOKEN"));
@@ -176,7 +177,7 @@ test("private home alias and path overlap protections refuse before a native lau
 
 test("later directory aliases and instruction/settings additions are refused by every-launch preparation", async t => {
   const f = await fixture(t), result = await setupLocalCodex(f.input), descriptor = result.runtimeOptions.privateCodexHome;
-  for (const name of ["AGENTS.md", "AGENTS.override.md", "config.toml", "managed_config.toml", "prompts", "rules", "skills", "plugins"]) {
+  for (const name of ["AGENTS.md", "AGENTS.override.md", "managed_config.toml", "prompts", "rules", "skills", "plugins"]) {
     const path = join(descriptor.home, name);
     await writeFile(path, "UNEXPECTED_INSTRUCTION_OR_SETTING");
     await assert.rejects(preparePrivateCodexHome(descriptor), error => error.code === "SETUP_INSTRUCTIONS_UNEXPECTED", name);
@@ -188,14 +189,21 @@ test("later directory aliases and instruction/settings additions are refused by 
   await assert.rejects(preparePrivateCodexHome(descriptor), error => error.code === "SETUP_DIRECTORY_CHANGED");
 });
 
-test("Codex's own trust record for a directory inside the application root is accepted; any other setting is not", async t => {
+test("next setup removes all private file settings and trust while preserving the source and sign-in link", async t => {
   const f = await fixture(t), result = await setupLocalCodex(f.input), descriptor = result.runtimeOptions.privateCodexHome;
   const root = join(descriptor.home, "..", ".."), path = join(descriptor.home, "config.toml");
   const own = join(await realpath(root), "workspaces", "a".repeat(64));
-  // The image worker's prepared thread writes exactly this; its start must not be refused for it.
-  await writeFile(path, `[projects."${own}"]\ntrust_level = "trusted"\n`);
-  await preparePrivateCodexHome(descriptor);
+  const source = join(f.input.codexHome, "config.toml");
+  const copied = `[projects."${f.root}"]\ntrust_level = "trusted"\n[features]\nplugins = true\n`;
+  await writeFile(source, copied); await writeFile(path, copied);
+  const repeated = await setupLocalCodex(f.input);
+  assert.equal(repeated.readiness.status, "ready", repeated.readiness.issues[0]?.code);
+  assert.deepEqual(await readdir(descriptor.home), ["auth.json"]);
+  assert.equal(await readFile(source, "utf8"), copied);
+  assert.equal(await readlink(join(descriptor.home, "auth.json")), descriptor.authSource);
+  assert.ok((await f.records()).filter(row => row.kind === "launch").every(row => !row.fileConfigPresent));
   for (const [why, text] of [
+    ["an old native workspace trust record", `[projects."${own}"]\ntrust_level = "trusted"\n`],
     ["a directory outside the application root", `[projects."/tmp/elsewhere"]\ntrust_level = "trusted"\n`],
     ["the application root itself", `[projects."${await realpath(root)}"]\ntrust_level = "trusted"\n`],
     ["a relative escape", `[projects."${own}/../../.."]\ntrust_level = "trusted"\n`],
@@ -204,12 +212,20 @@ test("Codex's own trust record for a directory inside the application root is ac
     ["a top-level setting", `model_instructions_file = "x"\n`],
   ]) {
     await writeFile(path, text);
-    await assert.rejects(preparePrivateCodexHome(descriptor), error => error.code === "SETUP_INSTRUCTIONS_UNEXPECTED", why);
+    await preparePrivateCodexHome(descriptor);
+    await assert.rejects(lstat(path), error => error.code === "ENOENT", why);
   }
-  await unlink(path);
+});
+
+test("private config aliases and directories are refused without changing their target", async t => {
+  const f = await fixture(t), result = await setupLocalCodex(f.input), descriptor = result.runtimeOptions.privateCodexHome;
+  const path = join(descriptor.home, "config.toml");
   await symlink(join(f.root, "linked.toml"), path);
-  await writeFile(join(f.root, "linked.toml"), `[projects."${own}"]\ntrust_level = "trusted"\n`);
+  await writeFile(join(f.root, "linked.toml"), "SYNTHETIC_OWNER_CONFIG");
   await assert.rejects(preparePrivateCodexHome(descriptor), error => error.code === "SETUP_INSTRUCTIONS_UNEXPECTED", "a linked file");
+  assert.equal(await readFile(join(f.root, "linked.toml"), "utf8"), "SYNTHETIC_OWNER_CONFIG");
+  await unlink(path); await mkdir(path);
+  await assert.rejects(preparePrivateCodexHome(descriptor), error => error.code === "SETUP_INSTRUCTIONS_UNEXPECTED", "a directory");
 });
 for (const [scenario, code] of [
   ["version", "SETUP_VERSION_MISMATCH"], ["auth", "SETUP_AUTH_REQUIRED"], ["model", "SETUP_MODEL_UNAVAILABLE"],
@@ -217,6 +233,7 @@ for (const [scenario, code] of [
   ["mcp-drift", "SETUP_MCP_UNEXPECTED"], ["skill-drift", "SETUP_SKILLS_UNEXPECTED"], ["feature-drift", "SETUP_CONFIG_MISMATCH"],
   ["search-drift", "SETUP_CONFIG_MISMATCH"], ["question-feature-drift", "SETUP_CONFIG_MISMATCH"],
   ["project-budget-drift", "SETUP_CONFIG_MISMATCH"], ["project-fallback-drift", "SETUP_CONFIG_MISMATCH"], ["project-markers-drift", "SETUP_CONFIG_MISMATCH"],
+  ["project-trust-drift", "SETUP_CONFIG_MISMATCH"],
   ["bundled-skills-drift", "SETUP_CONFIG_MISMATCH"], ["effort-drift", "SETUP_CONFIG_MISMATCH"],
   ["skill-error", "SETUP_SKILLS_INVALID"], ["invalid-mcp-name", "SETUP_CATALOG_INVALID"], ["rpc-error", "RUNTIME_RPC_REJECTED"],
   ["hang", "RUNTIME_RPC_TIMEOUT"], ["approval", "SETUP_INTERACTIVE_DENIED"],

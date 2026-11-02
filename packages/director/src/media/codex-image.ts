@@ -7,7 +7,7 @@ import { digest, type NativeDiagnostic } from "@openslate/core";
 import { CODEX_IMAGE_RUNTIME_VERSION, isRecordedCodexImageRuntime, CODEX_IMAGE_LIMITS, codexImageTurnText, describeCodexImageInput, inspectCodexImagePng,
   type CodexImageInput, type CodexImageOutcome, type CodexImagePrepared, type CodexImageTransport } from "@openslate/providers";
 import { setupLocalCodex } from "../runtime/setup.js";
-import { preparePrivateCodexHome, verifyPrivateCodexHome, type PrivateCodexHome } from "../runtime/private-home.js";
+import { preparePrivateCodexHome, verifyPrivateCodexHome, untrustedCodexProjects, type PrivateCodexHome } from "../runtime/private-home.js";
 import { CODEX_RUNTIME_LIMITS, CODEX_MAX_STARTUP_TIMEOUT_MS, normalizePermissionProfile, toml, type CodexConfigValue, type CodexDirectorOptions } from "../runtime/policy.js";
 import { classifyNativeDiagnostic, instructionSourcesDiagnostic } from "../runtime/native-diagnostic.js";
 import { object, requireRuntime, RuntimeFault } from "../runtime/validation.js";
@@ -130,6 +130,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     const config = structuredClone(ready.options.policy!.config) as Record<string, CodexConfigValue>;
     config["features.image_generation"] = true;
     config.forced_login_method = "chatgpt";
+    config.projects = untrustedCodexProjects(workspace);
     config.permissions = { [PROFILE]: { filesystem: { ":root": "deny", ":minimal": "read", [workspace]: "write", [ready.binary]: "read" }, network: { enabled: false } } };
     return { version: 2, config, workspace, binary: ready.binary, args: [...(this.#input.command.args ?? [])], runtimeDigest: ready.runtimeDigest,
       codexHome: ready.options.privateCodexHome!.home, environmentDigest: digest(ready.options.env) };
