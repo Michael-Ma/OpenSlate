@@ -35,7 +35,7 @@ import "./assets.css";
 
 const EMPTY: AssetItem[] = [];
 const ROLE_LABEL = {
-  all: "assets.role.all", keyframe: "assets.role.keyframe", clip: "assets.role.clip", voice: "assets.role.voice",
+  all: "assets.role.all", keyframe: "assets.role.keyframe", reference: "assets.role.reference", clip: "assets.role.clip", voice: "assets.role.voice",
   music: "assets.role.music", upload: "assets.role.upload", document: "assets.role.document", export: "assets.role.export",
 } as const satisfies Record<RoleFilter, string>;
 
