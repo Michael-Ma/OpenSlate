@@ -225,7 +225,7 @@ export function createApp(options: AppOptions = {}) {
     service().store.getProject(request.params.projectId);
     return options.director?.status(request.params.projectId) ?? { mode: "offline", status: "not_connected", activeRequestId: null };
   });
-  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/setup", async request => {
+  app.get<{ Params: { projectId: string }; Reply: Awaited<ReturnType<LocalDirectorController["inspectSettings"]>> }>("/api/projects/:projectId/director/setup", async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.inspectSettings(request.params.projectId);
   });
@@ -234,13 +234,13 @@ export function createApp(options: AppOptions = {}) {
     return options.runtimeSettings.models(request.params.projectId);
   });
   app.post<{ Params: { projectId: string }; Body: LocalDirectorSelection }>("/api/projects/:projectId/director/setup", {
-    schema: { body: object({ mode: { enum: ["fake", "native"] }, binaryPath: { type: "string", maxLength: 4096 }, model: { type: "string", maxLength: 120 }, codexHome: { type: "string", maxLength: 4096 } }, ["mode"]) },
+    schema: { body: object({ mode: { enum: ["fake", "native", "claude"] }, binaryPath: { type: "string", maxLength: 4096 }, model: { type: "string", maxLength: 120 }, codexHome: { type: "string", maxLength: 4096 } }, ["mode"]) },
   }, async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.configure(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
   app.post<{ Params: { projectId: string }; Body: { expectedSelectionDigest: string; selection: LocalDirectorSelection } }>("/api/projects/:projectId/director/change", {
-    schema: { body: object({ expectedSelectionDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, selection: object({ mode: { enum: ["fake", "native"] }, binaryPath: { type: "string", maxLength: 4096 }, model: { type: "string", maxLength: 120 }, codexHome: { type: "string", maxLength: 4096 } }, ["mode"]) }, ["expectedSelectionDigest", "selection"]) },
+    schema: { body: object({ expectedSelectionDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, selection: object({ mode: { enum: ["fake", "native", "claude"] }, binaryPath: { type: "string", maxLength: 4096 }, model: { type: "string", maxLength: 120 }, codexHome: { type: "string", maxLength: 4096 } }, ["mode"]) }, ["expectedSelectionDigest", "selection"]) },
   }, async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.changeSelection(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());

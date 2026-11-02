@@ -21,7 +21,7 @@ interface Request { id: string; projectId: string; principalId: string; text: st
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; state: string }
 export interface DirectorOutput { id: string; projectId: string; requestId: string; turnId: string; text: string; phase: string }
 export interface SupervisorOptions {
-  mode: "fake" | "native";
+  mode: "fake" | "native" | "claude";
   /** Local controllers may share one store while owning disjoint project sets. */
   projectFilter?: (projectId: string) => boolean;
   prepareInput?: (turn: DirectorTurn, human: ActorContext, bridge: { actor: ActorContext; token: string }, preparation?: { signal: AbortSignal }) => Promise<DirectorRunInput> | DirectorRunInput;

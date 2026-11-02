@@ -37,7 +37,7 @@ export function directorTurnViews(service: ProductionService, projectId: string)
     const nativeDiagnostic = safeNativeDiagnostic(turn.nativeDiagnostic);
     return { id: turn.id, requestId: turn.requestId, state: turn.state, at: turn.createdAt, updatedAt: turn.updatedAt,
       ...(nativeDiagnostic ? { nativeDiagnostic } : {}),
-      runtime: turn.runtimeId === 'codex-app-server' ? 'live' : 'scripted',
+      runtime: ['codex-app-server', 'claude-code'].includes(turn.runtimeId) ? 'live' : 'scripted',
       action: store.get('keyframe_review_request', turn.requestId) ? 'keyframe_review' : 'conversation',
       reason: turn.errorCode ? reasons[turn.errorCode] ?? (turn.state === 'failed' ? 'failed' : 'unknown') : turn.state === 'completed' && !replied ? 'no_reply' : turn.state === 'interrupted' ? 'interrupted' : turn.state === 'failed' ? 'failed' : turn.state === 'unknown' ? 'unknown' : null,
       effects: { notesCreated: notes, proposalsHeld: proposals, changesApplied: changes,

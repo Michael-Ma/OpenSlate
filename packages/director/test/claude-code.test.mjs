@@ -1,0 +1,164 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createServer } from 'node:http';
+import { ClaudeCodeDirectorRuntime, setupLocalClaudeCode } from '../dist/index.js';
+import { toolCatalog } from '../../core/dist/index.js';
+import { fakeClaude } from './claude-code-helpers.mjs';
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const waitFor = async (fn) => { for (let i=0;i<500;i++) { const value=fn(); if(value)return value; await delay(10); } throw new Error('Fixture did not reach its barrier'); };
+const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+test('Claude print flags, canonical instructions, bounded pictures and the MCP-only environment', async t => {
+  const f = fakeClaude(t), events = [];
+  const image = Buffer.alloc(24); Buffer.from([137,80,78,71,13,10,26,10]).copy(image); image.write('IHDR',12); image.writeUInt32BE(1,16); image.writeUInt32BE(1,20);
+  const path = join(f.cwd,'picture.png'); writeFileSync(path,image);
+  const result = await f.runtime.start({...f.input, images:[{path,mediaType:'image/png',sha256:createHash('sha256').update(image).digest('hex')}]}, {onEvent:event=>events.push(event)});
+  assert.equal(result.status,'completed',JSON.stringify(result)); assert.equal(result.dispatched,true);
+  const launched=f.records().find(row=>row.argv?.includes('-p')), argv=launched.argv, value=flag=>argv[argv.indexOf(flag)+1];
+  for(const flag of ['--safe-mode','--restricted','--strict-mcp-config','--disable-slash-commands','--no-chrome','--no-session-persistence','--verbose'])assert.ok(argv.includes(flag));
+  assert.equal(value('--input-format'),'stream-json');assert.equal(value('--output-format'),'stream-json');assert.equal(value('--tools'),'');assert.equal(value('--allowedTools'),'mcp__openslate__*');
+  assert.equal(value('--model'),'claude-opus-5-5');assert.equal(value('--permission-mode'),'dontAsk');assert.equal(value('--permission-prompts'),'none');assert.equal(value('--setting-sources'),'');
+  assert.equal(JSON.parse(value('--settings')).disableAllHooks,true);assert.equal(argv.includes('--bare'),false,'bare deliberately disables subscription auth');
+  assert.equal(JSON.parse(value('--settings')).env.CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS,'1','safe mode alone retains built-in agents in 2.1.312');
+  const system=value('--system-prompt'); for(const part of ["You are OpenSlate's director.",'Use canonical application context','CANONICAL APPLICATION CONTEXT','IMMUTABLE SKILL TEXT'])assert.ok(system.includes(part));
+  const codex=readFileSync(new URL('../src/runtime/codex.ts',import.meta.url),'utf8');
+  const base=JSON.parse(/baseInstructions: ("[^\n]*"),/.exec(codex)[1]);
+  const dev=JSON.parse(/developerInstructions: ("[^\n]*")/.exec(codex)[1])+JSON.parse(/\+ ("The following OpenSlate[^\n]*")/.exec(codex)[1]);
+  assert.equal(system,[base,dev+f.input.context,'IMMUTABLE SKILL TEXT'].join('\n\n'),'base and developer instructions exactly match Codex');
+  const config=JSON.parse(value('--mcp-config'));assert.deepEqual(Object.keys(config.mcpServers),['openslate']);
+  const bridge=config.mcpServers.openslate;assert.equal(bridge.command,process.execPath);assert.deepEqual(bridge.args,[f.input.bridge.entrypoint]);
+  assert.equal(bridge.env.OPENSLATE_BRIDGE_CREDENTIAL,f.input.bridge.credential);assert.equal(bridge.env.OPENSLATE_BRIDGE_ENDPOINT,f.input.bridge.endpoint);assert.equal(bridge.env.OPENSLATE_BRIDGE_TOOL_CONTRACT,'0.3.0');assert.ok(bridge.env.OPENSLATE_BRIDGE_READY_FILE.startsWith(f.cwd));
+  for(const row of f.records().filter(row=>row.env))assert.deepEqual(Object.keys(row.env).filter(key=>key!=='__CF_USER_TEXT_ENCODING').sort(),['HOME','LANG','PATH','TMPDIR','USER']);
+  const sent=f.records().find(row=>row.input).input;assert.equal(sent.message.content[0].text,f.input.text);assert.deepEqual(sent.message.content[1],{type:'image',source:{type:'base64',media_type:'image/png',data:image.toString('base64')}});
+  assert.deepEqual(events.map(e=>e.kind),['runtime_started','turn_started','activity','activity','assistant_message','activity','activity','assistant_message']);
+  assert.equal(events.at(-1).phase,'final');assert.equal(result.nativeThreadId,'fixture-session');assert.equal(result.nativeTurnId,'fixture-session');
+  assert.ok(!JSON.stringify(events).includes('PRIVATE')); assert.ok(!JSON.stringify(events).includes(f.input.bridge.credential));
+});
+
+test('planted personal instructions, hook and MCP configuration are excluded by the launch contract',async t=>{
+  const f=fakeClaude(t);mkdirSync(join(f.home,'.claude'));
+  writeFileSync(join(f.cwd,'CLAUDE.md'),'PERSONAL INSTRUCTIONS');
+  writeFileSync(join(f.home,'.claude','CLAUDE.md'),'PERSONAL HOME INSTRUCTIONS');
+  const marker=join(f.root,'hook-ran');
+  writeFileSync(join(f.home,'.claude','settings.json'),JSON.stringify({hooks:{SessionStart:[{hooks:[{type:'command',command:`touch ${marker}`}]}]},enabledPlugins:{'personal@example':true}}));
+  writeFileSync(join(f.home,'.claude.json'),JSON.stringify({mcpServers:{personal:{command:'personal-mcp'}}}));
+  assert.equal((await f.runtime.start(f.input)).status,'completed');assert.deepEqual(f.records().find(row=>row.input).personal,[]);
+  assert.ok(!JSON.stringify(f.records()).includes('PERSONAL INSTRUCTIONS'));
+  assert.throws(()=>readFileSync(marker),{code:'ENOENT'});
+});
+
+for(const [name,init,code] of [
+  ['built-in tool',{tools:[...toolCatalog('0.3.0').names.map(n=>`mcp__openslate__${n}`),'Bash']},'CLAUDE_CODE_TOOLS_UNEXPECTED'],
+  ['missing tool',{tools:[]},'CLAUDE_CODE_TOOLS_UNEXPECTED'],
+  ['user MCP',{mcp_servers:[{name:'personal',status:'connected'}]},'CLAUDE_CODE_MCP_UNEXPECTED'],
+  ['user-scoped bridge',{mcp_servers:[{name:'openslate',status:'connected',source:'user'}]},'CLAUDE_CODE_MCP_UNEXPECTED'],
+  ['skills',{skills:['personal']},'CLAUDE_CODE_CONFIG_UNEXPECTED'],['plugins',{plugins:[{name:'personal'}]},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
+  ['agents',{agents:['personal']},'CLAUDE_CODE_CONFIG_UNEXPECTED'],['commands',{slash_commands:['personal']},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
+  ['style',{output_style:'personal'},'CLAUDE_CODE_CONFIG_UNEXPECTED'],['model',{model:'wrong'},'CLAUDE_CODE_INIT_INVALID'],
+  ['API key',{apiKeySource:'ANTHROPIC_API_KEY'},'CLAUDE_CODE_NOT_ON_PLAN'],['key helper',{apiKeySource:'apiKeyHelper'},'CLAUDE_CODE_NOT_ON_PLAN'],
+  ['missing billing source',{apiKeySource:null},'CLAUDE_CODE_NOT_ON_PLAN'],
+])test(`Claude init refuses ${name} before emitting native ids or activity`,async t=>{
+  const f=fakeClaude(t,{init}),events=[];const result=await f.runtime.start(f.input,{onEvent:e=>events.push(e)});
+  assert.equal(result.status,'failed',JSON.stringify(result));assert.equal(result.error.code,code);assert.equal(result.dispatched,true);assert.deepEqual(events,[]);
+});
+
+for(const [scenario,code] of [['error','CLAUDE_CODE_FAILED'],['limit','CLAUDE_CODE_FAILED'],['usage','CLAUDE_CODE_USAGE_LIMIT'],['rate-limit','CLAUDE_CODE_USAGE_LIMIT'],['auth-before-init','CLAUDE_CODE_AUTH'],['stderr-auth','CLAUDE_CODE_AUTH'],['stderr-usage','CLAUDE_CODE_USAGE_LIMIT']])
+  test(`Claude ${scenario} is a plain failure with no retry or raw native error`,async t=>{
+    const f=fakeClaude(t,{scenario}),events=[];const result=await f.runtime.start(f.input,{onEvent:e=>events.push(e)});
+    assert.equal(result.status,'failed',JSON.stringify(result));assert.equal(result.error.code,code);assert.equal(result.dispatched,true);
+    assert.ok(!JSON.stringify({...result,events}).includes('private diagnostic'));assert.equal(f.records().filter(row=>row.argv?.includes('-p')).length,1);
+  });
+
+test('unexpected process exit and broken stream keep dispatched completion unknown',async t=>{
+  for(const scenario of ['exit','malformed','duplicate-init']){
+    const f=fakeClaude(t,{scenario});const result=await f.runtime.start(f.input);
+    assert.equal(result.dispatched,true);assert.ok(['unknown','failed'].includes(result.status));
+    assert.equal(result.status==='completed',false);
+  }
+});
+
+test('unsupported storyboard, resume, invalid image, version and aborted preparation do not dispatch',async t=>{
+  const f=fakeClaude(t);
+  for(const input of [{...f.input,resumeThreadId:'old'},{...f.input,bridge:{...f.input.bridge,toolContractVersion:'7.0.0'}}])
+    await assert.rejects(f.runtime.start(input),{code:'DIRECTOR_RUNTIME_UNSUPPORTED'});
+  const abort=new AbortController();abort.abort();const result=await f.runtime.start(f.input,{signal:abort.signal});assert.equal(result.dispatched,false);assert.equal(result.status,'interrupted');
+  assert.deepEqual(f.records(),[]);
+  f.update({version:'2.1.300'});const version=await f.runtime.start(f.input);assert.equal(version.dispatched,false);assert.equal(version.error.code,'CLAUDE_CODE_VERSION_MISMATCH');
+});
+
+for(const cause of ['abort','timeout','close'])test(`Claude ${cause} kills the entire process group`,async t=>{
+  const f=fakeClaude(t,{scenario:'hang',spawnChild:true,ignoreTerm:true});
+  const runtime=new ClaudeCodeDirectorRuntime({...f.options,runTimeoutMs:cause==='timeout'?2000:10000});t.after(()=>runtime.close());
+  const abort=new AbortController(),run=runtime.start(f.input,{signal:abort.signal});
+  const pid=await waitFor(()=>f.records().find(row=>row.descendant)?.descendant);
+  if(cause==='abort')abort.abort();if(cause==='close')await runtime.close();
+  const result=await run;assert.equal(result.status,cause==='timeout'?'unknown':'interrupted',JSON.stringify(result));assert.equal(result.dispatched,true);
+  await waitFor(()=>!alive(pid));
+  if(cause==='close')await assert.rejects(runtime.start(f.input),{code:'RUNTIME_CLOSED'});
+});
+
+test('Claude init timeout and failed event consumer cannot complete or open the bridge gate',async t=>{
+  const f=fakeClaude(t,{scenario:'hang-before-init'}),runtime=new ClaudeCodeDirectorRuntime({...f.options,startupTimeoutMs:1000});t.after(()=>runtime.close());
+  const result=await runtime.start(f.input);assert.equal(result.error.code,'CLAUDE_CODE_INIT_TIMEOUT');assert.equal(result.status,'unknown');
+  f.update({scenario:undefined});const failed=await f.runtime.start(f.input,{onEvent:()=>{throw new Error('PRIVATE CONSUMER');}});assert.equal(failed.error.code,'RUNTIME_EVENT_CONSUMER_FAILED');assert.equal(failed.status,'unknown');
+});
+
+for(const rejected of [false,true])test(`real MCP bridge ${rejected?'blocks rejected billing even when a tool races init':'opens only after init is verified'}`,async t=>{
+  let calls=0;
+  const server=createServer(async(request,response)=>{calls++;response.writeHead(200,{'content-type':'application/json'});response.end(JSON.stringify({callId:'fixture-call',isError:false,value:{hello:'film'}}));});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const f=fakeClaude(t,{realBridge:true,...(rejected?{init:{apiKeySource:'apiKeyHelper'}}:{})});
+  const events=[], result=await f.runtime.start({...f.input,bridge:{...f.input.bridge,endpoint:`http://127.0.0.1:${server.address().port}`}},{onEvent:event=>events.push(event)});
+  assert.equal(result.status,rejected?'failed':'completed',JSON.stringify(result));assert.equal(calls,rejected?0:1);
+  if(rejected)assert.deepEqual(events,[]);else assert.ok(f.records().find(row=>row.called));
+});
+
+test('Claude setup discovers the binary, pins version, checks plan login and never spends a turn',async t=>{
+  const f=fakeClaude(t), setup=()=>setupLocalClaudeCode({binaryPath:f.binaryPath,model:'claude-sonnet-5-5'},{env:f.env});
+  assert.equal((await setup()).status,'ready');assert.ok(f.records().every(row=>!row.argv.includes('-p')));
+  f.update({version:'9.9.9'});assert.deepEqual(await setup(),{status:'blocked',binaryPath:f.binaryPath,version:'9.9.9',reason:'Claude Code 2.1.312 is required'});
+  f.update({auth:{loggedIn:false}});assert.equal((await setup()).reason,'Sign in to Claude Code first');
+  f.update({auth:{loggedIn:true,authMethod:'api_key',apiProvider:'firstParty',subscriptionType:'max'}});assert.match((await setup()).reason,/subscription/);
+  f.update({noAuthStatus:true});assert.equal((await setup()).status,'unchecked');
+  const missing=await setupLocalClaudeCode({binaryPath:join(f.root,'missing')},{env:f.env});assert.equal(missing.status,'missing');
+  f.update({});const env={...f.env,OPENSLATE_CLAUDE_BINARY:f.binaryPath};assert.equal((await setupLocalClaudeCode({}, {env})).binaryPath,f.binaryPath);
+  mkdirSync(join(f.home,'.local','bin'),{recursive:true});writeFileSync(join(f.home,'.local','bin','claude'),readFileSync(f.binaryPath),{mode:0o700});
+  assert.equal((await setupLocalClaudeCode({}, {env:f.env})).binaryPath,join(f.home,'.local','bin','claude'));
+  const pathEnv={...f.env,HOME:join(f.root,'no-local'),PATH:f.root};assert.equal((await setupLocalClaudeCode({}, {env:pathEnv})).binaryPath,f.binaryPath);
+});
+
+
+test('Claude checks subscription auth every turn before writing, including after earlier setup',async t=>{
+  const f=fakeClaude(t);
+  for(const [auth,code] of [[{loggedIn:false},'CLAUDE_CODE_AUTH'],[{loggedIn:true,authMethod:'api_key',apiProvider:'firstParty',subscriptionType:'max'},'CLAUDE_CODE_NOT_ON_PLAN'],[{loggedIn:true,authMethod:'claude.ai',apiProvider:'bedrock',subscriptionType:'max'},'CLAUDE_CODE_NOT_ON_PLAN']]){
+    f.update({auth});const result=await f.runtime.start(f.input);assert.equal(result.error.code,code);assert.equal(result.status,'failed');assert.equal(result.dispatched,false);
+  }
+  assert.equal(f.records().some(row=>row.argv?.includes('-p')),false);
+});
+
+test('Claude setup and runtime version checks are bounded and close cancels preparation',async t=>{
+  const f=fakeClaude(t,{scenario:'hang-version'});
+  const ready=await setupLocalClaudeCode({binaryPath:f.binaryPath},{env:f.env,timeoutMs:1000});assert.equal(ready.status,'blocked');
+  const checksBefore=f.records().filter(row=>row.argv?.includes('--version')).length;
+  const run=f.runtime.start(f.input);await waitFor(()=>f.records().filter(row=>row.argv?.includes('--version')).length>checksBefore);await f.runtime.close();
+  const result=await run;assert.equal(result.status,'interrupted');assert.equal(result.dispatched,false);
+});
+
+test('Claude enforces image identity, bounded run options and single-project ownership before dispatch',async t=>{
+  const f=fakeClaude(t,{scenario:'hang'});
+  for(const runTimeoutMs of [0,600001,Infinity])assert.throws(()=>new ClaudeCodeDirectorRuntime({...f.options,runTimeoutMs}),{code:'RUNTIME_CONFIG_INVALID'});
+  const invalid=await f.runtime.start({...f.input,images:[{path:join(f.cwd,'missing.png'),sha256:'a'.repeat(64),mediaType:'image/png'}]});assert.equal(invalid.dispatched,false);
+  const abort=new AbortController(),run=f.runtime.start(f.input,{signal:abort.signal});await waitFor(()=>f.records().some(row=>row.input));
+  await assert.rejects(f.runtime.start(f.input),{code:'RUNTIME_BUSY'});abort.abort();await run;
+});
+
+
+test('Claude resolves workspace aliases and preserves uncertain pipe/stream failures',async t=>{
+  const f=fakeClaude(t),alias=join(f.root,'workspace-alias');symlinkSync(f.cwd,alias);
+  const runtime=new ClaudeCodeDirectorRuntime({...f.options,cwd:alias});t.after(()=>runtime.close());
+  assert.equal((await runtime.start(f.input)).status,'completed');
+  for(const scenario of ['no-input','flood']){f.update({scenario});const result=await f.runtime.start(f.input,scenario==='flood'?{onEvent:()=>new Promise(()=>{})}:{});assert.equal(result.dispatched,true);assert.equal(result.status,'unknown',JSON.stringify(result));}
+});

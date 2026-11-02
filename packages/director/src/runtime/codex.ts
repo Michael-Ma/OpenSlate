@@ -4,6 +4,7 @@ import { normalizePermissionProfile, toml, validateOptions } from "./policy.js";
 import type { CodexConfigValue, CodexDirectorOptions } from "./policy.js";
 import { CodexTransport, timeout, type RpcMessage } from "./transport.js";
 import { prepareDirectorImages } from "./images.js";
+import { bridgeEnvironment } from "./bridge-environment.js";
 import { beforeDispatch, fault, identity, object, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
 import { classifyNativeDiagnostic, instructionSourcesDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
 import { preparePrivateCodexHome } from "./private-home.js";
@@ -301,16 +302,11 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       ...input.skills.map(skill => ({ path: skill.path, enabled: true }))],
       [`mcp_servers.${SERVER}.command`]: process.execPath, [`mcp_servers.${SERVER}.args`]: [input.bridge.entrypoint],
       [`mcp_servers.${SERVER}.enabled`]: true, [`mcp_servers.${SERVER}.required`]: true,
-      [`mcp_servers.${SERVER}.env`]: this.bridgeEnvironment(input),
+      [`mcp_servers.${SERVER}.env`]: bridgeEnvironment(input),
     };
     for (const feature of DISABLED) config[`features.${feature}`] = false;
     for (const tool of toolCatalog(input.bridge.toolContractVersion).names) config[`mcp_servers.${SERVER}.tools.${tool}.approval_mode`] = "approve";
     return config;
-  }
-  private bridgeEnvironment(input: DirectorRunInput): Record<string, string> {
-    return { OPENSLATE_BRIDGE_ENDPOINT: input.bridge.endpoint, OPENSLATE_BRIDGE_PROJECT_ID: input.projectId,
-      OPENSLATE_BRIDGE_CREDENTIAL: input.bridge.credential,
-      ...(input.bridge.toolContractVersion ? { OPENSLATE_BRIDGE_TOOL_CONTRACT: input.bridge.toolContractVersion } : {}) };
   }
   private async preflight(transport: CodexTransport, input: DirectorRunInput, signal?: AbortSignal): Promise<void> {
     const config = object(object(await transport.request("config/read", { cwd: this.#options.cwd, includeLayers: false }, signal)).config);
@@ -318,7 +314,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     requireRuntime(enabled.length === 1 && enabled[0]![0] === SERVER, "RUNTIME_CATALOG_UNEXPECTED", "Unexpected enabled native MCP server");
     const bridge = object(enabled[0]![1]);
     requireRuntime(bridge.command === process.execPath && contains(bridge.args, [input.bridge.entrypoint]) && bridge.required === true &&
-      equal(bridge.env, this.bridgeEnvironment(input)) &&
+      equal(bridge.env, bridgeEnvironment(input)) &&
       toolCatalog(input.bridge.toolContractVersion).names.every(name => object(object(bridge.tools)[name]).approval_mode === "approve"),
     "RUNTIME_BRIDGE_MISMATCH", "Native bridge configuration differs from the fixed request binding");
     const policy = this.#options.policy;
