@@ -56,7 +56,9 @@ test('storyboard films refuse Claude on both selection routes before setup',asyn
 test('Claude supervisor saves final text, native ids, runtime binding, holds and live thread classification',async t=>{
   const f=await fixture(t);await f.director.configure(f.project.id,{mode:'claude',binaryPath:f.cli.binaryPath,model:'claude-sonnet-5-5'},'save');
   const turn=await f.run('Please direct my code film');assert.equal(turn.state,'completed',JSON.stringify(turn));assert.equal(turn.runtimeId,'claude-code');assert.equal(turn.dispatched,true);assert.equal(turn.nativeThreadId,'fixture-session');assert.equal(turn.nativeTurnId,'fixture-session');
-  const output=f.store.list('director_output',f.project.id).filter(row=>row.turnId===turn.id);assert.equal(output.at(-1).phase,'final');assert.equal(output.at(-1).text,'The film is ready for your next direction.');
+  const output=f.store.list('director_output',f.project.id).filter(row=>row.turnId===turn.id);
+  assert.deepEqual(output.map(row=>[row.phase,row.text]),[['commentary','I am reviewing the film.'],['final','The film is ready for your next direction.']]);
+  assert.equal(output.filter(row=>row.text==='The film is ready for your next direction.').length,1,'the final assistant block and result persist as one output');
   assert.equal(f.store.list('native_model_start',f.project.id).length,1);assert.deepEqual(f.plans.held,f.plans.released);
   const lock=f.store.list('director_skill_lock',f.project.id).at(-1).lock;assert.equal(lock.bindings.find(row=>row.kind==='runtime').id,'claude-code');assert.equal(lock.skills[0].packageDigest,CODE_PLAN_GUIDANCE_DIGEST);assert.equal(lock.compatibility.toolContract,'0.3.0');
   const sent=f.cli.records().find(row=>row.input).input;assert.equal(sent.message.content[0].text,'Please direct my code film');

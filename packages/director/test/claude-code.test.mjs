@@ -12,6 +12,10 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const waitFor = async (fn) => { for (let i=0;i<500;i++) { const value=fn(); if(value)return value; await delay(10); } throw new Error('Fixture did not reach its barrier'); };
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const promptFile = f => f.records().find(row=>row.systemPrompt)?.systemPrompt;
+const assistant = (...content) => ({ type: 'assistant', message: { content } });
+const textBlock = text => ({ type: 'text', text });
+const toolUse = id => ({ type: 'tool_use', id, name: 'mcp__openslate__read_film', input: { private: 'PRIVATE ARGUMENTS' } });
+const toolResult = id => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'PRIVATE TOOL RESULT' }] } });
 const assertPromptRemoved = f => {
   const prompt = promptFile(f); assert.ok(prompt, 'the fake CLI read the system prompt file');
   assert.equal(existsSync(prompt.path), false, 'the system prompt file was removed');
@@ -68,6 +72,58 @@ test('Claude starts with a 2 MiB context in the system prompt file instead of ar
   assert.ok(system.length>2*1024*1024);assert.ok(system.includes(Buffer.from(context)));
   assert.ok(system.subarray(-'IMMUTABLE SKILL TEXT'.length).equals(Buffer.from('IMMUTABLE SKILL TEXT')));
   assertPromptRemoved(f);
+});
+
+for (const [name, messages, expected] of [
+  ['text then tool then answer', [assistant(textBlock('Checking the film.'), toolUse('one')), toolResult('one'), assistant(textBlock('Final answer.'))],
+    [['commentary', 'Checking the film.'], ['final', 'Final answer.']]],
+  ['only the final answer', [assistant(textBlock('Final answer.'))], [['final', 'Final answer.']]],
+  ['different last assistant text', [assistant(textBlock('Checking the film.')), assistant(toolUse('one')), toolResult('one'), assistant(textBlock('Discard this draft.'))],
+    [['commentary', 'Checking the film.'], ['final', 'Final answer.']]],
+  ['multiple text blocks and tool rounds', [assistant(textBlock('First.'), textBlock('Second.')), assistant(toolUse('one')), toolResult('one'),
+    assistant(textBlock('Third.'), toolUse('two')), toolResult('two'), assistant(textBlock('Unsent draft.'), textBlock('Final answer.'))],
+    [['commentary', 'First.'], ['commentary', 'Second.'], ['commentary', 'Third.'], ['final', 'Final answer.']]],
+]) test(`Claude emits commentary only before tool use: ${name}`, async t => {
+  const f = fakeClaude(t, { messages, text: 'Final answer.' }), events = [];
+  const result = await f.runtime.start(f.input, { onEvent: event => events.push(event) });
+  assert.equal(result.status, 'completed', JSON.stringify(result)); assert.equal(result.text, 'Final answer.');
+  assert.deepEqual(events.filter(event => event.kind === 'assistant_message').map(event => [event.phase, event.text]), expected);
+  assert.ok(!JSON.stringify(events).includes('PRIVATE'));
+});
+
+for (const followedByTool of [false, true]) test(`Claude preserves buffered text and reasoning event order, tool follows: ${followedByTool}`, async t => {
+  const messages = [assistant(textBlock('Checking the film.'), { type: 'thinking', thinking: 'PRIVATE REASONING' }, { type: 'redacted_thinking', data: 'PRIVATE REASONING' })];
+  if (followedByTool) messages.push(assistant(toolUse('one')), toolResult('one'));
+  messages.push(assistant(textBlock('Final answer.')));
+  const f = fakeClaude(t, { messages, text: 'Final answer.' }), events = [];
+  const result = await f.runtime.start(f.input, { onEvent: event => events.push(event) });
+  assert.equal(result.status, 'completed', JSON.stringify(result));
+  assert.deepEqual(events.slice(2).map(event => event.kind === 'assistant_message' ? [event.phase, event.text] : [event.phase, event.state]), [
+    ...(followedByTool ? [['commentary', 'Checking the film.']] : []),
+    ['reasoning', 'started'], ['reasoning', 'completed'], ['reasoning', 'started'], ['reasoning', 'completed'],
+    ...(followedByTool ? [['tool', 'started'], ['tool', 'completed']] : []), ['final', 'Final answer.'],
+  ]);
+  assert.ok(!JSON.stringify(events).includes('PRIVATE'));
+});
+
+test('Claude does not publish pending answer text when the process exits without a result', async t => {
+  const f = fakeClaude(t, { messages: [assistant(textBlock('Unconfirmed answer.'))], omitResult: true }), events = [];
+  const result = await f.runtime.start(f.input, { onEvent: event => events.push(event) });
+  assert.equal(result.status, 'unknown', JSON.stringify(result)); assert.equal(result.error.code, 'CLAUDE_CODE_COMPLETION_UNKNOWN');
+  assert.equal(result.text, ''); assert.equal(result.dispatched, true);
+  assert.deepEqual(events.map(event => event.kind), ['runtime_started', 'turn_started']);
+  assert.equal(f.records().filter(row => row.argv?.includes('-p')).length, 1);
+});
+
+test('Claude redacts credentials in buffered commentary and the single final answer', async t => {
+  const f = fakeClaude(t), events = [], credential = f.input.bridge.credential;
+  f.update({ messages: [assistant(textBlock(`Checking ${credential}`)), assistant(toolUse('one')), toolResult('one'), assistant(textBlock(`Done ${credential}`))], text: `Done ${credential}` });
+  const result = await f.runtime.start(f.input, { onEvent: event => events.push(event) });
+  assert.equal(result.status, 'completed', JSON.stringify(result)); assert.equal(result.text, 'Done [redacted]');
+  assert.deepEqual(events.filter(event => event.kind === 'assistant_message').map(event => [event.phase, event.text]), [
+    ['commentary', 'Checking [redacted]'], ['final', 'Done [redacted]'],
+  ]);
+  assert.ok(!JSON.stringify(events).includes(credential));
 });
 
 test('planted personal instructions, hook and MCP configuration are excluded by the launch contract',async t=>{

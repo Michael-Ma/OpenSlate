@@ -133,6 +133,18 @@ export class ClaudeCodeDirectorRuntime implements DirectorRuntime {
       processChild.stdin.on("error", () => stop(new RuntimeFault("CLAUDE_CODE_INPUT_FAILED", "Claude Code could not receive this turn")));
       let streamBytes = 0, pending = 0, buffer = "", stderrTail = "", delivery = Promise.resolve();
       const decoder = new TextDecoder("utf-8", { fatal: true });
+      // Print mode repeats the terminal assistant text in result. Only a later tool_use
+      // establishes commentary. Hold intervening activity too, preserving event order.
+      let pendingAssistantEvents: DirectorRuntimeEvent[] = [];
+      const activity = async (phase: "reasoning" | "tool", state: "started" | "completed") => {
+        const event: DirectorRuntimeEvent = { ...base, kind: "activity", phase, state };
+        if (pendingAssistantEvents.length) pendingAssistantEvents.push(event);
+        else await emit(event);
+      };
+      const flushAssistant = async (beforeTool: boolean) => {
+        const events = pendingAssistantEvents; pendingAssistantEvents = [];
+        for (const event of events) if (beforeTool || event.kind !== "assistant_message") await emit(event);
+      };
       const message = async (raw: unknown) => {
         if (problem) return;
         const event = object(raw);
@@ -173,17 +185,19 @@ export class ClaudeCodeDirectorRuntime implements DirectorRuntime {
             const block = object(rawBlock);
             if (block.type === "text" && event.type === "assistant" && typeof block.text === "string") {
               if (/hit your limit|usage limit|not logged in|invalid api key/i.test(block.text)) throw reportedFailure(block.text);
-              await emit({ ...base, kind: "assistant_message", text: safeText(block.text), phase: "commentary" });
+              pendingAssistantEvents.push({ ...base, kind: "assistant_message", text: safeText(block.text), phase: "commentary" });
             } else if (block.type === "thinking" || block.type === "redacted_thinking") {
-              await emit({ ...base, kind: "activity", phase: "reasoning", state: "started" });
-              await emit({ ...base, kind: "activity", phase: "reasoning", state: "completed" });
+              await activity("reasoning", "started");
+              await activity("reasoning", "completed");
             } else if (block.type === "tool_use") {
               requireRuntime(toolCatalog(input.bridge.toolContractVersion).names.some(name => block.name === `mcp__openslate__${name}`), "CLAUDE_CODE_TOOLS_UNEXPECTED", "Claude Code attempted an unconfigured tool");
-              await emit({ ...base, kind: "activity", phase: "tool", state: "started" });
-            } else if (block.type === "tool_result") await emit({ ...base, kind: "activity", phase: "tool", state: "completed" });
+              await flushAssistant(true);
+              await activity("tool", "started");
+            } else if (block.type === "tool_result") await activity("tool", "completed");
           }
         } else if (event.type === "result") {
           requireRuntime(typeof event.result === "string", "CLAUDE_CODE_STREAM_INVALID", "Claude Code did not return final text");
+          await flushAssistant(false);
           text = safeText(event.result);
           await emit({ ...base, kind: "assistant_message", text, phase: "final" });
           result = { ...base, status: "completed", text, dispatched, nativeThreadId: nativeId!, nativeTurnId: nativeId! };
