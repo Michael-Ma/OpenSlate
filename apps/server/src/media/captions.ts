@@ -16,16 +16,56 @@ export interface FrozenCaption extends Caption { font: CaptionFont; sha256: stri
 export type FontLookup = (cjk: boolean) => CaptionFont | undefined;
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+type CaptionFontCatalog = Pick<typeof import("@napi-rs/canvas").GlobalFonts, "has" | "registerFromPath">;
+interface CaptionFontOptions { platform?: NodeJS.Platform; catalog?: CaptionFontCatalog; roots?: readonly string[] }
+const linuxCjkFonts = new WeakMap<CaptionFontCatalog, string | undefined>();
+
+// Keep this resolver identical to scripts/test-toolchain.mjs: the preflight cannot import the server build.
+function resolveCjkCaptionFont(catalog: CaptionFontCatalog, platform: NodeJS.Platform, roots: readonly string[]): { family: string; path?: string } | undefined {
+  const preferred = platform === "darwin" ? ["PingFang SC", "Hiragino Sans GB", "Heiti SC"]
+    : platform === "win32" ? ["Microsoft YaHei"] : ["Noto Sans CJK SC", "Noto Sans CJK", "Noto Sans SC"];
+  const family = preferred.find(name => catalog.has(name));
+  const registeredPath = linuxCjkFonts.get(catalog);
+  if (family) return family === "Noto Sans CJK SC" && registeredPath ? { family, path: registeredPath } : { family };
+  if (platform !== "linux") return undefined;
+  if (!linuxCjkFonts.has(catalog)) {
+    // Cache misses too: scanning and registration happen once per process's native catalog.
+    linuxCjkFonts.set(catalog, undefined);
+    let scanned = 0;
+    const candidates: string[] = [];
+    function scan(root: string, depth = 0): void {
+      if (depth > 5 || scanned >= 4000) return;
+      let entries; try { entries = readdirSync(root, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if (scanned >= 4000) break;
+        scanned++;
+        if (entry.isFile() && /^NotoSans(?:CJK|SC).*\.(ttc|otf|ttf)$/i.test(entry.name)) candidates.push(join(root, entry.name));
+        if (entry.isDirectory()) scan(join(root, entry.name), depth + 1);
+      }
+    }
+    for (const root of roots) scan(root);
+    candidates.sort((a, b) => Number(!/Regular\.(ttc|otf|ttf)$/i.test(a)) - Number(!/Regular\.(ttc|otf|ttf)$/i.test(b)) || a.localeCompare(b));
+    for (const path of candidates) {
+      try {
+        if (catalog.registerFromPath(path, "Noto Sans CJK SC")) { linuxCjkFonts.set(catalog, path); break; }
+      } catch { /* An unreadable or invalid font must not hide another usable candidate. */ }
+    }
+  }
+  const path = linuxCjkFonts.get(catalog);
+  return path ? { family: "Noto Sans CJK SC", path } : undefined;
+}
 
 /** System fonts only. Font paths stay on the host; receipts contain their family and readable file digest. */
-export const systemCaptionFont: FontLookup = cjk => {
-  const { GlobalFonts } = canvasApi();
-  const preferred = process.platform === "darwin" ? ["PingFang SC", "Hiragino Sans GB", "Heiti SC"]
-    : process.platform === "win32" ? ["Microsoft YaHei"] : ["Noto Sans CJK SC", "Noto Sans CJK", "Noto Sans SC"];
-  const family = [...preferred, ...(cjk ? [] : ["Arial", "DejaVu Sans", "Liberation Sans", "sans-serif"])].find(name => GlobalFonts.has(name));
+export function systemCaptionFont(cjk: boolean, { platform = process.platform, catalog, roots }: CaptionFontOptions = {}): CaptionFont | undefined {
+  catalog ??= canvasApi().GlobalFonts;
+  roots ??= platform === "darwin" ? ["/System/Library/Fonts", "/System/Library/Fonts/Supplemental", "/Library/Fonts"]
+    : platform === "win32" ? [join(process.env.WINDIR ?? "C:\\Windows", "Fonts")] : ["/usr/share/fonts", "/usr/local/share/fonts"];
+  const cjkFont = resolveCjkCaptionFont(catalog, platform, roots);
+  const family = cjkFont?.family ?? (cjk ? undefined : ["Arial", "DejaVu Sans", "Liberation Sans", "sans-serif"].find(name => catalog.has(name)));
   if (!family) return undefined;
-  const roots = process.platform === "darwin" ? ["/System/Library/Fonts", "/System/Library/Fonts/Supplemental", "/Library/Fonts"]
-    : process.platform === "win32" ? [join(process.env.WINDIR ?? "C:\\Windows", "Fonts")] : ["/usr/share/fonts", "/usr/local/share/fonts"];
+  if (cjkFont?.path) {
+    try { return { family, sha256: sha(readFileSync(cjkFont.path)) }; } catch { return { family }; }
+  }
   const compact = (s: string) => s.replace(/[^a-z]/gi, "").toLowerCase();
   const target = compact(family), aliases = family === "Microsoft YaHei" ? ["msyh"] : family === "Heiti SC" ? ["stheiti"]
     : family.startsWith("Noto Sans") ? ["notosanscjk", "notosanssc"] : [];
@@ -44,7 +84,7 @@ export const systemCaptionFont: FontLookup = cjk => {
     if (path) { try { return { family, sha256: sha(readFileSync(path)) }; } catch { break; } }
   }
   return { family };
-};
+}
 
 export function validateCaptions(value: unknown, totalFrames = 10800): Caption[] {
   invariant(Array.isArray(value) && value.length <= 64, "CODE_PLAN_RENDER_INPUT", "Use at most 64 captions");

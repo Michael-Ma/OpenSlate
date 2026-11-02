@@ -56,7 +56,7 @@ test('toolchain CJK preflight agrees with the caption renderer and fails clearly
   assert.throws(() => requireTestToolchain({ fontLookup: () => undefined }), /CJK caption font:.*unavailable.*apt-get install fonts-noto-cjk/);
   const linux = ['Noto Sans CJK SC', 'Noto Sans CJK', 'Noto Sans SC'];
   for (const family of linux) assert.equal(findCjkCaptionFont({ platform: 'linux', catalog: { has: name => name === family } }), family);
-  assert.equal(findCjkCaptionFont({ platform: 'linux', catalog: { has: name => name === 'DejaVu Sans' } }), undefined, 'Font fallback cannot masquerade as CJK support');
+  assert.equal(findCjkCaptionFont({ platform: 'linux', roots: [], catalog: { has: name => name === 'DejaVu Sans' } }), undefined, 'Font fallback cannot masquerade as CJK support');
 });
 
 test('same-version FFmpeg overrides missing AV1, HEVC or still-image demuxers fail before uploads run', () => {

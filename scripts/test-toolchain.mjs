@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -155,13 +155,44 @@ export function mediaDecodeSupport(path, profile, probe = probeCommand) {
 export function mediaConfigure(profile, platform = process.platform) {
   return [...profile.media.configure, ...(platform === "linux" ? profile.media.linuxConfigure ?? [] : [])];
 }
-// Use the same native catalog and accepted families as systemCaptionFont, without
-// requiring a server build. CI installs dependencies before this preflight.
-export function findCjkCaptionFont({ platform = process.platform, catalog } = {}) {
-  catalog ??= createRequire(join(repositoryRoot, "apps/server/package.json"))("@napi-rs/canvas").GlobalFonts;
+const linuxCjkFonts = new WeakMap();
+// Keep this resolver identical to apps/server/src/media/captions.ts: the preflight cannot import the server build.
+function resolveCjkCaptionFont(catalog, platform, roots) {
   const preferred = platform === "darwin" ? ["PingFang SC", "Hiragino Sans GB", "Heiti SC"]
     : platform === "win32" ? ["Microsoft YaHei"] : ["Noto Sans CJK SC", "Noto Sans CJK", "Noto Sans SC"];
-  return preferred.find((name) => catalog.has(name));
+  const family = preferred.find(name => catalog.has(name));
+  const registeredPath = linuxCjkFonts.get(catalog);
+  if (family) return family === "Noto Sans CJK SC" && registeredPath ? { family, path: registeredPath } : { family };
+  if (platform !== "linux") return undefined;
+  if (!linuxCjkFonts.has(catalog)) {
+    // Cache misses too: scanning and registration happen once per process's native catalog.
+    linuxCjkFonts.set(catalog, undefined);
+    let scanned = 0;
+    const candidates = [];
+    function scan(root, depth = 0) {
+      if (depth > 5 || scanned >= 4000) return;
+      let entries; try { entries = readdirSync(root, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if (scanned >= 4000) break;
+        scanned++;
+        if (entry.isFile() && /^NotoSans(?:CJK|SC).*\.(ttc|otf|ttf)$/i.test(entry.name)) candidates.push(join(root, entry.name));
+        if (entry.isDirectory()) scan(join(root, entry.name), depth + 1);
+      }
+    }
+    for (const root of roots) scan(root);
+    candidates.sort((a, b) => Number(!/Regular\.(ttc|otf|ttf)$/i.test(a)) - Number(!/Regular\.(ttc|otf|ttf)$/i.test(b)) || a.localeCompare(b));
+    for (const path of candidates) {
+      try {
+        if (catalog.registerFromPath(path, "Noto Sans CJK SC")) { linuxCjkFonts.set(catalog, path); break; }
+      } catch { /* An unreadable or invalid font must not hide another usable candidate. */ }
+    }
+  }
+  const path = linuxCjkFonts.get(catalog);
+  return path ? { family: "Noto Sans CJK SC", path } : undefined;
+}
+export function findCjkCaptionFont({ platform = process.platform, catalog, roots = ["/usr/share/fonts", "/usr/local/share/fonts"] } = {}) {
+  catalog ??= createRequire(join(repositoryRoot, "apps/server/package.json"))("@napi-rs/canvas").GlobalFonts;
+  return resolveCjkCaptionFont(catalog, platform, roots)?.family;
 }
 export function inspectTestToolchain({
   root = repositoryRoot,
