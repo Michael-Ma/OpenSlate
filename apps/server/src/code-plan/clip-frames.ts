@@ -4,11 +4,12 @@ import { copyFile, lstat, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { invariant } from "@openslate/core";
+import { DomainError, invariant } from "@openslate/core";
 import type { Store } from "../persistence/store.js";
 import type { ArtifactRecord } from "../execution/engine.js";
 import type { CodePlanStep } from "./records.js";
 import { runMediaProcess } from "../media/process.js";
+import { imageFormat, imageInputArgs } from "../media/image-input.js";
 import { codePlanArtifacts } from "./artifacts.js";
 
 export interface ClipFramesInput { artifactId: string; startFrame?: number; endFrame?: number; everyFrames?: number }
@@ -62,11 +63,24 @@ export async function readClipFrames(store: Store, projectId: string, input: Cli
     const hash = createHash("sha256");
     for await (const chunk of createReadStream(source, { signal })) hash.update(chunk);
     invariant(hash.digest("hex") === record.artifact.sha256, "ARTIFACT_CORRUPT", "Picture or video bytes differ from the owned artifact");
+    const run = (file: string, args: string[]) => runMediaProcess(file, args, { cwd: directory, signal, timeoutMs: 24_000, maxOutputBytes: 64 * 1024 });
     if (picture) {
       signal.throwIfAborted();
-      const image = await loadImage(await readFile(source)), width = image.width, height = image.height;
-      const ratio = Math.min(1, 1536 / Math.max(width, height));
-      const sheet = createCanvas(Math.max(1, Math.floor(width * ratio)), Math.max(1, Math.floor(height * ratio)));
+      const ffmpeg = options.ffmpegPath ?? mediaTool("ffmpeg"), target = join(directory, "picture.png");
+      let image: Awaited<ReturnType<typeof loadImage>>;
+      try {
+        const inputArgs = imageInputArgs(imageFormat(await readFile(source)));
+        const scale = "scale=w='max(1,floor(iw*min(1,1536/max(iw,ih))))':h='max(1,floor(ih*min(1,1536/max(iw,ih))))'";
+        // Canvas can mistake content credentials in a generated PNG for SVG. Decode only a fresh, plain PNG.
+        await run(ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", "-filter_threads", "1", ...inputArgs, "-i", source,
+          "-map", "0:v:0", "-map_metadata", "-1", "-frames:v", "1", "-vf", scale, "-threads", "1", "-c:v", "png", "-f", "image2", target]);
+        image = await loadImage(await readFile(target));
+      } catch (error) {
+        if (error instanceof DomainError && !["IMAGE_FORMAT_UNSUPPORTED", "MEDIA_TOOL_FAILED"].includes(error.code)) throw error;
+        throw new DomainError("CODE_PLAN_ARTIFACT_INVALID", "The picture could not be read");
+      }
+      const width = record.width ?? image.width, height = record.height ?? image.height;
+      const sheet = createCanvas(image.width, image.height);
       sheet.getContext("2d").drawImage(image, 0, 0, sheet.width, sheet.height);
       let jpeg = await sheet.encode("jpeg", 85);
       for (const quality of [65, 45, 25]) { if (jpeg.byteLength <= MAX_BYTES) break; jpeg = await sheet.encode("jpeg", quality); }
@@ -76,7 +90,6 @@ export async function readClipFrames(store: Store, projectId: string, input: Cli
         sheet: { sha256: createHash("sha256").update(jpeg).digest("hex"), byteLength: jpeg.byteLength } };
       return { metadata, content: [{ type: "text" as const, text: JSON.stringify(metadata) }, { type: "image" as const, mimeType: "image/jpeg" as const, data: jpeg.toString("base64") }] };
     }
-    const run = (file: string, args: string[]) => runMediaProcess(file, args, { cwd: directory, signal, timeoutMs: 24_000, maxOutputBytes: 64 * 1024 });
     const probe = JSON.parse(await run(options.ffprobePath ?? mediaTool("ffprobe"), ["-v", "error", ...inputOptions, "-show_entries", "stream=codec_type,width,height,duration:format=duration", "-of", "json", source])) as {
       streams?: { codec_type?: string; width?: number; height?: number; duration?: string }[]; format?: { duration?: string };
     };

@@ -26,13 +26,27 @@ import { createDirectorSkillLock, CODE_PLAN_GUIDANCE_DIGEST } from '../dist/appl
 import { readCodeFilm } from '../dist/code-plan/director.js';
 import { codePlanAssets } from '../dist/code-plan/assets.js';
 import { assertImageReferenceRecords } from '../dist/execution/codex-image-plan.js';
-import { realCodeFixture } from './code-plan-providers-fixture.mjs';
+import { realCodeFixture, imageSource } from './code-plan-providers-fixture.mjs';
+import { pngBytes } from './viggle-h3-execution-fixture.mjs';
+import { readClipFrames } from '../dist/code-plan/clip-frames.js';
 import { runMediaProcess } from '../dist/media/process.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const ffmpegPath = realpathSync(process.env.OPENSLATE_FFMPEG ?? '/opt/homebrew/bin/ffmpeg');
 const ffprobePath = realpathSync(process.env.OPENSLATE_FFPROBE ?? '/opt/homebrew/bin/ffprobe');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+function credentialedPng(png) {
+  assert.equal(png.toString('ascii',12,16),'IHDR');
+  const chunk=Buffer.alloc(22*1024+12);
+  chunk.writeUInt32BE(chunk.length-12);chunk.write('caBX',4);
+  // Synthetic metadata, not a signed credential. An embedded SVG marker trips canvas's source sniffing.
+  chunk.write('c2pa synthetic metadata <svg',8);
+  let crc=0xffffffff;
+  for(const byte of chunk.subarray(4,-4)) {crc^=byte;for(let bit=0;bit<8;bit++) crc=(crc>>>1)^((crc&1)?0xedb88320:0);}
+  chunk.writeUInt32BE((crc^0xffffffff)>>>0,chunk.length-4);
+  const afterHeader=8+12+png.readUInt32BE(8);
+  return Buffer.concat([png.subarray(0,afterHeader),chunk,png.subarray(afterHeader)]);
+}
 let mediaRoot, jpeg, noise;
 before(async () => {
   mediaRoot = mkdtempSync(join(tmpdir(), 'openslate-upload-input-'));
@@ -105,6 +119,59 @@ test('a later turn lists the upload, watches it without persisting image bytes, 
   await assert.rejects(calls.invoke(f.project.id,bridge.actor,'foreign','read_clip_frames',{artifactId:other.id}),error=>error.code==='CODE_PLAN_ARTIFACT_INVALID'&&/video or picture owned by this film/.test(error.message));
   const record=f.store.get('artifact',upload.artifact.artifactId);chmodSync(record.path,0o600);writeFileSync(record.path,Buffer.alloc(record.byteLength));
   await assert.rejects(calls.invoke(f.project.id,bridge.actor,'look','read_clip_frames',{artifactId:upload.artifact.artifactId,startFrame:999,endFrame:0,everyFrames:90}),{code:'ARTIFACT_CORRUPT'});
+});
+
+test('picture review decodes a PNG with a correct-CRC caBX chunk after IHDR and preserves stored dimensions',async t=>{
+  const f=await fixture(t), bytes=credentialedPng(pngBytes(3072,1536));
+  const original=f.add(bytes,{width:3072,height:1536,mimeType:'image/png'});
+  const before=f.store.db.prepare('SELECT count(*) AS n FROM entities WHERE project_id=?').get(f.project.id).n;
+  const result=await readClipFrames(f.store,f.project.id,{artifactId:original.id});
+  assert.deepEqual(result.content.map(block=>block.type),['text','image']);assert.equal(result.content[1].mimeType,'image/jpeg');
+  const metadata=JSON.parse(result.content[0].text), jpeg=Buffer.from(result.content[1].data,'base64'), image=await loadImage(jpeg);
+  assert.deepEqual(metadata,{artifactId:original.id,kind:'image',width:3072,height:1536,sheet:{sha256:hash(jpeg),byteLength:jpeg.length}});
+  assert.deepEqual([image.width,image.height],[1536,768]);assert.ok(jpeg.length<=1536*1024);
+  assert.deepEqual(readFileSync(original.path),bytes,'the owned source and its credentials stay intact');
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM entities WHERE project_id=?').get(f.project.id).n,before);
+});
+
+test('a generated Codex image step is readable through the tool and succeeded replay rebuilds its JPEG',async t=>{
+  const f=await realCodeFixture(t,{newFilm:true});f.png=credentialedPng(f.png);
+  await f.submit(imageSource);assert.equal((await f.finish()).state,'done');
+  const [step]=f.plans.steps(f.project.id);assert.equal(step.kind,'image');assert.equal(step.state,'succeeded');
+  const record=f.store.get('artifact',step.result.artifact.artifactId);
+  assert.equal(record.fixture,false);assert.ok(record.outputSpoolId);assert.equal(record.origin,undefined);
+  assert.deepEqual(readFileSync(record.path),f.png,'normal generated-image ingestion preserves the caBX chunk');
+  const human=f.service.beginRequest(f.project.id,'local-user','Inspect the generated picture',{editing:false});
+  const {actor}=f.service.openEpoch(f.project.id,human), calls=new ToolInvocationService(f.service);
+  const snapshotRoot=join(f.root,'skill-snapshots');
+  const {lock}=createDirectorSkillLock({repositoryRoot,snapshotRoot},'0.3.0');
+  try {
+    f.store.insert('director_skill_lock',lock.id,f.project.id,{id:lock.id,projectId:f.project.id,lock});
+    f.store.insert('director_epoch_lock',actor.epochId,f.project.id,{id:actor.epochId,epochId:actor.epochId,projectId:f.project.id,requestId:actor.requestId,lockId:lock.id});
+    const before=f.store.db.prepare('SELECT count(*) AS n FROM entities WHERE project_id=?').get(f.project.id).n;
+    const first=await calls.invoke(f.project.id,actor,'generated-look','read_clip_frames',{artifactId:record.id});
+    const [receipt]=f.store.list('tool_invocation',f.project.id);
+    assert.equal(receipt.state,'succeeded');assert.deepEqual(receipt.result,JSON.parse(first.content[0].text));
+    assert.ok(!('content' in receipt.result));assert.equal(first.content[1].mimeType,'image/jpeg');
+    const image=await loadImage(Buffer.from(first.content[1].data,'base64'));
+    assert.deepEqual([image.width,image.height],[record.width,record.height],'small generated pictures are not enlarged');
+    const replay=await new ToolInvocationService(f.service).invoke(f.project.id,actor,'generated-look','read_clip_frames',{artifactId:record.id});
+    assert.deepEqual(replay,first,'replay must recreate image bytes that were never persisted in the receipt');
+    assert.deepEqual(f.store.list('tool_invocation',f.project.id),[receipt]);
+    assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM entities WHERE project_id=?').get(f.project.id).n,before+1);
+    assert.equal(f.calls.start,1,'read and replay never generate another picture');
+  } finally { writable(snapshotRoot); } // The provider fixture's cleanup also needs to remove sealed skill snapshots.
+});
+
+const brokenPng=pngBytes();brokenPng.fill(0,41,brokenPng.length-12);
+for(const bytes of [Buffer.from('unreadable picture'),brokenPng]) test(`unreadable picture (${bytes.length} bytes) has a failed artifact-invalid tool receipt`,async t=>{
+  const f=await fixture(t), original=f.add(bytes), {bridge}=await f.turn();
+  const calls=new ToolInvocationService(f.service), input={artifactId:original.id};
+  await assert.rejects(calls.invoke(f.project.id,bridge.actor,'bad-picture','read_clip_frames',input),error=>error.code==='CODE_PLAN_ARTIFACT_INVALID'&&/picture could not be read/i.test(error.message));
+  const [receipt]=f.store.list('tool_invocation',f.project.id);
+  assert.equal(receipt.state,'failed');assert.equal(receipt.error.code,'CODE_PLAN_ARTIFACT_INVALID');
+  await assert.rejects(calls.invoke(f.project.id,bridge.actor,'bad-picture','read_clip_frames',input),{code:'CODE_PLAN_ARTIFACT_INVALID'});
+  assert.deepEqual(f.store.list('tool_invocation',f.project.id),[receipt]);
 });
 
 test('a real large PNG gets a validated reference before the first snapshot; later preparation is idempotent and Assets uses the original',async t=>{
