@@ -1,4 +1,4 @@
-import type { CodePlanDiff, CodePlanView } from "@openslate/core/public";
+import type { CodePlanDiff, CodePlanView, StudioArtifactRef } from "@openslate/core/public";
 import { invariant } from "@openslate/core";
 import type { ArtifactRef } from "@openslate/core";
 import type { CodePlanExecution } from "./execution.js";
@@ -7,7 +7,7 @@ import type { CodePlanChoice, CodePlanHold, CodePlanRun, CodePlanReview, CodePla
 import { codePlanCeiling } from "./settings.js";
 import { codePlanShotLinks } from "./projection.js";
 import type { CodePlanPoster } from "./posters.js";
-import { codePlanArtifacts, pictureSize } from "./artifacts.js";
+import { codePlanArtifacts, pictureSize, publicArtifact } from "./artifacts.js";
 import { codePlanFitWarning } from "./fit-warning.js";
 
 export const emptyDiff = (): CodePlanDiff => ({ reusedSteps: 0, newSteps: [], cancelledSteps: 0,
@@ -22,9 +22,30 @@ const mediaArtifact = (artifact: ArtifactRef) => {
 export function codePlanView(store: Store, execution: CodePlanExecution, projectId: string): CodePlanView {
   const run = store.get<CodePlanRun>("code_plan_run", projectId);
   const steps = store.list<CodePlanStep>("code_plan_step", projectId);
-  const choices = store.list<CodePlanChoice>("code_plan_choice", projectId), links = codePlanShotLinks(steps, choices, new Set(run?.reachedStepKeys));
+  const reached = new Set(run?.reachedStepKeys);
+  const choices = store.list<CodePlanChoice>("code_plan_choice", projectId), links = codePlanShotLinks(steps, choices, reached);
   const posters = new Map(store.list<CodePlanPoster>("code_plan_poster", projectId).map(row => [row.id, row.poster]));
   const media = codePlanArtifacts(store, projectId);
+  const keyframes = new Set(steps.filter(step => step.kind === "image" && links.has(step.key))
+    .flatMap(step => step.result?.ok ? [step.result.artifact, ...step.result.artifacts].map(ref => ref.artifactId) : []));
+  const originals = new Map(media.records.filter(record => record.projectId === projectId && record.artifact.kind === "image")
+    .flatMap(record => {
+      const reference = media.imageReferences.get(record.id);
+      return reference ? [[reference.id, record] as const] : [];
+    }));
+  const references: StudioArtifactRef[] = [], seen = new Set<string>();
+  // The journal is first-seen order; reached keys select only inputs used by the latest pass.
+  inputs: for (const step of steps) {
+    if (!reached.has(step.key) || step.kind !== "image" && step.kind !== "video") continue;
+    for (const input of [...(Array.isArray(step.input.references) ? step.input.references : []), step.input.firstFrame, step.input.lastFrame]) {
+      const record = media.find(input);
+      if (record?.artifact.kind !== "image" || keyframes.has(record.id)) continue;
+      const original = originals.get(record.id) ?? record;
+      if (keyframes.has(original.id) || seen.has(original.id)) continue;
+      seen.add(original.id); references.push(publicArtifact(original.artifact));
+      if (references.length === 24) break inputs;
+    }
+  }
   const sizes = new Map(media.records.filter(record => record.artifact.kind === "video" && media.posters.has(record.id))
     .map(record => [`video:${record.artifact.sha256}`, pictureSize(media.posters.get(record.id))]));
   const accounting = execution.accounting(projectId), attempts = execution.attempts(projectId);
@@ -34,6 +55,7 @@ export function codePlanView(store: Store, execution: CodePlanExecution, project
     held: store.list<CodePlanHold>("code_plan_hold", projectId).some(hold => !hold.released),
     ceilingMicros: codePlanCeiling(store, projectId), spentMicros: (accounting.charged + accounting.unknown).toString(), reservedMicros: accounting.inFlight.toString(),
     declarations: run?.declarations ?? { scenes: [], shots: [] },
+    ...(references.length ? { references } : {}),
     steps: steps.map(step => {
       const fitWarning = step.kind === "render" ? codePlanFitWarning(step.input, sizes) : undefined;
       return { key: step.key, kind: step.kind, state: step.state, model: String(step.input.model),
