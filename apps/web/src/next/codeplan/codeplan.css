@@ -228,6 +228,14 @@ dialog.cp-retry-dialog .foot{display:flex;gap:8px;justify-content:flex-end;margi
 
 /* Plan rows: the shot's frame beside its clip's still. Film rows: the clip's still opens the clip. */
 .cp-shot-media{display:flex;gap:6px;flex:none}
+.cp-ref-row{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px 14px}
+.plan .thumb.empty.cp-making{color:var(--text-2);gap:4px;align-content:center}
+.plan .thumb.empty.cp-making[data-making="making"]{background:var(--surface-stripe)}
+.plan .thumb.empty.cp-making .cp-spin{justify-self:center}
+.cp-shot-making{font-size:12px;color:var(--text-2);margin-bottom:3px}
+.cp-run-making{display:flex;align-items:center;gap:7px;padding:0;border:0;background:none;color:var(--text-2);font:inherit;text-align:left;cursor:pointer}
+.cp-run-making:hover span{color:var(--text);text-decoration:underline}
+.cp-run-making:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
 .cp-row.with-poster{grid-template-columns:auto auto minmax(0,1fr) auto auto}
 .cp-row-poster{position:relative;display:block;width:96px;aspect-ratio:16/9;padding:0;border:1px solid var(--hairline);border-radius:6px;overflow:hidden;background:#0b0c0d;cursor:zoom-in}
 .cp-row-poster .pic-img,.cp-row-poster .pic-note{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { numberLocale } from "../i18n/translate.ts";
-import { CEILING_PRESS, runStrip, TONE_CLASS, TONE_GLYPH } from "../model/code-plan.ts";
+import { CEILING_PRESS, makingNow, runStrip, TONE_CLASS, TONE_GLYPH } from "../model/code-plan.ts";
+import { labelList } from "../model/director.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
@@ -32,6 +33,9 @@ export function CodePlanRunStrip() {
     );
   }
   const strip = runStrip(view, numberLocale(locale));
+  const making = makingNow(view);
+  const makingText = making && (!making.items.length ? t("codeplan.making.only_queued", { count: making.queued })
+    : t(making.queued ? "codeplan.making.line_queued" : "codeplan.making.line", { items: labelList(making.items.map(tm), locale), count: making.queued }));
   return (
     <section className="cp-run" aria-label={t("codeplan.run.label")} data-state={view.state} data-held={strip.held ? "true" : undefined}>
       <div className="cp-run-top">
@@ -49,6 +53,12 @@ export function CodePlanRunStrip() {
         <i className="reserved" style={{ width: `${strip.meter.reserved * 100}%` }} />
       </div>
       {editing ? <LimitEditor view={view} onClose={() => setEditing(false)} /> : null}
+      {makingText ? (
+        <button type="button" className="cp-run-making" data-act="code-plan-show-making" title={t("codeplan.making.open")} onClick={() => store.setView("plan")}>
+          <i className="cp-spin" aria-hidden="true" />
+          <span>{makingText}</span>
+        </button>
+      ) : null}
       {strip.reviewingClips ? <p className="cp-run-note" role="status" data-act="code-plan-reviewing">{t("codeplan.run.reviewing", { count: strip.reviewingClips })}</p> : null}
       {strip.held ? <p className="cp-run-note" role="status" data-act="code-plan-held">{t("codeplan.run.held")}</p> : null}
       {strip.error !== null || view.state === "error" ? (

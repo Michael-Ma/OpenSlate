@@ -894,6 +894,8 @@ export interface CodePlanView {
   steps: CodePlanStepView[];
   /** Unanswered first, then answered, each in first-seen order. */
   choices: CodePlanChoiceView[];
+  /** Shared pictures the latest pass's steps take as references or start/end frames, first use first; no shot's own keyframe. An upload's smaller copy is reported as the upload. Absent on older servers. */
+  references?: StudioArtifactRef[];
   /** First seen first, latest pass only. Absent on older clients/fixtures. */
   reviews?: CodePlanReviewView[];
   /** Newest first, at most 50. */

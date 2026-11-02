@@ -482,6 +482,25 @@ export interface DeclaredShot {
   pictureStep: string | null;
   /** The shot's newest made clip, its step and, once it exists, the clip's still. */
   clip: { artifact: StudioArtifactRef; poster: StudioArtifactRef | null; stepKey: string } | null;
+  /** What the run is making for this shot now: its keyframe and its clip. */
+  making: { picture: Making | null; clip: Making | null };
+}
+
+/** A step the person is waiting for: being made, queued behind others, or held at the spend limit. */
+export interface Making {
+  state: "making" | "queued" | "budget";
+  /** Whole minutes since it was sent (making only). */
+  minutes: number;
+}
+
+/** A shared picture of the current plan: uploads, character sheets, empty sets; made, or on its way. */
+export interface DeclaredReference {
+  key: string;
+  /** The image step that makes it; null for an upload. */
+  stepKey: string | null;
+  label: string;
+  artifact: StudioArtifactRef | null;
+  making: Making | null;
 }
 
 export interface DeclaredScene {
@@ -496,6 +515,8 @@ export interface DeclaredPlan {
   scenes: DeclaredScene[];
   /** Shots that name no declared scene (or every shot, when the plan declares no scenes). */
   loose: DeclaredShot[];
+  /** The plan's shared pictures, made or on their way, in the order it asked for them. */
+  references: DeclaredReference[];
   shotCount: number;
   seconds: number;
 }
@@ -531,6 +552,42 @@ function bestPictures(view: CodePlanView, keyOf: (step: CodePlanStepView) => str
   return new Map([...best].map(([key, value]) => [key, value.artifact]));
 }
 
+/** A reached step still to come, or null once it is made, failed or no longer in the plan. */
+export function makingOf(step: CodePlanStepView, view: Pick<CodePlanView, "state">, now = Date.now()): Making | null {
+  if (!step.reached) return null;
+  if (step.state === "in_flight") return { state: "making", minutes: Math.max(0, Math.floor((now - Date.parse(step.updatedAt)) / 60000)) };
+  // Unsent work waits only while the run is still going; after an error or the end nothing will send it.
+  if (step.state === "absent" && view.state === "paused_budget") return { state: "budget", minutes: 0 };
+  if (step.state === "absent" && (view.state === "running" || view.state === "waiting" || view.state === "reviewing")) return { state: "queued", minutes: 0 };
+  return null;
+}
+
+/** The busiest of two: something being made says more than something queued. */
+const busier = (a: Making | null, b: Making | null): Making | null => (!a ? b : !b ? a : a.state === "making" ? a : b.state === "making" ? b : a);
+
+/** How a placeholder says it: making (with minutes, or slow), queued, or held at the limit. */
+export function makingMsg(making: Making): Msg {
+  if (making.state === "queued") return msg("codeplan.making.queued");
+  if (making.state === "budget") return msg("codeplan.step.budget");
+  if (making.minutes * 60000 >= SLOW_STEP_MS) return msg("codeplan.step.slow", { minutes: making.minutes });
+  return making.minutes ? msg("codeplan.making.minutes", { minutes: making.minutes }) : msg("codeplan.step.in_flight");
+}
+
+/** What the run is making now, by what each thing is for, and how many more wait their turn. Null when nothing is on its way. */
+export function makingNow(view: CodePlanView): { items: Msg[]; queued: number } | null {
+  const counts = { reference: 0, keyframe: 0, clip: 0, voice: 0, music: 0, render: 0 };
+  let queued = 0;
+  for (const step of view.steps) {
+    const making = makingOf(step, view);
+    if (!making || making.state === "budget") continue;
+    if (making.state === "queued") { queued += 1; continue; }
+    const role = step.kind === "image" ? (step.shotId ? "keyframe" : "reference") : step.kind === "video" ? "clip" : step.kind === "speech" ? "voice" : step.kind;
+    counts[role] += 1;
+  }
+  const items = (Object.keys(counts) as (keyof typeof counts)[]).filter((role) => counts[role] > 0).map((role) => msg(`codeplan.making.${role}`, { count: counts[role] }));
+  return items.length || queued ? { items, queued } : null;
+}
+
 /** Each shot's newest made clip. */
 function clipsByShot(view: CodePlanView): Map<string, NonNullable<DeclaredShot["clip"]>> {
   const newest = new Map<string, { clip: NonNullable<DeclaredShot["clip"]>; at: string }>();
@@ -546,6 +603,11 @@ function clipsByShot(view: CodePlanView): Map<string, NonNullable<DeclaredShot["
 export function declaredPlan(view: CodePlanView): DeclaredPlan {
   // Image steps carry their shot now; the prompt match keeps older plans working.
   const byShot = bestPictures(view, (step) => step.shotId ?? null), byPrompt = bestPictures(view, (step) => text(step.label, 200)), clips = clipsByShot(view);
+  const making = new Map<string, Making | null>();
+  for (const step of view.steps) {
+    const now = step.shotId && (step.kind === "image" || step.kind === "video") ? makingOf(step, view) : null;
+    if (now) making.set(`${step.shotId}:${step.kind}`, busier(making.get(`${step.shotId}:${step.kind}`) ?? null, now));
+  }
   const sceneRows = (Array.isArray(view.declarations?.scenes) ? view.declarations.scenes : []).filter(isObject).slice(0, 200);
   const shotRows = (Array.isArray(view.declarations?.shots) ? view.declarations.shots : []).filter(isObject).slice(0, 200);
   const scenes: DeclaredScene[] = sceneRows.map((row, index) => ({
@@ -577,12 +639,32 @@ export function declaredPlan(view: CodePlanView): DeclaredPlan {
       picture,
       pictureStep: picture ? view.steps.find((step) => step.artifact?.artifactId === picture.artifactId)?.key ?? null : null,
       clip: clips.get(key) ?? null,
+      making: { picture: making.get(`${key}:image`) ?? null, clip: making.get(`${key}:video`) ?? null },
     };
     seconds += shot.seconds ?? 0;
     if (scene) scene.shots.push(shot);
     else loose.push(shot);
   });
-  return { scenes, loose, shotCount: shotRows.length, seconds: Math.round(seconds * 10) / 10 };
+  // A shot's own picture is never also listed as shared, even when an older plan left it without a shot.
+  const shown = new Set([...scenes.flatMap((scene) => scene.shots), ...loose].flatMap((shot) => (shot.picture ? [shot.picture.artifactId] : [])));
+  // What the plan's steps take as references (the server knows their inputs), then shared pictures it makes now.
+  const references: DeclaredReference[] = [], listed = new Set<string>();
+  for (const value of Array.isArray(view.references) ? view.references.slice(0, 24) : []) {
+    const artifact = artifactRefOf(value);
+    if (!artifact || artifact.kind !== "image" || shown.has(artifact.artifactId) || listed.has(artifact.artifactId)) continue;
+    const step = view.steps.find((row) => row.artifact?.artifactId === artifact.artifactId);
+    listed.add(artifact.artifactId);
+    references.push({ key: artifact.artifactId, stepKey: step?.key ?? null, label: step ? text(step.label, 200) : "", artifact, making: null });
+  }
+  for (const step of view.steps) {
+    if (step.kind !== "image" || step.shotId || !step.reached) continue;
+    const artifact = step.state === "succeeded" ? artifactRefOf(step.artifact) : null;
+    const now = makingOf(step, view);
+    if (artifact ? shown.has(artifact.artifactId) || listed.has(artifact.artifactId) : !now) continue;
+    if (artifact) listed.add(artifact.artifactId);
+    references.push({ key: artifact?.artifactId ?? step.key, stepKey: step.key, label: text(step.label, 200), artifact, making: now });
+  }
+  return { scenes, loose, references, shotCount: shotRows.length, seconds: Math.round(seconds * 10) / 10 };
 }
 
 // ---- versions and their diffs (Code) ------------------------------------------------------
