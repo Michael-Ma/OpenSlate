@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { ClaudeCodeDirectorRuntime, setupLocalClaudeCode } from '../dist/index.js';
 import { toolCatalog } from '../../core/dist/index.js';
 import { fakeClaude } from './claude-code-helpers.mjs';
+import { realInitPlugins } from './claude-code-fixture.mjs';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const waitFor = async (fn) => { for (let i=0;i<500;i++) { const value=fn(); if(value)return value; await delay(10); } throw new Error('Fixture did not reach its barrier'); };
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -29,11 +30,12 @@ test('Claude print flags, canonical instructions, bounded pictures and the MCP-o
   const result = await f.runtime.start({...f.input, images:[{path,mediaType:'image/png',sha256:createHash('sha256').update(image).digest('hex')}]}, {onEvent:event=>events.push(event)});
   assert.equal(result.status,'completed',JSON.stringify(result)); assert.equal(result.dispatched,true);
   const launched=f.records().find(row=>row.argv?.includes('-p')), argv=launched.argv, value=flag=>argv[argv.indexOf(flag)+1];
-  for(const flag of ['--safe-mode','--restricted','--strict-mcp-config','--disable-slash-commands','--no-chrome','--no-session-persistence','--verbose'])assert.ok(argv.includes(flag));
+  for(const flag of ['--restricted','--strict-mcp-config','--disable-slash-commands','--no-chrome','--no-session-persistence','--verbose'])assert.ok(argv.includes(flag));
+  assert.ok(f.records().filter(row=>row.argv).every(row=>!row.argv.includes('--safe-mode')),'safe mode would disable the explicit MCP bridge');
   assert.equal(value('--input-format'),'stream-json');assert.equal(value('--output-format'),'stream-json');assert.equal(value('--tools'),'');assert.equal(value('--allowedTools'),'mcp__openslate__*');
   assert.equal(value('--model'),'claude-opus-5-5');assert.equal(value('--permission-mode'),'dontAsk');assert.equal(value('--permission-prompts'),'none');assert.equal(value('--setting-sources'),'');
-  assert.equal(JSON.parse(value('--settings')).disableAllHooks,true);assert.equal(argv.includes('--bare'),false,'bare deliberately disables subscription auth');
-  assert.equal(JSON.parse(value('--settings')).env.CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS,'1','safe mode alone retains built-in agents in 2.1.312');
+  assert.deepEqual(JSON.parse(value('--settings')),{disableAllHooks:true,enabledPlugins:{},env:{CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS:'1'}});assert.equal(argv.includes('--bare'),false,'bare deliberately disables subscription auth');
+  assert.equal(JSON.parse(value('--settings')).env.CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS,'1','built-in agents must still be explicitly disabled in 2.1.312');
   assert.equal(argv.includes('--system-prompt'),false);
   const prompt=promptFile(f);assert.ok(prompt);assert.equal(value('--system-prompt-file'),prompt.path);
   assert.equal(prompt.mode,0o600);assert.equal(prompt.directoryMode,0o700);
@@ -80,12 +82,42 @@ test('planted personal instructions, hook and MCP configuration are excluded by 
   assert.throws(()=>readFileSync(marker),{code:'ENOENT'});
 });
 
+for(const version of ['0.1.0','0.2.0','0.3.0'])test(`Claude replays the real builtin-plugin init with locked ${version} tools`,async t=>{
+  const tools=toolCatalog(version).names.map(name=>`mcp__openslate__${name}`);
+  if(version==='0.1.0')assert.deepEqual(tools,['mcp__openslate__read_film','mcp__openslate__submit_plan']);
+  const f=fakeClaude(t,{init:{tools,plugins:realInitPlugins,mcp_servers:[{name:'openslate',status:'connected',source:'dynamic'}],
+    skills:[],agents:[],slash_commands:[],apiKeySource:'none',output_style:'default'}}),events=[];
+  const result=await f.runtime.start({...f.input,bridge:{...f.input.bridge,toolContractVersion:version}},{onEvent:e=>events.push(e)});
+  assert.equal(result.status,'completed',JSON.stringify(result));assert.equal(result.dispatched,true);
+  assert.equal(events[0].kind,'runtime_started');assert.equal(events.at(-1).phase,'final');
+  assertPromptRemoved(f);
+});
+
+test('Claude still accepts an empty plugin inventory',async t=>{
+  const f=fakeClaude(t,{init:{plugins:[]}});
+  assert.equal((await f.runtime.start(f.input)).status,'completed');
+});
+
 for(const [name,init,code] of [
   ['built-in tool',{tools:[...toolCatalog('0.3.0').names.map(n=>`mcp__openslate__${n}`),'Bash']},'CLAUDE_CODE_TOOLS_UNEXPECTED'],
   ['missing tool',{tools:[]},'CLAUDE_CODE_TOOLS_UNEXPECTED'],
+  ['duplicate tool',{tools:[...toolCatalog('0.3.0').names.map(n=>`mcp__openslate__${n}`),'mcp__openslate__read_film']},'CLAUDE_CODE_TOOLS_UNEXPECTED'],
   ['user MCP',{mcp_servers:[{name:'personal',status:'connected'}]},'CLAUDE_CODE_MCP_UNEXPECTED'],
+  ['malformed MCP list',{mcp_servers:null},'CLAUDE_CODE_MCP_UNEXPECTED'],
+  ['missing bridge',{mcp_servers:[]},'CLAUDE_CODE_MCP_UNEXPECTED'],
+  ['disconnected bridge',{mcp_servers:[{name:'openslate',status:'failed',source:'dynamic'}]},'CLAUDE_CODE_MCP_UNEXPECTED'],
+  ['missing bridge status',{mcp_servers:[{name:'openslate',source:'dynamic'}]},'CLAUDE_CODE_MCP_UNEXPECTED'],
+  ['extra MCP server',{mcp_servers:[{name:'openslate',status:'connected',source:'dynamic'},{name:'personal',status:'connected'}]},'CLAUDE_CODE_MCP_UNEXPECTED'],
   ['user-scoped bridge',{mcp_servers:[{name:'openslate',status:'connected',source:'user'}]},'CLAUDE_CODE_MCP_UNEXPECTED'],
   ['skills',{skills:['personal']},'CLAUDE_CODE_CONFIG_UNEXPECTED'],['plugins',{plugins:[{name:'personal'}]},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
+  ...['user','project','./builtin','/tmp/builtin',null].map(path=>[`non-builtin plugin path ${path}`,{plugins:[{name:'personal',path,source:'personal@builtin'}]},'CLAUDE_CODE_CONFIG_UNEXPECTED']),
+  ...['personal@user','personal@builtin-extra','personal@BUILTIN',null,42].map(source=>[`non-builtin plugin source ${source}`,{plugins:[{name:'personal',path:'builtin',source}]},'CLAUDE_CODE_CONFIG_UNEXPECTED']),
+  ['missing plugin source',{plugins:[{name:'personal',path:'builtin'}]},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
+  ['mixed builtin and personal plugins',{plugins:[...realInitPlugins,{name:'personal',path:'user',source:'personal@builtin'}]},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
+  ['malformed plugin list',{plugins:null},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
+  ['malformed plugin entry',{plugins:[null]},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
+  ['plugin warnings',{plugin_warnings:['warning']},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
+  ['plugin errors',{plugin_errors:['error']},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
   ['agents',{agents:['personal']},'CLAUDE_CODE_CONFIG_UNEXPECTED'],['commands',{slash_commands:['personal']},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
   ['style',{output_style:'personal'},'CLAUDE_CODE_CONFIG_UNEXPECTED'],['model',{model:'wrong'},'CLAUDE_CODE_INIT_INVALID'],
   ['API key',{apiKeySource:'ANTHROPIC_API_KEY'},'CLAUDE_CODE_NOT_ON_PLAN'],['key helper',{apiKeySource:'apiKeyHelper'},'CLAUDE_CODE_NOT_ON_PLAN'],
@@ -93,6 +125,7 @@ for(const [name,init,code] of [
 ])test(`Claude init refuses ${name} before emitting native ids or activity`,async t=>{
   const f=fakeClaude(t,{init}),events=[];const result=await f.runtime.start(f.input,{onEvent:e=>events.push(e)});
   assert.equal(result.status,'failed',JSON.stringify(result));assert.equal(result.error.code,code);assert.equal(result.dispatched,true);assert.deepEqual(events,[]);
+  assert.equal(result.nativeThreadId,undefined);assert.equal(result.nativeTurnId,undefined);assertPromptRemoved(f);
 });
 
 for(const [scenario,code] of [['error','CLAUDE_CODE_FAILED'],['limit','CLAUDE_CODE_FAILED'],['usage','CLAUDE_CODE_USAGE_LIMIT'],['rate-limit','CLAUDE_CODE_USAGE_LIMIT'],['auth-before-init','CLAUDE_CODE_AUTH'],['stderr-auth','CLAUDE_CODE_AUTH'],['stderr-usage','CLAUDE_CODE_USAGE_LIMIT']])
@@ -139,20 +172,32 @@ test('Claude init timeout and failed event consumer cannot complete or open the 
   f.update({scenario:undefined});const failed=await f.runtime.start(f.input,{onEvent:()=>{throw new Error('PRIVATE CONSUMER');}});assert.equal(failed.error.code,'RUNTIME_EVENT_CONSUMER_FAILED');assert.equal(failed.status,'unknown');
 });
 
-for(const rejected of [false,true])test(`real MCP bridge ${rejected?'blocks rejected billing even when a tool races init':'opens only after init is verified'}`,async t=>{
+for(const [name,init,code] of [
+  ['opens only after init with builtin plugins is verified',undefined,undefined],
+  ['blocks rejected billing',{apiKeySource:'apiKeyHelper'},'CLAUDE_CODE_NOT_ON_PLAN'],
+  ['blocks non-builtin plugin paths',{plugins:[...realInitPlugins,{name:'personal',path:'user',source:'personal@builtin'}]},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
+  ['blocks non-builtin plugin sources',{plugins:[{name:'personal',path:'builtin',source:'personal@user'}]},'CLAUDE_CODE_CONFIG_UNEXPECTED'],
+  ['blocks a missing openslate server',{mcp_servers:[]},'CLAUDE_CODE_MCP_UNEXPECTED'],
+  ['blocks a disconnected openslate server',{mcp_servers:[{name:'openslate',status:'failed',source:'dynamic'}]},'CLAUDE_CODE_MCP_UNEXPECTED'],
+])test(`real MCP bridge ${name} even when a tool races init`,async t=>{
   let calls=0;
   const server=createServer(async(request,response)=>{calls++;response.writeHead(200,{'content-type':'application/json'});response.end(JSON.stringify({callId:'fixture-call',isError:false,value:{hello:'film'}}));});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
-  const f=fakeClaude(t,{realBridge:true,...(rejected?{init:{apiKeySource:'apiKeyHelper'}}:{})});
+  const f=fakeClaude(t,{realBridge:true,...(init?{init}:{})});
   const events=[], result=await f.runtime.start({...f.input,bridge:{...f.input.bridge,endpoint:`http://127.0.0.1:${server.address().port}`}},{onEvent:event=>events.push(event)});
-  assert.equal(result.status,rejected?'failed':'completed',JSON.stringify(result));assert.equal(calls,rejected?0:1);
-  if(rejected)assert.deepEqual(events,[]);else assert.ok(f.records().find(row=>row.called));
+  assert.equal(result.status,code?'failed':'completed',JSON.stringify(result));assert.equal(calls,code?0:1);
+  if(code){assert.equal(result.error.code,code);assert.deepEqual(events,[]);}else assert.ok(f.records().find(row=>row.called));
+  assertPromptRemoved(f);
 });
 
 test('Claude setup discovers the binary, pins version, checks plan login and never spends a turn',async t=>{
   const f=fakeClaude(t), setup=()=>setupLocalClaudeCode({binaryPath:f.binaryPath,model:'claude-sonnet-5-5'},{env:f.env});
   assert.equal((await setup()).status,'ready');assert.ok(f.records().every(row=>!row.argv.includes('-p')));
-  f.update({version:'9.9.9'});assert.deepEqual(await setup(),{status:'blocked',binaryPath:f.binaryPath,version:'9.9.9',reason:'Claude Code 2.1.312 is required'});
+  assert.ok(f.records().every(row=>!row.argv.includes('--safe-mode')));
+  f.update({version:'9.9.9'});assert.deepEqual(await setup(),{status:'blocked',binaryPath:f.binaryPath,version:'9.9.9',reason:'Claude Code 2.1.312 or a later 2.x is required'});
+  f.update({version:'2.1.311'});assert.equal((await setup()).status,'blocked','older than the tested version');
+  f.update({version:'2.3.0'});assert.equal((await setup()).status,'ready','a self-update within 2.x keeps working');
+  f.update({version:'2.1.312'});
   f.update({auth:{loggedIn:false}});assert.equal((await setup()).reason,'Sign in to Claude Code first');
   f.update({auth:{loggedIn:true,authMethod:'api_key',apiProvider:'firstParty',subscriptionType:'max'}});assert.match((await setup()).reason,/subscription/);
   f.update({noAuthStatus:true});assert.equal((await setup()).status,'unchecked');

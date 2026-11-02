@@ -4,6 +4,13 @@ import { homedir } from "node:os";
 import { object, requireRuntime, RuntimeFault } from "./validation.js";
 
 export const CLAUDE_CODE_VERSION = "2.1.312";
+/** Claude Code updates itself. Any 2.x from the tested version on is accepted; the init checks still hold each run to the isolation it needs. */
+export function supportedClaudeCodeVersion(version: unknown): boolean {
+  const parse = (value: string) => value.split(".").map(Number);
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) return false;
+  const [major, minor, patch] = parse(version), [baseMajor, baseMinor, basePatch] = parse(CLAUDE_CODE_VERSION);
+  return major === baseMajor && (minor! > baseMinor! || minor === baseMinor && patch! >= basePatch!);
+}
 export const CLAUDE_CODE_MODELS = Object.freeze([
   { id: "claude-opus-5-5", label: "Opus 5.5" }, { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
 ] as const);
@@ -19,8 +26,9 @@ export function claudeCodeEnvironment(source: Readonly<NodeJS.ProcessEnv> = proc
   requireRuntime(Object.values(env).every(value => !value.includes("\0")), "RUNTIME_CONFIG_INVALID", "Invalid local Claude environment");
   return env;
 }
-export const claudeIsolationArgs = () => ["--safe-mode", "--restricted", "--setting-sources", "", "--settings",
-  // 2.1.312's built-in agent loader retains general-purpose/Explore/Plan even in safe mode.
+export const claudeIsolationArgs = () => ["--restricted", "--setting-sources", "", "--settings",
+  // Safe mode disables even our explicit MCP bridge in 2.1.312; restricted mode keeps it.
+  // The built-in agent loader retains general-purpose/Explore/Plan unless disabled below.
   // Its noninteractive loader explicitly returns [] for this setting. Supply it as trusted
   // session settings, never inherited environment; the actual spawn env stays allow-listed.
   JSON.stringify({ disableAllHooks: true, enabledPlugins: {}, env: { CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1" } }),

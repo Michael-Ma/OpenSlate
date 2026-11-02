@@ -3,7 +3,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { isCodePlanToolContract, toolCatalog } from "@openslate/core";
 import { bridgeEnvironment } from "./bridge-environment.js";
-import { CLAUDE_CODE_MODELS, CLAUDE_CODE_VERSION, claudeCodeEnvironment, claudeCommand, claudeIsolationArgs, claudePlanLogin, spawnClaude, stopClaude } from "./claude-code-process.js";
+import { CLAUDE_CODE_MODELS, CLAUDE_CODE_VERSION, claudeCodeEnvironment, supportedClaudeCodeVersion, claudeCommand, claudeIsolationArgs, claudePlanLogin, spawnClaude, stopClaude } from "./claude-code-process.js";
 import type { ClaudeCodeModel } from "./claude-code-process.js";
 import { CODEX_MAX_RUN_TIMEOUT_MS, CODEX_RUNTIME_LIMITS } from "./policy.js";
 import { prepareDirectorImages } from "./images.js";
@@ -103,7 +103,7 @@ export class ClaudeCodeDirectorRuntime implements DirectorRuntime {
       }
       const system = [BASE, DEVELOPER + input.context, ...skills].join("\n\n");
       const version = await claudeCommand(config.command, ["--version"], this.#env, cancellation.signal, config.startupTimeoutMs ?? CODEX_RUNTIME_LIMITS.startupTimeoutMs);
-      requireRuntime(version.code === 0 && version.stdout.trim() === `${CLAUDE_CODE_VERSION} (Claude Code)`, "CLAUDE_CODE_VERSION_MISMATCH", `Claude Code ${CLAUDE_CODE_VERSION} is required`);
+      requireRuntime(version.code === 0 && supportedClaudeCodeVersion(/^(\S+) \(Claude Code\)$/.exec(version.stdout.trim())?.[1]), "CLAUDE_CODE_VERSION_MISMATCH", `Claude Code ${CLAUDE_CODE_VERSION} or a later 2.x is required`);
       // 'none' in init means no API key, not positive proof of a paid subscription.
       // Check the local login on every turn as well, so cached setup cannot lend stale billing evidence.
       const login = await claudeCommand(config.command, [...claudeIsolationArgs(), "auth", "status", "--json"], this.#env, cancellation.signal,
@@ -146,10 +146,13 @@ export class ClaudeCodeDirectorRuntime implements DirectorRuntime {
           requireRuntime(Array.isArray(servers) && servers.length === 1 && object(servers[0]).name === "openslate" && object(servers[0]).status === "connected"
             && (object(servers[0]).source === undefined || ["dynamic", "sdk"].includes(String(object(servers[0]).source))),
             "CLAUDE_CODE_MCP_UNEXPECTED", "Claude Code loaded an unexpected MCP configuration");
-          requireRuntime(["skills", "plugins", "agents", "slash_commands"].every(key => Array.isArray(event[key]) && event[key].length === 0)
+          requireRuntime(Array.isArray(event.plugins) && event.plugins.every(raw => {
+            const plugin = object(raw);
+            return plugin.path === "builtin" && typeof plugin.source === "string" && plugin.source.endsWith("@builtin");
+          }) && ["skills", "agents", "slash_commands"].every(key => Array.isArray(event[key]) && event[key].length === 0)
             && ["plugin_errors", "plugin_warnings"].every(key => event[key] === undefined || Array.isArray(event[key]) && event[key].length === 0)
             && ["default", "normal"].includes(String(event.output_style)), "CLAUDE_CODE_CONFIG_UNEXPECTED", "Claude Code loaded unexpected skills, plugins, commands, agents or output styles");
-          requireRuntime(event.claude_code_version === CLAUDE_CODE_VERSION && event.cwd === cwd && event.model === (config.model ?? "claude-opus-5-5") && event.permissionMode === "dontAsk",
+          requireRuntime(supportedClaudeCodeVersion(event.claude_code_version) && event.cwd === cwd && event.model === (config.model ?? "claude-opus-5-5") && event.permissionMode === "dontAsk",
             "CLAUDE_CODE_INIT_INVALID", "Claude Code launch configuration differs from the selected runtime");
           nativeId = event.session_id; initialized = true; clearTimeout(startupTimer);
           await emit({ ...base, kind: "runtime_started", nativeThreadId: nativeId });
