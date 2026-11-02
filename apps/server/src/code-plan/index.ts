@@ -535,6 +535,16 @@ export class CodePlanRuntime implements CodePlanPort {
     let outcome: SandboxResult;
     try {
       outcome = await runSandbox({ source, filmQualityEnabled, now: clock?.now ?? run?.now ?? Date.now(), seed: clock?.seed ?? run?.seed ?? 1, limits: this.limits, call });
+      // Publish what the sandbox reached before a long submission hides it.
+      // Without submissions, pass() can write its final state immediately.
+      if (!dry && submissions.length) {
+        const current = this.getRun(projectId);
+        if (current && current.planVersion === run?.planVersion) {
+          this.store.put("code_plan_run", projectId, projectId, { ...current, state: "running", error: null,
+            reachedStepKeys: [...reached], reviewKeys, declarations, logs });
+          this.changed(projectId);
+        }
+      }
       const settled = await Promise.allSettled(submissions);
       const rejected = settled.find(result => result.status === "rejected");
       if (rejected?.status === "rejected") outcome = { state: "error", error: errorView(rejected.reason) };
