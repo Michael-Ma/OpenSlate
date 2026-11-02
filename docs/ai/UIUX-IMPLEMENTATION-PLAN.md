@@ -1,5 +1,7 @@
 # OpenSlate UI/UX 改造实施计划
 
+> Historical design/audit record. Statements about rollout, versions and pending work describe this document's original checkpoint. Use [current status](../implementation/STATUS.md) and the technical references for today's implementation; linked decisions and evidence are retained.
+
 - 状态：草案，等你确认。没有改动任何产品代码。
 - 基线：`main` 2c4b6e3（2026-10-09）。
 - 目标设计：[The Last Ferry 原型](prototypes/last-ferry/last-ferry.html)，见 [DESIGN.md](prototypes/last-ferry/DESIGN.md)。布局取自你的第一张参考图，组件和配色取自第二张。

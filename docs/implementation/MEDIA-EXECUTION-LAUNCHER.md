@@ -1,6 +1,6 @@
 # Provider activation
 
-Host enablement chooses which compiled-in routes the local service can execute. A key, catalog row or browser model selection cannot enable a route. Enablement itself starts no generation. The human starts scoped work in the app, and current request authority, pause/hold controls and the applicable exact returned-frame/video review remain enforced; there is no separate usage allowance or spending approval.
+Host enablement chooses which compiled-in routes the local service can execute. Configured credentials normally enable their built-in routes; explicit `0` switches disable them. A catalog row or browser selection alone cannot enable a route. Enablement itself starts no generation. The human starts scoped work in the app, and current request authority, pause/hold controls and the applicable exact returned-frame/video review remain enforced; there is no separate usage allowance or spending approval.
 
 | Route | Enable variable | Credentials/setup |
 |---|---|---|
@@ -9,9 +9,12 @@ Host enablement chooses which compiled-in routes the local service can execute. 
 | Viggle H3 | `OPENSLATE_ENABLE_VIGGLE_H3_GENERATION=1` | Viggle key; `OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS` |
 | Direct MiniMax H3 | `OPENSLATE_ENABLE_H3_GENERATION=1` | MiniMax key; `OPENSLATE_H3_DOWNLOAD_HOSTS` |
 | OpenAI speech | `OPENSLATE_ENABLE_SPEECH_GENERATION=1` | OpenAI media key |
+| Lyria music | `OPENSLATE_ENABLE_MUSIC_GENERATION` | `OPENSLATE_GEMINI_API_KEY`; default built-in music profile |
+| Seedance (code films) | `OPENSLATE_ENABLE_SEEDANCE_GENERATION` | `OPENSLATE_MODELARK_API_KEY`; installed profiles |
+| fal video (code films) | `OPENSLATE_ENABLE_FAL_VIDEO_GENERATION` | `OPENSLATE_FAL_API_KEY`; installed profiles |
 | OpenAI transcription | `OPENSLATE_ENABLE_TRANSCRIPTION=1` | OpenAI media key |
 
-Switches accept only `0`/`1` (unset is off). FFmpeg/ffprobe are required for enabled media execution. Download allowlists contain exact trusted HTTPS hostnames separated by commas, without scheme/path/wildcards. An output-host error after video creation should recover the known job after correcting the allowlist and restarting; do not create a replacement.
+Switches accept `0`/`1`; unset values follow configured credential/runtime defaults. FFmpeg/ffprobe are required for enabled media execution. Download allowlists contain exact trusted HTTPS hostnames separated by commas, without scheme/path/wildcards. An output-host error after video creation should recover the known job after correcting the allowlist and restarting; do not create a replacement.
 
 Use [local setup](LOCAL-SETUP.md), choose an explicit [provider catalog](PROVIDER-CATALOG.md), then restart with `./start.sh --restart`. The server composes registered adapters, durable receipts/spooling, media ingestion, configured external admission and local assembly. A catalog readiness view reports local prerequisites; it never verifies media access/quota or starts an API request.
 
@@ -22,3 +25,5 @@ Projects retain saved profile/assembly definitions. Current model preview/apply 
 Media routes use backend-only credential aliases. Codex conversation setup and the Codex image account are distinct. There is no automatic switch between Codex subscription usage and API billing, or another provider fallback.
 
 Source: `apps/server/src/application/media-execution-config.ts`, `media-execution-runtime.ts`, `provider-credentials.ts`; server bootstrap. Tests cover malformed config, prerequisites, fixed routing, exact admission and zero dispatch on missing authority. Real media acceptance is recorded separately in [status](STATUS.md) and [human testing](MANUAL-LIVE-PRODUCTION.md).
+
+Codex images pin 0.162.1 independently of the Director selection. Download host overrides and additional code-film profiles are detailed in [providers/artifacts](../technical/PROVIDERS-ARTIFACTS.md). Optional `OPENSLATE_CLAUDE_BINARY` configures the code-film Director, not a media adapter.

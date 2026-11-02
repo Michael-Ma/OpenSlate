@@ -4,11 +4,11 @@ V0 is a source-checkout application for one user/computer. The launcher starts a
 
 ## Local operation
 
-Use Node 24 and pnpm 10.33.0. Run `./start.sh`, `--status`, `--restart`, `--doctor` or `--init-config` from the repository. The launcher loads private `.env.live.local`, with exported variables taking precedence, and preserves existing configuration/data. A verified running instance reconnects; changed builds/configuration need a restart.
+Startup supports Node 24; development/CI uses Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1. Run `pnpm install --frozen-lockfile`, `pnpm setup:test-media` and `pnpm check:toolchain`. Run `./start.sh`, `--status`, `--restart`, `--doctor` or `--init-config` from the repository. The launcher loads private `.env.live.local`, with exported variables taking precedence, and preserves existing configuration/data. A verified running instance reconnects; changed builds/configuration need a restart.
 
 Use one explicit `OPENSLATE_DATA_DIR` across start/development modes. Keep it outside `apps/web/dist`. Private pairing/token and provider credentials are different: normal launch uses a short-lived code/HttpOnly session; provider keys stay in the backend.
 
-FFmpeg/ffprobe enable media import/export. Native director/image setup requires the exact supported Codex version/configuration. Readiness checks can verify local tools/credential presence without making provider calls; actual account access and media generation require separate live evidence.
+FFmpeg/ffprobe enable media import/export. Native Codex Director/image setup pins 0.162.1; Director defaults to gpt-6.1-sol and the image worker uses gpt-6-astra. Optional Claude Code 2.1.312 or later 2.x directs code films on the user’s Claude plan; it does not replace media credentials. Readiness checks can verify local tools/credential presence without making provider calls; actual account access and media generation require separate live evidence.
 
 ## Checks
 
@@ -28,9 +28,9 @@ The browser-only `?fixture=last-ferry` sample uses its own simulated transport; 
 
 Tests bind loopback and use temporary databases/media. Optional native probes are separate from paid model turns. Real media experiments must identify their explicitly authorized scope and exact job/attempt outcomes; unknown dispatch is reconciled before any retry. The studio has no separate usage-allowance or API-key approval step.
 
-`demo:code` always creates and removes its own temporary directory. It uses Fastify HTTP injection with real session pairing, CSRF and command keys; it opens no listener, reads no private configuration and does not use `.openslate/` or port 3001. It advances the normal Director/engine/code-plan tick functions directly, with no scheduler sleeps. Its separate durable fake-vendor database provides a test-only lookup oracle for an accepted job whose POST reply was lost. Repeated unknown lookups never authorize another submit. The reported $0.36 / $1.00 uses explicit fixture prices, and the final MP4 is labeled placeholder media from the fixture renderer; this does not prove FFmpeg assembly or real-provider output quality.
+`demo:code` always creates and removes its own temporary directory. It uses Fastify HTTP injection with real session pairing, CSRF and command keys; it opens no listener, reads no private configuration and does not use `.openslate/` or port 3001. It advances the normal Director/engine/code-plan tick functions directly, with no scheduler sleeps. Its separate durable fake-vendor database provides a test-only lookup oracle for an accepted job whose POST reply was lost. Repeated unknown lookups never authorize another submit. The demo uses explicit fixture prices and a fixture ceiling; its reported dollars are not a new-film default or vendor bill, and the final MP4 is labeled placeholder media from the fixture renderer; this does not prove FFmpeg assembly or real-provider output quality.
 
-The motion edit eventually reuses seven steps and adds one video plus one render. Its stored dry-run receipt reports what the dry run reaches (seven reused steps and one new video, `dependsOnPending: true`): the example runs its shots as concurrent pipelines, so only the render waits for the new clip result. The demo prints both observations. The card's request for a complete two-step forecast in that immediate receipt remains a lead-owned preview-contract decision; see the [P2c report](../ai/code-plan/reports/P2c-report.md).
+The current demo reports four reused steps plus a new video/render for its motion edit; the saved dry run reports three reused steps and one new video, because the render is reached only after that pending clip resolves. Its November 2 run finished versions 1 → 2 → 3 → 4, answered two choices, recovered one lost reply by lookup, made zero duplicate submissions and ended at $0.40 / $4.00 in fixture accounting. These are this example's observed results, not invariant totals for arbitrary plans. The [P2c report](../ai/code-plan/reports/P2c-report.md) retains the earlier example and preview discussion as historical evidence.
 
 ## Recovery and evidence
 

@@ -4,9 +4,9 @@ OpenSlate separates instruction content, validated tool contracts and provider e
 
 ## Locked instruction packages
 
-The two production packages are `production` and `plan-authoring`. Each declares an entry, reference files, compatibility and required tools. The loader verifies bounded regular files, UTF-8, links, manifest declarations and hashes, then preserves immutable snapshots. The project lock binds instruction bytes, tool catalog/handlers, workflow recipe, stage checks and runtime identity.
+The core storyboard packages are `production` and `plan-authoring`; routed releases also lock craft/type/format packages. Each declares an entry, reference files, compatibility and required tools. The loader verifies bounded regular files, UTF-8, links, manifest declarations and hashes, then preserves immutable snapshots. The project lock binds instruction bytes, tool catalog/handlers, workflow recipe, stage checks and runtime identity.
 
-Legacy `skills/`, `skills/v2`, `skills/v3` and `skills/v4` are runtime compatibility inputs. Do not edit/delete old versions during prose cleanup. Current `skills/v5` has package version `5.0.0` and retains the `4.0.0` JSON tool contract. It describes configured-provider scene generation and requested audio without usage-approval steps. Package-content successors preserve historical digests instead of rewriting frozen snapshots.
+Legacy `skills/`, `skills/v2`, `skills/v3` and `skills/v4` are runtime compatibility inputs. Do not edit/delete old versions during prose cleanup. Historical `skills/v5` has package version `5.0.0` and retains the `4.0.0` JSON tool contract. It describes configured-provider scene generation and requested audio without usage-approval steps. Package-content successors preserve historical digests instead of rewriting frozen snapshots.
 
 ## Guidance releases (v8 and later)
 
@@ -34,39 +34,27 @@ Release 8.1.0 was generated with `pnpm skills:draft`, edits in `skills/next`, th
 
 Parallel authors each work in their own worktree on `skills/next`. Whoever merges second drafts from the merged latest row, reapplies edits and re-runs `skills:release`, producing a fresh successor instead of colliding with the first release. See [the authoring workflow](../../skills/README.md#author-and-release-guidance) for command details and recovery after an interrupted command.
 
-## Experimental code mode
+## Code-plan mode
 
-`skills/code-plan` is a separate schema 1 instruction package, version `2.0.0`, outside the `skills/v<N>...` release automation.
-Its content digest is pinned as `CODE_PLAN_GUIDANCE_DIGEST`. Its environment binds only the selected runtime and independent
-`code-plan-tools@2` catalog handler; graph recipes, stages, routed releases and graph upgrade targets are not part of this lock.
-The loader accepts bounded non-executable `.ts` references under `references/`, including `studio.d.ts` and `example-plan.ts`.
-They are verified and injected as text, never evaluated by the instruction loader.
+`skills/code-plan` is a separate schema 1 instruction package, version **2.0.0**, with its own **0.3.0** catalog and **`code-plan-tools@3`** handler. It is outside the storyboard release automation. `CODE_PLAN_GUIDANCE_DIGEST` pins its exact bytes; verified references include `studio.d.ts`, the example and film-craft guidance. They are injected as text. The instruction loader never evaluates them; the submitted program runs later in the isolated replay sandbox.
 
-Code contracts `0.1.0` and `0.2.0` are deliberately absent from `SUPPORTED_TOOL_CONTRACTS` and `RELEASED_TOOL_CONTRACTS`; graph-version
-comparisons return false for code mode. Existing graph descriptor bytes and digests remain unchanged.
+Code contracts 0.1.0, 0.2.0 and 0.3.0 are separate from `SUPPORTED_TOOL_CONTRACTS` / `RELEASED_TOOL_CONTRACTS` for storyboard tools. Archived `skills/code-plan-v1` and `skills/code-plan-v2` preserve the older packages. Bound epochs retain their catalog; compatible fresh turns can refresh current-contract guidance without rewriting old journal results or granting media authority.
 
 | Code-only tool | Responsibility |
 |---|---|
-| `read_film {}` | Return `CodePlanView` plus `source: string \| null` for its current version |
-| `submit_plan {source, basedOnVersion, summary}` | Submit the complete program as author `director`, using the durable invocation ID; return `{version, diff}` |
-| `set_spend_limit {ceilingMicros, quote}` | 0.2.0: raise or lower this film's limit using quoted human consent; return view and receipt |
-| `retry_step {stepKey, quote}` | 0.2.0: schedule another attempt for a reached retryable failure, retaining earlier liability; return view and receipt |
+| `read_film {}` | Current source/view, current choices, model capabilities/prices, measured outputs and reusable uploaded pictures |
+| `submit_plan {source, basedOnVersion, summary}` | Complete program, durable invocation ID and Director author; dry-run validation, fenced publication and `{version, diff}` |
+| `set_spend_limit {ceilingMicros, quote}` | 0.2.0+: raise/lower this film's limit with original-message human consent and a retained receipt |
+| `retry_step {stepKey, quote}` | 0.2.0+: consent retry of a reached retryable failure, retaining all earlier liability |
+| `read_clip_frames {artifactId, startFrame?, endFrame?, everyFrames?}` | 0.3.0: free read-only bounded video contact sheet/motion measures or one owned picture; no media step consumed |
 
-New code-film locks use `0.2.0`. Existing `0.1.0` locks retain the exact two-tool catalog, `code-plan-tools@1` handler and original package digest; `skills/code-plan-v1` archives the immutable package for runtime-selection changes or snapshot recreation. Code-film settings report the saved catalog instead of silently upgrading it. Graph descriptor bytes/digests are unchanged.
+Limit/retry consent requires an editable epoch begun by the person's own message. A nonempty whitespace-normalized quote must be a substring of that original message; repair/review/application turns cannot borrow consent. Lowering below charged + unknown + in-flight liability fails with component amounts. Lost replies reconcile receipts without repeating effects. Positive-price dispatch can wait on a request-specific hold; each terminal turn closes only its own hold. The new-film ceiling is $4 unless a saved film/preference overrides it; estimates are separate from bills.
 
-The two new tools require an active editable epoch in a turn started by the person's own message. The nonempty quote must be a whitespace-normalized substring of that original message; automatic repair/failure turns and wrong quotes return CODE_PLAN_PERSON_CONSENT_REQUIRED or CODE_PLAN_CONSENT_QUOTE. There is no chat-specific spend cap; ordinary nonnegative SQLite integer money bounds still apply. A limit below existing liability is refused with the component numbers. Accepted changes persist a domain receipt and a Director thread message; lost tool replies reconcile the receipt without reapplying the mutation. A request-specific hold can defer actual retry dispatch until the turn ends. Programs only have ctx: they can ask a cost-bearing retry/skip choice, then repeat a media call with a stable variant, and cannot invoke retry_step.
+Programs receive bounded `ctx` operations: scene/shot declarations, shared images, confirmed keyframes, video, speech, music, render, choose, review and log. `ctx.keyframe` waits for the declared shot's exact video-input choice; new declared-shot clips need it, while dispatched historical clips replay. `ctx.review` pauses for bounded Director frame inspection. Sound is not supplied to the Director. Image references/aspect ratios and render edits are specified in the [plan API](../../skills/code-plan/references/studio.d.ts).
 
-Guidance explains failures in plain words, possible spending and safe/consent/none retry meaning. It shows the in-program choice/variant pattern and vertical aspectRatio use. Automatic safe retries are bounded at two per step and survive restart. Unresolved submissions are never blindly retried.
+Choice identity hashes id/options; media identity hashes normalized effective inputs. Changed dependencies retire exactly the choices no longer reached by the latest completed pass. Saved rows retain `askedAt`, answer and pictures; `read_film` omits stale rows, and a new answer to one fails with `CODE_PLAN_CHOICE_STALE`. Identical reached inputs can restore the saved answer. A failed/incomplete pass does not retire the previous choices.
 
-Source is limited to 256 KiB of UTF-8 and summary to 500 characters. `basedOnVersion` is the current integer version, or null
-before the first plan. `CODE_PLAN_REJECTED` retains `details.diff` through transport/refusal replay; stale versions return
-`REVISION_CONFLICT`. Submission recovery uses the port's same-ID replay guarantee. The host-scoped port registration also
-serves fake Director and supervisor tool services constructed without options.
-
-The package documents every `ctx` call, replay by media input identity, deliberate duplicate `variant`s, stable choice IDs,
-unchanged prompt bytes, awaited effects, failure-result branches, and the absence of secrets, paths and external capabilities.
-It describes installed real models and measured local rendering, with explicit fake models/rendering for demo projects. See the
-[code-plan design](../ai/code-plan/DESIGN.md) and [Director runtime](DIRECTOR-RUNTIME.md#experimental-code-plan-director).
+Source is at most 256 KiB UTF-8; summary at most 500 characters. `basedOnVersion` must match the current integer version, or null before the first plan. Rejection preserves `details.diff`; stale publication returns `REVISION_CONFLICT`. Same invocation recovery never repeats a model turn or media submission. Two automatic safe retries require definitive no-submit evidence; uncertain work retains liability. See [execution](EXECUTION-ENGINE.md#code-plans-experimental) and [runtime](DIRECTOR-RUNTIME.md#code-plan-director).
 
 ## Model-facing tools
 

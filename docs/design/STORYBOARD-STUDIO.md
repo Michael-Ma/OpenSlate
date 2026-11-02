@@ -1,5 +1,7 @@
 # Storyboard studio
 
+This guide covers storyboard films. For code films, confirmed keyframes, choice retirement, reference/progress views and Claude Code selection see the [UI reference](../technical/REVIEW-UI.md#code-plan-films-experiment) and [owner tests](../ai/code-plan/TEST-INSTRUCTIONS.md).
+
 The studio in `apps/web/src/next` is the only web UI. It follows the [Last Ferry design](../ai/prototypes/last-ferry/DESIGN.md): a dark workspace, local Inter, a Director column and **Plan / Keyframes / Assets / Film**. Start and Settings are separate views. The previous [Day/Night design](OPENSLATE-LIGHT.md) is historical.
 
 ## Film flow

@@ -1,27 +1,29 @@
 # Project settings and live updates
 
-Project settings now answer **which model performs which job** in one compact dialog. The entry shows Director, Keyframes, Video and Narration. Transcription sits under Other models; selected accounts, director local paths and existing recorded-voice identities use secondary disclosures. Test-only catalog annotations are trimmed from labels while model/quality distinctions remain.
+The current studio has a Settings page with Models, Director, voices, This computer and language. It is implemented in `apps/web/src/next`; earlier compact-dialog/source-path descriptions are historical. The [UI reference](../technical/REVIEW-UI.md) covers mode-specific views.
 
 ## Director choices
 
-The Director picker uses actual compatible choices returned by the configured native account/runtime. Read-only model-catalog refresh saves no selection and starts no model turn. If the list is unavailable, retain the current ID and offer manual entry under local setup; do not invent availability. The Director account is separate from media API keys.
+Codex **0.162.1** defaults to **gpt-6.1-sol**. Its picker uses actual compatible models returned by the configured runtime/account; read-only refresh saves no selection and starts no model turn. A failed list retains the saved/current ID and explains readiness. Existing films keep their model, and a verified supported side-by-side binary can replace an old effective launch path with a notice without rewriting history.
 
-**Save director** uses its own durable command and result. Changes apply only to eligible future idle work, with exact selection/setup checks. An unknown result retains the same command; current/earlier result copy is bound to the saved selection.
+Code films additionally offer **Claude Code · Opus 5.5** and **Sonnet 5.5**, using a local Claude subscription login (2.1.312 or later 2.x). Storyboard films cannot select Claude. The demo Director remains available. Director accounts are separate from media accounts; Claude directing a film does not replace Codex image login. See [runtime/setup](../technical/DIRECTOR-RUNTIME.md).
 
-## Media choices and save
+Saving a Director choice uses its own durable command and setup checks; changes apply to eligible idle work. Unknown results retain their exact original command. Current/earlier result copy is bound to the saved selection, and later human changes cannot borrow an older save's authority.
 
-**Save media models** creates the existing exact server preview. If it is current and changes no pending work/authority, the explicit Save automatically applies that validated preview with its retained apply identity, omitting an empty confirmation. It does not bypass backend validation or grant generation.
+## Media choices and spend limits
 
-A preview that changes unfinished operations instead shows the real affected shots and dependent assembly, with kept work disclosed. Apply requires the human to confirm that exact impact. Completed results, in-flight work, protected dependencies and separately reviewed audio stay pinned. Changed pending operations need current generation/usage review. The default scope is eligible unfinished work; routine entry no longer asks for a technical scope choice or another planning continuation.
+For storyboard films, **Save media models** produces an exact server preview. An explicit Save can automatically apply a current zero-impact preview using its retained identity; actual unfinished-work effects require review. Completed results, in-flight work, protected dependencies and separately reviewed audio stay pinned. Changed work still needs current generation decisions; no separate usage allowance is added.
 
-Director and media are deliberately separate saved commands, not an atomic combined transaction. Drafts/pending commands survive compatible refresh/remount in the same API session. A lost apply response restores the reviewed choices and offers **Check saved media request**, sending the same identity. Hard reload can lose browser pending state; server receipts remain authoritative.
+Code films pin their installed media definitions at creation, including additional ready video/music models. A catalog edit does not silently add models to an existing film. [Catalog](PROVIDER-CATALOG.md) and [providers](../technical/PROVIDERS-ARTIFACTS.md) describe exact selection boundaries.
 
-Selected-account summaries show only relevant providers and actual setup issues. Key saved/configured does not mean media access/quota verified. Keys/routes remain server-configured; there is no new browser credential-entry or cloning-enrollment feature. See [catalog](PROVIDER-CATALOG.md) and [personal voice](PERSONAL-VOICE.md).
+**This film's spend limit** is durable code-film state, also editable in the run strip. Charged, unknown and in-flight liabilities set its minimum. **Spend limit for new films** defaults to $4 and is a browser preference, as is **Developer mode**, which reveals Code and filtered call parameters. These controls do not create a storyboard project budget or erase existing liability.
 
-## Guidance and updates
+## Saved commands, guidance and refresh
 
-Compatible shipped V1–V3 guidance updates to V4 at the first input of an eligible fresh undispatched/unbound native epoch. Old locks/epochs stay immutable. The version switch is absent from normal settings; [guidance compatibility](DIRECTOR-TOOLS-UPGRADE.md) remains an application concern. Ordinary writing requires no generation/spending permission.
+Director/media saves have separate identities. Pending commands preserve exact request bodies across uncertain replies; check the original saved request before starting another. Draft recovery is not authority or automatic submission. Provider credentials stay server-side; custom voice IDs and consent are distinct from unimplemented voice-clone enrollment.
 
-The visible project shares authenticated SSE with coalescing/backoff and 30-second fallback refresh. Background reads retain current connection/content instead of briefly showing Connecting or disabling controls. Saved-edit Continue rows stay hidden during Director execution while their holds persist. Stop and continuation still enforce their original scope/authority rules.
+Fresh eligible storyboard Director turns upgrade verified shipped guidance to the latest release (**8.1.0 / 7.1.0**), preserving already-bound epochs and historical bytes. Code films use their separate current **0.3.0** guidance; older contracts and journals keep compatibility behavior. Normal Settings does not expose a manual tool-version update. [Guidance compatibility](DIRECTOR-TOOLS-UPGRADE.md).
 
-Source: web `ProjectSettings.tsx`, `ProviderSettings.tsx`, `DirectorSettings.tsx`, `project-settings-model.ts`, `settings-presentation-model.ts`, `project-subscription.ts` and `App.tsx`; server model/director/event/continuation services. [October 3 verification](OCTOBER-3-REFINEMENT-REVIEW.md) records 2,207 tests, disposable actual-React fixture checks, rapid synthetic SSE and the final integrated gate and repaired bounded native guidance rerun passed. No paid media-generation calls were made for this refinement.
+Authenticated SSE invalidates current projections with bounded reconnect/refresh. Reads and status displays do not grant media authority. Stop, request epochs, original-command replay and recovery quarantine remain authoritative.
+
+Source: [ModelsPanel](../../apps/web/src/next/views/settings/ModelsPanel.tsx), [DirectorPanel](../../apps/web/src/next/views/settings/DirectorPanel.tsx), [Director selection model](../../apps/web/src/next/model/settings-director.ts), [local controller](../../apps/server/src/application/local-director.ts), [media settings](../../apps/server/src/application/project-model-settings.ts) and [code ceilings](../../apps/server/src/code-plan/settings.ts). Current [status](STATUS.md) links actual checks. The [October 3 report](OCTOBER-3-REFINEMENT-REVIEW.md) retains evidence for its earlier UI/runtime checkpoint.

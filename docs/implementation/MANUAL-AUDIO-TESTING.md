@@ -1,37 +1,36 @@
 # Audio rehearsal without paid media
 
-Use a disposable project/data directory with real media switches disabled to inspect writing, owned recordings, review and playback. Native Director conversations can still consume Codex account usage; choose Demo for a fully fake conversation. A disabled speech/transcription route can show/review a proposal but cannot produce a real result.
+Use the disposable fake-provider studio to inspect narration, owned recordings, fit and playback. Native Director conversations can still consume account usage; select the demo Director for a fully fake conversation. Do not rely on missing keys alone to disable media in a real installation.
 
 ## Start separately
 
-Build, then use a new explicit data directory so the rehearsal cannot alter production projects:
-
 ```sh
-pnpm build
-OPENSLATE_DATA_DIR=/absolute/path/to/a/new/audio-rehearsal pnpm start
+pnpm studio:fixture --film last-ferry
 ```
 
-Ensure inherited real-generation switches are off; use [the private config template](../../.env.example) and [doctor](LOCAL-SETUP.md) to inspect setup. Pair through the printed/opened launch link. Create a disposable demo project or select installed models for planning only.
+This creates disposable state on 3101, including synthetic narration and fake media. For UI development, after shared packages are built run `pnpm --filter @openslate/web dev` in another terminal; its 5173 proxy targets 3101 by default. The browser-only `?fixture=last-ferry` uses a separate simulated transport. Neither path proves real speech or transcription quality. Card sandboxes must leave browser launching to the lead.
 
-## Script-first and recording-first
+For a real local recording-import rehearsal instead use an explicitly separate `OPENSLATE_DATA_DIR`, with all real media routes explicitly disabled according to [activation](MEDIA-EXECUTION-LAUNCHER.md), and preserve any production instance. Importing/listening to owned audio does not itself require a provider request.
 
-1. Create two planned shots. Choose No narration for one and an uploaded/generated voice intent for the other.
-2. Open the spoken shot's Audio setup. Save a short exact line or start by importing your owned recording.
-3. Listen before binding. Save the actual words or a truthful description; select the exact recording and source-local range.
-4. Accept the displayed words/recording/timing. Keep the planned picture longer than a short voiceover; no padding is needed.
-5. Edit the words, voice or range. Check old acceptance/speech proposal does not remain current and the other shot is preserved.
-6. Continue that edit in chat using saved scope/state. The director can update writing/plan; media routes remain disabled.
+## Storyboard narration and fitting
 
-If rehearsing generated speech, inspect the shot's exact proposal and model/voice/usage information, then stop before paid generation. Final acceptance requires that shot's own session and current draft; project-wide acceptance is refused. For a real result follow [live testing](MANUAL-LIVE-PRODUCTION.md) within an explicitly authorized live-test scope.
+1. Open a storyboard film with two shots: one explicit **No narration**, one generated/owned narration intent. In Plan/Keyframes save a short script and selected stock voice, or import an owned recording.
+2. A recording press imports, measures and attaches that shot's audio in one keyed command. Fitting audio is accepted automatically under that human command. The user need not operate the retired browser session/accept workflow.
+3. Listen and compare saved words/description with the actual source. Audio is measured at 48 kHz. A short voice may end before a six-second picture ends; no padding is needed.
+4. For overlong measured audio, check the free **Make N s** / **Keep N s** choices: extend within model limits, or retain shot length and cut audio with a short fade. Undo restores eligible prior narration/media state. No provider call is needed for fitting.
+5. Change the script/mode/voice and check old speech readiness no longer appears current, while unrelated shots/picture remain. Scene **Generate keyframes** also requests missing voice lines; use only the fake provider for this rehearsal.
+6. A scene video confirmation is one server-owned durable command. The browser does not sequence speech/attach/accept/video itself; missing/failed/unknown voice blocks the appropriate step rather than buying replacement speech after reload.
 
-## Transcription and music
+Exact shot/session provenance and source/range validation remain internal invariants even though the old session HTTP/UI workflow is retired. Real speech results require a separately scoped [live test](MANUAL-LIVE-PRODUCTION.md).
 
-Owned recording transcription freezes exact source bytes/settings. With the API disabled, inspect preparation/review only; no transcript should be fabricated. Recognition remains candidate evidence for Director attachments. Human transcript adoption is unavailable; write the shot's words or a truthful description and accept the recording's measured range through the shot workspace.
+## Transcription, music and code films
 
-Import an owned short music recording through chat **+ → Audio** or Timeline. Audition it and select background music. Library import/listening should not change narration, create creative holds or fence a Director request.
+Transcription recognizes exact owned audio/settings as candidate evidence for Director attachments. With the API disabled there should be no fabricated real transcript. Human transcript adoption remains unavailable; rewritten text is not automatic audio alignment.
+
+The owned audio library can import/listen/select background music without changing narration or creating a creative hold. In Film, check placement/gain/mute. Code films use separate journaled `ctx.speech`/`ctx.music` and `ctx.render` placements rather than storyboard fit commands. Lyria is a paid route; use fake music for an offline rehearsal.
 
 ## Playback and recovery
 
-With valid demo/supplied clips, audition Timeline picture, voiceover and music. Seek/pause/return to a later cue and check sound follows picture. Export with local FFmpeg and listen to the actual output. Reload/reopen; verify selected ranges/acceptance and output identities remain saved.
+Audition muted picture with accepted narration/music on Film's common playback clock. Seek, pause, return to a cue and switch views. Export locally and listen to the actual MP4. Reopen/reload and verify saved audio/ranges, fit and original command identities; restoring an unsent draft must not submit it.
 
-Record which UI actions passed, whether files were imported through the picker or an HTTP harness, exact duration/range behavior and any error. Use synthetic/shared-safe text in screenshots. This rehearsal proves local behavior only; real speech/transcription quality, eligibility and billing remain separate.
+Record actual controls exercised, import method, measured duration/range, reuse/restart behavior and errors. Exclude credentials/private project text. This establishes local behavior only; real audio quality, account eligibility and billing require their own evidence. [Narration reference](../technical/NARRATION.md), [shot audio](SHOT-AUDIO.md), [owner tests](../ai/code-plan/TEST-INSTRUCTIONS.md).

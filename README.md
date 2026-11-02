@@ -1,92 +1,120 @@
 # OpenSlate
 
-An open-source local video studio with a conversational director and an editable storyboard.
+OpenSlate is a local video studio with a conversational Director, storyboard editing and an optional TypeScript code plan. The browser, server, SQLite database, media and workers run on one computer; the selected language and media models can use cloud services. It is an early single-user application; see [current status](docs/implementation/STATUS.md) for verification and limits.
 
-Develop a film as **brief → scenes → shots → reviewed keyframes → video → Film/export**. The application, database, files and workers run on your computer; configured model services may run in the cloud.
+## Features
 
-**Early development.** This branch delivers the studio in `apps/web/src/next`; it is the only web UI. Planning, scoped editing, scene confirmation, narration, take selection and local export are implemented. The earlier real Codex-image → Viggle H3 → six-second export remains dated evidence, not acceptance of every current provider or the new UI. New voice cloning from a recording and installer packaging remain pending. See [current status](docs/implementation/STATUS.md).
+**Making a film**
 
-## Use the studio
+- **Storyboard:** develop brief → scenes → shots, generate keyframes and voice lines, inspect the returned frames and video recipe, then confirm scene video. Edit individual shots, fit measured narration, select earlier keyframes and export in storyboard order.
+- **Code plan (experimental):** the Director submits a complete program. A durable journal reuses unchanged media, waits for choices and confirms each declared shot's keyframe/video input. Plans can generate references, clips, speech and music, inspect clip frames, and render cuts with trims, speed, holds, fixed zoom, captions and sound effects.
+- Imports and composer attachments become owned media. Code-film Directors can find uploaded pictures on later turns, inspect them and use bounded copies as generation references. Video/audio attachments have more limited later-turn availability.
 
-Start a film, open a saved film or explore the **Last Ferry** sample. The Director sits beside **Plan / Keyframes / Assets / Film**; Settings has its own page. The interface supports English and Simplified Chinese with local Inter and a shared dark token system. Message IDs and server error codes drive translated controls; creative writing and Director replies retain their original language.
+**The Director**
 
-- **Plan** edits the brief, story, scene titles/order and shot fields. Text/Markdown import produces a reviewable proposal. Direct edits preserve unaffected paid media and support Undo.
-- **Keyframes** shows one current preview, scene capsules, shot cards, narration fit and the scene video decision. Open each actual returned frame, inspect motion, timing and the video recipe, then confirm the scene. The server durably settles any missing voice and starts video; closing the browser does not own that sequence. Current media remains visible while a replacement is made. Takes exposes earlier eligible frames with a free selection command.
-- **Director** uses explicit @ scene/shot scope; selecting a preview does not silently change the message target. Lettered notes and held proposals have application-computed effects and accept/reject/Undo actions. Application checks such as overlong narration are separate from Director suggestions.
-- **Assets** lists owned images, clips, voices, music and exports with source and scene/shot filters. Importing media does not start generation.
-- **Film** plays current picture, accepted narration and music in storyboard order. Shot order/timing and music placement, gain and mute are editable. Its single export surface reports readiness, history and changes since export; all-demo exports carry a Demo stamp.
-- **Settings** separates media choices, Director setup/review, narrator/personal voices, this computer and language. The retained installation-status API reports local tool versions and provider configuration without returning paths or credentials.
+- Native **Codex 0.162.1**, default **`gpt-6.1-sol`**, with other model IDs supplied by the installed runtime/account. Saved model selections are preserved. Director turns use high reasoning effort.
+- Optional **Claude Code** for code-plan films: **Opus 5.5** (`claude-opus-5-5`) or **Sonnet 5.5** (`claude-sonnet-5-5`) on the user's Claude subscription. Storyboard films use Codex or the scripted demo Director.
+- The Director reads project evidence and proposes changes through validated MCP tools. Storyboard notes/proposals and code-plan submissions have different contracts. It cannot run shell commands, browse the web, read arbitrary files or obtain provider keys through those tools. Code films permit generation within their saved plan and spend limit; storyboard media uses the scene decisions above. The Director can inspect pictures/contact sheets, but cannot listen to the soundtrack.
 
-OpenSlate owns canonical revisions, scoped human requests, durable attempts and immutable media evidence. Models propose validated data; restricted TypeScript plans compile to a graph without evaluating model-authored JavaScript. Every paid press keeps its identity across a lost response. Stop detaches unsent work; Continue does not resend it. Giving up on an unknown outcome releases the slot while preserving the possibility of a late charged result. Inspect the original request before trying again.
+**Media models**
 
-Configured providers need no separate API-key approval or usage allowance. There are two generation decisions per scene: make keyframes, then review returned frames and the actual video recipe before video. Returned clips need no additional acceptance gate. Narration can be generated with keyframes, fitted without another provider call, or imported as a measured recording. Existing eligible personal voice IDs support consent and revocation; creating a new clone remains pending.
+- Codex images use the separate pinned native image worker and ChatGPT login. OpenAI API images are also implemented.
+- Viggle H3 supports reference, first-frame, first/last-frame and text modes in code films. Direct MiniMax H3 is also implemented.
+- Gemini **Lyria 3.5** supplies code-film background music; OpenAI supplies speech and transcription. Transcripts are candidate evidence, not automatically accepted narration.
+- Seedance on ModelArk and fal Kling/Veo/Wan adapters are built for code films; real use needs the relevant keys, installed profiles and account access. Availability in code is separate from live validation.
 
-The composer retains unsent words and explicit scope in this browser. Session expiry, disconnect, offline state, Stop and restore quarantine have separate recovery controls. Restoring a draft never submits it. Browser-only fixtures and disposable fake-provider studios are development tools, not live-provider evidence. See the [studio guide](docs/design/STORYBOARD-STUDIO.md), [UI reference](docs/technical/REVIEW-UI.md) and [current API](docs/technical/APPLICATION-API.md).
+**Studio UI**
 
-## Quick start
+- The Last Ferry interface in `apps/web/src/next` is the only UI: **Plan / Keyframes / Assets / Film**, Start and Settings. Code films put keyframes and reference progress in Plan and Assets; their Code view appears only in Developer mode.
+- English and Simplified Chinese, explicit @ scene/shot scope, image/video viewers, visible making/queued/held progress, Stop and saved-request recovery.
+- Settings separates media and Director selection, voices, language and this computer. Code-film spending includes charged, possibly charged and in-flight work; the new-film default is **$4**, with a browser preference override. Raising/lowering a film's limit cannot erase existing liability. Storyboard execution has no project spend cap.
 
-Requires **Node.js 24**. The launcher uses the pinned **pnpm 10.33.0**, installs locked dependencies and builds the studio.
+## Technical architecture
 
-```sh
-git clone https://github.com/Michael-Ma/OpenSlate.git
-cd OpenSlate
-./start.sh
-```
-
-Open [the local studio](http://127.0.0.1:3001). Keep the terminal open; Ctrl+C stops a server started there. Startup opens a short-lived browser pairing link and preserves saved projects. If the verified server is already running, the launcher reconnects to it.
-
-```sh
-./start.sh --restart       # Rebuild and load changed code/configuration
-./start.sh --status        # Inspect the current installation
-./start.sh --doctor        # Explain local prerequisites without provider calls
-./start.sh --init-config   # Create a private config template; preserve existing files
-```
-
-Default demo models need no API keys and make no paid media calls. FFmpeg/ffprobe are needed for media import and export. For real models, configure keys on the local server and choose a supported provider catalog. Configured keys/runtime enable their routes; optional explicit `0` switches disable a route. Scene actions or requested audio start work, and the app checks actual setup before dispatch. See [setup](docs/implementation/LOCAL-SETUP.md) and [human live testing](docs/implementation/MANUAL-LIVE-PRODUCTION.md).
-
-Local storage defaults to `.openslate/`. Set one explicit `OPENSLATE_DATA_DIR` when switching between launch modes; root `pnpm start` and filtered development commands otherwise have different working-directory defaults. Keep private storage outside `apps/web/dist`. Provider keys stay on the server.
-
-## Development
-
-```sh
-pnpm install --frozen-lockfile
-pnpm dev
-pnpm check
-```
-
-The verified development/CI baseline is Node **24.15.0**, pnpm **10.33.0**, and FFmpeg/ffprobe **8.1.1**. Use `nvm install`, `nvm use`, `pnpm setup:test-media` and `pnpm check:toolchain` before running the full gate. The media setup reuses a matching installed pair or builds an isolated checksummed release; [contributing](CONTRIBUTING.md) lists prerequisites. Application startup continues to support Node 24.
-
-Development UI: [127.0.0.1:5173](http://127.0.0.1:5173). Its `/api` proxy targets a disposable fixture studio on port 3101 (`pnpm studio:fixture`), never the live studio on 3001 unless `OPENSLATE_API_ORIGIN` says so. `pnpm check` builds, runs isolated offline tests and checks TypeScript; local integration tests need permission to bind loopback ports. Rebuild shared packages/restart development after changing them.
-
-| Command | Purpose |
+| Workspace | Responsibility |
 |---|---|
-| `pnpm build` / `pnpm start` | Build and serve the studio/API on port 3001 |
-| `pnpm studio:fixture` | Disposable fake-provider First Light studio on port 3101 for UI development |
-| `pnpm check:browser` | Browser scenarios in headless Chrome against disposable fixture studios (needs Google Chrome) |
-| `pnpm demo:headless` | Two-shot fake edit/restart proof without keys |
-| `pnpm probe:workflow` | Synthetic sixty-shot, six-minute workflow |
-| `pnpm probe:toolchain` | SQLite and optional local media-tool checks |
-| `pnpm probe:runtime --codex /absolute/path/to/codex` | Pinned Codex compatibility probe with zero model turns |
-| `pnpm probe:launcher` | Disposable real-process launcher check; port 3001 must be free |
-| `pnpm installation export / inspect / restore` | Private same-machine [backup and recovery](docs/implementation/INSTALLATION-RECOVERY.md) |
+| `packages/core` | Shared contracts, public browser types, workflow predicates, graph compiler and tool catalogs |
+| `packages/director` | Codex/Claude/fake runtimes, instruction locks, MCP bridge and native image worker |
+| `packages/providers` | Registered media adapters and bounded vendor transports |
+| `apps/server` | Fastify API, application authority, SQLite, Director supervision, code-plan replay, execution and local media |
+| `apps/web` | Vite/React studio; browser imports `@openslate/core/public` |
+| `skills/` | Immutable storyboard guidance releases and separate code-plan instructions/API/example |
+| `scripts/` | Local launcher, toolchain setup, offline demos, tests, browser harness and skill releases |
 
-`pnpm studio:fixture --film last-ferry` seeds the server with **The Last Ferry**: three scenes, eight shots, saved demo clips in Scene 1, returned frames and measured synthetic narration in Scene 2, and unstarted Scene 3. Scripted notes and a held duration proposal exercise the review controls. The data root is temporary; all media/provider activity is fake. This seed is distinct from the browser-only sample at `?fixture=last-ferry`, whose local fixture transport simulates routes without API/provider calls. Neither establishes media quality or live integration acceptance.
-
-`pnpm check:browser` builds and runs the rendered next-UI scenarios against disposable state with system Google Chrome. It is a separate browser gate from the Node test suite; run it only where browser launching is supported. Codex card sandboxes must leave that gate to the lead, as their [rules](docs/ai/uiux-plan/codex/RULES.md) require.
-
-```text
-apps/web/             React studio and review controls
-apps/server/          Application authority, SQLite, director supervision and execution
-packages/core/        Contracts, workflow predicates and restricted plan compiler
-packages/director/    Versioned skills/tools and fake/native director adapters
-packages/providers/   Image, video, speech and transcription adapters
-skills/               Immutable versioned runtime instruction inputs
-workers/h3-python/    Reserved future same-machine inference boundary
-docs/                 Current guides, technical references and dated evidence
+```mermaid
+flowchart LR
+  Studio --> Director[Director runtime]
+  Director --> MCP[Epoch-bound MCP bridge]
+  MCP --> Code[Code-plan runtime]
+  MCP --> Graph[Storyboard graph]
+  Code --> Execution[Execution adapters and local media]
+  Graph --> Engine[Graph execution engine]
+  Engine --> Execution
+  Execution --> Providers[Media providers / FFmpeg]
+  Code <--> Store[(SQLite entity store)]
+  Engine <--> Store
 ```
 
-Start with the [documentation index](docs/README.md), [architecture](docs/design/README.md), [remaining work](docs/design/IMPLEMENTATION-PLAN.md) and [contributing guide](CONTRIBUTING.md).
+A human message is saved before a leased Director turn receives its locked guidance, current evidence and tools. The bridge validates scope, epochs and arguments. Storyboard changes compile restricted declarations to a graph without running the declarations as JavaScript. Code films instead strip TypeScript and evaluate the program **inside a disposable QuickJS/WASM worker**, with bounded JSON `ctx` calls, no Node/filesystem/network APIs, CPU/heap/stack limits and a deterministic clock/random sequence. Replay starts a fresh interpreter, reuses content-addressed results and waits for pending effects/choices. Host execution retains submission intent before provider calls; unknown outcomes reconcile their original identities.
 
-## License
+Codex runs the pinned App Server with an exact local permission/configuration policy, a studio-owned instruction workspace and only the locked bridge catalog. Setup and each launch check the runtime; OpenSlate trusts the installed sandbox rather than claiming independent code-host/authentication isolation.
 
-[MIT](LICENSE). Third-party model weights and services retain their own licenses and terms.
+Claude Code runs a fresh noninteractive process on the user's Claude plan, with built-in tools disabled, an explicit MCP configuration and verified initialization. Its system prompt is supplied through a private file; output returns over bounded stream JSON.
+
+The fake Director supplies scripted turns for offline fixtures and tests, without a native model call. [Runtime details](docs/technical/DIRECTOR-RUNTIME.md).
+
+`openslate.sqlite` stores project heads, versioned JSON entities, commands and events. One data directory contains the database, owned artifacts, raw outputs/receipts, normalized media and instruction snapshots. Use one fixed absolute `OPENSLATE_DATA_DIR`; defaults otherwise depend on the launch directory. Schema 4 is created only in an empty database; other schema versions require a new directory. [Persistence and recovery](docs/technical/DATA-PERSISTENCE.md).
+
+## Getting started
+
+Application startup supports **Node >=24 <25**. Development/CI pins **Node 24.15.0** (`.nvmrc`), **pnpm 10.33.0** (`package.json`) and **FFmpeg/ffprobe 8.1.1** (`scripts/test-media-toolchain.json`).
+
+```sh
+nvm install
+nvm use
+npm install --global pnpm@10.33.0
+pnpm install --frozen-lockfile
+pnpm setup:test-media
+pnpm check:toolchain
+```
+
+For a real Director or Codex images, install **`@openai/codex@0.162.1`** side by side and sign in using the [pinned installation instructions](docs/implementation/MANUAL-LIVE-PRODUCTION.md#codex). Claude Code is optional: the adapter accepts **2.1.312 or later 2.x**, with a local Claude subscription login. Neither a Codex account nor a Claude plan supplies the other vendors' media credits.
+
+Configure the server locally; the launcher loads private `.env.live.local`, preserving exported variables. The names below come from the [setup](docs/implementation/LOCAL-SETUP.md) and [provider activation](docs/implementation/MEDIA-EXECUTION-LAUNCHER.md) guides; credentials never enter plans or browser code.
+
+| Purpose | Environment variable names |
+|---|---|
+| Installation/media tools | `OPENSLATE_DATA_DIR`, `OPENSLATE_PROVIDER_CONFIG`, `OPENSLATE_FFMPEG`, `OPENSLATE_FFPROBE` |
+| Director/image binaries | `OPENSLATE_CODEX_BINARY`, `OPENSLATE_CODEX_IMAGE_BINARY`, `OPENSLATE_CODEX_IMAGE_HOME`, `OPENSLATE_CLAUDE_BINARY` |
+| Media credentials | `OPENSLATE_OPENAI_API_KEY`, `OPENSLATE_VIGGLE_API_KEY`, `OPENSLATE_MINIMAX_API_KEY`, `OPENSLATE_GEMINI_API_KEY`, `OPENSLATE_MODELARK_API_KEY`, `OPENSLATE_FAL_API_KEY` |
+| Optional route switches | `OPENSLATE_ENABLE_IMAGE_GENERATION`, `OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION`, `OPENSLATE_ENABLE_VIGGLE_H3_GENERATION`, `OPENSLATE_ENABLE_H3_GENERATION`, `OPENSLATE_ENABLE_SPEECH_GENERATION`, `OPENSLATE_ENABLE_TRANSCRIPTION`, `OPENSLATE_ENABLE_MUSIC_GENERATION`, `OPENSLATE_ENABLE_SEEDANCE_GENERATION`, `OPENSLATE_ENABLE_FAL_VIDEO_GENERATION` |
+
+Configured credentials normally enable their routes; explicit `0` disables them. Protected result downloads use the exact host lists documented in the activation guide. Demo profiles require no keys.
+
+```sh
+export OPENSLATE_DATA_DIR="$HOME/openslate-data"
+node scripts/start-local.mjs --no-open
+```
+
+Use that same directory for every restart. The production studio serves `http://127.0.0.1:3001`; pair using the launch link printed by the server. Stop it in its own terminal with Ctrl+C. [Launcher options](docs/implementation/LOCAL-LAUNCHER.md) explain reconnect and `--restart`.
+
+For safe UI work, run `pnpm studio:fixture --film last-ferry` on **3101**, and `pnpm --filter @openslate/web dev` in a second terminal after building packages. Vite on **5173** proxies `/api` to 3101 unless `OPENSLATE_API_ORIGIN` overrides it. The server seed uses disposable fake media; `?fixture=last-ferry` is a separate browser-only simulation.
+
+## Testing
+
+| Command | Verification |
+|---|---|
+| `pnpm test` | Builds all five workspaces, then runs isolated offline Node tests; loopback listeners must be allowed |
+| `pnpm typecheck` | Builds shared packages and typechecks all workspaces |
+| `pnpm demo:code` | Offline HTTP/Director/code-plan/replay/restart proof with fake providers |
+| `pnpm demo:headless` | Offline storyboard scoped-edit/restart proof |
+| `node scripts/browser-check.mjs` | Rendered browser scenarios against disposable fixtures; run after a build, only where Chrome launching is supported |
+
+The owner walkthrough is [测试说明](docs/ai/code-plan/TEST-INSTRUCTIONS.md); real-provider tests are [separately scoped](docs/implementation/MANUAL-LIVE-PRODUCTION.md). Card sandboxes must leave browser launching to the lead under [RULES.md](docs/ai/uiux-plan/codex/RULES.md). Fake tests, native model turns and real media acceptance are separate evidence.
+
+## Documentation
+
+- [Documentation map](docs/README.md), [architecture](docs/design/README.md) and [technical references](docs/technical/README.md).
+- [Current status](docs/implementation/STATUS.md), [setup](docs/implementation/LOCAL-SETUP.md), [backup/recovery](docs/implementation/INSTALLATION-RECOVERY.md) and [remaining work](docs/design/IMPLEMENTATION-PLAN.md).
+- [Code-plan design](docs/ai/code-plan/DESIGN.md), [film-quality results](docs/ai/film-quality/RESULTS.md) and [AI design/decision archive](docs/ai/README.md).
+- [Contributing](CONTRIBUTING.md). [MIT license](LICENSE); third-party services and model weights retain their own terms.
