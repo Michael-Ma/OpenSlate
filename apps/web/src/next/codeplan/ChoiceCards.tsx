@@ -9,6 +9,7 @@ import { Modal } from "../views/plan/Modal.tsx";
 import { useDeveloperMode } from "../app/useDeveloperMode.ts";
 import { CodePlanMedia, useStore, useStudio } from "../store/react.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
+import { SHOW_IN_THREAD } from "../director/Thread.tsx";
 import "./codeplan.css";
 
 /**
@@ -26,8 +27,8 @@ export function useCodePlanChoices(): ChoiceCard[] {
 export function showWaitingChoice(): void {
   const card = document.querySelector<HTMLElement>("#director .cp-choice[data-answered='false']:not([data-stale='true'])");
   if (!card) return;
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  card.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+  // Its top first: a keyframe card can be taller than the thread, and its question is at the top.
+  window.dispatchEvent(new CustomEvent(SHOW_IN_THREAD, { detail: card }));
   card.querySelector<HTMLElement>("button:not(:disabled)")?.focus({ preventScroll: true });
 }
 

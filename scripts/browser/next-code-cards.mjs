@@ -46,6 +46,12 @@ export const scenarios = [
       expect(/1/.test(await show.innerText()), "the strip counts the one card still waiting");
       await show.click();
       await page.waitForFunction(() => document.activeElement?.closest(".cp-choice")?.dataset.answered === "false");
+      await page.waitForTimeout(600);
+      const top = await page.evaluate(() => {
+        const card = document.activeElement.closest(".cp-choice"), thread = document.querySelector("#director .thread");
+        return card.getBoundingClientRect().top - thread.getBoundingClientRect().top;
+      });
+      expect(top >= 0 && top < 40, `the waiting card's top is at the top of the thread, not ${top}px away`);
 
       await page.locator("#director .cp-choice[data-answered='false'] [data-input='first_frame']").click();
       await page.locator("#director .cp-choice[data-answered='true']").waitFor();

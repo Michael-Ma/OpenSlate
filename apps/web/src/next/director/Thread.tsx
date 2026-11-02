@@ -34,6 +34,9 @@ export interface TimedThreadItem {
 
 const NO_TIMED: TimedThreadItem[] = [];
 
+/** Asks the open thread to bring one of its cards to the top of view. The reader leaves the bottom, so new content does not pull them back. */
+export const SHOW_IN_THREAD = "openslate:show-in-thread";
+
 /**
  * The conversation, anchored to the bottom: bylines, the user's bubbles with @ chips and the pictures they showed,
  * the Director's replies as safe Markdown. It opens at its bottom (in either language), and new content, or a
@@ -104,6 +107,18 @@ export function Thread({ extraCount = 0, timed = NO_TIMED }: {
     observer.observe(inner);
     observer.observe(element);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const show = (event: Event) => {
+      const target = (event as CustomEvent<unknown>).detail, element = ref.current;
+      if (!element || !(target instanceof HTMLElement) || !element.contains(target)) return;
+      pinned.current = null;
+      setUnseen(false);
+      element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top - 8;
+    };
+    window.addEventListener(SHOW_IN_THREAD, show);
+    return () => window.removeEventListener(SHOW_IN_THREAD, show);
   }, []);
 
   const onScroll = () => {
