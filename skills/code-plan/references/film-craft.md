@@ -18,9 +18,9 @@ Keep one screen direction and one side of the action axis. Record travel and eye
 
 Make a character sheet first: consistent front, side and face views, markings and wardrobe under plain light. Then make one empty set plate per camera setup. Place props in the plate with count, relative positions and light fixed. Derive other views from the established set reference.
 
-Generate every keyframe from those references: `ctx.image({references: [character, plate], prompt: frame, ...})`. Name each reference's role. Finish shared assets before independent shot pipelines; await frame dependencies. Pictures carry identity and look; "same room" carries no memory between calls.
+Use `ctx.image` only for shared references, with no `shot`. Every shot makes exactly one keyframe from those references and its `frame` prompt: `ctx.keyframe(shot, {references: [character, plate], prompt: frame, video: {model, durationSeconds, aspectRatio}})`. Do not use `ctx.choose` for keyframes or make alternatives unless the person asks. Name each reference's role. Finish shared assets first, then start shot pipelines together with `Promise.all(shots.map(...))`; each card appears as soon as its frame exists. Pictures carry identity and look; "same room" carries no memory between calls.
 
-Track prop states: a pushed weight stays displaced; a bowl empties only after eating. Check returned keyframes for pose, facing, expression, set and props before buying motion. Fix wrong pictures here.
+Track prop states: a pushed weight stays displaced; a bowl empties only after eating. Write each frame so its keyframe shows pose, facing, expression, set and props: the person judges this picture before motion is bought.
 
 ## Prompts
 
@@ -34,9 +34,9 @@ Write order, not seconds: "nudges the weight, then flops onto his side." Describ
 
 Models spread action across the whole clip and run late: 1.33 seconds on average in the Tofu sample, not a universal guarantee. Request a clip longer than the retained beat, within advertised durations, then cut it down after watching. Extra time provides handles, not proof of action. Never assume the first planned frames contain the payoff.
 
-## References or frames
+## Confirmed keyframes
 
-References stay the video default; describe camera and action because they do not fix the opening. Only where the exact pose is the joke, use `firstFrame`, with `lastFrame` if the landing pose matters, without asking. References can also re-frame a shot: in the Tofu test the dog slid to the screen edge and lost half its body. If that happens, retake from the same keyframe with `firstFrame`, which holds the framing and costs less. Honour explicit frame requests too. Use advertised modes; references cannot combine with first/last frames. Preserve unchanged saved calls to reuse media.
+The person picks the video input on the card. Spread the result: `ctx.video({ ...keyframe.input, shot, prompt: motion, durationSeconds, aspectRatio })`. Never choose the input yourself. References can re-frame a shot; mention this only if asked. Retakes reuse the confirmed keyframe with a stable `variant`. When a subject was cut off and the person allowed the keyframe as input, use `firstFrame: keyframe.frame` for the retake. If they chose references only, keep their chosen input. When they ask to change a picture, change that shot's `prompt` or `variant` in `ctx.keyframe`; the card asks again. Preserve unchanged saved calls to reuse media. Tell the person nothing about step IDs or modes in chat; the card says it.
 
 ## Watching and cutting
 

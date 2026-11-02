@@ -67,7 +67,7 @@ export class FakeWorkflowDirector implements DirectorRuntime {
       const example = references.find(row => row.skillId === "code-plan" && row.path === "references/example-plan.ts");
       invariant(example, "CAPABILITY_MISMATCH", "Code-plan example is missing from the pinned instructions");
       const receipt = await invoke("submit_plan", { source: example.content, basedOnVersion: film.planVersion,
-        summary: "Scripted two-shot example with frame choices, fallback clips and a render." }) as { version: number; diff: unknown };
+        summary: "Scripted two-shot example with one confirmed keyframe per shot, fallback clips and a render." }) as { version: number; diff: unknown };
       const text = `Scripted code-plan version ${receipt.version} saved. Dry-run diff: ${JSON.stringify(receipt.diff)}`;
       await options.onEvent?.({ ...identity, kind: "assistant_message", text, phase: "final" });
       return { ...identity, status: "completed", text, dispatched: true };

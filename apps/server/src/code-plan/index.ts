@@ -8,7 +8,7 @@ import type { CodePlanDiff, CodePlanSourceView, CodePlanStepDetail, CodePlanView
 import type { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { CodePlanExecution } from "./execution.js";
-import { CODE_PLAN_MODELS, normalizeStepInput, stepKey } from "./identity.js";
+import { CODE_PLAN_MODELS, normalizeStepInput, stepKey, videoModes } from "./identity.js";
 import type { CodePlanMediaKind, CodePlanModel } from "./identity.js";
 import { CODE_PLAN_REVIEW_TURNS } from "./records.js";
 import type { CodePlanChoice, CodePlanReview, CodePlanHold, CodePlanInvocation, CodePlanRun, CodePlanSettings, CodePlanStep, CodePlanVersion } from "./records.js";
@@ -329,7 +329,9 @@ export class CodePlanRuntime implements CodePlanPort {
     const diff = emptyDiff(), submissions: Promise<void>[] = [];
     const reviewKeys: string[] = [];
     const lock = this.store.list<{ lock: { compatibility: { toolContract: string } } }>("director_skill_lock", projectId).at(-1)?.lock;
-    const reviewEnabled = !lock || lock.compatibility.toolContract === "0.3.0";
+    const filmQualityEnabled = !lock || lock.compatibility.toolContract === "0.3.0";
+    const confirmedKeyframes = new Map<string, { frame: JsonObject; choice: string }>();
+    const journalKeys = new Set(journal.map(step => step.key));
     let budget = false, limited = false;
     const reused = new Set<string>(), fresh = new Set<string>();
     const call = (method: string, args: unknown[]): unknown => {
@@ -348,7 +350,7 @@ export class CodePlanRuntime implements CodePlanPort {
       if (method === "log") { invariant(typeof args[0] === "string" && args[0].length <= 4096 && logs.length < 200,
         "CODE_PLAN_LOG", "Use at most 200 bounded log lines"); logs.push(args[0]); return null; }
       if (method === "review") {
-        invariant(reviewEnabled, "CODE_PLAN_METHOD", "Review needs tool contract 0.3.0");
+        invariant(filmQualityEnabled, "CODE_PLAN_METHOD", "Review needs tool contract 0.3.0");
         const [reviewId, raw] = args;
         invariant(typeof reviewId === "string" && reviewId.length > 0 && reviewId.length <= 200 && raw && typeof raw === "object",
           "CODE_PLAN_REVIEW", "Use a bounded review id and clips/note");
@@ -380,6 +382,53 @@ export class CodePlanRuntime implements CodePlanPort {
         return review.state === "done" || review.state === "failed" ? null : SANDBOX_PENDING;
       }
       if (method === "choose") return this.choose(projectId, args, dry);
+      if (method === "keyframe") {
+        invariant(filmQualityEnabled, "CODE_PLAN_METHOD", "Keyframes need tool contract 0.3.0");
+        const [shot, raw] = args;
+        const declaration = declarations.shots.find(row => row.id === shot);
+        invariant(typeof shot === "string" && shot.length > 0 && shot.length <= 120 && declaration,
+          "CODE_PLAN_KEYFRAME_INPUT", "ctx.keyframe needs a shot declared in this pass");
+        invariant(raw && typeof raw === "object" && !Array.isArray(raw), "CODE_PLAN_KEYFRAME_INPUT", "Use a keyframe input with video settings");
+        const { video, ...picture } = raw as Record<string, unknown>;
+        invariant(video && typeof video === "object" && !Array.isArray(video)
+          && typeof (video as Record<string, unknown>).durationSeconds === "number"
+          && Number.isFinite((video as Record<string, unknown>).durationSeconds) && Number((video as Record<string, unknown>).durationSeconds) > 0,
+        "CODE_PLAN_KEYFRAME_INPUT", "ctx.keyframe needs video with durationSeconds and optional model/aspectRatio");
+        const image = call("image", [{ ...picture, shot }]) as CodePlanStep["result"] | typeof SANDBOX_PENDING;
+        if (image === SANDBOX_PENDING || !image?.ok) return image;
+        const frame = image.artifact as unknown as JsonObject;
+        const references = (picture.references ?? []) as JsonObject[];
+        // Select the video model through the same defaults and normalization as ctx.video.
+        const settings = video as Record<string, unknown>;
+        const modelId = settings.model ?? (models["fake-video"] ? "fake-video" : Object.keys(models).find(id => models[id]?.kind === "video"));
+        invariant(typeof modelId === "string" && models[modelId]?.kind === "video", "CODE_PLAN_MODEL", "Use a configured video model");
+        const model = models[modelId]!, modes = videoModes(model);
+        const limit = model.profile?.adapter === "viggle-h3" ? 4 : 9;
+        const options: JsonObject[] = [];
+        const add = (choice: string, input: JsonObject) => {
+          const normalized = normalizeStepInput("video", { ...settings, ...input }, models);
+          const priced = this.options.execution.normalizeVideoInput(projectId, normalized, model);
+          options.push({ ...frame, keyframeInput: choice, references,
+            // Flat artifact fields remain compatible with existing choice readers.
+            // Bind the recipe too: flat-rate models can change length/model without changing price.
+            video: priced,
+            priceMicros: modelPrice(model, priced, codePlanPriceFrame(this.store, projectId, priced)) });
+        };
+        if (modes.includes("reference")) {
+          add("keyframe_and_references", { references: [frame, ...references].slice(0, limit) });
+          if (references.length) add("references_only", { references });
+        }
+        if (modes.includes("first_frame")) add("first_frame", { firstFrame: frame });
+        invariant(options.length > 0, "CODE_PLAN_KEYFRAME_INPUT", "This video model cannot use keyframes; choose a model with references or first-frame input");
+        const answer = this.choose(projectId, [`${shot}-keyframe`, {
+          question: typeof declaration.title === "string" ? declaration.title : shot, options,
+        }], dry) as JsonObject | typeof SANDBOX_PENDING;
+        if (answer === SANDBOX_PENDING) return answer;
+        const choice = String(answer.keyframeInput);
+        confirmedKeyframes.set(shot, { frame, choice });
+        return { ok: true, frame, choice, input: choice === "first_frame" ? { firstFrame: frame }
+          : { references: choice === "references_only" ? references : [frame, ...references].slice(0, limit) } };
+      }
       invariant(method === "image" || method === "video" || method === "speech" || method === "music" || method === "render", "CODE_PLAN_METHOD", "Unknown Studio operation");
       const kind: CodePlanMediaKind = method;
       const normalized = normalizeStepInput(kind, args[0], models);
@@ -403,6 +452,15 @@ export class CodePlanRuntime implements CodePlanPort {
       if (step?.retryAt === undefined && (step?.result || step?.attemptId)) {
         reused.add(key);
         return step.result ?? SANDBOX_PENDING;
+      }
+      if (kind === "video" && filmQualityEnabled && declarations.shots.length > 0 && !journalKeys.has(key)) {
+        const confirmed = shotId && declarations.shots.some(row => row.id === shotId) ? confirmedKeyframes.get(shotId) : undefined;
+        invariant(confirmed, "CODE_PLAN_KEYFRAME_REQUIRED",
+          "CODE_PLAN_KEYFRAME_REQUIRED: Call ctx.keyframe(shot, …) for this declared shot and spread its input into ctx.video");
+        const usesFrame = [input.firstFrame, input.lastFrame, ...(Array.isArray(input.references) ? input.references : [])]
+          .some(ref => ref && typeof ref === "object" && !Array.isArray(ref) && ref.kind === "image" && ref.sha256 === confirmed.frame.sha256);
+        invariant(confirmed.choice === "references_only" ? !usesFrame : usesFrame, "CODE_PLAN_KEYFRAME_INPUT",
+          "CODE_PLAN_KEYFRAME_INPUT: Spread the confirmed keyframe.input into ctx.video; respect whether the person allowed the keyframe as input");
       }
       // Refuse now what dispatch would refuse, while nothing is spent and the Director can still fix its plan.
       const model = models[String(input.model)]!;
@@ -451,7 +509,7 @@ export class CodePlanRuntime implements CodePlanPort {
     };
     let outcome: SandboxResult;
     try {
-      outcome = await runSandbox({ source, reviewEnabled, now: clock?.now ?? run?.now ?? Date.now(), seed: clock?.seed ?? run?.seed ?? 1, limits: this.limits, call });
+      outcome = await runSandbox({ source, filmQualityEnabled, now: clock?.now ?? run?.now ?? Date.now(), seed: clock?.seed ?? run?.seed ?? 1, limits: this.limits, call });
       const settled = await Promise.allSettled(submissions);
       const rejected = settled.find(result => result.status === "rejected");
       if (rejected?.status === "rejected") outcome = { state: "error", error: errorView(rejected.reason) };

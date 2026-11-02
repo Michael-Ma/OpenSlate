@@ -111,7 +111,7 @@ export function registerAssetLibrary(app: FastifyInstance, service: () => Produc
       offset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" }, kind: { enum: ["all", "image", "video", "audio", "document"] },
       source: { enum: ["all", "uploaded", "generated", "export", "imported", "demo"] }, search: { type: "string", maxLength: 160 },
       sceneId: { type: "string", minLength: 1, maxLength: 160 }, shotId: { type: "string", minLength: 1, maxLength: 160 },
-      role: { enum: ["keyframe", "clip", "voice", "music", "upload", "document", "export", "character_sheet"] },
+      role: { enum: ["keyframe", "reference", "clip", "voice", "music", "upload", "document", "export", "character_sheet"] },
     } } },
   }, async request => {
     const production = service(), query = request.query, offset = Number(query.offset ?? 0);

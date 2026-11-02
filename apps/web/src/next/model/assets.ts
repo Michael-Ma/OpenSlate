@@ -20,7 +20,7 @@ export interface AssetFilters {
 }
 export const ALL_ASSETS: AssetFilters = { role: "all", scene: "all" };
 
-const ROLE_ORDER: Record<AssetRole, number> = { keyframe: 0, clip: 1, voice: 2, music: 3, upload: 4, document: 5, export: 6, character_sheet: 7 };
+const ROLE_ORDER: Record<AssetRole, number> = { keyframe: 0, reference: 1, clip: 2, voice: 3, music: 4, upload: 5, document: 6, export: 7, character_sheet: 8 };
 
 /** Unique per stored file. Artifact ids alone are not enough: a take can reuse its id with new bytes. */
 export const assetKey = (item: Pick<AssetItem, "artifact">): string => `${item.artifact.kind}:${item.artifact.artifactId}:${item.artifact.sha256}`;

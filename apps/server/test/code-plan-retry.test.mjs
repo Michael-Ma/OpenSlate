@@ -12,7 +12,7 @@ import { wireCodePlans, readCodeFilm } from '../dist/code-plan/director.js';
 async function seed(t, changes={}) {
  const f=await realCodeFixture(t,changes);await f.submit(imageSource);await f.finish();
  f.frame=f.plans.steps(f.project.id)[0].result.artifact;
- f.source=`export default async function(ctx){await ctx.shot({id:'tofu-05',title:'The final tofu shot'}); const clip=await ctx.video({model:'${videoProfile.id}',firstFrame:${JSON.stringify(f.frame)},prompt:'Tofu rising',durationSeconds:3});if(!clip.ok) await ctx.log('This clip needs attention');}`;
+ f.source=`export default async function(ctx){const clip=await ctx.video({model:'${videoProfile.id}',firstFrame:${JSON.stringify(f.frame)},prompt:'Tofu rising',durationSeconds:3});if(!clip.ok) await ctx.log('This clip needs attention');}`;
  f.videoStep=()=>f.plans.steps(f.project.id).find(step=>step.kind==='video');
  f.makeDue=()=>{const s=f.videoStep();if(s?.retryAt!==undefined)f.store.put('code_plan_step',s.id,f.project.id,{...s,retryAt:0});};
  return f;
