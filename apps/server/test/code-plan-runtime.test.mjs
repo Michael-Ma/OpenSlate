@@ -110,7 +110,8 @@ test("unanswered choices wait, answers wake, question changes reuse answers and 
   submit(f, source("Choose framing", ["wide", "medium"]));
   assert.equal((await replay(f)).state, "waiting"); assert.equal(f.runtime.choices(f.projectId).length, 2);
   const current = f.runtime.choices(f.projectId).find(value => value.optionsDigest !== choice.optionsDigest);
-  assert.throws(() => f.runtime.answerChoice(f.projectId, current.choiceId, choice.optionsDigest, "close"), /choice|options|stale/i);
+  assert.throws(() => f.runtime.answerChoice(f.projectId, current.choiceId, choice.optionsDigest, "close"),
+    { code: "CODE_PLAN_CHOICE_STALE", message: "This card no longer applies" });
   f.runtime.answerChoice(f.projectId, current.choiceId, current.optionsDigest, "medium");
   await settle(f); assert.equal(f.calls.submit.length, 2);
 });

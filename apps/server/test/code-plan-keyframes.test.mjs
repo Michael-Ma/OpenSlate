@@ -29,7 +29,8 @@ async function until(f, predicate) {
   assert.fail(json(f.plans.view(f.id)));
 }
 const done = f => until(f, view => ['done', 'done_with_failures'].includes(view.state));
-const waiting = f => until(f, view => view.choices.some(choice => !Object.hasOwn(choice, 'answer')));
+const unanswered = choice => !choice.stale && !Object.hasOwn(choice, 'answer');
+const waiting = f => until(f, view => view.choices.some(unanswered));
 function answer(f, choice, mode) {
   const option = choice.options.find(option => option.keyframeInput === mode); assert.ok(option, mode);
   f.plans.answer(f.id, { choiceId: choice.choiceId, optionsDigest: choice.optionsDigest, answer: option });
@@ -132,7 +133,7 @@ test('model capabilities remove unsupported options, no references removes refer
   assert.equal(video.input.references.length, 4); assert.equal(video.input.references[0].sha256, choice.options[0].sha256);
   assert.deepEqual(video.input.references.slice(1).map(ref => ref.sha256), Array(3).fill(g.reference.sha256));
   await g.submit(g.source({ ...g.input, references: [] })); view = await waiting(g);
-  const without = view.choices.find(choice => !Object.hasOwn(choice, 'answer'));
+  const without = view.choices.find(unanswered);
   assert.deepEqual(without.options.map(option => option.keyframeInput), ['keyframe_and_references', 'first_frame']);
 });
 
@@ -158,7 +159,7 @@ test('a duration change asks again even when the model has the same flat price',
     const k=await ctx.keyframe('opening',{prompt:'Same image',video:{durationSeconds:${durationSeconds}}});if(k.ok)await ctx.log(k.choice);`);
   await f.submit(source(6)); const first = (await waiting(f)).choices[0]; answer(f, first, 'first_frame'); await done(f);
   const images = f.calls.submit.length;
-  await f.submit(source(7)); const changed = (await waiting(f)).choices.find(choice => !Object.hasOwn(choice, 'answer'));
+  await f.submit(source(7)); const changed = (await waiting(f)).choices.find(unanswered);
   assert.notEqual(changed.optionsDigest, first.optionsDigest); assert.equal(f.calls.submit.length, images);
 });
 
@@ -172,7 +173,7 @@ test('unchanged keyframes retain answers across versions/restart; prompt, varian
     { ...f.input, video: { ...f.clipSettings, durationSeconds: 7 } },
   ]) {
     const images = f.calls.start; await f.submit(f.source(input)); const view = await waiting(f);
-    const choice = view.choices.find(choice => !Object.hasOwn(choice, 'answer'));
+    const choice = view.choices.find(unanswered);
     assert.notEqual(choice.optionsDigest, first.optionsDigest);
     assert.equal(f.calls.video, before.video);
     assert.equal(f.calls.start - images, input.video.durationSeconds === 7 ? 0 : 1);
@@ -185,7 +186,7 @@ test('unchanged keyframes retain answers across versions/restart; prompt, varian
   assert.ok(readCodeFilm(g.service, g.id).models.some(model => model.id === miniMaxProfile.id));
   await g.submit(source('viggle-h3')); let view = await waiting(g); answer(g, view.choices[0], 'first_frame'); await g.finish();
   const images = g.calls.start; await g.submit(source(miniMaxProfile.id)); view = await waiting(g);
-  assert.equal(g.calls.start, images); assert.equal(view.choices.filter(choice => !Object.hasOwn(choice, 'answer')).length, 1);
+  assert.equal(g.calls.start, images); assert.equal(view.choices.filter(unanswered).length, 1);
 });
 
 test('journaled videos replay and re-cut without a keyframe or new charge; a new shot clip still needs confirmation', async t => {

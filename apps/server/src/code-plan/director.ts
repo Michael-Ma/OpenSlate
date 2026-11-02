@@ -30,7 +30,7 @@ export function readCodeFilm(service: ProductionService, projectId: string) {
     const output = codePlanOutput(media, step.artifact);
     return { ...step, ...(output ? { output } : {}) };
   });
-  return { ...view, steps, uploads: codePlanUploads(service.store, projectId), models: port.availableModels?.(projectId) ?? [], source: view.planVersion === null ? null : port.source(projectId, view.planVersion).source };
+  return { ...view, steps, choices: view.choices.filter(choice => !choice.stale), uploads: codePlanUploads(service.store, projectId), models: port.availableModels?.(projectId) ?? [], source: view.planVersion === null ? null : port.source(projectId, view.planVersion).source };
 }
 
 const CONVERSATION_ROWS = 16, CONVERSATION_TEXT = 4000;
@@ -213,7 +213,7 @@ export function triggerCodePlanRepairs(service: ProductionService, enqueue: (pro
       const id = digest({ projectId: project.id, stepKey: step.key, attempt: journal?.attemptId ?? step.attempts ?? step.updatedAt });
       if (store.get("code_plan_failure", id)) continue;
       const frame = journal?.input?.firstFrame;
-      const choice = frame && typeof frame === "object" && !Array.isArray(frame) ? film.choices.find(choice => choice.choiceId.endsWith("-keyframe")
+      const choice = frame && typeof frame === "object" && !Array.isArray(frame) ? film.choices.find(choice => !choice.stale && choice.choiceId.endsWith("-keyframe")
         && choice.options.some(option => option && typeof option === "object" && (option as { sha256?: unknown }).sha256 === frame.sha256)) : undefined;
       const shotId = choice?.choiceId.slice(0, -"-keyframe".length);
       const shot = film.declarations.shots.find((shot): shot is Record<string, unknown> => !!shot && typeof shot === "object" && (shot as Record<string, unknown>).id === shotId);

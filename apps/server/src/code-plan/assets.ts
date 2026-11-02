@@ -20,11 +20,11 @@ export function codePlanAssets(store: Store, project: ProjectRecord): AssetItem[
   const projectId = project.id, media = codePlanArtifacts(store, projectId);
   const steps = store.list<CodePlanStep>("code_plan_step", projectId), choices = store.list<CodePlanChoice>("code_plan_choice", projectId);
   const run = store.get<CodePlanRun>("code_plan_run", projectId), reached = new Set(run?.reachedStepKeys ?? []);
-  const links = codePlanShotLinks(steps, choices), shots = new Map((run?.declarations.shots ?? []).map(shot => [shot.id, shot]));
+  const links = codePlanShotLinks(steps, choices, reached), shots = new Map((run?.declarations.shots ?? []).map(shot => [shot.id, shot]));
   const scenes = new Map((run?.declarations.scenes ?? []).map(scene => [scene.id, scene]));
   const produced = new Map(steps.filter(step => step.state === "succeeded" && step.result?.ok)
     .flatMap(step => step.result?.ok ? [step.result.artifact, ...step.result.artifacts].map(ref => [ref.artifactId, step] as const) : []));
-  const videoFrames = new Set(steps.filter(step => step.kind === "video" && reached.has(step.key)).flatMap(step => [step.input.firstFrame, ...(Array.isArray(step.input.references) ? step.input.references : [])].map(frame => object(frame).sha256)));
+  const usedImages = new Set(steps.filter(step => (step.kind === "video" || step.kind === "image") && reached.has(step.key)).flatMap(step => [step.input.firstFrame, ...(Array.isArray(step.input.references) ? step.input.references : [])].map(frame => object(frame).sha256)));
   const labels = new Map(store.list<AudioLabel>("audio_library_label", projectId).map(row => [row.id, row]));
   const metadata = new Map(store.list<{ id: string; createdAt: string }>("asset_metadata", projectId).map(row => [row.id, row.createdAt]));
   const audio = new Map(store.list<NarrationAudio>("narration_audio", projectId).map(row => [row.id, row]));
@@ -41,10 +41,10 @@ export function codePlanAssets(store: Store, project: ProjectRecord): AssetItem[
       : record.origin === "local_render" ? "export" : record.artifact.kind === "image" ? "keyframe" : record.artifact.kind === "video" ? "clip" : "voice";
     const group = `${shotId ?? ""}:${role}`, numbered = role === "keyframe" || role === "reference" || role === "clip", takeIndex = (counts.get(group) ?? 0) + 1;
     if (numbered) counts.set(group, takeIndex);
-    const ref = record.artifact, frameChoices = step?.kind === "image" ? choices.filter(choice => choice.options.some(option => sameImage(option, { ...ref }))) : [];
+    const ref = record.artifact, frameChoices = step?.kind === "image" ? choices.filter(choice => !choice.stale && choice.options.some(option => sameImage(option, { ...ref }))) : [];
     const reference = media.imageReferences.get(record.id);
-    const current = ref.kind === "image" && (videoFrames.has(ref.sha256) || !!reference && videoFrames.has(reference.artifact.sha256)) || !!step && reached.has(step.key) && (step.kind !== "image" || frameChoices.length === 0
-      || frameChoices.some(choice => sameImage(choice.answer, { ...ref })) || videoFrames.has(ref.sha256));
+    const current = ref.kind === "image" && (usedImages.has(ref.sha256) || !!reference && usedImages.has(reference.artifact.sha256)) || !!step && reached.has(step.key) && (step.kind !== "image" || frameChoices.length === 0
+      || frameChoices.some(choice => sameImage(choice.answer, { ...ref })) || usedImages.has(ref.sha256));
     const poster = media.posters.get(record.id), size = pictureSize(ref.kind === "image" ? record : poster);
     const document = role === "document" ? record as SuppliedDocumentArtifact : undefined;
     const label = document ? `${document.name}${document.pages !== undefined ? ` · ${document.pages} ${document.pages === 1 ? "page" : "pages"}` : ""}`

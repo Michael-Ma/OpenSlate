@@ -8,7 +8,7 @@ import type { CodePlanDiff, CodePlanSourceView, CodePlanStepDetail, CodePlanView
  * and every write refuses while installation recovery is quarantined.
  */
 export interface CodePlanPort {
-  /** Read model for GET routes and for the Director's read_film tool. */
+  /** Browser read model, including stale choices; the Director's read_film filters them. */
   view(projectId: string): CodePlanView;
 
   /** Complete prompt and safe recorded call metadata. NOT_FOUND for an unknown step. */
@@ -34,7 +34,7 @@ export interface CodePlanPort {
     source: string; author: "director" | "user"; basedOnVersion: number | null; invocationId: string;
   }): Promise<{ version: number; diff: CodePlanDiff }>;
 
-  /** Records an answer that must equal one of the choice's options exactly, then wakes the run. */
+  /** Records an exact option and wakes the run. CODE_PLAN_CHOICE_STALE refuses retired cards, except an identical stored answer. */
   answer(projectId: string, input: { choiceId: string; optionsDigest: string; answer: unknown }): CodePlanView;
 
   /** The new ceiling must be higher than the current one. Wakes the run. */

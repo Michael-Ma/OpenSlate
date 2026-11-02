@@ -22,7 +22,7 @@ const mediaArtifact = (artifact: ArtifactRef) => {
 export function codePlanView(store: Store, execution: CodePlanExecution, projectId: string): CodePlanView {
   const run = store.get<CodePlanRun>("code_plan_run", projectId);
   const steps = store.list<CodePlanStep>("code_plan_step", projectId);
-  const choices = store.list<CodePlanChoice>("code_plan_choice", projectId), links = codePlanShotLinks(steps, choices);
+  const choices = store.list<CodePlanChoice>("code_plan_choice", projectId), links = codePlanShotLinks(steps, choices, new Set(run?.reachedStepKeys));
   const posters = new Map(store.list<CodePlanPoster>("code_plan_poster", projectId).map(row => [row.id, row.poster]));
   const media = codePlanArtifacts(store, projectId);
   const sizes = new Map(media.records.filter(record => record.artifact.kind === "video" && media.posters.has(record.id))
@@ -48,8 +48,9 @@ export function codePlanView(store: Store, execution: CodePlanExecution, project
     }),
     choices: choices
       .sort((a, b) => Number(Object.hasOwn(a, "answer")) - Number(Object.hasOwn(b, "answer")))
-      .map(({ choiceId, optionsDigest, question, options, answer, answeredAt }) => ({ choiceId, optionsDigest, question, options,
-        ...(answer !== undefined ? { answer } : {}), ...(answeredAt ? { answeredAt } : {}) })),
+      .map(({ choiceId, optionsDigest, question, options, answer, answeredAt, askedAt, stale }) => ({ choiceId, optionsDigest, question, options,
+        ...(answer !== undefined ? { answer } : {}), ...(answeredAt ? { answeredAt } : {}),
+        ...(askedAt ? { askedAt } : {}), ...(stale ? { stale } : {}) })),
     reviews: store.list<CodePlanReview>("code_plan_review", projectId)
       .filter(review => run?.reviewKeys?.includes(review.id))
       .map(review => ({ id: review.reviewId, note: review.note, state: review.state, clipCount: review.clips.length, updatedAt: review.updatedAt })),
