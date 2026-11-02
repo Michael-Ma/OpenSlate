@@ -5,15 +5,28 @@ import type { Request } from "./settings.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
- * Settings view, Director section: the film's Director (Codex or the scripted demo), its setup, and the
+ * Settings view, Director section: the film's Director (Codex, Claude Code or the scripted demo), its setup, and the
  * "Director reviews new keyframes" switch (D4). Shapes follow apps/server/src/application/local-director.ts.
  */
 
 export interface DirectorSelection {
-  mode: "fake" | "native";
+  /** native: Codex. claude: Claude Code on the person's own Claude plan (code-plan films only). */
+  mode: "fake" | "native" | "claude";
   binaryPath?: string;
   model?: string;
   codexHome?: string;
+}
+
+/** Claude Code on this computer, as the server checked it (card M2). */
+export interface ClaudeSetup {
+  status: "ready" | "blocked" | "missing" | "unchecked";
+  binaryPath: string | null;
+  version: string | null;
+  /** Plain words for blocked or missing. */
+  reason: string | null;
+  models: { id: string; label: string }[];
+  /** False for storyboard films: Claude Code directs code-plan films only. */
+  available: boolean;
 }
 
 /** GET /director/setup (and /director/models, which first runs Codex's read-only setup check). */
@@ -39,6 +52,8 @@ export interface DirectorSetup {
   codexDiagnostic?: { code: "DIRECTOR_CODEX_VERSION_MISMATCH"; expectedVersion: string; foundVersion: string | null; binaryPath: string; installPath: string } | null;
   nativeDiagnostic?: NativeDiagnostic | null;
   readiness?: { status: "ready" | "blocked"; checks?: Record<string, string>; nativeDiagnostic?: NativeDiagnostic } | null;
+  /** Absent from servers without Claude Code support. */
+  claude?: ClaudeSetup;
 }
 
 /** GET /settings/director-review (server card B10, apps/server/src/application/keyframe-review.ts). */
@@ -48,9 +63,10 @@ export interface DirectorReview {
 
 export const DEMO_VALUE = "fake";
 const NATIVE_PREFIX = "native:";
+const CLAUDE_PREFIX = "claude:";
 
 export const directorValue = (selection: DirectorSelection): string =>
-  selection.mode === "fake" ? DEMO_VALUE : `${NATIVE_PREFIX}${selection.model ?? ""}`;
+  selection.mode === "fake" ? DEMO_VALUE : `${selection.mode === "claude" ? CLAUDE_PREFIX : NATIVE_PREFIX}${selection.model ?? ""}`;
 
 /** The Codex program the Director would use: the saved one, else the one this computer found. */
 export const codexProgram = (setup: DirectorSetup): string => setup.selection.binaryPath ?? setup.defaults.binaryPath ?? "";
@@ -76,8 +92,11 @@ export function codexState(setup: DirectorSetup): CodexState {
 
 export interface DirectorChoice {
   value: string;
-  /** A Codex model id ("gpt-6-astra"), or null for the Demo Director. */
+  runtime: "codex" | "claude" | "demo";
+  /** A Codex or Claude model id ("gpt-6.1-sol", "claude-opus-5-5"), or null for the Demo Director. */
   model: string | null;
+  /** How the model is named: Codex ids as they are, Claude models by name ("Opus 5.5"). */
+  label: string | null;
   ready: boolean;
   reason: Msg | null;
   estimate: Msg;
@@ -90,17 +109,30 @@ export interface DirectorRow {
   locked: Msg | null;
 }
 
-/** The Models table's Director row: Codex with each model it offers, and the Demo Director. */
+/** Why Claude Code cannot be chosen now, or null. */
+export function claudeReason(claude: ClaudeSetup): Msg | null {
+  if (claude.status === "missing") return msg("set.why.claude_missing");
+  if (claude.status === "blocked") return claude.reason ? msg("set.why.claude_blocked", { reason: claude.reason }) : msg("set.why.claude_blocked_plain");
+  return null;
+}
+
+/** The Models table's Director row: Codex with each model it offers, Claude Code's models in a code-plan film, and the Demo Director. */
 export function directorRow(setup: DirectorSetup): DirectorRow {
   const state = codexState(setup);
   const ids = setup.modelChoices.map((choice) => choice.id);
   const current = setup.selection.mode === "native" ? setup.selection.model : undefined;
   for (const id of [current, setup.defaults.model]) if (id && !ids.includes(id)) ids.push(id);
   const reason = state === "missing" ? msg("set.why.codex_missing") : state === "blocked" ? codexDiagnostic(setup) ?? msg("set.why.codex_blocked") : null;
-  const native = ids.map((model): DirectorChoice => ({ value: `${NATIVE_PREFIX}${model}`, model, ready: !reason, reason, estimate: msg("set.estimate.director_codex") }));
+  const native = ids.map((model): DirectorChoice => ({ value: `${NATIVE_PREFIX}${model}`, runtime: "codex", model, label: model, ready: !reason, reason, estimate: msg("set.estimate.director_codex") }));
+  // A film already on Claude Code keeps its choice listed even where Claude Code is no longer offered.
+  const claude = setup.claude, onClaude = setup.selection.mode === "claude" ? setup.selection.model ?? null : null;
+  const claudeModels = claude && (claude.available || onClaude) ? [...claude.models] : [];
+  if (onClaude && !claudeModels.some((model) => model.id === onClaude)) claudeModels.push({ id: onClaude, label: onClaude });
+  const why = claude ? claudeReason(claude) ?? (claude.available ? null : msg("set.why.claude_code_films")) : null;
+  const claudeChoices = claudeModels.map((model): DirectorChoice => ({ value: `${CLAUDE_PREFIX}${model.id}`, runtime: "claude", model: model.id, label: model.label, ready: !why, reason: why, estimate: msg("set.estimate.director_claude") }));
   return {
     selected: directorValue(setup.selection),
-    choices: [...native, { value: DEMO_VALUE, model: null, ready: true, reason: null, estimate: msg("set.estimate.director_demo") }],
+    choices: [...native, ...claudeChoices, { value: DEMO_VALUE, runtime: "demo", model: null, label: null, ready: true, reason: null, estimate: msg("set.estimate.director_demo") }],
     locked: setup.busy || !setup.changeAvailable ? msg("set.director.busy") : null,
   };
 }
@@ -108,6 +140,10 @@ export function directorRow(setup: DirectorSetup): DirectorRow {
 /** The selection a Models-row switch saves: the demo, or Codex with the chosen model and the known program. */
 export function selectionFor(setup: DirectorSetup, value: string): DirectorSelection {
   if (value === DEMO_VALUE) return { mode: "fake" };
+  if (value.startsWith(CLAUDE_PREFIX)) {
+    const binaryPath = setup.claude?.binaryPath;
+    return { mode: "claude", model: value.slice(CLAUDE_PREFIX.length), ...(binaryPath ? { binaryPath } : {}) };
+  }
   const model = value.startsWith(NATIVE_PREFIX) ? value.slice(NATIVE_PREFIX.length) : setup.defaults.model;
   const codexHome = setup.selection.codexHome ?? setup.defaults.codexHome;
   return { mode: "native", binaryPath: codexProgram(setup), model, ...(codexHome ? { codexHome } : {}) };
@@ -119,7 +155,11 @@ export function selectionFor(setup: DirectorSetup, value: string): DirectorSelec
  * Both check that Codex runs before saving a Codex choice.
  */
 export function directorRequest(setup: DirectorSetup, selection: DirectorSelection): Request {
-  const clean: DirectorSelection = selection.mode === "fake" ? { mode: "fake" } : {
+  const clean: DirectorSelection = selection.mode === "fake" ? { mode: "fake" } : selection.mode === "claude" ? {
+    mode: "claude",
+    model: selection.model?.trim() ?? "",
+    ...(selection.binaryPath?.trim() ? { binaryPath: selection.binaryPath.trim() } : {}),
+  } : {
     mode: "native",
     binaryPath: selection.binaryPath?.trim() ?? "",
     model: selection.model?.trim() ?? "",

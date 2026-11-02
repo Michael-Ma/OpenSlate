@@ -158,7 +158,7 @@ export function ModelsPanel({ models, setup, film, offline }: {
     const current = submitted?.job === "director" ? submitted.baseline : null;
     if (!current || !setup.data || current.selectionDigest !== setup.data.selectionDigest || current.locked !== setup.data.locked) return;
     const request = settingsRequest(projectId, directorRequest(current, selectionFor(current, value)));
-    const toast = value === DEMO_VALUE ? msg("set.toast.director_demo") : msg("set.toast.director_switched", { model: choice?.model ?? "" });
+    const toast = value === DEMO_VALUE ? msg("set.toast.director_demo") : msg("set.toast.director_switched", { model: choice ? directorName(choice) : "" });
     // A Codex choice runs Codex's setup check on this computer first, which can take a while.
     const result = await store.command<DirectorSetup>(DIRECTOR_PRESS, request.body, () => request, toast, { timeoutMs: CODEX_CHECK_TIMEOUT_MS });
     if (!result) return;
@@ -171,7 +171,8 @@ export function ModelsPanel({ models, setup, film, offline }: {
   /** Each select names its estimate and status (and why it is off), so a screen reader reads them with it. */
   const described = (job: string, why = false) => `set-m-${job}-price set-m-${job}-status${why ? ` set-m-${job}-why` : ""}`;
 
-  const directorName = (choice: DirectorChoice): string => (choice.model ? t("set.model.codex", { model: choice.model }) : t("set.model.demo_director"));
+  const directorName = (choice: DirectorChoice): string => choice.runtime === "claude" ? t("set.model.claude", { model: choice.label ?? choice.model ?? "" })
+    : choice.model ? t("set.model.codex", { model: choice.model }) : t("set.model.demo_director");
   const optionText = (name: string, ready: boolean, reason: Msg | null) => (ready || !reason ? name : t("set.models.option_off", { name, reason: tm(reason) }));
 
   const directorRowView = () => {
@@ -190,7 +191,7 @@ export function ModelsPanel({ models, setup, film, offline }: {
     const value = pending?.job === "director" ? pending.value : director.selected;
     const shown = director.choices.find((choice) => choice.value === value) ?? director.choices[0]!;
     const stale = pending?.job === "director" && (pending.baseline.selectionDigest !== setup.data.selectionDigest || pending.baseline.locked !== setup.data.locked);
-    const unchecked = shown.model !== null && codexState(setup.data) === "unchecked";
+    const unchecked = shown.runtime === "claude" ? setup.data.claude?.status === "unchecked" : shown.model !== null && codexState(setup.data) === "unchecked";
     // The busy reason is text under the select: a disabled select cannot be focused, so a tooltip alone is never read.
     const busy = !offline && director.locked ? tm(director.locked) : null;
     const disabledWhy = offline ?? busy;
@@ -211,7 +212,7 @@ export function ModelsPanel({ models, setup, film, offline }: {
         {pending?.job === "director" && (
           <ImpactRow
             title={stale ? t("set.impact.stale") : t("set.impact.title.director", { model: directorName(shown) })}
-            lines={stale ? [] : [msg("set.impact.director_next"), msg(shown.model ? "set.impact.director_check" : "set.impact.director_demo")]}
+            lines={stale ? [] : [msg("set.impact.director_next"), msg(shown.runtime === "claude" ? "set.impact.director_claude" : shown.model ? "set.impact.director_check" : "set.impact.director_demo")]}
             tone={stale ? "info" : "cost"}
             stale={stale}
             actions={stale

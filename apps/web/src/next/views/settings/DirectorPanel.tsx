@@ -128,6 +128,22 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
         </form>
       );
     }
+    if (data.selection.mode === "claude") {
+      const model = data.claude?.models.find((row) => row.id === data.selection.model)?.label ?? data.selection.model ?? "";
+      return (
+        <>
+          <p className="lead">{t("set.director.claude_lead")}</p>
+          <dl className="kv" data-director="claude">
+            <dt>{t("set.director.program")}</dt>
+            <dd className="mono">{data.selection.binaryPath ?? data.claude?.binaryPath ?? t("set.director.no_program")}</dd>
+            <dt>{t("set.director.model")}</dt>
+            <dd>{t("set.model.claude", { model })}</dd>
+            <dt>{t("set.director.plan")}</dt>
+            <dd>{t("set.estimate.director_claude")}</dd>
+          </dl>
+        </>
+      );
+    }
     if (!native) return <p className="lead">{t("set.director.demo_lead")}</p>;
     const program = codexProgram(data);
     const model = data.selection.model ?? data.defaults.model;
