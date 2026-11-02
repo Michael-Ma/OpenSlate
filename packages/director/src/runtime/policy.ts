@@ -5,6 +5,18 @@ import type { PrivateCodexHome } from "./private-home.js";
 export type CodexConfigValue = string | number | boolean | readonly CodexConfigValue[] | { readonly [key: string]: CodexConfigValue };
 /** Updating this requires regenerating protocol fixtures and rerunning compatibility evidence. */
 export const CODEX_PROTOCOL_VERSION = "0.162.1";
+/** In 0.162.1 an empty marker list makes cwd the project root. This stops ancestor
+ * .codex config and repo skill discovery; a zero document budget alone does not.
+ * Application workspaces are owned, and explicit pinned skills remain available. */
+export const CODEX_PROJECT_ISOLATION_CONFIG = Object.freeze({
+  project_doc_max_bytes: 0,
+  project_doc_fallback_filenames: Object.freeze([] as string[]),
+  project_root_markers: Object.freeze([] as string[]),
+});
+export function projectIsolationMatches(config: Record<string, unknown>): boolean {
+  return config.project_doc_max_bytes === 0 && [config.project_doc_fallback_filenames, config.project_root_markers]
+    .every(value => Array.isArray(value) && value.length === 0);
+}
 /** Pinned native surface reductions shared by setup and execution; not independent credential isolation proof. */
 export const CODEX_DISABLED_FEATURES = ["apps", "plugins", "remote_plugin", "hooks", "shell_tool", "shell_snapshot", "unified_exec", "browser_use",
   "browser_use_external", "computer_use", "in_app_browser", "image_generation", "memories", "multi_agent", "multi_agent_v2",

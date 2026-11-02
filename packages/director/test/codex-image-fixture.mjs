@@ -48,6 +48,9 @@ lines.on("line", line => {
     return respond(id, { userAgent: "codex-cli/0.162.1" });
   }
   if (method === "config/read") {
+    if (imageProcess && imageScenario === "project-budget-drift") config.project_doc_max_bytes = 32768;
+    if (imageProcess && imageScenario === "project-fallback-drift") config.project_doc_fallback_filenames = ["FALLBACK.md"];
+    if (imageProcess && imageScenario === "project-markers-drift") config.project_root_markers = [".git"];
     if (imageProcess && imageScenario === "mcp-drift") config.mcp_servers.unexpected = { enabled: true, command: "PRIVATE_MUST_NOT_RUN" };
     if(imageScenario==="close-setup" && !imageProcess && !verifying) {
       const started=Date.now(),wait=setInterval(()=>{
@@ -95,7 +98,9 @@ lines.on("line", line => {
   if (method === "thread/start") {
     const threadId="thread-"+process.cwd().split("/").at(-1).slice(0,20);
     const thread={id:threadId,cwd:process.cwd(),modelProvider:"openai",historyMode:params.historyMode,turns:[]};saveHistory(thread);
-    return respond(id,{thread,model:"gpt-6-astra",modelProvider:"openai",cwd:process.cwd()});
+    return respond(id,{thread,model:"gpt-6-astra",modelProvider:"openai",cwd:process.cwd(),
+      instructionSources: imageScenario === "instructions-extra" ? [join(process.env.HOME,".codex/AGENTS.md")]
+        : imageScenario === "instructions-missing" ? undefined : imageScenario === "instructions-malformed" ? {} : []});
   }
   if (method === "thread/read") {
     if(imageScenario==="history-error")return send({id,error:{code:-32601,message:"PRIVATE_NATIVE_HISTORY_UNAVAILABLE"}});

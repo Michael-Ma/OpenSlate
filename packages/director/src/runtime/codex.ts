@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { toolCatalog } from "@openslate/core";
-import { CODEX_DISABLED_FEATURES as DISABLED, normalizePermissionProfile, toml, validateOptions } from "./policy.js";
+import { CODEX_DISABLED_FEATURES as DISABLED, CODEX_PROJECT_ISOLATION_CONFIG, projectIsolationMatches, normalizePermissionProfile, toml, validateOptions } from "./policy.js";
 import type { CodexConfigValue, CodexDirectorOptions } from "./policy.js";
 import { CodexTransport, timeout, type RpcMessage } from "./transport.js";
 import { prepareDirectorImages } from "./images.js";
@@ -285,7 +285,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
   }
   private launchConfig(input: DirectorRunInput): Record<string, CodexConfigValue> {
     const config: Record<string, CodexConfigValue> = { ...this.#options.policy.config,
-      model: this.#options.model, model_reasoning_effort: "high", approval_policy: "never", web_search: "disabled", project_doc_max_bytes: 0,
+      model: this.#options.model, model_reasoning_effort: "high", approval_policy: "never", web_search: "disabled", ...CODEX_PROJECT_ISOLATION_CONFIG,
       "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none", check_for_update_on_startup: false,
       "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
       "features.code_mode_host": true, "features.skip_host_skill_discovery": true,
@@ -318,8 +318,8 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       "RUNTIME_POLICY_MISMATCH", "Effective native permissions differ from the exact configured profile");
     const features = object(config.features);
     requireRuntime(features.code_mode_host === true && features.default_mode_request_user_input === true && DISABLED.every(name => features[name] === false), "RUNTIME_CONFIG_MISMATCH", "Native capability configuration differs from expected settings");
-    requireRuntime(object(object(config.skills).bundled).enabled === false,
-      "RUNTIME_CONFIG_MISMATCH", "Bundled native instructions must remain disabled");
+    requireRuntime(projectIsolationMatches(config) && features.skip_host_skill_discovery === true && object(object(config.skills).bundled).enabled === false,
+      "RUNTIME_CONFIG_MISMATCH", "Project discovery and bundled native instructions must remain disabled");
     const data = object(await transport.request("skills/list", { cwds: [this.#options.cwd], forceReload: true }, signal)).data;
     requireRuntime(Array.isArray(data), "RUNTIME_PROTOCOL_INVALID", "Native skill catalog is missing");
     const found: { name: unknown; path: unknown }[] = [];

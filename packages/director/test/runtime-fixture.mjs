@@ -52,6 +52,9 @@ lines.on("line", line => {
   }
   if (method === "initialized") return;
   if (method === "config/read") {
+    if (mode === "project-budget-wrong") config.project_doc_max_bytes = 32768;
+    if (mode === "project-fallback-wrong") config.project_doc_fallback_filenames = ["FALLBACK.md"];
+    if (mode === "project-markers-wrong") config.project_root_markers = [".git"];
     if (mode === "bundled-skills-wrong") config.skills.bundled.enabled = true;
     if (mode === "question-feature-wrong") config.features.default_mode_request_user_input = false;
     if (mode === "bridge-wrong") config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_CREDENTIAL = "wrong-fixed-credential";

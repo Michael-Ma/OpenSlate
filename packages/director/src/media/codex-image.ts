@@ -9,7 +9,7 @@ import { CODEX_IMAGE_RUNTIME_VERSION, isRecordedCodexImageRuntime, CODEX_IMAGE_L
 import { setupLocalCodex } from "../runtime/setup.js";
 import { preparePrivateCodexHome, verifyPrivateCodexHome, type PrivateCodexHome } from "../runtime/private-home.js";
 import { CODEX_RUNTIME_LIMITS, CODEX_MAX_STARTUP_TIMEOUT_MS, normalizePermissionProfile, toml, type CodexConfigValue, type CodexDirectorOptions } from "../runtime/policy.js";
-import { classifyNativeDiagnostic } from "../runtime/native-diagnostic.js";
+import { classifyNativeDiagnostic, instructionSourcesDiagnostic } from "../runtime/native-diagnostic.js";
 import { object, requireRuntime, RuntimeFault } from "../runtime/validation.js";
 import { ImageRpc } from "./image-rpc.js";
 import { imageDirectory, imageFileSha, imageRead, imageStopped, imageWithin, imageWrite } from "./image-files.js";
@@ -222,6 +222,9 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       const threadId = object(response.thread).id;
       requireRuntime(validId(threadId) && response.model === MODEL && response.modelProvider === "openai" && response.cwd === workspace,
         "CODEX_IMAGE_THREAD_INVALID", "Native image thread identity is invalid");
+      if (!Array.isArray(response.instructionSources) || response.instructionSources.length !== 0)
+        throw new RuntimeFault("RUNTIME_INSTRUCTIONS_UNEXPECTED", "Unexpected inherited native image instructions",
+          instructionSourcesDiagnostic(response.instructionSources, this.#input.nativeHome));
       imageStopped(signal);
       const prepared: CodexImagePrepared = { runtime: { version: 1, runtimeVersion: "0.162.1", runtimeDigest: ready.runtimeDigest,
         configurationDigest, model: MODEL, authMode: "chatgpt" }, session: { threadId, turnInputDigest: description.turnInputDigest } };

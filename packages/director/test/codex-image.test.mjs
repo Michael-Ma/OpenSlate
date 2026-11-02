@@ -80,6 +80,21 @@ for(const scenario of ["api-key","capability","mcp-drift"])test(`new work blocks
  const f=await fixture(t,scenario);const ready=await f.worker.checkReadiness();assert.equal(ready.status,"blocked");assert.deepEqual(ready.nativeDiagnostic,{category:scenario==="api-key"?"native_auth_required":"native_protocol"});assert.ok(!methods(await f.records()).includes("turn/start"));
  if(scenario==="mcp-drift")assert.equal(ready.code,"CODEX_IMAGE_MCP_UNEXPECTED");
 });
+for(const scenario of ["project-budget-drift","project-fallback-drift","project-markers-drift"])test(`image preflight refuses ${scenario} without a thread or turn`,async t=>{
+ const f=await fixture(t,scenario),ready=await f.worker.checkReadiness();
+ assert.equal(ready.status,"blocked");assert.equal(ready.code,"CODEX_IMAGE_CONFIG_MISMATCH");
+ await assert.rejects(f.worker.prepare(input()),error=>error.code==="CODEX_IMAGE_CONFIG_MISMATCH");
+ assert.ok(!methods(await f.records()).some(method=>method==="thread/start"||method==="turn/start"));
+});
+for(const scenario of ["instructions-extra","instructions-missing","instructions-malformed"])test(`image preparation refuses ${scenario} before handing off or dispatching`,async t=>{
+ const f=await fixture(t,scenario);
+ await assert.rejects(f.worker.prepare(input()),error=>{
+  assert.equal(error.code,"RUNTIME_INSTRUCTIONS_UNEXPECTED");
+  assert.deepEqual(classifyNativeDiagnostic(error),{category:"native_instructions_unexpected",instructionFiles:scenario==="instructions-extra"?["~/.codex/AGENTS.md"]:[]});
+  return true;
+ });
+ assert.ok(!methods(await f.records()).includes("turn/start"));
+});
 for(const operation of ["prepare","checkReadiness"])test(`${operation} preserves its primary native start reason when cleanup also fails`,async t=>{
  const f=await fixture(t,"api-key"),close=ImageRpc.prototype.close;
  ImageRpc.prototype.close=async function(){await close.call(this);throw Error("PRIVATE_CLEANUP_ERROR");};

@@ -45,6 +45,9 @@ lines.on("line", line => {
     return respond(id, { userAgent: "codex-cli/0.162.1" });
   }
   if (method === "config/read") {
+    if (verifying && scenario === "project-budget-drift") config.project_doc_max_bytes = 32768;
+    if (verifying && scenario === "project-fallback-drift") config.project_doc_fallback_filenames = ["FALLBACK.md"];
+    if (verifying && scenario === "project-markers-drift") config.project_root_markers = [".git"];
     if (verifying && scenario === "policy") config.permissions.openslate_local.filesystem["/unexpected-root"] = "read";
     if (verifying && scenario === "permissions-null") {
       Object.assign(config.permissions.openslate_local, { description: null, extends: null, workspace_roots: null });

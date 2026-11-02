@@ -174,6 +174,16 @@ test("instruction-source refusal retains redacted file metadata before dispatch,
   assert.equal((await f.records()).some(row => row.method === "turn/start"), false);
 });
 
+for (const scenario of ["project-budget-wrong", "project-fallback-wrong", "project-markers-wrong"]) {
+  test(`project isolation drift refuses before dispatch: ${scenario}`, async t => {
+    const f = await fixture(t, scenario);
+    const result = await deadline(f.runtime.start(f.input));
+    assert.equal(result.status, "failed"); assert.equal(result.dispatched, false);
+    assert.equal(result.error.code, "RUNTIME_CONFIG_MISMATCH");
+    assert.ok(!(await f.records()).some(row => row.method === "thread/start" || row.method === "turn/start"));
+  });
+}
+
 test("missing or malformed instruction source metadata still refuses before dispatch", async t => {
   for (const sources of [null, {}, "PRIVATE_PROSE", [{ contents: "PRIVATE_INSTRUCTIONS" }]]) {
     const f = await fixture(t);
