@@ -50,7 +50,7 @@ export function codePlanProviderArgs(profile: ProviderProfile, input: JsonObject
     invariant((input.width === undefined || input.width === width) && (input.height === undefined || input.height === height),
       "CODE_PLAN_INPUT", "Use aspectRatio to choose an image canvas; explicit dimensions must match that canvas or the installed profile");
     operation = { ...base, prompt: input.prompt, width: width!, height: height!, ...(canvas ? { aspect: canvas.aspect } : {}), settings: profile.adapter === "openai-image" ? { quality: settings.quality! } : {} };
-    // Reconstruct saved plan keys from their original profile. First dispatch separately requires the current pin.
+    // Keep the original profile in plan keys and inputs. New dispatch separately selects the supported runtime.
     if (profile.adapter === "codex-image") assertCodexImageOperationOptions(profile, operation, { historical: true });
   } else if (profile.kind === "video") {
     allowed.push("prompt", "firstFrame", "lastFrame", "references", "durationSeconds", "aspectRatio");

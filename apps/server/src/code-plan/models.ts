@@ -15,8 +15,8 @@ import { assertImageReferenceRecords, imageCapabilities } from "../execution/cod
 export interface CodePlanCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; localExecution?: unknown; [key: string]: unknown }
 export const supportedCodePlanAdapters = new Set(["codex-image", "openai-image", "viggle-h3", "minimax-h3", "openai-speech", "seedance", "fal-video-i2v", "gemini-lyria"]);
 
-/** Current definitions match byte for byte. Retired Codex image locks remain available for journal replay only;
- * dispatch still requires a current installed definition and current-runtime preflight. */
+/** Keep locked definitions byte for byte so journal keys never change. Retired Codex locks can replay;
+ * new dispatch requires an exact installed definition or the catalog's sole runtime-only upgrade. */
 export function projectModels(store: Store, projectId: string, catalog?: InstalledProviderCatalog): Record<string, CodePlanModel> {
   const project = store.getProject(projectId), lock = store.get<CodePlanCapabilityLock>("capability_lock", project.capabilityLockId);
   const installed = catalog?.view().profiles ?? [];

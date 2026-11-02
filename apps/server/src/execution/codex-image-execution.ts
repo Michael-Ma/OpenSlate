@@ -40,7 +40,9 @@ export class CodexImageExecution implements ExecutionProvider {
     assertCodexImageFirstDispatch(this.#store,admission,lease);
     let prepared:CodexImageInput,mapping:CodexImageExecutionMapping;
     try {
-      stopped(signal);assertCodexImageOperationOptions(admission.profile,request.args);
+      // Code films keep the locked profile in their keys/intent. Catalog admission has checked the
+      // runtime-only installed replacement; only this new native turn uses the current runtime.
+      stopped(signal);assertCodexImageOperationOptions(admission.profile,request.args,{runtimeUpgrade:'codePlan' in admission});
       prepared=await this.prepareInputs(attempt,signal);stopped(signal);
     }catch{return this.notDispatched(admission,lease,signal?.aborted?'LOCAL_CANCELLED':'LOCAL_INPUT_INVALID',signal);}
     let acquired:CodexImagePrepared|undefined;

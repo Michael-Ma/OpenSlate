@@ -78,6 +78,15 @@ export function inspectSetup({ root, environment = process.env, nodeVersion = pr
         ? 'Readable JSON catalog. The server validates exact model/profile contracts during startup.'
         : 'This catalog has no real model profiles. Enabled routes still need an installed profile and project model selection.',
       'Add supported profiles using examples/live-provider-profiles.example.json, then choose the models in Project settings.');
+      for (const entry of catalog.profiles.filter(entry => entry?.profile?.adapter === 'codex-image')) {
+        const runtime = entry.profile.configuration?.settings?.runtimeVersion;
+        if (runtime === '0.162.1') continue;
+        const upgrade = runtime === '0.153.4';
+        add(`codex-image-profile:${entry.profile.id}`, 'Codex image profile', upgrade ? 'warning' : 'blocked',
+          upgrade ? `${entry.profile.id}: using Codex 0.162.1 for new images. Saved film inputs and receipts stay unchanged.`
+            : `${entry.profile.id}: unsupported Codex image runtimeVersion.`,
+          `Change runtimeVersion to "0.162.1" in provider configuration profile ${entry.profile.id}. The server validates all other fields during startup.`);
+      }
     } catch { add('catalog', 'Provider catalog', 'blocked', 'OPENSLATE_PROVIDER_CONFIG is not a readable bounded v1 provider catalog.', 'Start with examples/live-provider-profiles.example.json or examples/viggle-provider-profiles.example.json and set OPENSLATE_PROVIDER_CONFIG to your catalog.'); }
   } else add('catalog', 'Provider catalog', realEnabled ? 'warning' : 'ready', 'Built-in demo profiles selected. Choose an explicit catalog to use real models.',
     'Set OPENSLATE_PROVIDER_CONFIG to a supported catalog such as examples/live-provider-profiles.example.json, then choose its models in Project settings.');

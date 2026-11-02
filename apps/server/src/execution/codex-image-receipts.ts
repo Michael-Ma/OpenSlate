@@ -2,7 +2,7 @@ import { providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, invariant, providerProfileArguments } from '@openslate/core';
 import type { NativeDiagnostic,ProviderProfile } from '@openslate/core';
 import { safeNativeDiagnostic } from '../application/native-diagnostics.js';
-import { CODEX_IMAGE_RUNTIME_VERSION, isRecordedCodexImageRuntime, codexImageCanvasValid, describeCodexImageInput } from '@openslate/providers';
+import { CODEX_IMAGE_RUNTIME_VERSION, isRecordedCodexImageRuntime, isCodexImageRuntimeUpgrade, codexImageCanvasValid, describeCodexImageInput } from '@openslate/providers';
 import type { CodexImageRuntimeVersion, CodexImageAspect, CodexImageDescription, CodexImagePrepared, ExecutionRequest } from '@openslate/providers';
 import type { Attempt } from './engine.js';
 import { assertOutputReceiptIdentity } from './output-store.js';
@@ -46,14 +46,16 @@ export function codexImageTurnCanvas(args:ExecutionRequest['args']):{width:numbe
   invariant(codexImageCanvasValid(args.width,args.height,aspect),'CODEX_IMAGE_PREFLIGHT_INVALID','Codex image canvas must match its turn policy');
   return {width:args.width as number,height:args.height as number,...(aspect===undefined?{}:{aspect:aspect as CodexImageAspect})};
 }
-export function assertCodexImageOperationOptions(profile:ProviderProfile,args:ExecutionRequest['args'],options:{historical?:boolean}={}):void {
+export function assertCodexImageOperationOptions(profile:ProviderProfile,args:ExecutionRequest['args'],options:{historical?:boolean;runtimeUpgrade?:boolean}={}):void {
   const expected=providerProfileArguments(profile);
   codexFields(profile.configuration,['model','settings']); const settings=profile.configuration.settings; codexFields(settings,['runtimeVersion','directorModel','width','height']);
   codexFields(args,[...Object.keys(expected),'prompt','width','height',...(Object.hasOwn(args,'aspect')?['aspect']:[]),'settings']); codexFields(args.settings,[]);
   const canvas=codexImageTurnCanvas(args);
   invariant(profile.kind==='image' && profile.adapter==='codex-image' && profile.executionVersion==='1'
     && profile.unitCostMicros==='0' && profile.maxRetries===0 && profile.maxConcurrency===1
-    && profile.configuration.model==='codex-image-generation' && (settings.runtimeVersion===CODEX_IMAGE_RUNTIME_VERSION || options.historical && isRecordedCodexImageRuntime(settings.runtimeVersion)) && settings.directorModel==='gpt-6-astra'
+    && profile.configuration.model==='codex-image-generation' && (settings.runtimeVersion===CODEX_IMAGE_RUNTIME_VERSION
+      || options.historical && isRecordedCodexImageRuntime(settings.runtimeVersion)
+      || options.runtimeUpgrade && isCodexImageRuntimeUpgrade(settings.runtimeVersion,CODEX_IMAGE_RUNTIME_VERSION)) && settings.directorModel==='gpt-6-astra'
     && settings.width===1024 && settings.height===1024 && (canvas.aspect!==undefined || args.width===settings.width && args.height===settings.height)
     && Object.entries(expected).every(([key,value])=>canonical(args[key])===canonical(value)) && typeof args.prompt==='string',
   'CODEX_IMAGE_PREFLIGHT_INVALID','Codex image options must match the exact pinned usage profile');
@@ -76,7 +78,9 @@ export function assertCodexImageExecutionMapping(attempt:Attempt,mapping:CodexIm
   const runtime=mapping.native.runtime, transport=mapping.transport;
   invariant(mapping.profileDigest===attempt.request.profile!.digest && mapping.profileDefinitionDigest===digest(mapping.profileDefinition)
     && codexId(mapping.capabilityLockId) && codexHash(mapping.capabilityLockDigest) && mapping.estimatedMicros==='0'
-    && runtime.version===1 && isRecordedCodexImageRuntime(runtime.runtimeVersion) && runtime.runtimeVersion===mapping.profileDefinition.configuration?.settings?.runtimeVersion && runtime.model==='gpt-6-astra' && runtime.authMode==='chatgpt'
+    && runtime.version===1 && isRecordedCodexImageRuntime(runtime.runtimeVersion)
+    && (runtime.runtimeVersion===mapping.profileDefinition.configuration?.settings?.runtimeVersion
+      || isCodexImageRuntimeUpgrade(mapping.profileDefinition.configuration?.settings?.runtimeVersion,runtime.runtimeVersion)) && runtime.model==='gpt-6-astra' && runtime.authMode==='chatgpt'
     && codexHash(runtime.runtimeDigest) && codexHash(runtime.configurationDigest) && codexId(mapping.native.session.threadId)
     && Array.isArray(transport.images) && canonical(transport)===canonical(describeCodexImageInput({attemptId:attempt.id,requestDigest:digest(attempt.request),
       prompt:attempt.request.args.prompt as string,...codexImageTurnCanvas(attempt.request.args),runtimeVersion:runtime.runtimeVersion,model:'gpt-6-astra',images:transport.images}))
