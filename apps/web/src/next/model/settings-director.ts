@@ -76,8 +76,8 @@ export const codexProgram = (setup: DirectorSetup): string => setup.selection.bi
 export const codexDiagnostic = (setup: DirectorSetup): Msg | null => setup.codexDiagnostic
   ? errorMsg(setup.codexDiagnostic.code, setup.codexDiagnostic) : nativeDiagnosticMsg(setup.nativeDiagnostic ?? setup.readiness?.nativeDiagnostic, "setup");
 
-/** Says that the supported Codex runs instead of the chosen program, and which versions those are. */
-export const codexNoticeMsg = (setup: DirectorSetup): Msg | null => setup.codexNotice && !setup.codexDiagnostic
+/** Says that the supported Codex runs instead of the chosen program, and which versions those are; only while Codex directs. */
+export const codexNoticeMsg = (setup: DirectorSetup): Msg | null => setup.codexNotice && !setup.codexDiagnostic && setup.selection.mode === "native"
   ? msg("set.director.codex_fallback", { found: setup.codexNotice.foundVersion ?? "?", expected: setup.codexNotice.expectedVersion }) : null;
 
 export type CodexState = "ready" | "found" | "blocked" | "unchecked" | "missing";

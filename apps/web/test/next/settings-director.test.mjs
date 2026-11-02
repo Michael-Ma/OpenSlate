@@ -64,6 +64,7 @@ test('a Codex program of another version runs the supported one instead, and Set
   assert.equal(en(codexNoticeMsg(setup({ codexNotice: notice }))), 'The chosen Codex program is version 0.153.4, so OpenSlate runs its supported Codex 0.162.1 instead.');
   assert.equal(codexState(setup({ codexNotice: notice })), 'ready');
   assert.equal(codexNoticeMsg(setup()), null);
+  assert.equal(codexNoticeMsg(setup({ codexNotice: notice, selection: { mode: 'claude', model: 'claude-opus-5-5' } })), null, 'not while Claude Code directs');
 });
 
 test('Codex state comes from the last setup check', () => {
