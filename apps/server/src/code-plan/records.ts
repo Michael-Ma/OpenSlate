@@ -23,6 +23,7 @@ export interface CodePlanSettings { ceilingMicros: string }
 export interface CodePlanChoice {
   id: string; projectId: string; choiceId: string; optionsDigest: string; question: string; options: JsonValue[];
   answer?: JsonValue; answeredAt?: string;
+  askedAt?: string; stale?: true;
 }
 /** One round with a retake needs four: clips, render, the retaken clips, the new render. */
 export const CODE_PLAN_REVIEW_TURNS = 4;

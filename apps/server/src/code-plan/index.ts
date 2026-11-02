@@ -182,6 +182,8 @@ export class CodePlanRuntime implements CodePlanPort {
     invariant(run && this.store.get<CodePlanVersion>("code_plan_version", entityId(projectId, `version:${run.planVersion}`)), "CODE_PLAN_MISSING", "No code plan is saved");
     const id = entityId(projectId, digest({ choiceId, optionsDigest }));
     const choice = this.store.get<CodePlanChoice>("code_plan_choice", id);
+    if (choice?.answer !== undefined && canonical(choice.answer) === canonical(answer)) return;
+    invariant(!choice?.stale, "CODE_PLAN_CHOICE_STALE", "This card no longer applies");
     invariant(choice && choice.options.some(option => canonical(option) === canonical(answer)), "CODE_PLAN_CHOICE", "Answer must be one of this choice's exact options");
     invariant(choice.answer === undefined || canonical(choice.answer) === canonical(answer), "CODE_PLAN_CHOICE_ANSWERED", "This choice already has another answer");
     this.store.put("code_plan_choice", id, projectId, { ...choice, answer, answeredAt: choice.answeredAt ?? stamp() });
@@ -307,18 +309,40 @@ export class CodePlanRuntime implements CodePlanPort {
     const run = this.getRun(projectId); invariant(run, "CODE_PLAN_MISSING", "No code plan is saved");
     const version = this.store.get<CodePlanVersion>("code_plan_version", entityId(projectId, `version:${run.planVersion}`));
     invariant(version && version.sha256 === createHash("sha256").update(version.source).digest("hex"), "CODE_PLAN_JOURNAL", "Plan source identity differs");
-    const { outcome, reached, declarations, logs, budget, reviewKeys } = await this.evaluate(projectId, version.source, false);
+    const { outcome, reached, reachedChoices, declarations, logs, budget, reviewKeys } = await this.evaluate(projectId, version.source, false);
     // Leave outcomes from an obsolete pass in history; never overwrite the newer plan's run state.
     const current = this.getRun(projectId)!;
     if (current.planVersion !== run.planVersion) { this.queued.add(projectId); return current; }
     for (const step of this.steps(projectId)) if (!reached.has(step.key) && !step.attemptId && step.state !== "cancelled")
       this.store.put("code_plan_step", step.id, projectId, { ...step, state: "cancelled", updatedAt: stamp() });
+    const lastPassAt = stamp();
+    if (outcome.state !== "error" && !this.stopping) this.settleChoices(projectId, reachedChoices, lastPassAt);
     const failed = this.steps(projectId).some(step => reached.has(step.key) && step.state === "failed" && step.retryAt === undefined);
     const result: CodePlanRun = { ...current, state: outcome.state === "error" ? "error" : budget ? "paused_budget"
       : reviewKeys.some(id => ["waiting", "watching"].includes(this.store.get<CodePlanReview>("code_plan_review", id)?.state ?? "")) ? "reviewing"
       : outcome.state === "done" && failed ? "done_with_failures" : outcome.state,
-      lastPassAt: stamp(), error: outcome.error ?? null, reachedStepKeys: [...reached], reviewKeys, declarations, logs };
+      lastPassAt, error: outcome.error ?? null, reachedStepKeys: [...reached], reviewKeys, declarations, logs };
     this.store.put("code_plan_run", projectId, projectId, result); this.changed(projectId); return result;
+  }
+
+  private settleChoices(projectId: string, reached: Set<string>, now: string): void {
+    const frames = new Map(this.steps(projectId).flatMap(step => step.kind === "image" && step.result?.ok
+      ? [[`${step.result.artifact.artifactId}:${step.result.artifact.sha256}`, step.updatedAt] as const] : []));
+    for (const choice of this.choices(projectId)) {
+      const { stale: _stale, ...row } = choice;
+      const current = reached.has(choice.id), unanswered = choice.answer === undefined;
+      const next: CodePlanChoice = { ...row, ...(!current ? { stale: true } as const : {}) };
+      if (current && unanswered && choice.stale) next.askedAt = now;
+      if (!next.askedAt) {
+        const option = choice.options[0];
+        const value = option && typeof option === "object" && !Array.isArray(option) ? option.artifact ?? option : undefined;
+        const frame = value && typeof value === "object" && !Array.isArray(value) && value.kind === "image"
+          ? frames.get(`${value.artifactId}:${value.sha256}`) : undefined;
+        if (frame) next.askedAt = frame;
+        else if (current && unanswered && !choice.answeredAt) next.askedAt = now;
+      }
+      if (canonical(next) !== canonical(choice)) this.store.put("code_plan_choice", choice.id, projectId, next);
+    }
   }
 
   /** One call path for preview and execution. Preview keeps all new state in memory. */
@@ -328,10 +352,11 @@ export class CodePlanRuntime implements CodePlanPort {
     const journal = this.steps(projectId), virtual = new Map(journal.map(step => [step.key, step]));
     const diff = emptyDiff(), submissions: Promise<void>[] = [];
     const reviewKeys: string[] = [];
+    const reachedChoices = new Set<string>();
     const lock = this.store.list<{ lock: { compatibility: { toolContract: string } } }>("director_skill_lock", projectId).at(-1)?.lock;
     const filmQualityEnabled = !lock || lock.compatibility.toolContract === "0.3.0";
     const confirmedKeyframes = new Map<string, { frame: JsonObject; choice: string }>();
-    const journalKeys = new Set(journal.map(step => step.key));
+    const journalKeys = new Set(journal.filter(step => step.attemptId || step.result).map(step => step.key));
     let budget = false, limited = false;
     const reused = new Set<string>(), fresh = new Set<string>();
     const call = (method: string, args: unknown[]): unknown => {
@@ -381,7 +406,7 @@ export class CodePlanRuntime implements CodePlanPort {
         if (line && !logs.includes(line)) logs.push(line);
         return review.state === "done" || review.state === "failed" ? null : SANDBOX_PENDING;
       }
-      if (method === "choose") return this.choose(projectId, args, dry);
+      if (method === "choose") return this.choose(projectId, args, dry, reachedChoices);
       if (method === "keyframe") {
         invariant(filmQualityEnabled, "CODE_PLAN_METHOD", "Keyframes need tool contract 0.3.0");
         const [shot, raw] = args;
@@ -422,7 +447,7 @@ export class CodePlanRuntime implements CodePlanPort {
         invariant(options.length > 0, "CODE_PLAN_KEYFRAME_INPUT", "This video model cannot use keyframes; choose a model with references or first-frame input");
         const answer = this.choose(projectId, [`${shot}-keyframe`, {
           question: typeof declaration.title === "string" ? declaration.title : shot, options,
-        }], dry) as JsonObject | typeof SANDBOX_PENDING;
+        }], dry, reachedChoices) as JsonObject | typeof SANDBOX_PENDING;
         if (answer === SANDBOX_PENDING) return answer;
         const choice = String(answer.keyframeInput);
         confirmedKeyframes.set(shot, { frame, choice });
@@ -524,10 +549,10 @@ export class CodePlanRuntime implements CodePlanPort {
     if (limited) diff.findings.push({ code: "STEP_LIMIT" });
     const liability = this.options.execution.accounting(projectId).total;
     if (moneyMicros(diff.certainMicros) > moneyMicros(codePlanCeiling(this.store, projectId)) - liability) diff.findings.push({ code: "CEILING" });
-    return { outcome, reached, reviewKeys, declarations, logs, budget, diff };
+    return { outcome, reached, reachedChoices, reviewKeys, declarations, logs, budget, diff };
   }
 
-  private choose(projectId: string, args: unknown[], dry = false): unknown {
+  private choose(projectId: string, args: unknown[], dry: boolean, reached: Set<string>): unknown {
     const [choiceId, raw] = args;
     invariant(typeof choiceId === "string" && choiceId.length > 0 && choiceId.length <= 200 && raw && typeof raw === "object",
       "CODE_PLAN_CHOICE", "Use a bounded choice id and question/options");
@@ -535,9 +560,11 @@ export class CodePlanRuntime implements CodePlanPort {
     invariant(typeof question === "string" && question.length <= 4096 && Array.isArray(options) && options.length > 0 && options.length <= 200
       && Buffer.byteLength(canonical(options)) <= 64 * 1024, "CODE_PLAN_CHOICE", "Use a bounded question and 1 to 200 JSON options");
     const optionsDigest = digest(options), id = entityId(projectId, digest({ choiceId, optionsDigest }));
+    reached.add(id);
     const previous = this.store.get<CodePlanChoice>("code_plan_choice", id);
-    const choice: CodePlanChoice = { ...previous, id, projectId, choiceId, question, options: options as JsonValue[], optionsDigest };
-    if (!dry) this.store.put("code_plan_choice", id, projectId, choice);
+    const choice: CodePlanChoice = { ...previous, id, projectId, choiceId, question, options: options as JsonValue[], optionsDigest,
+      ...(!previous && !dry ? { askedAt: stamp() } : {}) };
+    if (!dry && (!previous || canonical(previous) !== canonical(choice))) this.store.put("code_plan_choice", id, projectId, choice);
     return Object.hasOwn(choice, "answer") ? choice.answer : SANDBOX_PENDING;
   }
 }
