@@ -23,6 +23,7 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 const credential = config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_CREDENTIAL;
 log({ kind: "launch", pid: process.pid, parentSecretAbsent: !process.env.OPENSLATE_PARENT_SECRET,
+  projects: config.projects,
   credentialDigest: createHash("sha256").update(credential).digest("hex"),
   endpoint: config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_ENDPOINT,
   codeProfile: { effort: config.model_reasoning_effort, tools: Object.keys(config.mcp_servers.openslate.tools ?? {}), shell: config.features?.shell_tool, unknownReductionPresent: Object.hasOwn(config.features ?? {}, "unknown_disabled_reduction") } });
@@ -55,6 +56,7 @@ lines.on("line", line => {
     if (mode === "project-budget-wrong") config.project_doc_max_bytes = 32768;
     if (mode === "project-fallback-wrong") config.project_doc_fallback_filenames = ["FALLBACK.md"];
     if (mode === "project-markers-wrong") config.project_root_markers = [".git"];
+    if (mode === "project-trust-wrong") config.projects[process.cwd()].trust_level = "trusted";
     if (mode === "bundled-skills-wrong") config.skills.bundled.enabled = true;
     if (mode === "question-feature-wrong") config.features.default_mode_request_user_input = false;
     if (mode === "bridge-wrong") config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_CREDENTIAL = "wrong-fixed-credential";

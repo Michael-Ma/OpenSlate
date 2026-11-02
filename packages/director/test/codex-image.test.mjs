@@ -62,7 +62,21 @@ test("personal MCP changes after cached setup cannot alter preparation or its so
  assert.equal(launches[0].imageProcess,true);assert.equal(launches[0].codexHome,f.privateHome);assert.deepEqual(launches[0].mcpServers,[]);
  assert.equal(methods(extra).filter(method=>method==="turn/start").length,1);
 });
-for(const boundary of ["checkReadiness","prepare","start","lookup"])for(const drift of ["config.toml","AGENTS.md","home-alias"])test(`${boundary} refuses private ${drift} drift without launching or dispatching`,async t=>{
+test("cached image setup cleans old private project trust before readiness and preparation",async t=>{
+ const f=await fixture(t),source=join(f.options.codexHome,"config.toml"),text=`[projects."${f.root}"]\ntrust_level = "trusted"\n[features]\nplugins = true\n`;
+ await writeFile(source,text);
+ assert.equal((await f.worker.checkReadiness()).status,"ready");
+ await writeFile(join(f.privateHome,"config.toml"),text);
+ assert.equal((await f.worker.checkReadiness()).status,"ready");
+ await writeFile(join(f.privateHome,"config.toml"),text);
+ const {outcome}=await run(f);assert.equal(outcome.kind,"completed",outcome.code);
+ for(const row of (await f.records()).filter(row=>row.kind==="launch")){
+  assert.deepEqual(row.projects,{[row.cwd]:{trust_level:"untrusted"}});assert.equal(row.fileConfigPresent,false);
+ }
+ assert.equal(await readFile(source,"utf8"),text);
+ assert.ok(!(await readdir(f.privateHome)).includes("config.toml"));
+});
+for(const boundary of ["checkReadiness","prepare","start","lookup"])for(const drift of ["config.toml","AGENTS.md","home-alias"].filter(name=>name!=="config.toml"||["start","lookup"].includes(boundary)))test(`${boundary} refuses private ${drift} drift without launching or dispatching`,async t=>{
  const f=await fixture(t);let prepared;
  if(boundary==="lookup")prepared=(await run(f)).prepared;
  else if(boundary==="start")prepared=await f.worker.prepare(input());
@@ -80,7 +94,7 @@ for(const scenario of ["api-key","capability","mcp-drift"])test(`new work blocks
  const f=await fixture(t,scenario);const ready=await f.worker.checkReadiness();assert.equal(ready.status,"blocked");assert.deepEqual(ready.nativeDiagnostic,{category:scenario==="api-key"?"native_auth_required":"native_protocol"});assert.ok(!methods(await f.records()).includes("turn/start"));
  if(scenario==="mcp-drift")assert.equal(ready.code,"CODEX_IMAGE_MCP_UNEXPECTED");
 });
-for(const scenario of ["project-budget-drift","project-fallback-drift","project-markers-drift"])test(`image preflight refuses ${scenario} without a thread or turn`,async t=>{
+for(const scenario of ["project-budget-drift","project-fallback-drift","project-markers-drift","project-trust-drift"])test(`image preflight refuses ${scenario} without a thread or turn`,async t=>{
  const f=await fixture(t,scenario),ready=await f.worker.checkReadiness();
  assert.equal(ready.status,"blocked");assert.equal(ready.code,"CODEX_IMAGE_CONFIG_MISMATCH");
  await assert.rejects(f.worker.prepare(input()),error=>error.code==="CODEX_IMAGE_CONFIG_MISMATCH");

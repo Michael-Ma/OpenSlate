@@ -145,7 +145,7 @@ test("code native launch discovers only its two tools and refuses the graph cata
   assert.equal((await legacy.records()).some(row => row.method === "turn/start"), false);
 });
 
-for (const scenario of ["version-wrong", "missing-result", "skill-extra", "skills-error", "catalog-extra", "instructions-extra", "bundled-skills-wrong", "bridge-wrong", "permissions-wrong", "permissions-expanded", "permissions-defaults-expanded", "permissions-defaults-unknown"]) {
+for (const scenario of ["version-wrong", "missing-result", "skill-extra", "skills-error", "catalog-extra", "instructions-extra", "bundled-skills-wrong", "bridge-wrong", "permissions-wrong", "permissions-expanded", "permissions-defaults-expanded", "permissions-defaults-unknown", "project-trust-wrong"]) {
   test(`fail closed before dispatch: ${scenario}`, async t => {
     const f = await fixture(t, scenario);
     const result = await deadline(f.runtime.start(f.input));
@@ -210,11 +210,15 @@ test("native turns use the private home despite personal instructions and repair
   for (const replacement of ["first", "missing", "wrong"]) {
     if (replacement !== "first") await unlink(join(home, "auth.json"));
     if (replacement === "wrong") await symlink(backing, join(home, "auth.json"));
+    if (replacement !== "first") await writeFile(join(home, "config.toml"), `[projects."${root}"]\ntrust_level = "trusted"\n`);
     const result = await deadline(runtime.start(f.input));
     assert.equal(result.status, "completed", result.error?.code);
     assert.equal((await lstat(join(home, "auth.json"))).isSymbolicLink(), true);
     assert.equal(await readlink(join(home, "auth.json")), privateCodexHome.authSource);
+    await assert.rejects(lstat(join(home, "config.toml")), error => error.code === "ENOENT");
   }
+  assert.ok((await f.records()).filter(row => row.kind === "launch").every(row =>
+    JSON.stringify(row.projects) === JSON.stringify({ [f.options.cwd]: { trust_level: "untrusted" } })));
   const inherited = await deadline(new CodexDirectorRuntime({ ...f.options, env: { ...f.options.env,
     HOME: join(root, "person"), CODEX_HOME: selected } }).start(f.input));
   assert.equal(inherited.dispatched, false); assert.equal(inherited.error.code, "RUNTIME_INSTRUCTIONS_UNEXPECTED");

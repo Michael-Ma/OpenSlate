@@ -7,7 +7,7 @@ import { prepareDirectorImages } from "./images.js";
 import { bridgeEnvironment } from "./bridge-environment.js";
 import { beforeDispatch, fault, identity, object, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
 import { classifyNativeDiagnostic, instructionSourcesDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
-import { preparePrivateCodexHome } from "./private-home.js";
+import { preparePrivateCodexHome, untrustedCodexProjects } from "./private-home.js";
 import type { DirectorQuestion, DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent, DirectorStartOptions } from "./types.js";
 
 const SERVER = "openslate";
@@ -285,6 +285,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
   }
   private launchConfig(input: DirectorRunInput): Record<string, CodexConfigValue> {
     const config: Record<string, CodexConfigValue> = { ...this.#options.policy.config,
+      projects: untrustedCodexProjects(this.#options.cwd),
       model: this.#options.model, model_reasoning_effort: "high", approval_policy: "never", web_search: "disabled", ...CODEX_PROJECT_ISOLATION_CONFIG,
       "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none", check_for_update_on_startup: false,
       "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
@@ -318,7 +319,8 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       "RUNTIME_POLICY_MISMATCH", "Effective native permissions differ from the exact configured profile");
     const features = object(config.features);
     requireRuntime(features.code_mode_host === true && features.default_mode_request_user_input === true && DISABLED.every(name => features[name] === false), "RUNTIME_CONFIG_MISMATCH", "Native capability configuration differs from expected settings");
-    requireRuntime(projectIsolationMatches(config) && features.skip_host_skill_discovery === true && object(object(config.skills).bundled).enabled === false,
+    requireRuntime(projectIsolationMatches(config) && equal(config.projects, untrustedCodexProjects(this.#options.cwd)) &&
+      features.skip_host_skill_discovery === true && object(object(config.skills).bundled).enabled === false,
       "RUNTIME_CONFIG_MISMATCH", "Project discovery and bundled native instructions must remain disabled");
     const data = object(await transport.request("skills/list", { cwds: [this.#options.cwd], forceReload: true }, signal)).data;
     requireRuntime(Array.isArray(data), "RUNTIME_PROTOCOL_INVALID", "Native skill catalog is missing");
