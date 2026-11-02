@@ -243,9 +243,11 @@ export class CodePlanRuntime implements CodePlanPort {
           let ingestionError: unknown;
           try { if (await this.options.execution.advance(project.id)) this.queued.add(project.id); }
           catch (error) { ingestionError = error; }
+          if (this.stopping) return;
           if (this.syncSteps(project.id)) this.queued.add(project.id);
           // A wake during a live pass belongs to its successor, even if tick joins that pass.
           if (!this.passes.has(project.id) && this.queued.delete(project.id)) await this.replay(project.id);
+          if (this.stopping) return;
           const run = this.getRun(project.id)!;
           if (ingestionError && !this.passes.has(project.id) && (run.state === "waiting" || run.state === "paused_budget" || run.state === "error")
             && this.steps(project.id).some(step => run.reachedStepKeys.includes(step.key) && step.attemptId
@@ -312,11 +314,14 @@ export class CodePlanRuntime implements CodePlanPort {
     const { outcome, reached, reachedChoices, declarations, logs, budget, reviewKeys } = await this.evaluate(projectId, version.source, false);
     // Leave outcomes from an obsolete pass in history; never overwrite the newer plan's run state.
     const current = this.getRun(projectId)!;
+    // Shutdown interrupts replay, not the saved film. Keep its saved run and
+    // journal reachability for the next runtime to replay.
+    if (this.stopping) return current;
     if (current.planVersion !== run.planVersion) { this.queued.add(projectId); return current; }
     for (const step of this.steps(projectId)) if (!reached.has(step.key) && !step.attemptId && step.state !== "cancelled")
       this.store.put("code_plan_step", step.id, projectId, { ...step, state: "cancelled", updatedAt: stamp() });
     const lastPassAt = stamp();
-    if (outcome.state !== "error" && !this.stopping) this.settleChoices(projectId, reachedChoices, lastPassAt);
+    if (outcome.state !== "error") this.settleChoices(projectId, reachedChoices, lastPassAt);
     const failed = this.steps(projectId).some(step => reached.has(step.key) && step.state === "failed" && step.retryAt === undefined);
     const result: CodePlanRun = { ...current, state: outcome.state === "error" ? "error" : budget ? "paused_budget"
       : reviewKeys.some(id => ["waiting", "watching"].includes(this.store.get<CodePlanReview>("code_plan_review", id)?.state ?? "")) ? "reviewing"
@@ -537,7 +542,7 @@ export class CodePlanRuntime implements CodePlanPort {
       outcome = await runSandbox({ source, filmQualityEnabled, now: clock?.now ?? run?.now ?? Date.now(), seed: clock?.seed ?? run?.seed ?? 1, limits: this.limits, call });
       // Publish what the sandbox reached before a long submission hides it.
       // Without submissions, pass() can write its final state immediately.
-      if (!dry && submissions.length) {
+      if (!dry && !this.stopping && submissions.length) {
         const current = this.getRun(projectId);
         if (current && current.planVersion === run?.planVersion) {
           this.store.put("code_plan_run", projectId, projectId, { ...current, state: "running", error: null,

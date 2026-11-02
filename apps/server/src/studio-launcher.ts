@@ -2,10 +2,14 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+function studioOrigin(port: number): string {
+  if (port !== 3001 && port !== 5173) throw new Error(`Unsupported studio port ${port}; expected 3001 or 5173`);
+  return `http://127.0.0.1:${port}`;
+}
+
 export function studioUrl(code: string, port = 3001): string {
   if (!/^[A-Za-z0-9_-]{43}$/.test(code)) throw new Error("Invalid studio launch code");
-  if (port !== 3001 && port !== 5173) throw new Error(`Unsupported studio port ${port}; expected 3001 or 5173`);
-  return `http://127.0.0.1:${port}/#connect=${code}`;
+  return `${studioOrigin(port)}/#connect=${code}`;
 }
 
 /** Fixed local destinations and argument arrays; never run a URL through a shell. */
@@ -22,10 +26,11 @@ export function openStudioBrowser(url: string): Promise<boolean> {
 }
 
 /** Local launcher only. The long-lived credential never reaches browser code or the launch URL. */
-export async function requestStudioLaunch(directory: string, localToken?: string): Promise<string> {
+export async function requestStudioLaunch(directory: string, localToken?: string, port = 3001): Promise<string> {
+  const origin = studioOrigin(port);
   const token = localToken ?? readFileSync(join(directory, "local-session.token"), "utf8").trim();
   if (!/^[A-Za-z0-9_-]{20,256}$/.test(token)) throw new Error("Invalid local launcher credential");
-  const response = await fetch("http://127.0.0.1:3001/api/studio/launch", { method: "POST", redirect: "error",
+  const response = await fetch(`${origin}/api/studio/launch`, { method: "POST", redirect: "error",
     headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
   if (!response.ok) throw new Error("Studio launcher could not connect to the running installation");
   const value = await response.json() as { code?: unknown };

@@ -193,6 +193,90 @@ test("restart restores a pending choice and its answer continues the same run", 
   assert.deepEqual((await settle(f)).logs, ["plain"]); assert.equal(f.calls.submit.length, 0);
 });
 
+test("shutdown during a completed film's replay preserves its successful export and answered choices", async t => {
+  const f = fixture(t);
+  submit(f, film(`
+    const image = await ctx.image({ prompt: "finished film" });
+    const clip = await ctx.video({ firstFrame: image.artifact, prompt: "still" });
+    await ctx.render([clip.artifact]);
+    await ctx.choose("finish", { question: "Finish?", options: ["yes"] });
+    ctx.log("finished");
+  `));
+  await settle(f, "waiting");
+  // The film reaches its card after its three media operations succeed.
+  for (let turn = 0; turn < 30 && !f.runtime.choices(f.projectId).length; turn++) await f.runtime.tick();
+  assert.equal(f.runtime.choices(f.projectId).length, 1);
+  const choice = f.runtime.choices(f.projectId)[0];
+  f.runtime.answerChoice(f.projectId, choice.choiceId, choice.optionsDigest, "yes");
+  const before = await settle(f), steps = f.runtime.steps(f.projectId), choices = f.runtime.choices(f.projectId);
+  assert.equal(steps.find(step => step.kind === "render").state, "succeeded");
+  const choose = f.runtime.choose.bind(f.runtime);
+  f.runtime.choose = (...args) => { const answer = choose(...args); f.runtime.stop(); return answer; };
+  assert.deepEqual(await replay(f), before);
+  await f.runtime.close();
+  assert.deepEqual(f.runtime.getRun(f.projectId), before);
+  assert.deepEqual(f.runtime.steps(f.projectId), steps);
+  assert.deepEqual(f.runtime.choices(f.projectId), choices);
+  assert.equal(f.calls.submit.length, 3);
+  f.reopen();
+  assert.equal(f.runtime.getRun(f.projectId).state, "done");
+  assert.deepEqual(resultView(await settle(f)), resultView(before));
+  assert.equal(f.calls.submit.length, 3, "restart reuses the finished media and export");
+});
+
+test("a stopped partial pass leaves run, choices and unreached unsent steps untouched until restart", async t => {
+  const f = fixture(t, { models: { costly: { kind: "image", priceMicros: "4000001" } } });
+  submit(f, film(`await Promise.all([
+    ctx.choose("old", { question: "Old card?", options: ["yes"] }),
+    ctx.image({ model: "costly", prompt: "unsent" })
+  ]);`));
+  await settle(f, "paused_budget");
+  submit(f, film(`ctx.log("starting"); ctx.scene({ id: "new" }); ctx.log("done");`));
+  const before = f.runtime.getRun(f.projectId), steps = f.runtime.steps(f.projectId), choices = f.runtime.choices(f.projectId);
+  const assertCode = f.runtime.assertCode.bind(f.runtime);
+  let calls = 0;
+  f.runtime.assertCode = id => {
+    assertCode(id);
+    // replay() is the first check; the first host call stops this live pass.
+    if (++calls === 2) f.runtime.stop();
+  };
+  assert.deepEqual(await replay(f), before);
+  await f.runtime.close();
+  assert.deepEqual(f.runtime.getRun(f.projectId), before);
+  assert.deepEqual(f.runtime.steps(f.projectId), steps);
+  assert.deepEqual(f.runtime.choices(f.projectId), choices);
+  f.reopen();
+  assert.deepEqual((await settle(f)).logs, ["starting", "done"]);
+  assert.equal(f.runtime.steps(f.projectId)[0].state, "cancelled");
+  assert.equal(f.runtime.choices(f.projectId)[0].stale, true);
+  assert.equal(f.calls.submit.length, 0);
+});
+
+test("shutdown after media admission does not publish a partial run and restart reuses its submission", async t => {
+  const f = fixture(t);
+  submit(f, film(`await ctx.image({ prompt: "admitted before shutdown" }); ctx.log("done");`));
+  const before = f.runtime.getRun(f.projectId), dispatch = f.execution.submit.bind(f.execution);
+  f.execution.submit = id => { const result = dispatch(id); f.runtime.stop(); return result; };
+  assert.deepEqual(await replay(f), before);
+  await f.runtime.close();
+  assert.deepEqual(f.runtime.getRun(f.projectId), before);
+  assert.equal(f.calls.submit.length, 1);
+  f.reopen();
+  assert.deepEqual((await settle(f)).logs, ["done"]);
+  assert.equal(f.calls.submit.length, 1, "an admitted intent is reconciled, never blindly resubmitted");
+});
+
+test("shutdown while tick awaits execution leaves the run for the next start", async t => {
+  const f = fixture(t);
+  submit(f, film(`ctx.log("resumed");`));
+  const before = f.runtime.getRun(f.projectId), advance = f.execution.advance.bind(f.execution);
+  f.execution.advance = async id => { const result = await advance(id); f.runtime.stop(); return result; };
+  await f.runtime.tick(); await f.runtime.close();
+  assert.deepEqual(f.runtime.getRun(f.projectId), before);
+  f.reopen();
+  assert.deepEqual((await settle(f)).logs, ["resumed"]);
+});
+
 test("provider failure resolves ok:false and permits a different-model fallback without retrying the failure", async t => {
   const f = fixture(t, { models: { primary: { kind: "image" }, fallback: { kind: "image" } }, mode: request => request.args.model === "primary" ? "technical_failure" : "complete" });
   submit(f, film(`
@@ -211,7 +295,19 @@ test("programming errors end the pass with a capped message and stack", async t 
   const run = await replay(f);
   assert.equal(run.state, "error"); assert.match(run.error.message, /Broken film/);
   assert.equal(typeof run.error.stack, "string"); assert.ok(JSON.stringify(run.error).length < 20000);
+  assert.deepEqual(f.runtime.getRun(f.projectId), run, "real errors are persisted");
   assert.equal(f.calls.submit.length, 0);
+});
+
+test("a genuine plan error with the shutdown message still persists across restart", async t => {
+  const f = fixture(t);
+  submit(f, film(`throw new Error("Code-plan execution is stopping");`));
+  const run = await replay(f);
+  assert.equal(run.state, "error"); assert.equal(run.error.message, "Code-plan execution is stopping");
+  assert.deepEqual(f.runtime.getRun(f.projectId), run);
+  await f.runtime.close(); f.reopen();
+  assert.deepEqual(f.runtime.getRun(f.projectId), run);
+  assert.equal((await settle(f, "error")).error.message, run.error.message);
 });
 
 test("speech returns a priced fake audio artifact and reuses it on replay", async t => {
