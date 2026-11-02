@@ -133,11 +133,14 @@ const close = createServerShutdown(app, {
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void close().catch(error => { app.log.error(error); process.exitCode = 1; }); });
 try {
   await app.listen({ host: "127.0.0.1", port: 3001 });
+  const address = app.server.address();
+  invariant(address !== null && typeof address !== "string", "CONFIGURATION_ERROR", "OpenSlate did not bind a TCP port");
+  const origin = `http://127.0.0.1:${address.port}`;
+  const url = serveWeb ? studioUrl(studioSessions.issueLaunch(), address.port) : undefined;
   if (recoveryPending) process.stdout.write("Restored workspace: inspect your saved work and finish recovery review before making changes.\n");
-  process.stdout.write(`\nOpenSlate ${serveWeb ? "is ready" : "API is ready"} at http://127.0.0.1:3001${serveWeb ? "" : "/api/health"}\nLocal data: ${directory}\n${process.env.OPENSLATE_LOCAL_TOKEN ? "Local launcher credential: configured" : `Local launcher credential file: ${tokenPath}`}\nStop with Ctrl+C.\n\n`);
+  process.stdout.write(`\nOpenSlate ${serveWeb ? "is ready" : "API is ready"} at ${origin}${serveWeb ? "" : "/api/health"}\nLocal data: ${directory}\n${process.env.OPENSLATE_LOCAL_TOKEN ? "Local launcher credential: configured" : `Local launcher credential file: ${tokenPath}`}\nStop with Ctrl+C.\n\n`);
   // API-only development starts before Vite; open that browser explicitly with pnpm studio --dev.
-  if (serveWeb) {
-    const url = studioUrl(studioSessions.issueLaunch());
+  if (url) {
     if (!process.argv.includes("--no-open") && await openStudioBrowser(url)) process.stdout.write("Sent the connected studio link to your default browser. If it did not appear, run ./start.sh --no-open for a fresh link.\n");
     else process.stdout.write(`Open studio (valid for 60 seconds): ${url}\n`);
   }

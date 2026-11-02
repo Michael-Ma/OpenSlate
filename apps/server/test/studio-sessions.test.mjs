@@ -130,7 +130,15 @@ test('logout closes an already-open cookie-authenticated event stream', async t 
 test('launch URL accepts only bounded random codes and fixed local browser destinations', () => {
   const code = 'a'.repeat(43);
   assert.equal(studioUrl(code), `http://127.0.0.1:3001/#connect=${code}`);
-  assert.equal(studioUrl(code, true), `http://127.0.0.1:5173/#connect=${code}`);
+  assert.equal(studioUrl(code, 3001), `http://127.0.0.1:3001/#connect=${code}`);
+  assert.equal(studioUrl(code, 5173), `http://127.0.0.1:5173/#connect=${code}`);
   assert.throws(() => studioUrl('x&redirect=https://evil.example'));
-  assert.throws(() => openStudioBrowser(`https://evil.example/#connect=${code}`));
+  for (const port of [0, 3002, 65535, NaN, '5173', true]) {
+    assert.throws(() => studioUrl(code, port), /Unsupported studio port .*; expected 3001 or 5173/);
+  }
+  for (const url of [`https://evil.example/#connect=${code}`, `http://evil.example:5173/#connect=${code}`,
+    `http://127.0.0.1.evil.example:5173/#connect=${code}`, `http://127.0.0.1:3002/#connect=${code}`,
+    `http://127.0.0.1:5173/#connect=${code}&redirect=https://evil.example`]) {
+    assert.throws(() => openStudioBrowser(url), /Invalid studio URL/);
+  }
 });
