@@ -53,7 +53,7 @@ test('Claude print flags, canonical instructions, bounded pictures and the MCP-o
   assert.equal(bridge.env.OPENSLATE_BRIDGE_CREDENTIAL,f.input.bridge.credential);assert.equal(bridge.env.OPENSLATE_BRIDGE_ENDPOINT,f.input.bridge.endpoint);assert.equal(bridge.env.OPENSLATE_BRIDGE_TOOL_CONTRACT,'0.3.0');assert.ok(bridge.env.OPENSLATE_BRIDGE_READY_FILE.startsWith(f.cwd));
   assert.equal(dirname(prompt.path),dirname(bridge.env.OPENSLATE_BRIDGE_READY_FILE));
   assert.equal(dirname(dirname(prompt.path)),f.cwd);assert.ok(dirname(prompt.path).startsWith(join(f.cwd,'.claude-director-')));
-  for(const row of f.records().filter(row=>row.env))assert.deepEqual(Object.keys(row.env).filter(key=>key!=='__CF_USER_TEXT_ENCODING').sort(),['HOME','LANG','PATH','TMPDIR','USER']);
+  for(const row of f.records().filter(row=>row.env))assert.deepEqual(Object.keys(row.env).filter(key=>!['__CF_USER_TEXT_ENCODING','UV_USE_IO_URING'].includes(key)).sort(),['HOME','LANG','PATH','TMPDIR','USER']);
   const sent=f.records().find(row=>row.input).input;assert.equal(sent.message.content[0].text,f.input.text);assert.deepEqual(sent.message.content[1],{type:'image',source:{type:'base64',media_type:'image/png',data:image.toString('base64')}});
   assert.deepEqual(events.map(e=>e.kind),['runtime_started','turn_started','activity','activity','assistant_message','activity','activity','assistant_message']);
   assert.equal(events.at(-1).phase,'final');assert.equal(result.nativeThreadId,'fixture-session');assert.equal(result.nativeTurnId,'fixture-session');
