@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { CODEX_DISABLED_FEATURES as DISABLED, CODEX_PROTOCOL_VERSION, normalizePermissionProfile, toml, validateOptions } from "./policy.js";
+import { CODEX_DISABLED_FEATURES as DISABLED, CODEX_PROTOCOL_VERSION, CODEX_PROJECT_ISOLATION_CONFIG, projectIsolationMatches, normalizePermissionProfile, toml, validateOptions } from "./policy.js";
 import type { CodexConfigValue, CodexDirectorOptions, CodexRuntimeLimits } from "./policy.js";
 import { CodexTransport } from "./transport.js";
 import { object, requireRuntime, RuntimeFault } from "./validation.js";
@@ -100,7 +100,7 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
   const config: Record<string, CodexConfigValue> = {
     default_permissions: PROFILE, permissions: { [PROFILE]: profile }, sqlite_home: state, log_dir: logs,
     model: input.model, model_provider: "openai", model_reasoning_effort: "high", approval_policy: "never", web_search: "disabled",
-    project_doc_max_bytes: 0, "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none",
+    ...CODEX_PROJECT_ISOLATION_CONFIG, "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none",
     "skills.bundled.enabled": false,
     check_for_update_on_startup: false, "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
     "features.code_mode_host": true, "features.skip_host_skill_discovery": true, "features.default_mode_request_user_input": true,
@@ -266,7 +266,7 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
         config.model_reasoning_effort === "high" && config.web_search === "disabled" && config.check_for_update_on_startup === false &&
         object(config.analytics).enabled === false && object(config.feedback).enabled === false && object(config.history).persistence === "none" &&
         config.sqlite_home === runtime.policy.config.sqlite_home && config.log_dir === runtime.policy.config.log_dir &&
-        config.project_doc_max_bytes === 0 && object(config.features).code_mode_host === true && object(config.features).skip_host_skill_discovery === true &&
+        projectIsolationMatches(config) && object(config.features).code_mode_host === true && object(config.features).skip_host_skill_discovery === true &&
         object(object(config.skills).bundled).enabled === false &&
         object(config.features).default_mode_request_user_input === true &&
         DISABLED.every(name => object(config.features)[name] === false) && object(config.shell_environment_policy).inherit === "none" &&

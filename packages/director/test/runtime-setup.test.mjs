@@ -216,6 +216,7 @@ for (const [scenario, code] of [
   ["effort", "SETUP_MODEL_UNSUPPORTED"], ["cursor-loop", "SETUP_MODEL_CATALOG_INVALID"], ["policy", "SETUP_POLICY_MISMATCH"],
   ["mcp-drift", "SETUP_MCP_UNEXPECTED"], ["skill-drift", "SETUP_SKILLS_UNEXPECTED"], ["feature-drift", "SETUP_CONFIG_MISMATCH"],
   ["search-drift", "SETUP_CONFIG_MISMATCH"], ["question-feature-drift", "SETUP_CONFIG_MISMATCH"],
+  ["project-budget-drift", "SETUP_CONFIG_MISMATCH"], ["project-fallback-drift", "SETUP_CONFIG_MISMATCH"], ["project-markers-drift", "SETUP_CONFIG_MISMATCH"],
   ["bundled-skills-drift", "SETUP_CONFIG_MISMATCH"], ["effort-drift", "SETUP_CONFIG_MISMATCH"],
   ["skill-error", "SETUP_SKILLS_INVALID"], ["invalid-mcp-name", "SETUP_CATALOG_INVALID"], ["rpc-error", "RUNTIME_RPC_REJECTED"],
   ["hang", "RUNTIME_RPC_TIMEOUT"], ["approval", "SETUP_INTERACTIVE_DENIED"],
