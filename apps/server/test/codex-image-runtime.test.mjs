@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import { syncBuiltinESMExports } from 'node:module';
 import {CodexImageWorkerTransport} from '@openslate/director';
 import {codexImageFixture as fixture,codexImageProfile as codex,codexRuntimeConfiguration as config,codexRowCounts as rowCounts} from './codex-image-execution-fixture.mjs';
 import { GenerationOverviewReader } from '../dist/generation-overview.js';
@@ -20,6 +22,10 @@ test('automatic native construction checks executable configuration but does not
   assert.equal(f.calls.prepare,0);assert.equal(f.calls.start,0);assert.equal(f.calls.api,0);
 });
 test('enabled native route fails closed for missing binary, tools, invalid paths or incomplete injection',t=>{
+  // M1 may fall back from a missing explicit path to the supported side-by-side install.
+  // Exercise genuine absence in an isolated home, regardless of what other sessions installed.
+  const home=fixture(t).directory, replacement=t.mock.method(os,'homedir',()=>home);syncBuiltinESMExports();
+  t.after(()=>{replacement.mock.restore();syncBuiltinESMExports();});
   for(const changes of [
     {transport:{},configuration:config()},
     {transport:{},configuration:{...config(),codexImageBinary:'/does-not-exist/codex'}},

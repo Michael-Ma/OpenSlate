@@ -2,7 +2,7 @@ import { codeOnlyVideoAdapter, assertVideoI2vProfile } from "../execution/video-
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { canonical, DEFAULT_PROFILES, digest, invariant, moneyMicros, providerProfileArguments, snapshotLocalExecution } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
-import { CODEX_IMAGE_RUNTIME_VERSION, isRecordedCodexImageRuntime, describeOpenAIImageRequest, FAL_H3_LIPSYNC_MODEL, FAL_H3_LIPSYNC_RESOLUTIONS, falH3LipSyncPriceMicros, validateViggleH3Settings } from "@openslate/providers";
+import { CODEX_IMAGE_RUNTIME_VERSION, isRecordedCodexImageRuntime, isCodexImageRuntimeUpgrade, describeOpenAIImageRequest, FAL_H3_LIPSYNC_MODEL, FAL_H3_LIPSYNC_RESOLUTIONS, falH3LipSyncPriceMicros, validateViggleH3Settings } from "@openslate/providers";
 import type { FalH3LipSyncResolution } from "@openslate/providers";
 import { lipSyncAudioSamples } from "../execution/lip-sync.js";
 import type { ExecutionIdentity, ExecutionRegistry, OpenAIImageModel, OpenAIImageQuality, ViggleH3Settings } from "@openslate/providers";
@@ -125,16 +125,20 @@ function validateConfiguration(input: unknown): Configuration {
     exact(input, ["version", "profiles"]);
     invariant(input.version === 1 && Array.isArray(input.profiles) && input.profiles.length <= 28
       && Buffer.byteLength(canonical(input)) <= MAX_BYTES, "PROVIDER_CATALOG_INVALID", "Use a bounded version-one provider catalog");
+    // Normalize only host configuration, on a detached copy. Saved film locks never enter this path.
+    const configuration = structuredClone(input) as unknown as Configuration;
     const used = new Set(BUILT_IN_PROFILES.map(profile => profile.id));
-    for (const entry of input.profiles) {
+    for (const entry of configuration.profiles) {
       exact(entry, ["label", "profile"]);
       invariant(label(entry.label), "PROVIDER_CATALOG_INVALID", "Use a short provider label without host locations");
+      if (entry.profile?.adapter === "codex-image" && isCodexImageRuntimeUpgrade(entry.profile.configuration?.settings?.runtimeVersion, CODEX_IMAGE_RUNTIME_VERSION))
+        entry.profile.configuration!.settings!.runtimeVersion = CODEX_IMAGE_RUNTIME_VERSION;
       const policy = profilePolicy(entry.profile as ProviderProfile), profile = entry.profile as ProviderProfile;
       invariant(profile.id !== VIGGLE_PROFILE.id || canonical(profile) === canonical(VIGGLE_PROFILE),
         "PROVIDER_CATALOG_INVALID", "The built-in Viggle identity requires its exact definition; use a distinct id for custom profiles");
       invariant(!policy.fixture && !used.has(profile.id), "PROVIDER_CATALOG_INVALID", "Additional external profiles require distinct nonreserved identities"); used.add(profile.id);
     }
-    return structuredClone(input) as unknown as Configuration;
+    return configuration;
   } catch { invariant(false, "PROVIDER_CATALOG_INVALID", "Provider configuration contains unsupported identities, settings, estimates or fields"); }
 }
 
@@ -147,7 +151,12 @@ export function readInstalledProviderConfiguration(path: string): unknown {
     const bytes = Buffer.alloc(stat.size + 1); let size = 0;
     while (size < bytes.length) { const count = readSync(fd, bytes, size, bytes.length - size, null); if (!count) break; size += count; }
     invariant(size === stat.size, "PROVIDER_CATALOG_INVALID", "Provider configuration changed while reading");
-    return validateConfiguration(JSON.parse(bytes.subarray(0, size).toString("utf8")));
+    const input = JSON.parse(bytes.subarray(0, size).toString("utf8")), configuration = validateConfiguration(input);
+    const upgraded = configuration.profiles.filter((entry, index) => entry.profile.adapter === "codex-image"
+      && isCodexImageRuntimeUpgrade(input.profiles[index].profile.configuration.settings.runtimeVersion, CODEX_IMAGE_RUNTIME_VERSION));
+    if (upgraded.length) console.warn(JSON.stringify({ kind: "codex_image_profile_runtime_notice", profileIds: upgraded.map(entry => entry.profile.id),
+      message: `Using Codex ${CODEX_IMAGE_RUNTIME_VERSION} for new images. Change runtimeVersion to "${CODEX_IMAGE_RUNTIME_VERSION}" in these provider configuration profiles.` }));
+    return configuration;
   } catch { invariant(false, "PROVIDER_CATALOG_INVALID", "The configured provider catalog could not be read or validated"); }
   finally { if (fd !== undefined) closeSync(fd); }
 }
@@ -246,7 +255,12 @@ export class InstalledProviderCatalog {
     let valid = true, policy: ReturnType<typeof profilePolicy> | undefined;
     try { policy = profilePolicy(input as ProviderProfile, { historical: true }); } catch { valid = false; }
     const profile = valid ? structuredClone(input) as ProviderProfile : null;
-    const current = profile ? this.#definitions.find(item => item.profile.id === profile.id && canonical(item.profile) === canonical(profile)) : undefined;
+    // Retain the locked profile and its digest for step keys and receipts. Only a runtime-only upgrade
+    // counts as installed; revision, price, limits and every other field must remain byte-for-byte equal.
+    const effective = profile ? structuredClone(profile) : null;
+    if (effective?.adapter === "codex-image" && isCodexImageRuntimeUpgrade(effective.configuration?.settings?.runtimeVersion, CODEX_IMAGE_RUNTIME_VERSION))
+      effective.configuration!.settings!.runtimeVersion = CODEX_IMAGE_RUNTIME_VERSION;
+    const current = effective ? this.#definitions.find(item => item.profile.id === effective.id && canonical(item.profile) === canonical(effective)) : undefined;
     let registered = false;
     if (valid && profile) { try { registered = !!this.#registry?.forProfile(profile); } catch { /* A missing route remains unavailable. */ } }
     let credentialPresent: boolean | null = null, credentialUnavailable = false;
@@ -257,7 +271,7 @@ export class InstalledProviderCatalog {
     const enabledByHost = !!profile && !policy?.fixture && this.#enabledExecutions.has(canonical({ adapter: profile.adapter, version: profile.executionVersion }));
     const codexImage = profile?.adapter === "codex-image";
     const realExecutionEnabled = enabledByHost && registered && valid && !!policy?.media && this.#mediaTools[policy.media]
-      && (codexImage ? this.#codexImageConfigured && profile?.configuration?.settings?.runtimeVersion === CODEX_IMAGE_RUNTIME_VERSION : credentialPresent === true && !credentialUnavailable);
+      && (codexImage ? this.#codexImageConfigured && !!current && effective?.configuration?.settings?.runtimeVersion === CODEX_IMAGE_RUNTIME_VERSION : credentialPresent === true && !credentialUnavailable);
     return { id: object(input) && typeof input.id === "string" && ID.test(input.id) ? input.id : "unavailable",
       label: name ?? current?.label ?? (profile ? `${profile.kind}: ${profile.id}` : "Unsupported saved provider"),
       ...(codexImage ? { usage: { kind: "codex_subscription" as const, unit: "native_turn" as const, quotaEstimateAvailable: false as const } } : {}),

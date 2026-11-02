@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -13,6 +13,7 @@ import { ProductionService } from "../dist/application/service.js";
 import { Engine } from "../dist/execution/engine.js";
 import { Store } from "../dist/persistence/store.js";
 import { createApp } from "../dist/app.js";
+import { codexImageFixture, codexImageProfile } from "./codex-image-execution-fixture.mjs";
 
 const token = "offline_provider_catalog_session_0123456789", credential = "offline-credential-never-published";
 const image = () => ({ label: "Configured image", profile: { id: "image-pinned", revision: "image-config-1", kind: "image", adapter: "openai-image", executionVersion: "1",
@@ -24,6 +25,51 @@ const speech = () => ({ label: "Configured speech", profile: { id: "speech-pinne
 const transcription = () => ({ label: "Configured transcription", profile: { id: "transcription-pinned", revision: "transcription-config-1", kind: "transcription", adapter: "openai-transcription", executionVersion: "1",
   configuration: { model: OPENAI_TRANSCRIPTION_MODEL, settings: {} }, maxConcurrency: 1, unitCostMicros: "20000", maxRetries: 0 } });
 const configuration = (...profiles) => ({ version: 1, profiles });
+
+test("startup accepts the previous Codex config in memory, reports one notice and exposes the ready current runtime", t => {
+  const f = codexImageFixture(t), profile = structuredClone(codexImageProfile);
+  profile.configuration.settings.runtimeVersion = "0.153.4";
+  const input = configuration({ label: "Old Codex images", profile }), file = join(f.directory, "providers.json"), bytes = JSON.stringify(input);
+  writeFileSync(file, bytes);
+  const notices = []; t.mock.method(console, "warn", value => notices.push(JSON.parse(value)));
+  const installed = readInstalledProviderConfiguration(file);
+  assert.equal(installed.profiles[0].profile.configuration.settings.runtimeVersion, "0.162.1");
+  f.options.providerConfiguration = installed;
+  const runtime = f.build(), row = runtime.providerCatalog.view().profiles.find(row => row.id === profile.id);
+  assert.equal(row.profile.configuration.settings.runtimeVersion, "0.162.1");
+  assert.equal(row.profile.configuration.settings.directorModel, "gpt-6-astra");
+  assert.equal(row.installedDefinition, true); assert.equal(row.readiness.realExecutionEnabled, true);
+  assert.equal(notices.length, 1); assert.equal(notices[0].kind, "codex_image_profile_runtime_notice");
+  assert.deepEqual(notices[0].profileIds, [profile.id]); assert.match(notices[0].message, /Change runtimeVersion to "0\.162\.1"/);
+  assert.equal(readFileSync(file, "utf8"), bytes); assert.equal(input.profiles[0].profile.configuration.settings.runtimeVersion, "0.153.4");
+  assert.equal(new InstalledProviderCatalog({ configuration: input }).digest, runtime.providerCatalog.digest);
+  assert.equal(f.calls.prepare, 0); assert.equal(f.calls.start, 0); assert.equal(f.calls.api, 0);
+});
+
+test("the old-config exception accepts no unsupported runtime or invalid neighboring field and logs only after validation", t => {
+  const f = codexImageFixture(t), file = join(f.directory, "providers.json"), notices = [];
+  t.mock.method(console, "warn", value => notices.push(value));
+  for (const change of [
+    profile => { profile.configuration.settings.runtimeVersion = "0.150.0"; },
+    profile => { profile.configuration.settings.runtimeVersion = "0.162.2"; },
+    profile => { profile.configuration.settings.directorModel = "gpt-6.1-sol"; },
+    profile => { profile.configuration.settings.width = 768; },
+    profile => { profile.configuration.settings.extra = false; },
+    profile => { profile.configuration.extra = false; },
+    profile => { profile.extra = false; },
+    profile => { profile.unitCostMicros = "1"; },
+    profile => { profile.maxConcurrency = 2; },
+    profile => { profile.maxRetries = 1; },
+  ]) {
+    const profile = structuredClone(codexImageProfile); profile.configuration.settings.runtimeVersion = "0.153.4"; change(profile);
+    const input = configuration({ label: "Old Codex images", profile }); writeFileSync(file, JSON.stringify(input));
+    assert.throws(() => readInstalledProviderConfiguration(file), { code: "PROVIDER_CATALOG_INVALID" });
+    assert.throws(() => new InstalledProviderCatalog({ configuration: input }), { code: "PROVIDER_CATALOG_INVALID" });
+  }
+  writeFileSync(file, JSON.stringify(configuration({ label: "Current Codex images", profile: codexImageProfile })));
+  readInstalledProviderConfiguration(file); assert.deepEqual(notices, []);
+});
+
 function fixture(t, config = configuration(image(), video()), extra = {}) {
   const directory = mkdtempSync(join(tmpdir(), "openslate-provider-catalog-")), store = new Store(join(directory, "store.sqlite"));
   const provider = new FakeProvider(join(directory, "fake.sqlite")), engine = new Engine(store, provider, { artifactDir: join(directory, "artifacts") });

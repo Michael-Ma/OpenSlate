@@ -118,3 +118,35 @@ test('a missing supported image installation refuses an old path and prints the 
   const report=inspectSetup(input),check=report.checks.find(row=>row.id==='codex-image');
   assert.equal(report.ready,false);assert.equal(check.state,'blocked');assert.match(check.action,/npm install --prefix .*openslate-codex-0\.162\.1.* --save-exact @openai\/codex@0\.162\.1/);
 });
+
+test('doctor explains the old Codex profile runtime upgrade without changing the file', t => {
+  const input = fixture(t), file = join(input.root, 'catalog.json');
+  const catalog = { version: 1, profiles: [{ label: 'Old Codex images', profile: { id: 'old-film-images', revision: '1', kind: 'image', adapter: 'codex-image', executionVersion: '1',
+    maxConcurrency: 1, unitCostMicros: '0', maxRetries: 0,
+    configuration: { model: 'codex-image-generation', settings: { runtimeVersion: '0.153.4', directorModel: 'gpt-6-astra', width: 1024, height: 1024 } } } }] };
+  const bytes = JSON.stringify(catalog); writeFileSync(file, bytes);
+  Object.assign(input.environment, { OPENSLATE_PROVIDER_CONFIG: file, OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION: '1', OPENSLATE_CODEX_IMAGE_BINARY: '/codex' });
+  const report = inspectSetup(input), output = formatSetup(report);
+  assert.equal(report.ready, true); assert.equal(report.checks.find(row => row.id === 'codex-image-profile:old-film-images').state, 'warning');
+  assert.match(output, /old-film-images: using Codex 0\.162\.1 for new images/);
+  assert.match(output, /Change runtimeVersion to "0\.162\.1" in provider configuration profile old-film-images/);
+  assert.equal(readFileSync(file, 'utf8'), bytes); assert.equal(report.networkCalls, 0);
+  // Run the actual --doctor entry in an isolated root without an environment file, server or provider.
+  const scripts = join(input.root, 'scripts'); mkdirSync(scripts);
+  for (const name of ['start-local.mjs', 'setup-readiness.mjs', 'local-server.mjs'])
+    copyFileSync(fileURLToPath(new URL(`../${name}`, import.meta.url)), join(scripts, name));
+  const doctor = spawnSync(process.execPath, [join(scripts, 'start-local.mjs'), '--doctor'], { encoding: 'utf8', timeout: 15000,
+    env: { PATH: process.env.PATH, OPENSLATE_PROVIDER_CONFIG: file, OPENSLATE_DATA_DIR: join(input.root, 'data') } });
+  assert.equal(doctor.status, 0, doctor.stderr); assert.match(doctor.stdout, /old-film-images: using Codex 0\.162\.1 for new images/);
+  assert.match(doctor.stdout, /Change runtimeVersion to "0\.162\.1" in provider configuration profile old-film-images/);
+  assert.equal(readFileSync(file, 'utf8'), bytes);
+  for (const version of ['0.150.0', '0.162.2', undefined]) {
+    catalog.profiles[0].profile.configuration.settings.runtimeVersion = version;
+    writeFileSync(file, JSON.stringify(catalog));
+    const invalid = inspectSetup(input); assert.equal(invalid.ready, false);
+    assert.equal(invalid.checks.find(row => row.id === 'codex-image-profile:old-film-images').state, 'blocked');
+  }
+  catalog.profiles[0].profile.configuration.settings.runtimeVersion = '0.162.1';
+  writeFileSync(file, JSON.stringify(catalog));
+  assert.equal(inspectSetup(input).checks.some(row => row.id === 'codex-image-profile:old-film-images'), false);
+});
