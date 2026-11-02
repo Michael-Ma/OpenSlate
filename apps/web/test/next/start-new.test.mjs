@@ -52,6 +52,15 @@ test('Codex is found from the host default, else the film’s own Codex Director
   assert.equal(directorSetupBody({ selection: { mode: 'fake' }, defaults: { binaryPath: '', model: 'gpt-6-astra' } }), null);
 });
 
+test('a new code-plan film quotes video by the second; a storyboard film by the clip', () => {
+  const pricing = { unit: 'second', modes: [], minMicrosPerSecond: '30000', maxMicrosPerSecond: '50000' };
+  const real = allReal(true).map((r) => (r.profile.kind === 'video' ? { ...r, pricing } : r));
+  const video = (plan) => en(plan.rows.find((r) => r.job === 'video').price);
+  assert.equal(video(modelPlan(catalog(real), found, 'en', true)), 'about $0.03–$0.05 a second');
+  assert.match(video(modelPlan(catalog(real), found, 'en')), /a clip$/);
+  assert.equal(zh(modelPlan(catalog(real), found, 'zh-CN', true).rows.find((r) => r.job === 'video').price), '每秒约 $0.03–$0.05');
+});
+
 test('with every key set, a new film gets the ready real models with their prices', () => {
   const plan = modelPlan(catalog(allReal(true)), found, 'en');
   assert.deepEqual(plan.selection, { expectedCatalogDigest: 'c'.repeat(64), profileIds: ['img', 'vid', 'tts', 'stt'] });

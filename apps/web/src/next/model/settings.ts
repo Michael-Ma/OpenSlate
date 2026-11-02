@@ -18,6 +18,8 @@ export interface ProviderOption {
   usage?: { kind: "codex_subscription"; unit: string; quotaEstimateAvailable: boolean };
   profile: { id: string; kind: string; adapter: string; unitCostMicros: string } | null;
   estimatedCost: { currency: "USD"; unitMicros: string; basis: "fixture" | "host_configured"; actualVendorPriceVerified: boolean } | null;
+  /** Code-plan video priced by the second (card F3), from the same function the keyframe cards use. */
+  pricing?: VideoPricing;
   readiness: {
     configurationValid: boolean;
     registered: boolean;
@@ -27,6 +29,19 @@ export interface ProviderOption {
     enabledByHost: boolean;
     realExecutionEnabled: boolean;
   };
+}
+
+export interface VideoPricing {
+  unit: "second";
+  modes: { mode: string; microsPerSecond: string }[];
+  minMicrosPerSecond: string;
+  maxMicrosPerSecond: string;
+}
+
+/** "about $0.03 a second" or "about $0.03–$0.05 a second", by the input chosen on the keyframe card. */
+export function perSecondMsg(pricing: VideoPricing, locale: string, ids: { one: MessageId; range: MessageId }): Msg {
+  const min = formatMicros(pricing.minMicrosPerSecond, locale), max = formatMicros(pricing.maxMicrosPerSecond, locale);
+  return min === max ? msg(ids.one, { price: min }) : msg(ids.range, { min, max });
 }
 
 export interface ProviderCatalogView {
@@ -157,9 +172,11 @@ export function modelName(option: ProviderOption): Msg {
  * The host-configured estimate per operation (D15): "about $0.04 a keyframe", "uses your Codex plan" or
  * "free stand-in". Never "$0.00".
  */
-export function estimateMsg(option: ProviderOption, locale: string): Msg {
+export function estimateMsg(option: ProviderOption, locale: string, codeFilm = false): Msg {
   if (isFixture(option)) return msg("set.estimate.free");
   if (option.usage?.kind === "codex_subscription") return msg("set.estimate.codex");
+  // A code film pays video by the second; storyboard films keep the per-clip estimate.
+  if (codeFilm && option.pricing) return perSecondMsg(option.pricing, locale, { one: "set.estimate.video_second", range: "set.estimate.video_second_range" });
   const micros = Number(option.estimatedCost?.unitMicros ?? option.profile?.unitCostMicros ?? 0);
   const kind = option.profile?.kind;
   if (!Number.isFinite(micros) || micros <= 0 || !kind || !isMediaKind(kind)) return msg("set.estimate.none");
@@ -212,14 +229,14 @@ export interface ModelRow {
  * One row per media job, in the design's order, with every installed model for that job. A saved model that
  * is no longer installed (the server keeps old profiles in the film's lock) comes first, marked missing.
  */
-export function modelRows(status: ModelSettingsStatus, locale: string): ModelRow[] {
+export function modelRows(status: ModelSettingsStatus, locale: string, codeFilm = false): ModelRow[] {
   return MEDIA_KINDS.map((kind) => {
     const choices = status.options
       // Lip sync makes only singing shots and is pinned beside the video model; it is never the video choice.
       .filter((option) => option.profile?.kind === kind && option.profile.adapter !== "fal-h3-lipsync")
       .map((option): ModelChoice => {
         const ready = readiness(option);
-        return { value: option.id, name: modelName(option), estimate: estimateMsg(option, locale), ready: ready.ready, reason: ready.reason };
+        return { value: option.id, name: modelName(option), estimate: estimateMsg(option, locale, codeFilm), ready: ready.ready, reason: ready.reason };
       });
     // Configured models first, the stand-in last, as in the design.
     choices.sort((a, b) => Number(a.name.id === DEMO_LABEL[kind]) - Number(b.name.id === DEMO_LABEL[kind]));

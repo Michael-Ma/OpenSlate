@@ -96,7 +96,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   /** Why the last Create made nothing; cleared by the next change or press. */
   const [refusal, setRefusal] = useState<Msg | null>(null);
 
-  const plan = useMemo(() => (providers && providers !== "failed" ? modelPlan(providers, codex, locale) : null), [providers, codex, locale]);
+  const plan = useMemo(() => (providers && providers !== "failed" ? modelPlan(providers, codex, locale, planning === "code") : null), [providers, codex, locale, planning]);
   const running = phase.kind === "running";
   const failed = phase.kind === "failed" ? phase : null;
   // Create waits for this computer's models, so the film never gets the stand-ins only because the list was still being read.

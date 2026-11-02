@@ -146,6 +146,8 @@ export const startMessages = {
   "start.job.transcription": { en: "Transcription", zh: "转写" },
   "start.model.stand_in": { en: "Stand-in", zh: "替身" },
   "start.price.keyframe": { en: "about {price} a keyframe", zh: "每张关键帧约 {price}" },
+  "start.price.second": { en: "about {price} a second", zh: "每秒约 {price}" },
+  "start.price.second_range": { en: "about {min}–{max} a second", zh: "每秒约 {min}–{max}" },
   "start.price.clip": { en: "about {price} a clip", zh: "每段视频约 {price}" },
   "start.price.line": { en: "about {price} a line", zh: "每条约 {price}" },
   "start.price.recording": { en: "about {price} a recording", zh: "每段录音约 {price}" },

@@ -52,6 +52,19 @@ test('estimates are host-configured, per operation, and never $0.00 (D15)', () =
   assert.equal(zh(estimateMsg(option('x', 'X', 'video', 'minimax-h3', '500000'), 'zh-CN')), '每段视频约 $0.50');
 });
 
+test('a code film prices video by the second, from the server\'s pricing; a storyboard film keeps the clip estimate', () => {
+  const pricing = { unit: 'second', modes: [{ mode: 'first_frame', microsPerSecond: '30000' }, { mode: 'reference', microsPerSecond: '50000' }], minMicrosPerSecond: '30000', maxMicrosPerSecond: '50000' };
+  const viggle = option('viggle', 'Viggle H3', 'video', 'viggle-h3', '100000', { pricing });
+  assert.equal(en(estimateMsg(viggle, 'en-US', true)), 'about $0.03–$0.05 a second');
+  assert.equal(zh(estimateMsg(viggle, 'zh-CN', true)), '每秒约 $0.03–$0.05');
+  assert.equal(en(estimateMsg(viggle, 'en-US')), 'about $0.10 a clip', 'storyboard films still pay per clip');
+  const flat = option('flat', 'Flat', 'video', 'viggle-h3', '100000', { pricing: { ...pricing, minMicrosPerSecond: '30000', maxMicrosPerSecond: '30000' } });
+  assert.equal(en(estimateMsg(flat, 'en-US', true)), 'about $0.03 a second');
+  assert.equal(en(estimateMsg(option('mm', 'MiniMax', 'video', 'minimax-h3', '500000'), 'en-US', true)), 'about $0.50 a clip', 'a per-call model has no per-second price');
+  const rows = modelRows({ ...status, options: [...status.options.filter((o) => o.id !== 'viggle'), { ...status.options.find((o) => o.id === 'viggle'), pricing }] }, 'en-US', true);
+  assert.equal(en(rows.find((r) => r.kind === 'video').choices.find((c) => c.value === 'viggle').estimate), 'about $0.03–$0.05 a second');
+});
+
 test('a price under a tenth of a cent never rounds to $0.000', () => {
   assert.equal(en(estimateMsg(option('x', 'X', 'image', 'openai-image', '1'), 'en')), 'under $0.001 a keyframe');
   assert.equal(en(estimateMsg(option('x', 'X', 'speech', 'openai-speech', '499'), 'en')), 'under $0.001 a voice line');
