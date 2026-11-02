@@ -12,7 +12,7 @@
         "configuration": {
           "model": "codex-image-generation",
           "settings": {
-            "runtimeVersion": "0.153.4",
+            "runtimeVersion": "0.162.1",
             "directorModel": "gpt-6-astra",
             "width": 1024,
             "height": 1024
