@@ -846,6 +846,10 @@ export interface CodePlanChoiceView {
   options: unknown[];
   answer?: unknown;
   answeredAt?: string;
+  /** When the card was asked, or asked again after retiring. Absent on old rows that could not be dated. */
+  askedAt?: string;
+  /** The latest plan no longer reaches this choice: something it depended on changed. It cannot be answered. */
+  stale?: true;
 }
 
 /** The dry run recorded for a version: what replaying it against the journal would do. */

@@ -35,6 +35,8 @@ On-screen frames of a row: `round(durationFrames / speed) + holdFrames`. `atFram
 
 Card K1 adds `keyframe(shot, input)`, which makes one shot's picture, waits for the person, and returns the video input they chose. New clips of declared shots need it. See `cards/K1-keyframe-confirm.md`.
 
+Card K2 retires a choice the latest pass no longer reaches: `CodePlanChoiceView` adds `askedAt?` and `stale?: true`, answering a stale row is refused with `CODE_PLAN_CHOICE_STALE`, and `read_film.choices` omits stale rows. See `cards/K2-cards-follow-dependencies.md`.
+
 ## Director tool: `read_clip_frames` (Q3)
 
 Input: `{ artifactId: string; startFrame?: integer; endFrame?: integer; everyFrames?: integer }`. `everyFrames` is 1–90, default 15. Frame numbers are the same 30 fps numbers `render` takes as `startFrame`.
