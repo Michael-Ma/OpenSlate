@@ -231,6 +231,14 @@ for (const contract of ['0.2.0', '0.3.0']) test(`${contract}: unannotated sheets
   await f.restart(); assert.deepEqual(projectAssets(f.service, f.store.getProject(f.id)), assets);
 });
 
+test('an old frame with no shot annotation stays a keyframe when its choice names the shot', async t => {
+  const f = await fake(t), lock = createDirectorSkillLock({ repositoryRoot: process.cwd(), snapshotRoot: join(f.root, 'asset-skills') }, '0.2.0').lock;
+  f.store.put('director_skill_lock', lock.id, f.id, { id: lock.id, projectId: f.id, lock });
+  await f.submit(film(`const frame=await ctx.image({prompt:'Old frame'});await ctx.choose('opening-keyframe',{question:'Which frame?',options:[frame.artifact]});`));
+  await until(f, view => view.choices.length === 1);
+  assert.deepEqual(projectAssets(f.service, f.store.getProject(f.id)).map(item => [item.role, item.shotId]), [['keyframe', 'opening']]);
+});
+
 test('19.5s music requests 30s; re-cut to 21s retains the measured track, identity and charge', async t => {
   const calls = [];
   const f = await realCodeFixture(t, { profiles: [musicProfile], configuration: { music: true }, transport: {
