@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
-import { codexState, directorRequest, directorRow, draftFrom, draftProblems, reviewRequest, reviewSwitch, selectionFor } from '../../src/next/model/settings-director.ts';
+import { codexNoticeMsg, codexState, directorRequest, directorRow, draftFrom, draftProblems, reviewRequest, reviewSwitch, selectionFor } from '../../src/next/model/settings-director.ts';
 
 const en = (m) => translateMsg('en', m);
 const setup = (patch = {}) => ({
@@ -57,6 +57,13 @@ test('choosing Claude Code saves its program and model, after the first conversa
   assert.deepEqual(selection, { mode: 'claude', model: 'claude-sonnet-5-5', binaryPath: '/Users/you/.local/bin/claude' });
   assert.deepEqual(directorRequest(current, selection), { path: '/director/change', body: { expectedSelectionDigest: 'd'.repeat(64), selection } });
   assert.equal(directorRow(setup({ claude: claude(), selection })).selected, 'claude:claude-sonnet-5-5');
+});
+
+test('a Codex program of another version runs the supported one instead, and Settings says so without blocking', () => {
+  const notice = { code: 'DIRECTOR_CODEX_VERSION_MISMATCH', expectedVersion: '0.162.1', foundVersion: '0.153.4', binaryPath: '/old/codex', installPath: '/new/codex' };
+  assert.equal(en(codexNoticeMsg(setup({ codexNotice: notice }))), 'The chosen Codex program is version 0.153.4, so OpenSlate runs its supported Codex 0.162.1 instead.');
+  assert.equal(codexState(setup({ codexNotice: notice })), 'ready');
+  assert.equal(codexNoticeMsg(setup()), null);
 });
 
 test('Codex state comes from the last setup check', () => {

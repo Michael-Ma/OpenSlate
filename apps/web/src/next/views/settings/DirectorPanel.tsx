@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { errorMsg } from "../../i18n/translate.ts";
-import { CODEX_CHECK_TIMEOUT_MS, afterDirectorSave, codexDiagnostic, codexProgram, directorForm, directorFormConflict, directorFormRequest, draftProblems, reviewRequest, reviewSwitch, type DirectorDraft, type DirectorForm, type DirectorReview, type DirectorSetup } from "../../model/settings-director.ts";
+import { CODEX_CHECK_TIMEOUT_MS, afterDirectorSave, codexDiagnostic, codexNoticeMsg, codexProgram, directorForm, directorFormConflict, directorFormRequest, draftProblems, reviewRequest, reviewSwitch, type DirectorDraft, type DirectorForm, type DirectorReview, type DirectorSetup } from "../../model/settings-director.ts";
 import { CEILING_PRESS } from "../../model/code-plan.ts";
 import { formatMicros, microsFromDollars } from "../../model/price.ts";
 import { msg } from "../../model/types.ts";
@@ -31,6 +31,7 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
   const data = setup.data;
   const native = data?.selection.mode === "native";
   const diagnostic = data ? codexDiagnostic(data) : null;
+  const notice = data ? codexNoticeMsg(data) : null;
   const saving = !!presses[DIRECTOR_PRESS];
   const toggle = useMemo(() => reviewSwitch(review, data), [review, data]);
   const ids = useId();
@@ -162,6 +163,7 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
   return (
     <Panel id="set-director" title="set.section.director" scope={t("set.scope.film", { film })} end={editButton}>
       {diagnostic && <p className="why" role="status" data-codex-diagnostic>{tm(diagnostic)}</p>}
+      {notice && <p className="lead" role="status" data-codex-notice>{tm(notice)}</p>}
       {body()}
       <div className="srow review-row">
         <div className="txt">

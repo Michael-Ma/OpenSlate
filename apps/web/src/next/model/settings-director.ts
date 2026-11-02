@@ -50,6 +50,8 @@ export interface DirectorSetup {
   /** Present after a save: the result of Codex's setup check for that selection. */
   /** The most recent local version failure, including an attempted unsaved program. */
   codexDiagnostic?: { code: "DIRECTOR_CODEX_VERSION_MISMATCH"; expectedVersion: string; foundVersion: string | null; binaryPath: string; installPath: string } | null;
+  /** The chosen program is another Codex version, so the supported install runs instead (card M1). Information, not a block. */
+  codexNotice?: { code: "DIRECTOR_CODEX_VERSION_MISMATCH"; expectedVersion: string; foundVersion: string | null; binaryPath: string; installPath: string } | null;
   nativeDiagnostic?: NativeDiagnostic | null;
   readiness?: { status: "ready" | "blocked"; checks?: Record<string, string>; nativeDiagnostic?: NativeDiagnostic } | null;
   /** Absent from servers without Claude Code support. */
@@ -73,6 +75,10 @@ export const codexProgram = (setup: DirectorSetup): string => setup.selection.bi
 
 export const codexDiagnostic = (setup: DirectorSetup): Msg | null => setup.codexDiagnostic
   ? errorMsg(setup.codexDiagnostic.code, setup.codexDiagnostic) : nativeDiagnosticMsg(setup.nativeDiagnostic ?? setup.readiness?.nativeDiagnostic, "setup");
+
+/** Says that the supported Codex runs instead of the chosen program, and which versions those are. */
+export const codexNoticeMsg = (setup: DirectorSetup): Msg | null => setup.codexNotice && !setup.codexDiagnostic
+  ? msg("set.director.codex_fallback", { found: setup.codexNotice.foundVersion ?? "?", expected: setup.codexNotice.expectedVersion }) : null;
 
 export type CodexState = "ready" | "found" | "blocked" | "unchecked" | "missing";
 

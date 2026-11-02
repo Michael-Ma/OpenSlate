@@ -124,6 +124,7 @@ export const settingsMessages = {
   "set.impact.director_demo": { en: "The Demo Director gives scripted replies and can't read a written plan or look at keyframes.", zh: "示例导演只给出预设回复，不能读书面计划，也不能看关键帧。" },
   "set.impact.director_claude": { en: "Its turns count against your Claude plan, and it can use only the Director's tools.", zh: "每一轮都计入你的 Claude 订阅额度，它只能使用导演的工具。" },
   "set.director.claude_lead": { en: "Claude Code directs this film on your Claude plan. It uses only the Director's tools, and none of your own Claude Code settings.", zh: "这部片子由 Claude Code 当导演，使用你的 Claude 订阅。它只用导演的工具，不读取你自己的 Claude Code 设置。" },
+  "set.director.codex_fallback": { en: "The chosen Codex program is version {found}, so OpenSlate runs its supported Codex {expected} instead.", zh: "选中的 Codex 程序是 {found} 版，OpenSlate 改用它支持的 Codex {expected}。" },
   "set.director.plan": { en: "Billing", zh: "计费" },
   "set.impact.director_check": { en: "Switching first checks that Codex runs and is signed in.", zh: "切换前会先检查 Codex 能运行并已登录。" },
   "set.impact.checking": { en: "Checking what this switch affects…", zh: "正在检查这次切换的影响…" },
