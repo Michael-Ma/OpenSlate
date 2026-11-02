@@ -864,7 +864,7 @@ export class ProductionService {
         }
         if (event.kind === "director.message") {
           const output = outputById.get(String(event.payload.outputId));
-          return output ? [{ id: output.id, role: "assistant", text: output.text, state: output.phase, requestId: output.requestId, at: event.occurredAt, runtime: this.store.get<{ runtimeId: string }>("director_turn", output.turnId)?.runtimeId === "codex-app-server" ? "live" : "scripted" }] : [];
+          return output ? [{ id: output.id, role: "assistant", text: output.text, state: output.phase, requestId: output.requestId, at: event.occurredAt, runtime: ["codex-app-server", "claude-code"].includes(this.store.get<{ runtimeId: string }>("director_turn", output.turnId)?.runtimeId ?? "") ? "live" : "scripted" }] : [];
         }
         return [];
       });
