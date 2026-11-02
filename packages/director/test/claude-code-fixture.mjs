@@ -74,11 +74,18 @@ export async function runFakeClaude(configPath) {
   }
   if (config.scenario === 'usage') { send({ type: 'assistant', message: { content: [{ type: 'text', text: "You've hit your limit · resets tomorrow" }] } }); return; }
   if (config.scenario === 'rate-limit') { send({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected' } }); return; }
-  send({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'PRIVATE REASONING' }, { type: 'text', text: 'I am reviewing the film.' },
-    { type: 'tool_use', id: 'tool-1', name: 'mcp__openslate__read_film', input: { private: 'PRIVATE ARGUMENTS' } }] } });
-  if (toolCall) { const called = await toolCall; record({ called }); }
-  send({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'PRIVATE TOOL RESULT' }] } });
-  send({ type: 'result', subtype: 'success', is_error: false, result: config.text ?? 'The film is ready for your next direction.' });
+  const finalText = config.text ?? 'The film is ready for your next direction.';
+  if (config.messages) {
+    for (const message of config.messages) send(message);
+  } else {
+    send({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'PRIVATE REASONING' }, { type: 'text', text: 'I am reviewing the film.' },
+      { type: 'tool_use', id: 'tool-1', name: 'mcp__openslate__read_film', input: { private: 'PRIVATE ARGUMENTS' } }] } });
+    if (toolCall) { const called = await toolCall; record({ called }); }
+    send({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'PRIVATE TOOL RESULT' }] } });
+    // Print mode repeats the last assistant answer in the result record.
+    send({ type: 'assistant', message: { content: [{ type: 'text', text: finalText }] } });
+  }
+  if (!config.omitResult) send({ type: 'result', subtype: 'success', is_error: false, result: finalText });
   mcp?.stdin.end();
   if (mcp) await new Promise(resolve => mcp.once('close', resolve));
 }
