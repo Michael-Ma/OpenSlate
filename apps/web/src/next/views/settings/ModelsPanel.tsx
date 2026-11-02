@@ -52,7 +52,8 @@ export function ModelsPanel({ models, setup, film, offline }: {
   const projectEpoch = useStudio((s) => s.projectEpoch);
   const active = () => store.getState().projectId === projectId && store.getState().projectEpoch === projectEpoch;
   const labels = useMemo(() => Object.fromEntries(Object.values(overview?.shots ?? {}).map((shot) => [shot.shotId, shot.label])), [overview]);
-  const rows = useMemo(() => (models.data ? modelRows(models.data, locale) : null), [models.data, locale]);
+  const codeFilm = useStudio((s) => s.snapshot?.project.planMode === "code");
+  const rows = useMemo(() => (models.data ? modelRows(models.data, locale, codeFilm) : null), [models.data, locale, codeFilm]);
   const director = useMemo(() => (setup.data ? directorRow(setup.data) : null), [setup.data]);
   const [pending, setPending] = useProjectDraft<Pending>("models");
   const token = useRef(0);
@@ -272,7 +273,7 @@ export function ModelsPanel({ models, setup, film, offline }: {
             {directorRowView()}
             {rows.map(mediaRowView)}
           </div>
-          <p className="hint set-note">{t("set.models.note")}</p>
+          <p className="hint set-note">{t(codeFilm ? "set.models.note_code" : "set.models.note")}</p>
         </>
       ) : <ReadState error={models.error} onRetry={models.reload} />}
     </Panel>

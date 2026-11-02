@@ -75,6 +75,9 @@ function option(id: string, label: string, kind: MediaKind, adapter: string, mic
 export function catalogProfiles(world: FixtureWorld): ProviderOption[] {
   const { keys, codex } = computer(world);
   const viggle = option("viggle-h3", "MiniMax H3 via Viggle", "video", "viggle-h3", "450000", false);
+  // As the server reports Viggle H3 for code films (card F3): first frame and text $0.03 a second, references $0.05.
+  viggle.pricing = { unit: "second", modes: [{ mode: "reference", microsPerSecond: "50000" }, { mode: "first_frame", microsPerSecond: "30000" },
+    { mode: "first_last_frame", microsPerSecond: "50000" }, { mode: "text", microsPerSecond: "30000" }], minMicrosPerSecond: "30000", maxMicrosPerSecond: "50000" };
   const codexImage = option("codex-image", "Codex image · gpt-6-astra", "image", "codex-image", "0", codex, { usage: { kind: "codex_subscription", unit: "native_turn", quotaEstimateAvailable: false } });
   codexImage.readiness = { ...codexImage.readiness, credential: { required: false, present: null, backendUnavailable: false, apiValidated: false }, nativeAccess: { configured: codex, authentication: "checked_before_dispatch", quota: "unverified" } };
   return [

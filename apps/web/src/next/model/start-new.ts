@@ -1,3 +1,4 @@
+import { perSecondMsg, type VideoPricing } from "./settings.ts";
 import type { Locale } from "../../shared/locale-preference.ts";
 import type { MessageId } from "../i18n/messages.ts";
 import { formatMicros } from "./price.ts";
@@ -22,6 +23,8 @@ export interface ProviderRow {
   label: string;
   profile: { kind: ProviderKind; adapter: string; configuration?: { model: string } } | null;
   estimatedCost: { unitMicros: string; basis: "fixture" | "host_configured" } | null;
+  /** Code-plan video priced by the second (card F3). */
+  pricing?: VideoPricing;
   usage?: { kind: "codex_subscription" };
   readiness: {
     configurationValid: boolean;
@@ -156,9 +159,11 @@ const WAITING: Record<NotReady, MessageId> = {
  */
 const PRICE_FLOOR_MICROS = 1000;
 
-function priceOf(row: ProviderRow, unit: { about: MessageId; under: MessageId }, locale: Locale): Msg {
+function priceOf(row: ProviderRow, unit: { about: MessageId; under: MessageId }, locale: Locale, codeFilm: boolean): Msg {
   if (isStandIn(row)) return msg("start.price.stand_in");
   if (row.usage?.kind === "codex_subscription" || row.profile?.adapter === "codex-image") return msg("start.price.codex");
+  // A code-plan film pays video by the second, at the rate of the input chosen on each keyframe card.
+  if (codeFilm && row.pricing) return perSecondMsg(row.pricing, locale, { one: "start.price.second", range: "start.price.second_range" });
   const micros = row.estimatedCost?.unitMicros;
   // Never "$0.00": a model without a configured estimate says so.
   if (!micros || !/^\d+$/.test(micros) || Number(micros) === 0) return msg("start.price.unset");
@@ -182,7 +187,7 @@ function standInWhy(real: readonly ProviderRow[]): StandInWhy {
  * This computer's defaults for a new film: per job, the first real model that is ready, else the
  * built-in stand-in. The Director row says whether the Codex Director will be set up.
  */
-export function modelPlan(catalog: ProviderCatalog, codex: Codex, locale: Locale): ModelPlan {
+export function modelPlan(catalog: ProviderCatalog, codex: Codex, locale: Locale, codeFilm = false): ModelPlan {
   const rows: ModelRow[] = [];
   const chosen: string[] = [];
   const waitingReal: ProviderRow[] = [];
@@ -201,7 +206,7 @@ export function modelPlan(catalog: ProviderCatalog, codex: Codex, locale: Locale
     if (usable) {
       ready++;
       chosen.push(usable.id);
-      rows.push({ job, model: usable.label, price: priceOf(usable, price, locale), status: msg("start.ready.ready"), ok: true });
+      rows.push({ job, model: usable.label, price: priceOf(usable, price, locale, codeFilm), status: msg("start.ready.ready"), ok: true });
       continue;
     }
     if (standIn) chosen.push(standIn.id);
