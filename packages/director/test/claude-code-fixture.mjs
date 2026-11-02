@@ -4,6 +4,10 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { toolCatalog } from '../../core/dist/index.js';
 
+// Reported by the lead's Claude Code 2.1.312 probe, with and without safe mode.
+export const realInitPlugins = ['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring']
+  .map(name => ({ name, path: 'builtin', source: `${name}@builtin` }));
+
 /** Fake CLI only. Never invokes a model or reads the contributor's actual home. */
 export async function runFakeClaude(configPath) {
   const config = JSON.parse(readFileSync(configPath, 'utf8')), args = process.argv.slice(2);
@@ -22,9 +26,10 @@ export async function runFakeClaude(configPath) {
       mode: statSync(path).mode & 0o777, directoryMode: statSync(dirname(path)).mode & 0o777 } });
   }
   if (config.scenario === 'no-input') { process.exit(1); }
-  const isolated = args.includes('--safe-mode') && args.includes('--restricted') && args[args.indexOf('--setting-sources') + 1] === '';
+  // A flag-contract fixture, not independent proof of the native CLI's isolation.
+  const isolated = args.includes('--restricted') && args[args.indexOf('--setting-sources') + 1] === '';
   const personal = [];
-  if (!isolated) for (const path of [join(process.cwd(), 'CLAUDE.md'), join(process.env.HOME, '.claude', 'settings.json'), join(process.env.HOME, '.claude.json')])
+  if (!isolated) for (const path of [join(process.cwd(), 'CLAUDE.md'), join(process.env.HOME, '.claude', 'CLAUDE.md'), join(process.env.HOME, '.claude', 'settings.json'), join(process.env.HOME, '.claude.json')])
     if (existsSync(path)) personal.push(readFileSync(path, 'utf8'));
   const input = await new Promise(resolve => {
     let text = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => { text += chunk; if (text.includes('\n')) resolve(JSON.parse(text.split('\n')[0])); });
@@ -56,7 +61,7 @@ export async function runFakeClaude(configPath) {
   if (config.scenario === 'auth-before-init') { send({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['authentication_error: not logged in'] }); return; }
   const init = { type: 'system', subtype: 'init', session_id: 'fixture-session', cwd: process.cwd(), tools: catalog.names.map(name => `mcp__openslate__${name}`),
     mcp_servers: [{ name: 'openslate', status: 'connected', source: 'dynamic' }], model: args[args.indexOf('--model') + 1], permissionMode: 'dontAsk',
-    apiKeySource: 'none', claude_code_version: '2.1.312', slash_commands: [], skills: [], plugins: [],
+    apiKeySource: 'none', claude_code_version: '2.1.312', slash_commands: [], skills: [], plugins: realInitPlugins,
     agents: settings.env?.CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS === '1' ? [] : ['general-purpose', 'Explore', 'Plan'], output_style: 'default', ...config.init };
   send(init);
   if (config.scenario === 'hang') { setInterval(() => {}, 1000); return; }
