@@ -69,6 +69,8 @@
 .set-view .status .ic{width:15px;height:15px;border-radius:50%;border:1.5px solid currentColor;display:inline-grid;place-items:center;font-size:9.5px;font-weight:800;flex:none;line-height:1;font-style:normal}
 .set-view .status.fail .ic{background:var(--text);color:var(--surface);border-color:var(--text)}
 .set-readfail{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+/* The reason is a sentence, not a pill label: it wraps instead of pushing a phone screen sideways. */
+.set-readfail .status{white-space:normal;min-width:0;max-width:100%;border-radius:var(--r-card)}
 
 /* ---------- layout: index + sections ---------- */
 .set-grid{display:grid;grid-template-columns:180px minmax(0,760px);gap:22px;align-items:start}

@@ -53,6 +53,9 @@ export const settingsMessages = {
   "set.job.video": { en: "Video", zh: "视频" },
   "set.job.speech": { en: "Narration", zh: "旁白" },
   "set.job.transcription": { en: "Transcription", zh: "转写" },
+  // A code-plan film's video resolution (card G1), under the video row.
+  "set.job.resolution": { en: "Resolution", zh: "分辨率" },
+  "set.res.scope": { en: "New clips only", zh: "只用于新视频" },
   // Job names inside a sentence ("Used by keyframes, narration").
   "set.job_lc.image": { en: "keyframes", zh: "关键帧" },
   "set.job_lc.video": { en: "video", zh: "视频" },
@@ -136,7 +139,13 @@ export const settingsMessages = {
   "set.impact.blocked_title": { en: "Switch {jobs} first.", zh: "请先切换{jobs}。" },
   "set.impact.blocked": { en: "The model saved for {jobs} isn't installed on this computer any more, so no other switch can be checked until it is changed.", zh: "{jobs}保存的模型已不在本机安装，换掉它之前，其他切换都无法检查。" },
   "set.impact.check_again": { en: "Check again", zh: "重新检查" },
+  "set.res.impact_title": { en: "Make new clips at {resolution}?", zh: "新视频改用 {resolution}？" },
+  "set.res.impact_rate": { en: "Clips not made yet use it, at about {price} a second.", zh: "还没生成的视频会用它，每秒约 {price}。" },
+  "set.res.impact_rate_range": { en: "Clips not made yet use it, at about {min}–{max} a second.", zh: "还没生成的视频会用它，每秒约 {min}–{max}。" },
+  "set.res.impact_new": { en: "Clips not made yet use it.", zh: "还没生成的视频会用它。" },
+  "set.res.impact_kept": { en: "Clips already made or running keep their resolution; nothing is made again.", zh: "已生成或正在生成的视频保持原分辨率，不会重新生成。" },
   "set.toast.model_switched": { en: "{job} now uses {model}.", zh: "{job}现在使用 {model}。" },
+  "set.toast.resolution": { en: "New clips are made at {resolution}.", zh: "新视频改用 {resolution}。" },
   "set.toast.director_switched": { en: "The Director uses {model} from its next turn.", zh: "导演下一轮起使用 {model}。" },
 
   // ---- Director ------------------------------------------------------------------------
