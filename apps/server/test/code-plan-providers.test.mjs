@@ -54,7 +54,7 @@ test('Codex and Viggle steps retain intent → submit → lookup/poll → spool 
  const rendered=f.store.get('artifact',steps.find(step=>step.kind==='render').result.artifact.artifactId);
  assert.equal(rendered.fixture,false); assert.equal(rendered.origin,'local_render');
  const probe=JSON.parse((await promisify(execFile)(tool('ffprobe'),['-v','error','-show_streams','-show_format','-of','json',rendered.path])).stdout);
- assert.equal(probe.streams[0].codec_name,'h264'); assert.equal(probe.streams[0].r_frame_rate,'30/1'); assert.equal(probe.streams[0].nb_frames,'180');
+ assert.equal(probe.streams[0].codec_name,'h264'); assert.equal(probe.streams[0].r_frame_rate,'24/1'); assert.equal(probe.streams[0].nb_frames,'144');
  assert.equal(Number(probe.format.duration),6); assert.ok(readFileSync(rendered.path).length>1000);
  f.noGraph(); const before={...f.calls}; await f.tick(); assert.deepEqual(f.calls,before);
 });

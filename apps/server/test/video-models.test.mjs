@@ -78,7 +78,7 @@ test('Seedance loopback create → poll → download → normalize/ingest, owned
  assert.equal(modelPrice(model,record.normalizedInput,codePlanPriceFrame(f.store,f.project.id,record.normalizedInput)),'378000');
  assert.equal(seedancePriceMicros(seedanceModel,{resolution:'720p'},{seconds:5,firstFrame:{width:360,height:640}}),'378000');
  const terminal=f.store.get('video_i2v_terminal',attempt.id);assert.equal(terminal.result.completionTokens,108000);assert.equal(terminal.result.actualCostMicros,'378000');
- const clip=f.store.get('media_source',attempt.outputs.video.artifactId);assert.equal(clip.source.probe.video.frameRate,'30/1');assert.equal(clip.source.probe.video.frames,150);
+ const clip=f.store.get('media_source',attempt.outputs.video.artifactId);assert.equal(clip.source.probe.video.frameRate,'24/1');assert.equal(clip.source.probe.video.frames,120);
  const frame=f.store.get('artifact',attempt.outputs.lastFrame.artifactId);assert.equal(frame.mimeType,'image/png');assert.equal(frame.width,360);assert.equal(frame.height,640);assert.equal(frame.fixture,false);
  const descriptions=modelDescriptions(f.execution.models(f.project.id));const row=descriptions.find(m=>m.id===f.profile.id);assert.equal(row.priceUnit,'input');assert.equal(row.priceUnknown,false);assert.equal(row.modelId,seedanceModel);
  await f.restart();await f.tick();assert.equal(f.state.creates,1);assert.equal(f.state.downloads,2);

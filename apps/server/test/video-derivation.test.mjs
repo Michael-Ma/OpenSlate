@@ -18,7 +18,7 @@ import { setup } from "./execution-fixture.mjs";
 const ffmpegPath = process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync("/opt/homebrew/bin/ffmpeg") ? "/opt/homebrew/bin/ffmpeg" : "/usr/bin/ffmpeg");
 const ffprobePath = process.env.OPENSLATE_FFPROBE_PATH ?? (existsSync("/opt/homebrew/bin/ffprobe") ? "/opt/homebrew/bin/ffprobe" : "/usr/bin/ffprobe");
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
-let temporary, raw, shortRaw;
+let temporary, raw, shortRaw, legacyRaw;
 before(async () => {
   temporary = await mkdtemp(join(tmpdir(), "openslate-generated-video-"));
   for (const seconds of [6, 2]) {
@@ -27,6 +27,9 @@ before(async () => {
       "-t", String(seconds), "-c:v", "libx264", "-threads", "1", "-pix_fmt", "yuv420p", "-c:a", "aac", "-metadata", "comment=raw provider fixture", path], { timeout: 30000 });
   }
   raw = await readFile(join(temporary, "6.mp4")); shortRaw = await readFile(join(temporary, "2.mp4"));
+  const legacyPath = join(temporary, "legacy30.mp4");
+  await promisify(execFile)(ffmpegPath, ["-nostdin", "-v", "error", "-i", join(temporary, "6.mp4"), "-vf", "fps=30", "-an", "-c:v", "libx264", "-threads", "1", legacyPath]);
+  legacyRaw = await readFile(legacyPath);
 });
 after(async () => rm(temporary, { recursive: true, force: true }));
 
@@ -70,7 +73,7 @@ function unresolved(f) {
   assert.equal(f.store.list("video_derivation_receipt", f.projectId).length, 0);
 }
 
-test("generated MP4 derives a measured silent 30-fps source with separate raw and normalized identities, usable by rendering", async t => {
+test("generated MP4 derives a measured silent native-rate source with separate raw and normalized identities, usable by rendering", async t => {
   const f = await fixture(t); await f.engine.runReady();
   const attempt = latest(f), record = artifacts(f)[0], source = f.store.get("media_source", record.id);
   const intent = f.store.list("video_derivation_intent", f.projectId)[0], receipt = f.store.get("video_derivation_receipt", intent.id);
@@ -79,8 +82,8 @@ test("generated MP4 derives a measured silent 30-fps source with separate raw an
   assert.equal(intent.requestDigest, digest(attempt.request)); assert.equal(intent.rawSha256, hash(raw));
   assert.equal(receipt.source.originalSha256, hash(raw)); assert.notEqual(record.artifact.sha256, hash(raw));
   assert.equal(record.artifact.sha256, hash(readFileSync(record.path))); assert.equal(record.fixture, false);
-  assert.equal(record.physicalDurationSeconds, 6); assert.equal(receipt.source.probe.video.frames, 180);
-  assert.equal(receipt.source.probe.video.frameRate, "30/1"); assert.equal(receipt.source.probe.audio, undefined);
+  assert.equal(record.physicalDurationSeconds, 6); assert.equal(receipt.source.probe.video.frames, 144);
+  assert.equal(receipt.source.probe.video.frameRate, "24/1"); assert.equal(receipt.source.probe.audio, undefined);
   assert.equal(source.origin, "generated_video"); assert.equal(source.requestId, undefined); assert.equal(source.attemptId, attempt.id);
   assert.equal(record.outputSpoolId, intent.spoolId); assert.equal(record.derivationId, receipt.id);
   assert.deepEqual(JSON.parse(readFileSync(indexPath(f), "utf8")), receipt);
@@ -103,6 +106,24 @@ test("SQL publication failure rolls back artifact, generated source, receipt and
   assert.deepEqual(f.calls, { submit: 1, poll: 0, lookup: 0, normalize: 1, recipe: 1 });
 });
 
+test("a completed v1 30-fps derivation recovers under the native-rate runtime without normalizing or calling its provider again", async t => {
+  const f = await fixture(t, legacyRaw), describe = f.media.describeNormalization.bind(f.media), insert = f.store.insert.bind(f.store);
+  f.media.describeNormalization = async (...args) => ({ ...await describe(...args), recipe: "silent-h264-30fps-v1" });
+  f.store.insert = (...args) => { if (args[0] === "video_derivation_receipt") throw Error("legacy SQL publication interrupted"); return insert(...args); };
+  try { await assert.rejects(f.engine.runReady(), /legacy SQL publication interrupted/); } finally { f.store.insert = insert; }
+  unresolved(f);
+  const intent = f.store.list("video_derivation_intent", f.projectId)[0];
+  assert.equal(intent.normalization.recipe, "silent-h264-30fps-v1");
+  const completion = JSON.parse(readFileSync(indexPath(f), "utf8"));
+  assert.equal(completion.source.probe.video.frameRate, "30/1"); assert.equal(completion.source.probe.video.frames, 180);
+  f.media.describeNormalization = async () => { throw Error("completed legacy media must retain its pinned recipe"); };
+  f.media.importMedia = async () => { throw Error("completed legacy media must reuse its bytes"); };
+  expire(f); await f.engine.reconcile();
+  assert.equal(latest(f).phase, "succeeded"); assert.equal(artifacts(f)[0].physicalDurationSeconds, 6);
+  assert.deepEqual(f.store.get("video_derivation_receipt", intent.id), completion);
+  assert.deepEqual(f.calls, { submit: 1, poll: 0, lookup: 0, normalize: 1, recipe: 1 });
+});
+
 test("lease loss after durable normalization retains recovery bytes but prevents publication by the old worker", async t => {
   const f = await fixture(t), writeIndex = f.outputIngestor.writeIndex.bind(f.outputIngestor);
   f.outputIngestor.writeIndex = async receipt => {
@@ -118,7 +139,7 @@ test("lease loss after durable normalization retains recovery bytes but prevents
 test("physically short output preserves measured failure evidence and never repeats its completed normalization", async t => {
   const f = await fixture(t, shortRaw);
   await assert.rejects(f.engine.runReady(), { code: "VIDEO_TOO_SHORT" }); unresolved(f);
-  const receipt = JSON.parse(readFileSync(indexPath(f), "utf8")); assert.equal(receipt.source.probe.video.frames, 60);
+  const receipt = JSON.parse(readFileSync(indexPath(f), "utf8")); assert.equal(receipt.source.probe.video.frames, 48);
   expire(f); await assert.rejects(f.engine.reconcile(), { code: "VIDEO_TOO_SHORT" }); unresolved(f);
   assert.deepEqual(f.calls, { submit: 1, poll: 0, lookup: 0, normalize: 1, recipe: 1 });
 });
@@ -135,13 +156,19 @@ test("normalization keeps its 128-MiB input cap even when spool storage accepts 
 });
 
 test("an incomplete derivation cannot change its pinned recipe after restart", async t => {
-  const f = await fixture(t);
-  f.media.importMedia = async () => { f.calls.normalize++; throw Error("crash before local normalization completes"); };
-  await assert.rejects(f.engine.runReady(), /crash before local normalization/); unresolved(f);
-  const intent = f.store.list("video_derivation_intent", f.projectId)[0]; assert.ok(intent); assert.equal(existsSync(indexPath(f)), false);
-  f.media.describeNormalization = async () => ({ ...intent.normalization, toolchainDigest: "0".repeat(64) });
-  expire(f); await assert.rejects(f.engine.reconcile(), { code: "VIDEO_DERIVATION_RECIPE_CHANGED" }); unresolved(f);
-  assert.equal(f.calls.normalize, 1); assert.deepEqual(f.store.get("video_derivation_intent", intent.id), intent);
+  for (const change of ["toolchain", "legacy-recipe"]) {
+    const f = await fixture(t);
+    const describe = f.media.describeNormalization.bind(f.media);
+    if (change === "legacy-recipe") f.media.describeNormalization = async (...args) => ({ ...await describe(...args), recipe: "silent-h264-30fps-v1" });
+    f.media.importMedia = async () => { f.calls.normalize++; throw Error("crash before local normalization completes"); };
+    await assert.rejects(f.engine.runReady(), /crash before local normalization/); unresolved(f);
+    const intent = f.store.list("video_derivation_intent", f.projectId)[0]; assert.ok(intent); assert.equal(existsSync(indexPath(f)), false);
+    f.media.describeNormalization = async () => change === "toolchain"
+      ? { ...intent.normalization, toolchainDigest: "0".repeat(64) }
+      : { ...intent.normalization, recipe: "silent-h264-native-fps-v2" };
+    expire(f); await assert.rejects(f.engine.reconcile(), { code: "VIDEO_DERIVATION_RECIPE_CHANGED" }); unresolved(f);
+    assert.equal(f.calls.normalize, 1); assert.deepEqual(f.store.get("video_derivation_intent", intent.id), intent);
+  }
 });
 
 test("corrupt durable normalization metadata or normalized bytes cannot trigger regeneration or publication", async t => {

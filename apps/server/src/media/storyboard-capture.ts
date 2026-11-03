@@ -1,3 +1,4 @@
+import { videoTicks } from "./frame-rate.js";
 import { canonical, clipFit, digest, explicitProjectAspect, invariant, projectExportSize, shotIntentDigest, shotVideoTiming } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan } from "@openslate/core";
 import type { ExportReadiness, ExportRecord } from "@openslate/core/public";
@@ -76,7 +77,7 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
         shot.promptIntent.video === node.intentDigest && node.args.prompt === shot.videoPrompt && currentDependency(node.id);
       if (!ref || !artifact) blockers.push({ code: binding?.outdated || ref || nodes.length > 1 ? "clip_outdated" : "no_clip", shotId: shot.id });
       else if (!current || (!artifact.fixture && !(source?.projectId === projectId && source.source.kind === "video" &&
-        source.source.artifactId === ref.artifactId && source.source.sha256 === ref.sha256 && (source.source.probe.video?.frames ?? 0) >= shot.desiredFrames)))
+        source.source.artifactId === ref.artifactId && source.source.sha256 === ref.sha256 && (source.source.probe.video ? videoTicks(source.source.probe.video) : 0) >= shot.desiredFrames)))
         blockers.push({ code: "clip_outdated", shotId: shot.id });
       if (ref && artifact) {
         selected.push({ shotId: shot.id, fixture: artifact.fixture });

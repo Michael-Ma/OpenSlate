@@ -1,3 +1,4 @@
+import { videoTicks } from "./frame-rate.js";
 import { soundtrackPlacement } from "../narration/soundtrack-placement.js";
 import { projectAudioPlacements } from "../narration/audio-placement.js";
 import type { ShotAudioCut } from "../narration/audio-placement.js";
@@ -188,7 +189,7 @@ function timelineCapture(
       "MEDIA_SOURCE_UNAVAILABLE",
       "Video has no measured supplied-media descriptor",
     );
-    let frames = owned.source.probe.video?.frames;
+    let frames = owned.source.probe.video ? videoTicks(owned.source.probe.video) : undefined;
     if (take.source.kind === "output") {
       const video = node(take.source.nodeId, "video"),
         shot = project.shots.find((s) => s.id === video.shotId);
@@ -472,7 +473,7 @@ export function captureCodePlanRender(store: Store, projectId: string, args: Rec
       if (row.artifact) invariant(Object.keys(row).every(key => ["artifact", "startFrame", "durationFrames", "fit", "motion"].includes(key)),
         "CODE_PLAN_RENDER_INPUT", "Unsupported clip parameters");
       return { source: descriptor, startFrame: row.startFrame === undefined ? 0 : row.startFrame as number,
-        durationFrames: row.durationFrames === undefined ? descriptor.probe.video!.frames : row.durationFrames as number,
+        durationFrames: row.durationFrames === undefined ? videoTicks(descriptor.probe.video!) : row.durationFrames as number,
         fit: (row.fit ?? "contain") as "contain" | "cover" };
     });
     const totalFrames = clips.reduce((sum, row) => sum + row.durationFrames, 0);
