@@ -5,6 +5,7 @@ import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
 import { activeSection, type ModelSettingsStatus, type ProviderCatalogView } from "../../model/settings.ts";
 import type { DirectorReview, DirectorSetup } from "../../model/settings-director.ts";
+import { VIDEO_SETTINGS_PATH, type VideoSettingsView } from "../../model/settings-video.ts";
 import type { PersonalVoices, VoiceSetting } from "../../model/settings-voice.ts";
 import { searchWithLocale } from "../../model/shell.ts";
 import { useStudio } from "../../store/react.tsx";
@@ -50,6 +51,9 @@ export function SettingsView() {
   // The film's models and narrator change only with the film (both move its head version).
   const models = useRead<ModelSettingsStatus>("/settings/models", { follow: filmChanged });
   const voice = useRead<VoiceSetting>("/settings/voice", { follow: filmChanged });
+  // A code-plan film chooses its video resolution; other films have no such setting.
+  const codeFilm = useStudio((s) => s.snapshot?.project.planMode === "code");
+  const video = useRead<VideoSettingsView>(codeFilm ? VIDEO_SETTINGS_PATH : null, { follow: filmChanged });
   // The Director's state (busy, the setup check), the review setting and personal voices move without the head.
   const setup = useResource<DirectorSetup>("/director/setup");
   const review = useRead<DirectorReview>("/settings/director-review");
@@ -155,7 +159,7 @@ export function SettingsView() {
         <div className="set-sections">
           {hasFilm ? (
             <>
-              <ModelsPanel key={`models:${projectId}`} models={models} setup={setup} film={film} offline={offline} />
+              <ModelsPanel key={`models:${projectId}`} models={models} setup={setup} video={video} film={film} offline={offline} />
               <DirectorPanel key={`director:${projectId}`} setup={setup} review={review} film={film} offline={offline} />
               <VoicePanel key={`voice:${projectId}`} voice={voice} personal={personal} film={film} offline={offline} />
             </>

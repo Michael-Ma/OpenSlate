@@ -8,6 +8,7 @@ import { applyRequest, blockedBy, choiceFor, impactOf, JOB_IN_SENTENCE, joinList
 import { CODEX_CHECK_TIMEOUT_MS, DEMO_VALUE, codexState, directorRequest, directorRow, selectionFor, type DirectorChoice, type DirectorSetup } from "../../model/settings-director.ts";
 import { msg, type Msg } from "../../model/types.ts";
 import { settingsRequest } from "../../model/settings-ownership.ts";
+import { resolutionChoices, resolutionImpact, resolutionLabel, resolutionRequest, type VideoResolution, type VideoSettingsView } from "../../model/settings-video.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 import type { Resource } from "../../store/useResource.ts";
 import { Panel, ReadState, ReadyMark } from "./parts.tsx";
@@ -32,15 +33,18 @@ type Pending = { job: "director"; value: string; baseline: DirectorSetup } | Med
 /** One press per job and choice, so picking another model while one is being checked is never blocked. */
 const PREVIEW_PRESS = (kind: MediaKind, value: string) => `settings:preview:${kind}:${value}`;
 const APPLY_PRESS = "settings:models:apply";
+const RESOLUTION_PRESS = "settings:video-resolution";
 export const DIRECTOR_PRESS = "settings:director";
 
 /**
  * Models: one row per job with its model, host-configured estimate and readiness (D15). Changing a select
  * first shows what the switch affects (the server's preview); nothing changes until Switch.
  */
-export function ModelsPanel({ models, setup, film, offline }: {
+export function ModelsPanel({ models, setup, video, film, offline }: {
   models: Resource<ModelSettingsStatus>;
   setup: Resource<DirectorSetup>;
+  /** A code-plan film's video resolution; absent (no data) for other films and older studios. */
+  video: Resource<VideoSettingsView>;
   film: string;
   offline: string | null;
 }) {
@@ -56,6 +60,8 @@ export function ModelsPanel({ models, setup, film, offline }: {
   const rows = useMemo(() => (models.data ? modelRows(models.data, locale, codeFilm) : null), [models.data, locale, codeFilm]);
   const director = useMemo(() => (setup.data ? directorRow(setup.data) : null), [setup.data]);
   const [pending, setPending] = useProjectDraft<Pending>("models");
+  /** A resolution chosen in the select and not switched yet. */
+  const [resolution, setResolution] = useProjectDraft<{ value: VideoResolution }>("video-resolution");
   const token = useRef(0);
   /** Previews on their way, by press: choosing A, then B, then A again waits for A's first check instead of failing. */
   const inflight = useRef(new Map<string, { promise: Promise<ModelPreview | undefined> }>());
@@ -67,6 +73,11 @@ export function ModelsPanel({ models, setup, film, offline }: {
     const saved = pending.job === "director" ? director?.selected : models.data?.selected[pending.job];
     if (saved === pending.value) { token.current++; setPending(null); }
   }, [pending, director, models.data]);
+
+  // A resolution saved elsewhere (another tab, a lost reply) that equals the one chosen here ends that choice.
+  useEffect(() => {
+    if (resolution && video.data?.resolution === resolution.value) setResolution(null);
+  }, [resolution, video.data]);
 
   const focusSelect = (job: string) => requestAnimationFrame(() => document.getElementById(`set-m-${job}`)?.focus());
 
@@ -154,6 +165,18 @@ export function ModelsPanel({ models, setup, film, offline }: {
     focusSelect(row.kind);
   };
 
+  /** A resolution switch changes only clips not sent yet, so Switch saves it at once; the prices then follow. */
+  const applyResolution = async (value: VideoResolution) => {
+    const request = settingsRequest(projectId, resolutionRequest(value));
+    const toast = msg("set.toast.resolution", { resolution: resolutionLabel(value) });
+    const result = await store.command<VideoSettingsView>(RESOLUTION_PRESS, request.body, () => request, toast);
+    if (!result || store.getState().projectId !== projectId) return;
+    setResolution((current) => current?.value === value ? null : current);
+    video.reload();
+    models.reload();
+    focusSelect("resolution");
+  };
+
   const applyDirector = async (value: string, choice: DirectorChoice | null) => {
     const submitted = pending;
     const current = submitted?.job === "director" ? submitted.baseline : null;
@@ -225,6 +248,41 @@ export function ModelsPanel({ models, setup, film, offline }: {
     );
   };
 
+  const resolutionRowView = () => {
+    const view = video.data;
+    const choices = codeFilm && view ? resolutionChoices(view, locale) : [];
+    if (!view || !choices.length) return null;
+    const value = resolution?.value ?? view.resolution;
+    const shown = choices.find((choice) => choice.value === value) ?? choices[0]!;
+    const switching = !!presses[RESOLUTION_PRESS];
+    const choose = (event: ChangeEvent<HTMLSelectElement>) => {
+      const next = event.target.value as VideoResolution;
+      setResolution(next === view.resolution ? null : { value: next });
+    };
+    const cancelResolution = () => { setResolution(null); focusSelect("resolution"); };
+    return (
+      <div className="mrow" data-job="resolution" key="resolution">
+        <span className="c job">{t("set.job.resolution")}</span>
+        <span className="c model">
+          <label className="sr" htmlFor="set-m-resolution">{t("set.models.select", { job: t("set.job.resolution") })}</label>
+          <select id="set-m-resolution" className="select" data-act="resolution" value={value} disabled={!!offline || applying || switching} title={offline ?? undefined} aria-describedby={described("resolution")} onChange={choose}>
+            {choices.map((choice) => <option key={choice.value} value={choice.value}>{resolutionLabel(choice.value)}</option>)}
+          </select>
+        </span>
+        <span className="c price" id="set-m-resolution-price">{tm(shown.estimate)}</span>
+        <span className="c ready-c" id="set-m-resolution-status"><span className="dim">{t("set.res.scope")}</span></span>
+        {resolution && resolution.value !== view.resolution && (
+          <ImpactRow
+            title={t("set.res.impact_title", { resolution: resolutionLabel(resolution.value) })}
+            lines={resolutionImpact(view, resolution.value, locale)}
+            tone="cost"
+            actions={<SwitchActions disabled={!!offline || switching} busy={switching} why={offline} onSwitch={() => void applyResolution(resolution.value)} onCancel={cancelResolution} />}
+          />
+        )}
+      </div>
+    );
+  };
+
   const mediaRowView = (row: ModelRow) => {
     const mine = pending && pending.job === row.kind ? pending : null;
     const value = mine?.value ?? row.selected ?? "";
@@ -271,7 +329,7 @@ export function ModelsPanel({ models, setup, film, offline }: {
             <span className="h">{t("set.models.col.estimate")}</span>
             <span className="h">{t("set.models.col.status")}</span>
             {directorRowView()}
-            {rows.map(mediaRowView)}
+            {rows.map((row) => row.kind === "video" ? [mediaRowView(row), resolutionRowView()] : mediaRowView(row))}
           </div>
           <p className="hint set-note">{t(codeFilm ? "set.models.note_code" : "set.models.note")}</p>
         </>

@@ -7,6 +7,7 @@ import { MEDIA_KINDS, type MediaKind, type ModelPreview, type ModelSelection, ty
 import type { FixtureWorld } from "../fixture-port.ts";
 import { catalogDigest, catalogProfiles, CODEX_DEFAULTS, computer } from "./computer.ts";
 import type { FixtureRoute } from "./types.ts";
+import { filmResolution, readVideoSettings, saveVideoSettings, viggleSecondPricing } from "./video-settings.ts";
 
 /**
  * Simulated server routes the Settings view needs in the sample film: models with preview and apply, the
@@ -61,14 +62,24 @@ function hex(seed: string, n: number): string {
   return out.padEnd(64, "0").slice(0, 64);
 }
 
-function modelStatus(world: FixtureWorld): ModelSettingsStatus {
+function modelStatus(world: FixtureWorld, codeFilm?: string): ModelSettingsStatus {
   const s = state(world);
   const project = world.snapshot.project;
+  // A code film's video row is priced at the film's chosen resolution (card G1).
+  const options = catalogProfiles(world).map((option) => codeFilm && option.pricing && option.profile?.adapter === "viggle-h3" ? { ...option, pricing: viggleSecondPricing(filmResolution(world)) } : option);
   return {
     version: 1, projectId: project.id, headVersion: project.headVersion, revisionId: project.revisionId,
     capabilityLockId: `lock-${s.lock}`, selectionDigest: hex("selection", s.lock), catalogDigest: catalogDigest(world),
-    selected: { ...s.selected }, options: catalogProfiles(world),
+    // New code films make their clips with Viggle H3, as the server's built-in profile does.
+    selected: { ...s.selected, ...(codeFilm ? { video: "viggle-h3" } : {}) }, options,
   };
+}
+
+/** Only code-plan films have a video resolution; the server answers others 409. */
+function codeFilmId(world: FixtureWorld, id: string | undefined): string {
+  const projectId = id ?? world.snapshot.project.id;
+  if (!isCodeFilm(world, projectId)) throw new ApiError("CODE_PLAN_VIDEO_SETTINGS_UNAVAILABLE", 409);
+  return projectId;
 }
 
 // ---- preview: unfinished work of the switched job uses the new model; made or running work stays ----
@@ -270,7 +281,9 @@ function setReview(world: FixtureWorld, body: unknown) {
 }
 
 export const settingsRoutes: FixtureRoute[] = [
-  { method: "GET", match: new RegExp(`^(?:/api/projects/${CODE_FILM_ID})?/settings/models$`), handle: (world) => modelStatus(world) },
+  { method: "GET", match: new RegExp(`^(?:/api/projects/(${CODE_FILM_ID}))?/settings/models$`), handle: (world, [id]) => modelStatus(world, id) },
+  { method: "GET", match: new RegExp(`^(?:/api/projects/(${CODE_FILM_ID}))?/code-plan/video-settings$`), handle: (world, [id]) => readVideoSettings(world, codeFilmId(world, id)) },
+  { method: "PUT", match: new RegExp(`^(?:/api/projects/(${CODE_FILM_ID}))?/code-plan/video-settings$`), handle: (world, [id], body) => saveVideoSettings(world, codeFilmId(world, id), body) },
   { method: "POST", match: /^\/settings\/models\/preview$/, handle: (world, _params, body) => preview(world, body) },
   { method: "POST", match: /^\/settings\/models\/apply$/, handle: (world, _params, body) => apply(world, body) },
   // The sample film's paths are relative; the sample code-plan film (?codeplan=) asks under its own id. Start answers films it makes.
