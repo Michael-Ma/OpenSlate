@@ -42,3 +42,7 @@ PUT /api/projects/:projectId/code-plan/video-settings   body { resolution }
 ## Finish
 
 Run the code-plan, provider, catalog and route suites, then `pnpm test` and `pnpm typecheck`. Write `docs/ai/film-quality/reports/G1-report.md`.
+
+## Measured prices (lead, 2026-11-02, `GET /v1/credits` before and after each job)
+
+Three 5-second jobs at `quality: "high"`, `enhance: false`: first frame 768p charged 15 credits, first frame 1080p 25, reference 1080p 30. All equal `VIGGLE_PRICE_CREDITS` (1 credit = $0.01), so keep the table as it is. `quality` did not change the charge. The portal's "H3 at $0.01/sec" headline does not match any measured rate.
