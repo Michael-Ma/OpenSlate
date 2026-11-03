@@ -127,9 +127,10 @@ test("sandbox caps guest heap allocation and a later pass still succeeds", async
 });
 
 test("sandbox excludes asynchronous host wait from guest CPU time", async () => {
+  // The wait is several times the budget, so counting it would fail; the budget leaves room for a slow CI CPU.
   const result = await runSandbox(options("export default async function film(ctx) { await ctx.image({}); }", {
-    limits: { cpuMs: 20 },
-    async call() { await new Promise((resolve) => setTimeout(resolve, 80)); return { ok: true }; },
+    limits: { cpuMs: 60 },
+    async call() { await new Promise((resolve) => setTimeout(resolve, 400)); return { ok: true }; },
   }));
   assert.equal(result.state, "done");
 });
