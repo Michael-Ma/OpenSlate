@@ -2,7 +2,7 @@
 
 ## Story before any plan
 
-Before writing a program, state a one-line premise: who wants what, and what obstacle gets in the way. Write a beat sheet with setup, turn and payoff. For each beat name the one thing a viewer can see and its resulting state. Remove shots that neither set up nor pay off. Respect the requested length and language.
+Before writing a program, state a one-line premise: who wants what, and what obstacle gets in the way. Write a beat sheet with setup, turn and payoff. For each beat name the one thing a viewer can see, its resulting state and the shot's target on-screen length: about 2–3 seconds for a quick reaction or insert, 4–6 for a clear action, 5–8 for a payoff that needs to breathe. Let lengths differ with the story; equal lengths need a reason. Remove shots that neither set up nor pay off. Respect the requested length and language.
 
 Write the punch image first, then the shortest setup. Comedy needs visible contrast: tiny effort, enormous collapse, sudden energy for food. Exaggerate; "normal speed, not exaggerated" erases the joke. Characters take the absurdity seriously. Keep it harmless and let the result register.
 
@@ -32,7 +32,7 @@ Write order, not seconds: "nudges the weight, then flops onto his side." Describ
 
 ## Clip length
 
-Models spread action across the whole clip and run late: 1.33 seconds on average in the Tofu sample, not a universal guarantee. Request a clip longer than the retained beat, within advertised durations, then cut it down after watching. Extra time provides handles, not proof of action. Never assume the first planned frames contain the payoff.
+Request `durationSeconds = ceil(targetSeconds + 1.5)`, clamped to the model's `durationSeconds {min, max}` in `read_film.models`. Use a listed `durationValuesSeconds` value when required. The late-start margin is about 1.5 seconds: the Tofu sample averaged 1.33 seconds late, not a universal guarantee. Viggle accepts 5–15 seconds, so a 3-second beat requests 5 seconds. Video is billed per second: asking for 8 seconds for a 3-second beat pays for about 2.5 times the footage used. Extra time provides handles, not proof of action. Never assume the first planned frames contain the payoff.
 
 ## Confirmed keyframes
 
@@ -40,7 +40,7 @@ The person picks the video input on the card. Spread the result: `ctx.video({ ..
 
 ## Watching and cutting
 
-Finish every clip, then `await ctx.review(id, {clips, note})`. Use `read_clip_frames` to find each action's actual start and end. Inspect uncertain events closely; motion scores locate change, not meaning. Record usable ranges and visible proof. Set `startFrame` and `durationFrames` from observed source frames at 30 fps. Cut after completion, enter on movement, never end on a half-finished pose. Let the punch settle.
+Finish every clip, then `await ctx.review(id, {clips, note})`. Use `read_clip_frames` to find each action's actual start and end. Inspect uncertain events closely; motion scores locate change, not meaning. Record usable ranges and visible proof. Set `startFrame` and `durationFrames` from the observed action and the beat's target, not the requested clip length; frame numbers are 1/30-second positions. Cut after completion, enter on movement, never end on a half-finished pose. Let the punch settle.
 
 Score each shot and the assembled sequence on five items, 0–2 each: 0 missing/broken, 1 readable but weak, 2 clear and effective.
 
