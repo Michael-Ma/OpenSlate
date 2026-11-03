@@ -41,7 +41,8 @@ interface Studio {
   speech(input: ShotMediaInput & { text: string; voice?: string; instructions?: string }): Promise<MediaResult>;
   /** Music exposes measured leadInSamples and durationSamples at 48 kHz. Length is approximate; every Lyria file carries SynthID. */
   music(input: ShotMediaInput & { prompt: string; durationSeconds: number; instrumental?: boolean }): Promise<MediaResult>;
-  /** Owned video refs or timeline rows; 30 fps, 48 kHz, cuts only. Each row lasts
+  /** Owned video refs or timeline rows; 48 kHz, cuts only. Frame numbers are 1/30-second positions
+   * (30 per second); each clip keeps its own frame rate and the finished film plays at 24 fps. Each row lasts
    * round(durationFrames / speed) + holdFrames. Zoom is a fixed punch-in, not camera motion.
    * Captions and audio positions address the finished film: at most 64 nonoverlapping captions,
    * 1–80 characters, two lines, bold white with outline/shadow; bottom sits at 78% height.

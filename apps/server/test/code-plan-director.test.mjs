@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CODE_PLAN_TOOL_CONTRACT, DomainError, SUPPORTED_TOOL_CONTRACTS, digest, newId, parseToolArguments, toolCatalog, toolContractAtLeast, toolHandlerId } from '@openslate/core';
 import { FakeProvider } from '@openslate/providers';
-import { skillPackageDigest, readSkillPackageFiles } from '@openslate/director';
+import { createSkillLock, loadSkillCatalog, skillPackageDigest, readSkillPackageFiles, verifySkillLock } from '@openslate/director';
 import { Store } from '../dist/persistence/store.js';
 import { Engine } from '../dist/execution/engine.js';
 import { ProductionService } from '../dist/application/service.js';
@@ -18,7 +18,7 @@ import { DirectorToolSettings } from '../dist/application/director-tools-upgrade
 import { CODE_PLAN_GUIDANCE_DIGEST } from '../dist/application/director-capabilities.js';
 import { ToolInvocationService } from '../dist/application/tool-invocations.js';
 import { holdCodePlanRequest, releaseCodePlanRequest, wireCodePlans, triggerCodePlanRepairs } from '../dist/code-plan/director.js';
-import { runSandbox } from '../dist/code-plan/sandbox.js';
+import { runSandbox, SANDBOX_PENDING } from '../dist/code-plan/sandbox.js';
 import { createApp } from '../dist/app.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
@@ -112,6 +112,7 @@ test('code turn pins only code-plan instructions and source, skips fresh graph u
   assert.equal(f.store.list('skill_read', f.project.id).length, 4);
   assert.equal(f.store.list('director_context', f.project.id).length, 1);
   assert.equal(lock.schemaVersion, 1); assert.equal(lock.skills[0].packageDigest, CODE_PLAN_GUIDANCE_DIGEST);
+  assert.equal(lock.skills[0].version, '2.0.1');
   assert.equal(skillPackageDigest(readSkillPackageFiles(join(repositoryRoot, 'skills/code-plan'))), CODE_PLAN_GUIDANCE_DIGEST);
   assert.equal(f.prepare(a.turn, a.human, a.bridge).bridge.toolContractVersion, CODE_PLAN_TOOL_CONTRACT);
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 1);
@@ -147,6 +148,40 @@ test('a fresh turn re-pins a film whose saved guidance is older than this build,
   assert.equal(locks.length, 3);
   assert.equal(JSON.parse(next.input.context).toolContract.lockId, locks.at(-1).id);
   assert.equal(locks.at(-1).lock.skills[0].packageDigest, saved.lock.skills[0].packageDigest);
+});
+
+test('fresh code guidance preserves an older package snapshot, lock and recorded turn evidence', t => {
+  const f = fixture(t), packageRoot = join(f.root, 'previous-code-plan');
+  const files = readSkillPackageFiles(join(repositoryRoot, 'skills/code-plan'));
+  const manifest = JSON.parse(files['openslate.skill.json']);
+  const oldCraft = '# Film craft\n\nRequest a clip longer than the retained beat, then cut it down after watching.\n';
+  mkdirSync(join(packageRoot, 'references'), { recursive: true });
+  for (const [path, source] of Object.entries({ ...files,
+    'openslate.skill.json': JSON.stringify({ ...manifest, version: '2.0.0' }), 'references/film-craft.md': oldCraft })) {
+    writeFileSync(join(packageRoot, path), source);
+  }
+  const environment = { snapshotRoot: f.config.snapshotRoot, compatibility: manifest.compatibility,
+    availableToolIds: toolCatalog(CODE_PLAN_TOOL_CONTRACT).names };
+  const previous = createSkillLock(loadSkillCatalog({ ...environment, packageRoots: [packageRoot] }), { selectedSkillIds: ['code-plan'], bindings: [] });
+  const saved = { id: previous.id, projectId: f.project.id, lock: previous };
+  f.store.insert('director_skill_lock', previous.id, f.project.id, saved);
+  const human = f.service.beginRequest(f.project.id, 'local-user', 'Plan it', { editing: false });
+  const bridge = f.service.openEpoch(f.project.id, human);
+  const evidence = { id: newId(), projectId: f.project.id, requestId: human.requestId, epochId: bridge.actor.epochId,
+    evidence: { lockId: previous.id, packageDigest: previous.skills[0].packageDigest } };
+  f.store.insert('skill_read', evidence.id, f.project.id, evidence);
+  const next = f.turn('Carry on'), context = JSON.parse(next.input.context);
+  const current = f.store.get('director_skill_lock', context.toolContract.lockId).lock;
+  assert.notEqual(current.id, previous.id);
+  assert.equal(current.skills[0].version, '2.0.1');
+  assert.equal(current.skills[0].packageDigest, CODE_PLAN_GUIDANCE_DIGEST);
+  assert.match(context.references.find(row => row.path === 'references/film-craft.md').content, /ceil\(targetSeconds \+ 1\.5\)/);
+  assert.deepEqual(f.store.get('director_skill_lock', previous.id), saved);
+  assert.deepEqual(f.store.get('skill_read', evidence.id), evidence);
+  const oldPackage = verifySkillLock(previous, environment)[0];
+  assert.equal(readFileSync(join(oldPackage.immutableRoot, 'references/film-craft.md'), 'utf8'), oldCraft);
+  assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2);
+  assert.equal(f.port.calls.length, 0, 'refreshing guidance submits no plan or media');
 });
 
 test('graph instructions, lock pins and catalog remain on the shipped identity', t => {
@@ -284,7 +319,7 @@ test('pinned example executes every ctx call through JSON, stable choices, varia
   assert.deepEqual(calls.filter(c=>c.method==='choose').map(c=>c.args[0]),['shot-1-retry','shot-2-retry']);
   assert.equal(calls.filter(c=>c.method==='music').length,1);
   assert.equal(calls.find(c=>c.method==='music').args[0].durationSeconds,30);
-  assert.deepEqual(calls.find(c=>c.method==='render').args[0].audio.map(row=>[row.startSample,row.durationSamples,row.fadeOutSamples]),[[12000,480000,96000],[undefined,undefined,undefined]]);
+  assert.deepEqual(calls.find(c=>c.method==='render').args[0].audio.map(row=>[row.startSample,row.durationSamples,row.fadeOutSamples]),[[12000,384000,96000],[undefined,undefined,undefined]]);
   assert.deepEqual(calls.filter(c=>c.method==='review').map(c=>c.args[0]),['first-cut']);
   const motions = [...example.matchAll(/motion: "([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(calls.filter(c=>c.method==='video').map(c=>c.args[0].prompt), [...motions, ...motions]);
@@ -292,6 +327,25 @@ test('pinned example executes every ctx call through JSON, stable choices, varia
   assert.equal(calls.filter(c=>c.method==='video').length,4);assert.equal(calls.filter(c=>c.method==='render').length,1);
   assert.deepEqual(calls.find(c=>c.method==='render').args[0].timeline.map(row=>row.motion),
     [...example.matchAll(/motion: "([^"]+)"/g)].map(match => match[1]));
+  const targets = calls.filter(c=>c.method==='shot').map(c=>c.args[0].targetSeconds);
+  assert.deepEqual(targets, [5, 3]);
+  const quotedDurations = calls.filter(c=>c.method==='keyframe').map(c=>c.args[1].video.durationSeconds);
+  assert.ok(new Set(quotedDurations).size > 1, 'the example must not request one length for every shot');
+  assert.deepEqual(quotedDurations, [7, 5], 'round up target + 1.5 seconds within the model range');
+  assert.deepEqual(calls.filter(c=>c.method==='video').map(c=>c.args[0].durationSeconds), [7, 5, 7, 5], 'quotes, clips and consent retries agree');
+  assert.deepEqual(calls.find(c=>c.method==='render').args[0].timeline.map(row=>row.durationFrames), [150, 90], 'cut to beat targets, not requested lengths');
+});
+
+test('example duration requests clamp to both model bounds before keyframe confirmation', async () => {
+  const quotes = [];
+  const source = example.replace('targetSeconds: 5', 'targetSeconds: 20').replace('targetSeconds: 3', 'targetSeconds: 1');
+  const result = await runSandbox({ source, now: 1, seed: 1, call(method, args) {
+    if (method === 'scene' || method === 'shot') return args[0];
+    if (method === 'keyframe') { quotes.push(args[1].video.durationSeconds); return SANDBOX_PENDING; }
+    assert.fail(`Unexpected call before confirmation: ${method}`);
+  } });
+  assert.equal(result.state, 'waiting', JSON.stringify(result));
+  assert.deepEqual(quotes, [15, 5]);
 });
 
 test('code project changes fake/native selection with code locks and never runs a graph release upgrade', async t => {
