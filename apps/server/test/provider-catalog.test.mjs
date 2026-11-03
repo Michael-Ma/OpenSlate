@@ -395,9 +395,9 @@ test("provider and model-settings routes expose second pricing without changing 
     assert.equal(response.statusCode, 200, response.body);
     const options = response.json()[field], builtin = options.find(row => row.id === "viggle-h3");
     assert.deepEqual(builtin.pricing, { unit: "second", modes: [
-      { mode: "reference", microsPerSecond: "50000" }, { mode: "first_frame", microsPerSecond: "30000" },
-      { mode: "first_last_frame", microsPerSecond: "50000" }, { mode: "text", microsPerSecond: "30000" },
-    ], minMicrosPerSecond: "30000", maxMicrosPerSecond: "50000" });
+      { mode: "reference", microsPerSecond: "60000" }, { mode: "first_frame", microsPerSecond: "50000" },
+      { mode: "first_last_frame", microsPerSecond: "60000" }, { mode: "text", microsPerSecond: "50000" },
+    ], minMicrosPerSecond: "50000", maxMicrosPerSecond: "60000" });
     assert.equal(options.find(row => row.id === viggle().profile.id).pricing.minMicrosPerSecond, "20000");
     assert.equal(options.find(row => row.id === viggle().profile.id).estimatedCost.unitMicros, "900000");
     for (const option of options.filter(row => row.profile.adapter !== "viggle-h3")) assert.equal(Object.hasOwn(option, "pricing"), false);

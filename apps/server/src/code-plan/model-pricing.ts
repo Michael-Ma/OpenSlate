@@ -28,7 +28,7 @@ export function videoDefaults(profile: ProviderProfile): JsonObject {
 export function modelPrice(model: CodePlanModel, input?: JsonObject, firstFrame?: VideoImageSize): string {
   if (model.profile?.adapter === "viggle-h3") {
     invariant(input, "CODE_PLAN_INPUT", "Viggle pricing requires the exact input");
-    return vigglePriceMicros({ mode: videoMode(input), resolution: model.profile.configuration!.settings!.resolution as ViggleH3Resolution,
+    return vigglePriceMicros({ mode: videoMode(input), resolution: model.videoResolution ?? model.profile.configuration!.settings!.resolution as ViggleH3Resolution,
       durationSeconds: Number(input.durationSeconds), enhance: false });
   }
   if (model.profile && codeOnlyVideoAdapter(model.profile.adapter)) {
@@ -45,9 +45,9 @@ export function modelPrice(model: CodePlanModel, input?: JsonObject, firstFrame?
  * Seedance adaptive inputs use a representative 16:9 frame; actual owned dimensions still price each call.
  * Divide the default clip price, rounding up to a micro, since token pricing can round per clip.
  */
-export function providerPricing(profile: ProviderProfile): ProviderPricing | undefined {
+export function providerPricing(profile: ProviderProfile, videoResolution?: ViggleH3Resolution): ProviderPricing | undefined {
   if (profile.kind !== "video" || !hasDurationPrice(profile)) return;
-  const defaults = videoDefaults(profile), model: CodePlanModel = { kind: "video", profile };
+  const defaults = videoDefaults(profile), model: CodePlanModel = { kind: "video", profile, ...(videoResolution ? { videoResolution } : {}) };
   const frame = { width: 1280, height: 720 };
   const modes = videoModes(model).filter(mode => profile.adapter !== "viggle-h3" || mode !== "reference" || (profile.maxFrames ?? 450) >= 150).map(mode => {
     // Old Viggle profiles may stop below reference mode's five-second minimum.

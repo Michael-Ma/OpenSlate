@@ -24,16 +24,16 @@ function installedModel(profile) {
 test('Viggle built-in per-second rates reproduce every six-second card price with enhance off', () => {
   const pricing = providerPricing(builtin), model = installedModel(builtin);
   assert.deepEqual(pricing, { unit: 'second', modes: [
-    { mode: 'reference', microsPerSecond: '50000' }, { mode: 'first_frame', microsPerSecond: '30000' },
-    { mode: 'first_last_frame', microsPerSecond: '50000' }, { mode: 'text', microsPerSecond: '30000' },
-  ], minMicrosPerSecond: '30000', maxMicrosPerSecond: '50000' });
+    { mode: 'reference', microsPerSecond: '60000' }, { mode: 'first_frame', microsPerSecond: '50000' },
+    { mode: 'first_last_frame', microsPerSecond: '60000' }, { mode: 'text', microsPerSecond: '50000' },
+  ], minMicrosPerSecond: '50000', maxMicrosPerSecond: '60000' });
   assert.equal(model.defaults.durationSeconds, 6);
   for (const { mode, microsPerSecond } of pricing.modes) {
     const input = normalizeStepInput('video', { model: builtin.id, durationSeconds: 6, ...inputs[mode] }, { [builtin.id]: model });
     assert.equal(modelPrice(model, input), (BigInt(microsPerSecond) * 6n).toString());
   }
-  assert.equal(modelPrice(model, { durationSeconds: 6, firstFrame: frame }), '180000');
-  assert.equal(modelPrice(model, { durationSeconds: 6, references: [frame] }), '300000');
+  assert.equal(modelPrice(model, { durationSeconds: 6, firstFrame: frame }), '300000');
+  assert.equal(modelPrice(model, { durationSeconds: 6, references: [frame] }), '360000');
 });
 
 test('custom Viggle resolution uses the price function, independent of stale clip estimates and quality', () => {

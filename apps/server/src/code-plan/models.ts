@@ -12,6 +12,7 @@ export { modelPrice } from "./model-pricing.js";
 import { videoCapabilities } from "./video-capabilities.js";
 import { codePlanArtifacts } from "./artifacts.js";
 import { assertImageReferenceRecords, imageCapabilities } from "../execution/codex-image-plan.js";
+import { currentVideoModel } from "./video-settings.js";
 
 export interface CodePlanCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; localExecution?: unknown; [key: string]: unknown }
 export const supportedCodePlanAdapters = new Set(["codex-image", "openai-image", "viggle-h3", "minimax-h3", "openai-speech", "seedance", "fal-video-i2v", "gemini-lyria"]);
@@ -20,7 +21,7 @@ export const supportedCodePlanAdapters = new Set(["codex-image", "openai-image",
  * new dispatch requires an exact installed definition or the catalog's sole runtime-only upgrade. */
 export function projectModels(store: Store, projectId: string, catalog?: InstalledProviderCatalog): Record<string, CodePlanModel> {
   const project = store.getProject(projectId), lock = store.get<CodePlanCapabilityLock>("capability_lock", project.capabilityLockId);
-  const installed = catalog?.view().profiles ?? [];
+  const installed = lock && catalog ? catalog.projectView(lock.profiles, undefined, lock.localExecution).profiles : [];
   const recordedCodex = (profile: ProviderProfile): boolean => {
     if (profile.adapter !== "codex-image" || profile.configuration?.settings?.runtimeVersion !== "0.153.4") return false;
     try { profilePolicy(profile, { historical: true }); return true; } catch { return false; }
@@ -53,6 +54,7 @@ export function projectModels(store: Store, projectId: string, catalog?: Install
       priceUnit: hasDurationPrice(profile) ? "input" : "call",
       defaults: profile.kind === "video" ? videoDefaults(profile)
         : profile.kind === "music" ? { instrumental: true } : profile.kind === "speech" ? { voice: "coral", instructions: "" } : {} };
+    models[profile.id] = currentVideoModel(store, projectId, models[profile.id]!);
   }
   return withImageValidation(models);
 }
@@ -72,8 +74,8 @@ export function modelDescriptions(models: Readonly<Record<string, CodePlanModel>
     ...(model.kind === "video" ? { videoModes: videoModes(model), ...videoCapabilities(model) } : {}),
     ...(model.kind === "image" ? imageCapabilities(model.profile) : {}),
     ...(model.priceUnit === "input" ? { priceBasis: model.profile?.adapter === "viggle-h3" ? { unit: "ceil_output_seconds", formula: "ceil(seconds) * creditsPer5Seconds / 5 * $0.01", enhance: false,
-      resolution: model.profile.configuration!.settings!.resolution,
-      creditsPer5Seconds: Object.fromEntries(Object.entries(VIGGLE_PRICE_CREDITS).map(([mode, rates]) => [mode, rates.off[["480p", "768p", "1080p", "2k", "4k"].indexOf(String(model.profile!.configuration!.settings!.resolution))]])) }
+      resolution: model.videoResolution ?? model.profile.configuration!.settings!.resolution,
+      creditsPer5Seconds: Object.fromEntries(Object.entries(VIGGLE_PRICE_CREDITS).map(([mode, rates]) => [mode, rates.off[["480p", "768p", "1080p", "2k", "4k"].indexOf(String(model.videoResolution ?? model.profile!.configuration!.settings!.resolution))]])) }
       : model.profile?.adapter === "seedance" ? { unit: "output_tokens", formula: "seconds * width * height * 24 / 1024", usdPerMillionTokens: model.profile.configuration!.model.startsWith("seedance-1") ? "1.00" : model.profile.configuration!.model.includes("mini") ? "3.50" : "7.00 (1080p: 7.70)" }
       : { unit: "output_seconds", usdPerSecond: model.profile!.configuration!.model.includes("kling") ? "0.084 (silent)" : model.profile!.configuration!.model.includes("veo") ? "0.10 silent / 0.15 audio; 4k 0.30 / 0.35" : "480p 0.05 / 720p 0.10 / 1080p 0.20" }, modelId: model.profile!.configuration!.model } : {}),
     defaults: model.defaults ?? {}, ...(model.profile ? { minFrames: model.profile.minFrames ?? null, maxFrames: model.profile.maxFrames ?? null } : {}) }));

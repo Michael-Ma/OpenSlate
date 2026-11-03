@@ -19,6 +19,7 @@ import { codePlanView, emptyDiff, stepLabel } from "./view.js";
 import { codePlanCeiling } from "./settings.js";
 import { codePlanStepDetail } from "./step-detail.js";
 import { codePlanProviderArgs } from "./provider-input.js";
+import { codePlanVideoSettings, currentVideoModel, isCodePlanVideoResolution } from "./video-settings.js";
 export { normalizeStepInput, stepKey } from "./identity.js";
 export type * from "./records.js";
 
@@ -63,6 +64,21 @@ export class CodePlanRuntime implements CodePlanPort {
   steps(projectId: string): CodePlanStep[] { return this.store.list("code_plan_step", projectId); }
   wakeReviews(projectId: string): void { this.queued.add(projectId); }
   choices(projectId: string): CodePlanChoice[] { return this.store.list("code_plan_choice", projectId); }
+  videoSettings(projectId: string): ReturnType<typeof codePlanVideoSettings> { return codePlanVideoSettings(this.store, projectId); }
+  setVideoSettings(projectId: string, resolution: unknown): ReturnType<typeof codePlanVideoSettings> {
+    // Availability has the route's dedicated 409, including for graph films.
+    this.videoSettings(projectId); this.assertCode(projectId);
+    invariant(isCodePlanVideoResolution(resolution), "VALIDATION_ERROR", "Choose 480p, 768p, 1080p or 2k");
+    this.store.transaction(() => {
+      const settings = this.store.get<CodePlanSettings>("code_plan_settings", projectId) ?? {};
+      this.store.put<CodePlanSettings>("code_plan_settings", projectId, projectId, { ...settings, videoResolution: resolution });
+      // This policy is outside CodePlanView, so emit even when journal state has not changed yet.
+      this.store.appendEvent(projectId, "code_plan.changed", { planVersion: this.getRun(projectId)?.planVersion ?? null,
+        state: this.getRun(projectId)?.state ?? "empty" });
+    });
+    this.queued.add(projectId);
+    return this.videoSettings(projectId);
+  }
   availableModels(projectId: string): ReturnType<typeof modelDescriptions> {
     this.assertProject(projectId);
     return modelDescriptions(this.models ?? this.options.execution.models(projectId));
@@ -208,7 +224,8 @@ export class CodePlanRuntime implements CodePlanPort {
       inFlightMicros: accounting.inFlight.toString(), liabilityMicros: accounting.total.toString(),
     });
     this.store.transaction(() => {
-      this.store.put<CodePlanSettings>("code_plan_settings", projectId, projectId, { ceilingMicros: input.ceilingMicros });
+      this.store.put<CodePlanSettings>("code_plan_settings", projectId, projectId,
+        { ...this.store.get<CodePlanSettings>("code_plan_settings", projectId), ceilingMicros: input.ceilingMicros });
       if (run) this.store.put("code_plan_run", projectId, projectId, { ...run, ceilingMicros: input.ceilingMicros });
       this.changed(projectId);
     });
@@ -424,15 +441,17 @@ export class CodePlanRuntime implements CodePlanPort {
           && typeof (video as Record<string, unknown>).durationSeconds === "number"
           && Number.isFinite((video as Record<string, unknown>).durationSeconds) && Number((video as Record<string, unknown>).durationSeconds) > 0,
         "CODE_PLAN_KEYFRAME_INPUT", "ctx.keyframe needs video with durationSeconds and optional model/aspectRatio");
-        const image = call("image", [{ ...picture, shot }]) as CodePlanStep["result"] | typeof SANDBOX_PENDING;
-        if (image === SANDBOX_PENDING || !image?.ok) return image;
-        const frame = image.artifact as unknown as JsonObject;
-        const references = (picture.references ?? []) as JsonObject[];
         // Select the video model through the same defaults and normalization as ctx.video.
         const settings = video as Record<string, unknown>;
         const modelId = settings.model ?? (models["fake-video"] ? "fake-video" : Object.keys(models).find(id => models[id]?.kind === "video"));
         invariant(typeof modelId === "string" && models[modelId]?.kind === "video", "CODE_PLAN_MODEL", "Use a configured video model");
-        const model = models[modelId]!, modes = videoModes(model);
+        const model = currentVideoModel(this.store, projectId, models[modelId]!), modes = videoModes(model);
+        invariant(model.profile?.adapter !== "viggle-h3" || settings.resolution === undefined,
+          "CODE_PLAN_INPUT", "Viggle resolution belongs to the film's video settings; omit resolution from keyframe.video");
+        const image = call("image", [{ ...picture, shot }]) as CodePlanStep["result"] | typeof SANDBOX_PENDING;
+        if (image === SANDBOX_PENDING || !image?.ok) return image;
+        const frame = image.artifact as unknown as JsonObject;
+        const references = (picture.references ?? []) as JsonObject[];
         const limit = model.profile?.adapter === "viggle-h3" ? 4 : 9;
         const options: JsonObject[] = [];
         const add = (choice: string, input: JsonObject) => {
@@ -452,7 +471,7 @@ export class CodePlanRuntime implements CodePlanPort {
         invariant(options.length > 0, "CODE_PLAN_KEYFRAME_INPUT", "This video model cannot use keyframes; choose a model with references or first-frame input");
         const answer = this.choose(projectId, [`${shot}-keyframe`, {
           question: typeof declaration.title === "string" ? declaration.title : shot, options,
-        }], dry, reachedChoices) as JsonObject | typeof SANDBOX_PENDING;
+        }], dry, reachedChoices, true) as JsonObject | typeof SANDBOX_PENDING;
         if (answer === SANDBOX_PENDING) return answer;
         const choice = String(answer.keyframeInput);
         confirmedKeyframes.set(shot, { frame, choice });
@@ -493,7 +512,7 @@ export class CodePlanRuntime implements CodePlanPort {
           "CODE_PLAN_KEYFRAME_INPUT: Spread the confirmed keyframe.input into ctx.video; respect whether the person allowed the keyframe as input");
       }
       // Refuse now what dispatch would refuse, while nothing is spent and the Director can still fix its plan.
-      const model = models[String(input.model)]!;
+      const model = currentVideoModel(this.store, projectId, models[String(input.model)]!);
       if (model.profile) codePlanProviderArgs(model.profile, input);
       const priceMicros = modelPrice(model, input, codePlanPriceFrame(this.store, projectId, input));
       step = { ...(step ?? { id, projectId, key, kind, input, attemptId: null, result: null, createdAt: stamp() }),
@@ -567,18 +586,27 @@ export class CodePlanRuntime implements CodePlanPort {
     return { outcome, reached, reachedChoices, reviewKeys, declarations, logs, budget, diff };
   }
 
-  private choose(projectId: string, args: unknown[], dry: boolean, reached: Set<string>): unknown {
+  private choose(projectId: string, args: unknown[], dry: boolean, reached: Set<string>, keyframe = false): unknown {
     const [choiceId, raw] = args;
     invariant(typeof choiceId === "string" && choiceId.length > 0 && choiceId.length <= 200 && raw && typeof raw === "object",
       "CODE_PLAN_CHOICE", "Use a bounded choice id and question/options");
     const { question, options } = raw as Record<string, unknown>;
     invariant(typeof question === "string" && question.length <= 4096 && Array.isArray(options) && options.length > 0 && options.length <= 200
       && Buffer.byteLength(canonical(options)) <= 64 * 1024, "CODE_PLAN_CHOICE", "Use a bounded question and 1 to 200 JSON options");
+    // A setting changes prices, not the person's chosen input. Keep an answered recipe's exact row/answer.
+    const recipe = (values: unknown[]) => values.map(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+      const { priceMicros: _price, ...input } = value as JsonObject; return input;
+    });
+    const equivalent = keyframe ? this.choices(projectId).filter(choice => choice.choiceId === choiceId
+      && canonical(recipe(choice.options)) === canonical(recipe(options))) : [];
+    const answered = equivalent.find(choice => choice.answer !== undefined);
+    if (answered) { reached.add(answered.id); return answered.answer; }
     const optionsDigest = digest(options), id = entityId(projectId, digest({ choiceId, optionsDigest }));
     reached.add(id);
     const previous = this.store.get<CodePlanChoice>("code_plan_choice", id);
     const choice: CodePlanChoice = { ...previous, id, projectId, choiceId, question, options: options as JsonValue[], optionsDigest,
-      ...(!previous && !dry ? { askedAt: stamp() } : {}) };
+      ...(!previous && !dry ? { askedAt: equivalent.find(choice => !choice.stale)?.askedAt ?? stamp() } : {}) };
     if (!dry && (!previous || canonical(previous) !== canonical(choice))) this.store.put("code_plan_choice", id, projectId, choice);
     return Object.hasOwn(choice, "answer") ? choice.answer : SANDBOX_PENDING;
   }

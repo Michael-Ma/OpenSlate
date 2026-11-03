@@ -21,6 +21,8 @@ export function videoModes(model: CodePlanModel): VideoMode[] {
   return adapter === "fal-video-i2v" && !profile.configuration!.model.includes("veo") ? ["first_frame", "first_last_frame"] : ["first_frame"];
 }
 export interface CodePlanModel { kind: CodePlanMediaKind; defaults?: JsonObject; priceMicros?: string; priceUnit?: "call" | "input"; profile?: ProviderProfile; profileDefinitionDigest?: string;
+  /** Host-selected price/dispatch policy; never normalized into the step key. */
+  videoResolution?: import("@openslate/providers").ViggleH3Resolution;
   validateImageReferences?: (references: readonly Record<string, unknown>[]) => void }
 export const CODE_PLAN_MODELS: Readonly<Record<string, CodePlanModel>> = Object.freeze({
   "fake-image": { kind: "image" },
@@ -100,6 +102,8 @@ export function normalizeStepInput(kind: CodePlanMediaKind, value: unknown,
       "CODE_PLAN_INPUT", `${model} accepts image aspectRatio: ${ratios.join(", ") || "none; omit aspectRatio and use its installed canvas"}`);
   }
   if (kind === "video") {
+    invariant(models[model]!.profile?.adapter !== "viggle-h3" || media.resolution === undefined,
+      "CODE_PLAN_INPUT", "Viggle resolution belongs to the film's video settings; omit resolution from ctx.video");
     const mode = videoMode(media), modes = videoModes(models[model]!);
     invariant(modes.includes(mode), "CODE_PLAN_INPUT", `${model} supports video modes: ${modes.join(", ")}`);
     invariant(mode !== "text" || typeof media.aspectRatio === "string" && (videoRatios as readonly string[]).includes(media.aspectRatio),
