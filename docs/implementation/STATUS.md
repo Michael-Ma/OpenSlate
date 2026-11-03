@@ -26,9 +26,10 @@ Storyboard media retains two scene decisions: create keyframes, then inspect ret
 ## Current contracts and limits
 
 - Browser types: [studio-api.ts](../../packages/core/src/studio-api.ts). The only web entry is `apps/web/src/next`; no legacy selector is needed.
-- Storyboard guidance: [shipped registry](../../skills/shipped-releases.json), latest **8.1.0 / 7.1.0**. Code guidance: [code-plan package](../../skills/code-plan/openslate.skill.json), **2.0.0 / 0.3.0**. Older bound catalogs, plan keys and instruction snapshots retain their identities.
+- Storyboard guidance: [shipped registry](../../skills/shipped-releases.json), latest **8.1.0 / 7.1.0**. Code guidance: [code-plan package](../../skills/code-plan/openslate.skill.json), **2.0.1 / 0.3.0** (G3: each shot is generated at the length its beat needs). Older bound catalogs, plan keys and instruction snapshots retain their identities.
 - Storyboard declarations compile without JavaScript evaluation. Code-film programs evaluate only inside the bounded QuickJS guest; host Node/files/network/secrets are unavailable. [Compiler](../technical/PLAN-COMPILER.md), [execution](../technical/EXECUTION-ENGINE.md).
-- Local renders: 30 fps picture, 48 kHz audio, 360 seconds, 64 clips, 65 audio placements and eight simultaneous audio lanes. Code-film row edits/captions do not imply a general timeline editor.
+- Local renders: 48 kHz audio, 360 seconds, 64 clips, 65 audio placements and eight simultaneous audio lanes. Clips keep their native constant frame rate; code films play at 24 fps and storyboard films at 30 fps, while plan positions stay 1/30-second ticks (G2). Code-film row edits/captions do not imply a general timeline editor.
+- Code-film video: new films use Viggle at `quality: "high"` and 1080p. Each code film chooses 480p, 768p, 1080p or 2K in Settings › Models; the choice applies to clips not sent yet, reprices them, and sets the export's short side (1080, 720 or 480). Measured Viggle charges match the published table (G1).
 - Codex uses the accepted local runtime trust policy. Independent code-host/authentication isolation remains unverified, not an additional deployment gate. [Decision](RUNTIME-TRUST-DECISION.md).
 - Existing eligible personal voice IDs support consent/revocation; creating a new clone from a recording is unimplemented. The Director cannot listen to music/audio. General detached QuickJS promise rejections outside observed `ctx` calls remain a documented limitation.
 
