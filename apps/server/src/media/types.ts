@@ -30,7 +30,7 @@ export interface MediaProbe {
 
 /** Read-only identity of the current video normalization algorithm and worker bounds. */
 export interface MediaNormalizationIdentity {
-  version: 1; recipe: "silent-h264-30fps-v1"; toolchainDigest: string;
+  version: 1; recipe: "silent-h264-30fps-v1" | "silent-h264-native-fps-v2"; toolchainDigest: string;
   maxInputBytes: number; maxOutputBytes: number; maxDurationFrames: number; timeoutMs: number;
 }
 
@@ -78,6 +78,8 @@ export interface RenderManifestInput {
   targetRevisionId: string;
   width: number;
   height: number;
+  /** Trusted code-film output rate; plan positions remain 1/30 s ticks. */
+  outputFrameRate?: 24;
   /** Trusted local demo export only; included in the immutable recipe. */
   demo?: true;
   clips: SuppliedClip[];
@@ -91,7 +93,7 @@ export interface FrozenRenderManifest {
   targetRevisionId: string;
   width: number;
   height: number;
-  frameRate: { numerator: 30; denominator: 1 };
+  frameRate: { numerator: 24 | 30; denominator: 1 };
   sampleRate: 48000;
   totalFrames: number;
   /** Trusted local demo export only; included in the immutable recipe. */

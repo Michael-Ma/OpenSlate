@@ -41,8 +41,8 @@ before(async () => {
 after(async () => { if (root) await rm(root, { recursive: true, force: true }); });
 
 test("supplied sources preserve originals and normalize measured video/audio independently", async () => {
-  assert.equal(red.probe.video.frameRate, "30/1");
-  assert.equal(red.probe.video.frames, 30);
+  assert.equal(red.probe.video.frameRate, "24/1");
+  assert.equal(red.probe.video.frames, 24);
   assert.equal(blue.probe.video.frames, 30);
   assert.equal(blue.probe.video.width, 90);
   assert.equal(red.probe.audio, undefined);

@@ -1,3 +1,4 @@
+import { videoTicks } from "../media/frame-rate.js";
 import { join, resolve } from "node:path";
 import { canonical, CODE_PLAN_TOOL_CONTRACT, digest, invariant, snapshotLocalExecution } from "@openslate/core";
 import type { ArtifactRef, JsonObject, LocalExecutionIdentity } from "@openslate/core";
@@ -53,7 +54,7 @@ export async function captureEditedCodePlanRender(store: Store, media: LocalMedi
       const capture = captureCodePlanRender(store, projectId, { timeline: [{ ...(row.artifact ? plain : { artifact: plain }), durationFrames: 1 }],
         ...(args.width === undefined ? {} : { width: args.width }), ...(args.height === undefined ? {} : { height: args.height }) });
       const clip = capture.clips[0]!;
-      return { capture, clip: { ...clip, durationFrames: (row.durationFrames ?? clip.source.probe.video!.frames) as number, ...edits } };
+      return { capture, clip: { ...clip, durationFrames: (row.durationFrames ?? videoTicks(clip.source.probe.video!)) as number, ...edits } };
     } catch (error) { if (error instanceof Error) error.message = `Row ${index + 1}: ${error.message}`; throw error; }
   });
   const clips = captured.map(item => item.clip), totalFrames = clips.reduce((sum, row) => sum + rowFrames(row), 0);
@@ -217,7 +218,7 @@ export class LocalMediaExecutor implements LocalExecutionPort {
       check(signal);
       const timeline = createLocalTimelineDocument(timelineInput(input));
       await this.timelines.put(timeline, { signal });
-      const recipe = await this.media.freezeManifest(input, { signal });
+      const recipe = await this.media.freezeManifest({ ...input, outputFrameRate: 24 }, { signal });
       owned();
       invariant(record!.planVersion === this.store.get<{ planVersion: number }>("code_plan_run", previous.projectId)?.planVersion,
         "CODE_PLAN_SELECTION_CHANGED", "A newer plan fenced the prepared local render");
@@ -287,15 +288,15 @@ export class LocalMediaExecutor implements LocalExecutionPort {
     invariant(canonical(completion.manifest) === canonical(recipe), "LOCAL_EXECUTION_CONFLICT", "Rendered bytes belong to another manifest");
     const probe = completion.artifact.probe;
     invariant(probe.video?.frames === recipe.totalFrames && probe.video.width === recipe.width && probe.video.height === recipe.height
-      && probe.video.frameRate === "30/1" && probe.video.codec === "h264", "LOCAL_EXECUTION_CONFLICT", "Recovered video measurement differs from the frozen recipe");
+      && probe.video.frameRate === `${recipe.frameRate.numerator}/1` && probe.video.codec === "h264", "LOCAL_EXECUTION_CONFLICT", "Recovered video measurement differs from the frozen recipe");
     invariant(recipe.audio.length ? probe.audio?.codec === "aac" && probe.audio.sampleRate === 48000 && probe.audio.channels === 2
-      && probe.audio.samples !== null && Math.abs(probe.audio.samples - recipe.totalFrames * 1600) <= 2048 : !probe.audio,
+      && probe.audio.samples !== null && Math.abs(probe.audio.samples - recipe.totalFrames * 48000 / recipe.frameRate.numerator) <= 2048 : !probe.audio,
     "LOCAL_EXECUTION_CONFLICT", "Recovered audio measurement differs from the frozen recipe");
     const path = await installManagedVideo(this.artifactDir, projectId, completion.artifact, this.maxOutputBytes, { signal });
     check(signal);
     return { id: outputArtifactId, projectId, attemptId,
       artifact: { artifactId: outputArtifactId, sha256: completion.artifact.sha256, kind: "video" }, path,
       mimeType: "video/mp4", fixture: false, origin: "local_render", byteLength: completion.artifact.byteLength,
-      physicalDurationSeconds: recipe.totalFrames / 30, width: recipe.width, height: recipe.height };
+      physicalDurationSeconds: recipe.totalFrames / recipe.frameRate.numerator, width: recipe.width, height: recipe.height };
   }
 }

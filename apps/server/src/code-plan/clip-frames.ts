@@ -107,8 +107,8 @@ export async function readClipFrames(store: Store, projectId: string, input: Cli
     const cellWidth = Math.min(320, Math.floor(2048 / columns));
     const pictureHeight = Math.max(1, Math.min(Math.floor(cellWidth * height / width), Math.floor(2048 / rows) - 28)), cellHeight = pictureHeight + 28;
     await run(options.ffmpegPath ?? mediaTool("ffmpeg"), ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...inputOptions,
-      "-ss", (start / 30).toFixed(8), "-noautorotate", "-i", source, "-an", "-vf",
-      `fps=30,select='not(mod(n,${every}))',scale=${cellWidth}:${pictureHeight}:force_original_aspect_ratio=decrease:flags=bilinear,pad=${cellWidth}:${pictureHeight}:(ow-iw)/2:(oh-ih)/2:color=black`,
+      "-noautorotate", "-i", source, "-an", "-vf",
+      `fps=30:round=near:start_time=0,select='gte(n,${start})*not(mod(n-${start},${every}))',scale=${cellWidth}:${pictureHeight}:force_original_aspect_ratio=decrease:flags=bilinear,pad=${cellWidth}:${pictureHeight}:(ow-iw)/2:(oh-ih)/2:color=black`,
       "-fps_mode", "vfr", "-frames:v", String(count), "-threads", "1", join(directory, "%02d.png")]);
     const sheet = createCanvas(columns * cellWidth, rows * cellHeight), context = sheet.getContext("2d");
     context.fillStyle = "#111111"; context.fillRect(0, 0, sheet.width, sheet.height);

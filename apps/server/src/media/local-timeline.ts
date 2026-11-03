@@ -1,3 +1,4 @@
+import { videoTicks, NATIVE_FRAME_RATES } from "./frame-rate.js";
 import { createHash } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { link, mkdtemp, open, rm } from "node:fs/promises";
@@ -129,7 +130,7 @@ function source(value: unknown, kind: "video" | "audio"): SuppliedMedia {
     const video = object(probe.video, ["streamIndex", "width", "height", "frameRate", "frames", "durationSeconds", "codec"]);
     integer(video.streamIndex, 0, 0); integer(video.width, 2, 4096); integer(video.height, 2, 4096); integer(video.frames, 1, MAX_FRAMES);
     seconds(video.durationSeconds);
-    invalid(video.frameRate === "30/1" && video.codec === "h264" && (video.width as number) % 2 === 0 && (video.height as number) % 2 === 0, "Timeline video must be normalized silent H264 at 30 fps");
+    invalid(NATIVE_FRAME_RATES.includes(video.frameRate as typeof NATIVE_FRAME_RATES[number]) && video.codec === "h264" && (video.width as number) % 2 === 0 && (video.height as number) % 2 === 0, "Timeline video must be normalized silent H264 at a supported constant frame rate");
   } else {
     const audio = object(probe.audio, ["streamIndex", "sampleRate", "channels", "samples", "durationSeconds", "codec"]);
     integer(audio.streamIndex, 0, 0); integer(audio.samples, 1, MAX_SAMPLES); seconds(audio.durationSeconds);
@@ -151,7 +152,7 @@ function create(input: unknown): LocalTimelineDocument {
   const clips: EditedClip[] = value.clips.map((raw, index) => rowContext(`Row ${index + 1}`, () => {
     const clip = object(raw, ["source", "startFrame", "durationFrames", "fit"], ["speed", "holdFrames", "zoom"]), media = remember(source(clip.source, "video"));
     integer(clip.startFrame, 0, MAX_FRAMES); integer(clip.durationFrames, 1, MAX_FRAMES);
-    invalid(clip.startFrame + clip.durationFrames <= media.probe.video!.frames, `Row ${index + 1}: clip exceeds measured source frames (0–${media.probe.video!.frames - 1})`);
+    invalid(clip.startFrame + clip.durationFrames <= videoTicks(media.probe.video!), `Row ${index + 1}: clip exceeds measured source ticks (0–${videoTicks(media.probe.video!) - 1})`);
     invalid(clip.fit === "contain" || clip.fit === "cover", "Clip fit must be contain or cover");
     return { source: media, startFrame: clip.startFrame, durationFrames: clip.durationFrames, fit: clip.fit, ...rowEdits(clip, index) };
   }));

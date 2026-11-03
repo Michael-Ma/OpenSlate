@@ -243,9 +243,9 @@ test('real code-plan execution persists all edits, stays free and replays its co
   for (let i = 0; i < 10 && f.plans.view(f.project.id).state !== 'done'; i++) await f.plans.tick();
   assert.equal(f.plans.view(f.project.id).state, 'done', JSON.stringify(f.plans.view(f.project.id)));
   assert.equal(f.plans.steps(f.project.id).length, 1); assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.plans.view(f.project.id).spentMicros, '0');
-  const intent = f.store.list('code_plan_render_intent', f.project.id)[0]; assert.equal(intent.recipe.totalFrames, 60); assert.equal(intent.recipe.mastering, 'loudnorm-0.3.0');
+  const intent = f.store.list('code_plan_render_intent', f.project.id)[0]; assert.equal(intent.recipe.totalFrames, 48); assert.equal(intent.recipe.mastering, 'loudnorm-0.3.0');
   assert.equal(intent.timeline.captions[0].text, 'Hello 你好'); assert.equal(intent.recipe.audio[1].fadeInSamples, 10000); assert.ok(intent.recipe.sfxPackDigest);
-  const stored = await media.findCompletions(intent.recipe.digest); assert.equal(stored.length, 1); assert.equal(stored[0].artifact.probe.video.frames, 60);
+  const stored = await media.findCompletions(intent.recipe.digest); assert.equal(stored.length, 1); assert.equal(stored[0].artifact.probe.video.frames, 48);
   const calls = media.render; media.render = () => { throw Error('replay must not render'); };
   try { await f.plans.submit(f.project.id, { source, author: 'user', basedOnVersion: 1, invocationId: randomUUID() }); await f.plans.tick(); assert.equal(f.plans.view(f.project.id).state, 'done'); assert.equal(f.plans.steps(f.project.id).length, 1); }
   finally { media.render = calls; }

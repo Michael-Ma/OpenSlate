@@ -319,7 +319,7 @@ test("Engine H3 completion flows through raw spool and measured video derivation
   await f.engine.runReady(); assert.equal(attempt(f).phase, "remote_pending"); due(f); await f.engine.reconcile();
   const current = attempt(f), artifact = f.store.get("artifact", current.outputs.video.artifactId), source = f.store.get("media_source", artifact.id);
   assert.equal(current.phase, "succeeded"); assert.equal(current.taskId, taskId); assert.equal(artifact.fixture, false); assert.equal(artifact.physicalDurationSeconds, 6);
-  assert.equal(source.source.originalSha256, hash(video)); assert.equal(source.source.probe.video.frames, 180); assert.notEqual(artifact.artifact.sha256, hash(video));
+  assert.equal(source.source.originalSha256, hash(video)); assert.equal(source.source.probe.video.frames, 144); assert.notEqual(artifact.artifact.sha256, hash(video));
   assert.equal(f.store.get("reservation", current.reservationId).state, "charged"); assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 1); assert.equal(f.calls.download, 1);
   await f.engine.reconcile(); assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 1);
 });

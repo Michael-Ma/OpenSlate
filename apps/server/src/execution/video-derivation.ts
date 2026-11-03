@@ -1,3 +1,4 @@
+import { frameRate, NATIVE_FRAME_RATES, videoSeconds, videoTicks } from "../media/frame-rate.js";
 import { canonical, digest, invariant } from "@openslate/core";
 import { isSpoolOutput } from "@openslate/providers";
 import type { IngestibleExecutionOutput } from "@openslate/providers";
@@ -36,7 +37,7 @@ export function assertVideoDerivationIntent(intent: VideoDerivationIntent, attem
     && integer(intent.requiredFrames, 1, 10800) && intent.requiredFrames === attempt.request.args.durationFrames,
   "VIDEO_DERIVATION_CONFLICT", "Video derivation does not match its exact admitted raw output and requested duration");
   const recipe = intent.normalization;
-  invariant(recipe?.version === 1 && recipe.recipe === "silent-h264-30fps-v1" && hash(recipe.toolchainDigest)
+  invariant(recipe?.version === 1 && ["silent-h264-30fps-v1", "silent-h264-native-fps-v2"].includes(recipe.recipe) && hash(recipe.toolchainDigest)
     && integer(recipe.maxInputBytes, 1024, VIDEO_DERIVATION_LIMITS.inputBytes) && intent.rawByteLength <= recipe.maxInputBytes
     && integer(recipe.maxOutputBytes, 1024, VIDEO_DERIVATION_LIMITS.outputBytes)
     && integer(recipe.maxDurationFrames, intent.requiredFrames, 10800) && integer(recipe.timeoutMs, 50, 600000),
@@ -49,16 +50,16 @@ export function assertVideoDerivationReceipt(intent: VideoDerivationIntent, rece
     && receipt.intentDigest === digest(intent) && source?.artifactId === intent.artifactId && source.kind === "video"
     && source.originalSha256 === intent.rawSha256 && source.originalByteLength === intent.rawByteLength
     && hash(source.sha256) && integer(source.byteLength, 1, intent.normalization.maxOutputBytes)
-    && source.toolchainDigest === intent.normalization.toolchainDigest && video?.codec === "h264" && video.frameRate === "30/1" && video.streamIndex === 0
+    && source.toolchainDigest === intent.normalization.toolchainDigest && video?.codec === "h264" && (intent.normalization.recipe === "silent-h264-30fps-v1" ? video.frameRate === "30/1" : NATIVE_FRAME_RATES.includes(video.frameRate as typeof NATIVE_FRAME_RATES[number])) && video.streamIndex === 0
     && integer(video.frames, 1, intent.normalization.maxDurationFrames) && integer(video.width, 1, 4096) && integer(video.height, 1, 4096)
     && !source.probe.audio && Number.isFinite(source.probe.durationSeconds) && source.probe.durationSeconds > 0
-    && Math.abs(source.probe.durationSeconds - video.frames / 30) <= 1 / 30 + 0.001
+    && Math.abs(source.probe.durationSeconds - videoSeconds(video)) <= 1 / frameRate(video.frameRate) + 0.001
     && Number.isFinite(video.durationSeconds) && video.durationSeconds > 0
-    && Math.abs(video.durationSeconds - video.frames / 30) <= 1 / 30 + 0.001,
+    && Math.abs(video.durationSeconds - videoSeconds(video)) <= 1 / frameRate(video.frameRate) + 0.001,
   "VIDEO_DERIVATION_CONFLICT", "Normalized source differs from its pinned raw bytes, recipe, or measured media");
   const { id, ...body } = source;
   invariant(id === digest(body), "VIDEO_DERIVATION_CONFLICT", "Normalized source descriptor identity differs");
-  if (requireUsableFrames) invariant(video.frames >= intent.requiredFrames, "VIDEO_TOO_SHORT", "Decoded video has fewer frames than the admitted shot requires");
+  if (requireUsableFrames) invariant(videoTicks(video) >= intent.requiredFrames, "VIDEO_TOO_SHORT", "Decoded video has fewer frames than the admitted shot requires");
 }
 
 export function assertNormalizedVideoIngestion(intent: VideoDerivationIntent, attempt: Attempt, output: IngestibleExecutionOutput, result: NormalizedVideoIngestion): void {
@@ -69,7 +70,7 @@ export function assertNormalizedVideoIngestion(intent: VideoDerivationIntent, at
     && record.mimeType === "video/mp4" && record.fixture === false && record.origin === "generated_video"
     && record.outputReceiptId === intent.spoolId && record.outputSpoolId === intent.spoolId
     && record.derivationId === intent.id && record.sourceDescriptorId === source.id && record.byteLength === source.byteLength
-    && record.physicalDurationSeconds === source.probe.video!.frames / 30
+    && record.physicalDurationSeconds === videoSeconds(source.probe.video!)
     && canonical(result.mediaSource) === canonical({ id: intent.artifactId, projectId: intent.projectId, source,
       origin: "generated_video", attemptId: attempt.id, derivationId: intent.id }),
   "VIDEO_DERIVATION_CONFLICT", "Normalized artifact and generated media source lost their derivation provenance");

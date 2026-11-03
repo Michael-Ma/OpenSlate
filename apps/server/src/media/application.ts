@@ -1,3 +1,4 @@
+import { videoSeconds } from "./frame-rate.js";
 import { canonical, clipFit, digest, DomainError, invariant, newId } from "@openslate/core";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ActorContext, ArtifactRef } from "@openslate/core";
@@ -68,7 +69,7 @@ export class MediaApplicationService {
       invariant(project.headVersion === request.expectedHeadVersion, "REVISION_CONFLICT", "Project changed while importing media");
       const artifact: ArtifactRef = { artifactId: source.artifactId, sha256: source.sha256, kind: "video" };
       const record: RealVideoArtifact = { id: source.artifactId, projectId, artifact, path, mimeType: "video/mp4", fixture: false, attemptId: null,
-        origin: "supplied_video", byteLength: source.byteLength, physicalDurationSeconds: source.probe.video!.frames / 30, sourceDescriptorId: source.id,
+        origin: "supplied_video", byteLength: source.byteLength, physicalDurationSeconds: videoSeconds(source.probe.video!), sourceDescriptorId: source.id,
         ...(request.name === undefined ? {} : { name: request.name }) };
       this.store.insert("artifact", record.id, projectId, record);
       this.store.insert<OwnedMediaSource>("media_source", source.artifactId, projectId, { id: source.artifactId, projectId, source, requestId: authority.requestId });
@@ -336,7 +337,7 @@ export class MediaApplicationService {
       invariant(current.ownerToken === job.ownerToken, "MEDIA_LEASE_LOST", "Another worker owns completion registration");
       const artifact: ArtifactRef = { artifactId: job.outputArtifactId, sha256: completion.artifact.sha256, kind: "video" };
       const record: RealVideoArtifact = { id: artifact.artifactId, projectId: job.projectId, artifact, path, mimeType: "video/mp4", fixture: "kind" in job.target && job.target.demo, attemptId: null,
-        origin: "local_render", byteLength: completion.artifact.byteLength, physicalDurationSeconds: completion.artifact.probe.video!.frames / 30, manifestDigest: job.manifest.digest, renderJobId: job.id };
+        origin: "local_render", byteLength: completion.artifact.byteLength, physicalDurationSeconds: videoSeconds(completion.artifact.probe.video!), manifestDigest: job.manifest.digest, renderJobId: job.id };
       this.store.insert("artifact", record.id, job.projectId, record);
       let publish = !current.cancelRequested && this.matches(job);
       try { this.authorize(job.projectId, job.actor); this.assertUnpaused(job); } catch { publish = false; }

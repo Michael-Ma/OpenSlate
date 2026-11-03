@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
+import { frameRate, NATIVE_FRAME_RATES, outputFrames, videoSeconds, videoTicks } from "./frame-rate.js";
 import { runMediaProcess } from "./process.js";
 import { LocalImageStore } from "./local-images.js";
 import { CODEX_IMAGE_LIMITS } from "@openslate/providers";
@@ -109,7 +110,7 @@ export class LocalMediaService {
     const signal = options.signal;
     return this.exclusive(async () => {
       const toolchainDigest = await this.toolchainDigest(signal); aborted(signal);
-      return frozen({ version: 1 as const, recipe: "silent-h264-30fps-v1" as const, toolchainDigest,
+      return frozen({ version: 1 as const, recipe: "silent-h264-native-fps-v2" as const, toolchainDigest,
         maxInputBytes: this.limits.maxInputBytes, maxOutputBytes: this.limits.maxOutputBytes,
         maxDurationFrames: this.limits.maxDurationFrames, timeoutMs: this.limits.timeoutMs });
     });
@@ -332,20 +333,29 @@ export class LocalMediaService {
       const toolchainDigest = await this.toolchainDigest(signal);
       const output = join(dir, input.kind === "video" ? "normalized.mp4" : "normalized.wav");
       const args = ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...INPUT_OPTIONS, "-i", decoderPath, "-map_metadata", "-1", "-map_chapters", "-1"];
-      if (input.kind === "video") args.push("-map", `0:${inputProbe.video!.streamIndex}`, "-an", "-vf", "fps=30,setsar=1,pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p", "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", "18", "-metadata:s:v:0", "rotate=0", "-movflags", "+faststart");
+      const videoRecipe = input.kind === "video" ? await this.videoNormalization(decoderPath, inputProbe.video!, signal) : undefined;
+      if (videoRecipe) {
+        args.push("-map", `0:${inputProbe.video!.streamIndex}`, "-an");
+        // Already conforming H.264 needs only a silent remux: preserve its decoded pictures exactly.
+        if (videoRecipe.copy) args.push("-c:v", "copy");
+        else args.push("-vf", `fps=${videoRecipe.rate},setsar=1,pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p`, "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", "18");
+        args.push("-metadata:s:v:0", "rotate=0", "-movflags", "+faststart");
+      }
       else args.push("-map", `0:${inputProbe.audio!.streamIndex}`, "-vn", "-af", "aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2");
       // The extra second detects an overlong source instead of silently accepting
       // the truncated prefix. Time and byte limits also bound bad metadata.
       args.push("-t", String(this.limits.maxDurationFrames / FPS + 1), "-fs", String(this.limits.maxOutputBytes), output);
       await this.run(this.ffmpeg, args, signal);
       const probe = await this.inspect(output, signal);
-      if (input.kind === "video") invariant(probe.video?.frameRate === "30/1" && probe.video.frames > 0 && !probe.audio, "MEDIA_VALIDATION_FAILED", "Normalized video must be silent 30 fps media");
+      if (input.kind === "video") invariant(probe.video?.frameRate === videoRecipe!.rate && probe.video.frames > 0 && !probe.audio, "MEDIA_VALIDATION_FAILED", "Normalized video must be silent constant-rate media");
       else invariant(probe.audio?.sampleRate === SAMPLE_RATE && probe.audio.channels === 2 && probe.audio.samples !== null && !probe.video, "MEDIA_VALIDATION_FAILED", "Normalized audio must have measured 48 kHz stereo samples");
+      if (videoRecipe?.preserveFrames) invariant(probe.video!.frames === inputProbe.video!.frames,
+        "MEDIA_VALIDATION_FAILED", "Native-rate normalization must retain every source picture");
       const expectedDuration = inputProbe[input.kind]!.durationSeconds;
-      const observedDuration = input.kind === "video" ? probe.video!.frames / FPS : probe.audio!.samples! / SAMPLE_RATE;
+      const observedDuration = input.kind === "video" ? videoSeconds(probe.video!) : probe.audio!.samples! / SAMPLE_RATE;
       // Decoder delay/padding can differ slightly from compressed audio metadata;
       // a size-limited prefix must never become an apparently complete import.
-      invariant(Math.abs(expectedDuration - observedDuration) <= (input.kind === "video" ? 1 / FPS + 0.001 : 0.1), "MEDIA_VALIDATION_FAILED", "Normalization truncated or changed source duration");
+      invariant(Math.abs(expectedDuration - observedDuration) <= (input.kind === "video" ? 1 / frameRate(videoRecipe!.rate) + 0.001 : 0.1), "MEDIA_VALIDATION_FAILED", "Normalization truncated or changed source duration");
       await this.decode(output, signal);
       aborted(signal);
       const original = await this.installFile(sourcePath, "source", this.limits.maxInputBytes);
@@ -359,7 +369,7 @@ export class LocalMediaService {
 
   /**
    * The sound of an imported clip as normalized 48 kHz stereo PCM. Clip import keeps only silent video
-   * ("silent-h264-30fps-v1"); the untouched original stays in the blob store, so its audio stream is read from there,
+   * (native constant frame rate); the untouched original stays in the blob store, so its audio stream is read from there,
    * trimmed to the clip's measured picture. Content-addressed and cached: a clip is derived once, and a clip with
    * no audio stream is remembered as such. Never reads a caller path.
    */
@@ -386,7 +396,7 @@ export class LocalMediaService {
       const inputProbe = await this.inspect(input, signal);
       if (!inputProbe.audio) { await this.installJson("clip-audio", key, { reason: "no_audio_stream" }); return { reason: "no_audio_stream" as const }; }
       const output = join(dir, "clip-audio.wav"), toolchainDigest = await this.toolchainDigest(signal);
-      const seconds = value.probe.video.frames / FPS;
+      const seconds = videoSeconds(value.probe.video);
       await this.run(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...INPUT_OPTIONS, "-i", input, "-map_metadata", "-1", "-map_chapters", "-1",
         "-map", `0:${inputProbe.audio.streamIndex}`, "-vn", "-af", "aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2",
         "-t", String(seconds), "-fs", String(this.limits.maxOutputBytes), output], signal);
@@ -482,14 +492,18 @@ export class LocalMediaService {
       invariant(source.kind === "video" && source.probe.video, "MEDIA_INVALID_INPUT", "Clip requires normalized video");
       integer(clip.startFrame, 0, this.limits.maxDurationFrames, `row ${index + 1} source start frame (0–${this.limits.maxDurationFrames})`);
       integer(clip.durationFrames, 1, this.limits.maxDurationFrames, `row ${index + 1} clip duration (1–${this.limits.maxDurationFrames})`);
-      invariant(clip.startFrame + clip.durationFrames <= source.probe.video.frames, "MEDIA_SOURCE_TOO_SHORT", `Row ${index + 1}: clip cannot exceed measured source frames (0–${source.probe.video.frames - 1})`);
+      invariant(clip.startFrame + clip.durationFrames <= videoTicks(source.probe.video), "MEDIA_SOURCE_TOO_SHORT", `Row ${index + 1}: clip cannot exceed measured source ticks (0–${videoTicks(source.probe.video) - 1})`);
       invariant(clip.fit === "contain" || clip.fit === "cover", "MEDIA_INVALID_INPUT", `Row ${index + 1}: fit must be contain or cover`);
       const edits = rowEdits(clip as unknown as Record<string, unknown>, index);
       totalFrames += rowFrames({ durationFrames: clip.durationFrames, ...edits });
       clips.push({ source, startFrame: clip.startFrame, durationFrames: clip.durationFrames, fit: clip.fit, ...edits });
     }
     integer(totalFrames, 1, this.limits.maxDurationFrames, "total frames");
-    const totalSamples = totalFrames * SAMPLES_PER_FRAME;
+    const timelineFrames = totalFrames;
+    invariant(value.outputFrameRate === undefined || value.outputFrameRate === 24, "MEDIA_INVALID_INPUT", "Unsupported output frame rate");
+    const fps: 24 | 30 = value.outputFrameRate ?? 30;
+    totalFrames = outputFrames(timelineFrames, fps);
+    const totalSamples = timelineFrames * SAMPLES_PER_FRAME;
     const audio = [];
     const audioStreams = new Set<string>();
     for (const [index, placement] of (value.audio ?? []).entries()) {
@@ -513,7 +527,7 @@ export class LocalMediaService {
     if (value.sfxPackDigest !== undefined) { invariant(HASH.test(value.sfxPackDigest), "MEDIA_INVALID_INPUT", "Invalid sound pack digest"); extras.sfxPackDigest = value.sfxPackDigest; }
     if (value.captions !== undefined) {
       extras.captions = [];
-      for (const [index, layout] of layoutCaptions(validateCaptions(value.captions, totalFrames), value.width, value.height).entries()) {
+      for (const [index, layout] of layoutCaptions(validateCaptions(value.captions, timelineFrames), value.width, value.height).entries()) {
         const path = join(this.rootDir, "tmp", `caption-${index}-${randomUUID()}.png`);
         try {
           aborted(signal); await writeFile(path, rasterizeCaption(layout, value.width, value.height), { flag: "wx", mode: 0o600 });
@@ -522,7 +536,7 @@ export class LocalMediaService {
         } finally { await rm(path, { force: true }); }
       }
     }
-    const body = { version: 1 as const, projectId: value.projectId, targetRevisionId: value.targetRevisionId, width: value.width, height: value.height, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, ...(value.demo ? { demo: true as const } : {}), ...extras, toolchainDigest: await this.toolchainDigest(signal) };
+    const body = { version: 1 as const, projectId: value.projectId, targetRevisionId: value.targetRevisionId, width: value.width, height: value.height, frameRate: { numerator: fps, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, ...(value.demo ? { demo: true as const } : {}), ...extras, toolchainDigest: await this.toolchainDigest(signal) };
     aborted(signal);
     const manifest: TimelineRenderManifest = { digest: digest(body), ...body };
     await this.installJson("manifests", manifest.digest, manifest);
@@ -562,18 +576,38 @@ export class LocalMediaService {
         // The pinned demuxer allowlist deliberately requires a separate png_pipe input.
         args.push("-threads", "1", "-protocol_whitelist", "file", "-format_whitelist", "png_pipe", "-f", "png_pipe", "-i", path);
       }
-      const filters: string[] = [];
-      manifest.clips.forEach((clip, index) => {
+      const fps = manifest.frameRate.numerator, totalSamples = manifest.totalFrames * SAMPLE_RATE / fps;
+      const only = manifest.clips[0]!;
+      const copyVideo = fps === 24 && manifest.clips.length === 1 && !manifest.demo && !manifest.captions?.length
+        && only.source.probe.video!.frameRate === "24/1" && only.source.probe.video!.width === manifest.width && only.source.probe.video!.height === manifest.height
+        && only.startFrame === 0 && videoTicks(only.source.probe.video!) === only.durationFrames
+        && only.source.probe.video!.frames === manifest.totalFrames && (only.speed ?? 1) === 1 && !only.holdFrames && !only.zoom;
+      const filters: string[] = [], videoLabels: string[] = [];
+      let timelineCursor = 0;
+      if (!copyVideo) manifest.clips.forEach((clip, index) => {
         const size = `${manifest.width}:${manifest.height}`;
         const fit = clip.fit === "contain" ? `scale=${size}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${size}:(ow-iw)/2:(oh-ih)/2:color=black` : `scale=${size}:force_original_aspect_ratio=increase:force_divisible_by=2,crop=${size}`;
-        const movingFrames = Math.round(clip.durationFrames / (clip.speed ?? 1));
-        const speed = clip.speed === undefined ? "setpts=PTS-STARTPTS" : `setpts=(PTS-STARTPTS)/${clip.speed},fps=30:round=near,tpad=stop_mode=clone:stop=1,trim=end_frame=${movingFrames},setpts=PTS-STARTPTS`;
-        const hold = clip.holdFrames === undefined ? "" : `,tpad=stop_mode=clone:stop=${clip.holdFrames}`;
+        const movingTicks = Math.round(clip.durationFrames / (clip.speed ?? 1));
+        const start = outputFrames(timelineCursor, fps), movingEnd = outputFrames(timelineCursor + movingTicks, fps);
+        timelineCursor += rowFrames(clip);
+        const end = outputFrames(timelineCursor, fps), count = end - start;
+        // Sub-frame rows can round to no output picture. Rounding cumulative boundaries prevents drift.
+        if (!count) return;
+        const native = clip.source.probe.video!, rate = frameRate(native.frameRate);
+        const sourceStart = Math.min(native.frames - 1, Math.round(clip.startFrame * rate / FPS));
+        // Keep the boundary picture available to the sampler. Rounding an exclusive
+        // native end first can lose a picture (e.g. ticks 7..38 need 25 output frames).
+        const endPicture = (clip.startFrame + clip.durationFrames) * rate / FPS;
+        const sourceEnd = Math.min(native.frames, Math.max(sourceStart + 1, fps === 24 ? Math.ceil(endPicture) + 1 : Math.round(endPicture)));
+        const movingFrames = Math.max(1, movingEnd - start), holdFrames = count - movingFrames;
+        const timing = `setpts=(PTS-STARTPTS)/${clip.speed ?? 1},tpad=stop_mode=clone:stop_duration=${count / fps + 1},fps=${fps}:round=near:start_time=0,trim=end_frame=${movingFrames},setpts=PTS-STARTPTS${holdFrames > 0 ? `,tpad=stop_mode=clone:stop=${holdFrames}` : ""},trim=end_frame=${count}`;
         const zoom = clip.zoom === undefined ? "" : `,crop=w='max(2,trunc(iw/${clip.zoom.scale}/2)*2)':h='max(2,trunc(ih/${clip.zoom.scale}/2)*2)':x='max(0,min(iw-ow,iw*${clip.zoom.x ?? 0.5}-ow/2))':y='max(0,min(ih-oh,ih*${clip.zoom.y ?? 0.5}-oh/2))',scale=${size}`;
-        filters.push(`[${index}:v:0]trim=start_frame=${clip.startFrame}:end_frame=${clip.startFrame + clip.durationFrames},${speed}${hold},${fit}${zoom},setsar=1,format=yuv420p[v${index}]`);
+        filters.push(`[${index}:v:0]trim=start_frame=${sourceStart}:end_frame=${sourceEnd},${timing},${fit}${zoom},setsar=1,format=yuv420p${fps === 24 ? `,setpts=PTS-STARTPTS+${start}/${fps}/TB` : ""}[v${index}]`);
+        videoLabels.push(`[v${index}]`);
       });
       const captions = manifest.captions ?? [];
-      filters.push(`${manifest.clips.map((_, i) => `[v${i}]`).join("")}concat=n=${manifest.clips.length}:v=1:a=0[${manifest.demo ? "demov" : captions.length ? "captionv0" : "outv"}]`);
+      // Interleave exact output positions: concat assigns zero duration to one-picture segments.
+      if (!copyVideo) filters.push(`${videoLabels.join("")}${fps === 24 ? `interleave=nb_inputs=${videoLabels.length}:duration=longest,settb=1/24,setpts=N` : `concat=n=${videoLabels.length}:v=1:a=0`}[${manifest.demo ? "demov" : captions.length ? "captionv0" : "outv"}]`);
       if (manifest.demo) {
         // Fixed bitmap glyphs spell "Demo". No host fonts or drawtext dependency in the pinned media profile.
         const glyphs = [
@@ -588,7 +622,7 @@ export class LocalMediaService {
         })));
         filters.push(`[demov]${boxes.join(",")}[${captions.length ? "captionv0" : "outv"}]`);
       }
-      captions.forEach((caption, index) => filters.push(`[captionv${index}][${manifest.clips.length + audioSources.size + index}:v:0]overlay=enable='between(n,${caption.atFrame},${caption.atFrame + caption.durationFrames - 1})':eof_action=repeat[${index + 1 === captions.length ? "outv" : `captionv${index + 1}`}]`));
+      captions.forEach((caption, index) => filters.push(`[captionv${index}][${manifest.clips.length + audioSources.size + index}:v:0]overlay=enable='between(n,${outputFrames(caption.atFrame, fps)},${outputFrames(caption.atFrame + caption.durationFrames, fps) - 1})':eof_action=repeat[${index + 1 === captions.length ? "outv" : `captionv${index + 1}`}]`));
       if (manifest.audio.length) {
         const audioFilterStart = filters.length;
         const lanes = audioLanes(manifest.audio);
@@ -612,10 +646,10 @@ export class LocalMediaService {
             const placement = manifest.audio[index]!; silence(placement.atSample - cursor); parts.push(`[a${index}]`);
             cursor = placement.atSample + placement.durationSamples;
           }
-          silence(manifest.totalFrames * SAMPLES_PER_FRAME - cursor);
+          silence(Math.max(0, totalSamples - cursor));
           filters.push(`${parts.join("")}concat=n=${parts.length}:v=0:a=1[lane${lane}]`);
         });
-        const mix = `${lanes.map((_, i) => `[lane${i}]`).join("")}amix=inputs=${lanes.length}:duration=longest:dropout_transition=0:normalize=0,apad=whole_len=${manifest.totalFrames * SAMPLES_PER_FRAME},atrim=end_sample=${manifest.totalFrames * SAMPLES_PER_FRAME}`;
+        const mix = `${lanes.map((_, i) => `[lane${i}]`).join("")}amix=inputs=${lanes.length}:duration=longest:dropout_transition=0:normalize=0,apad=whole_len=${totalSamples},atrim=end_sample=${totalSamples}`;
         let mastering = "";
         if (manifest.mastering === "loudnorm-0.3.0") {
           const analysis = [...filters.slice(audioFilterStart), `${mix},loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json,aresample=48000[outa]`].join(";");
@@ -625,21 +659,25 @@ export class LocalMediaService {
           if ([measured.input_i, measured.input_tp, measured.input_lra, measured.input_thresh, measured.target_offset].every(value => Number.isFinite(Number(value))))
             mastering += `:measured_I=${Number(measured.input_i)}:measured_TP=${Number(measured.input_tp)}:measured_LRA=${Number(measured.input_lra)}:measured_thresh=${Number(measured.input_thresh)}:offset=${Number(measured.target_offset)}:linear=true`;
         }
-        filters.push(`${mix}${mastering},aresample=48000[outa]`);
+        filters.push(`${mix}${mastering},aresample=48000,apad=whole_len=${totalSamples},atrim=end_sample=${totalSamples}[outa]`);
       }
       const output = join(dir, "render.mp4");
-      args.push("-filter_complex", filters.join(";"), "-map", "[outv]");
+      if (filters.length) args.push("-filter_complex", filters.join(";"));
+      args.push("-map", copyVideo ? "0:v:0" : "[outv]");
       if (manifest.audio.length) args.push("-map", "[outa]", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2");
       else args.push("-an");
       // Fix the encoder thread count so repeated renders use the same x264
       // recipe regardless of the host's available CPUs. Filtering, decoding and
       // normalization keep their existing single-threaded behavior.
-      args.push("-map_metadata", "-1", "-map_chapters", "-1", "-c:v", "libx264", "-threads", String(RENDER_ENCODER_THREADS), "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30", "-fps_mode", "cfr", "-frames:v", String(manifest.totalFrames), "-movflags", "+faststart", "-fs", String(this.limits.maxOutputBytes), output);
+      args.push("-map_metadata", "-1", "-map_chapters", "-1");
+      if (copyVideo) args.push("-c:v", "copy");
+      else args.push("-c:v", "libx264", "-threads", String(RENDER_ENCODER_THREADS), "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", String(fps), "-fps_mode", "cfr");
+      args.push("-frames:v", String(manifest.totalFrames), "-t", String(manifest.totalFrames / fps), "-movflags", "+faststart", "-fs", String(this.limits.maxOutputBytes), output);
       await this.run(this.ffmpeg, args, signal, renderTimeoutMs(manifest.totalFrames, this.limits.timeoutMs));
       const probe = await this.inspect(output, signal);
-      invariant(probe.video?.frames === manifest.totalFrames && probe.video.width === manifest.width && probe.video.height === manifest.height && probe.video.frameRate === "30/1" && probe.video.codec === "h264", "MEDIA_VALIDATION_FAILED", "Rendered picture does not match frozen frame count or geometry");
+      invariant(probe.video?.frames === manifest.totalFrames && probe.video.width === manifest.width && probe.video.height === manifest.height && probe.video.frameRate === `${fps}/1` && probe.video.codec === "h264", "MEDIA_VALIDATION_FAILED", "Rendered picture does not match frozen frame count or geometry");
       if (manifest.audio.length) {
-        invariant(probe.audio?.sampleRate === SAMPLE_RATE && probe.audio.channels === 2 && probe.audio.codec === "aac" && probe.audio.samples !== null && Math.abs(probe.audio.samples - manifest.totalFrames * SAMPLES_PER_FRAME) <= 2048, "MEDIA_VALIDATION_FAILED", "Rendered audio does not match the timeline within AAC padding tolerance");
+        invariant(probe.audio?.sampleRate === SAMPLE_RATE && probe.audio.channels === 2 && probe.audio.codec === "aac" && probe.audio.samples !== null && Math.abs(probe.audio.samples - totalSamples) <= 2048, "MEDIA_VALIDATION_FAILED", "Rendered audio does not match the timeline within AAC padding tolerance");
       } else invariant(!probe.audio, "MEDIA_VALIDATION_FAILED", "Unexpected output audio");
       await this.decode(output, signal);
       aborted(signal);
@@ -783,6 +821,31 @@ export class LocalMediaService {
       await target.sync();
     } finally { await target?.close(); await source.close(); }
   }
+  /** Average rate alone does not prove CFR: verify every decoded presentation timestamp. */
+  private async videoNormalization(path: string, video: NonNullable<MediaProbe["video"]>, signal?: AbortSignal): Promise<{ rate: string; copy: boolean; preserveFrames: boolean }> {
+    if (!NATIVE_FRAME_RATES.includes(video.frameRate as typeof NATIVE_FRAME_RATES[number])) return { rate: "30/1", copy: false, preserveFrames: false };
+    const text = await this.run(this.ffprobe, ["-v", "error", ...INPUT_OPTIONS, "-select_streams", String(video.streamIndex),
+      "-show_frames", "-show_streams", "-show_entries", "frame=best_effort_timestamp:stream=codec_name,pix_fmt,width,height,sample_aspect_ratio,time_base:stream_tags=rotate:stream_side_data=rotation", "-of", "json", path], signal);
+    const measured = JSON.parse(text) as { frames?: { best_effort_timestamp?: number }[]; streams?: {
+      codec_name?: string; pix_fmt?: string; width?: number; height?: number; sample_aspect_ratio?: string; time_base?: string;
+      tags?: { rotate?: string }; side_data_list?: { rotation?: number }[];
+    }[] };
+    const stream = measured.streams?.[0], timestamps = measured.frames?.map(frame => frame.best_effort_timestamp);
+    const timeBase = stream?.time_base ? frameRate(stream.time_base) : 0, period = 1 / frameRate(video.frameRate);
+    const minStep = Math.max(1, Math.floor(period / timeBase + 1e-6)), maxStep = Math.ceil(period / timeBase - 1e-6);
+    const first = timestamps?.[0];
+    const constant = timestamps?.length === video.frames && typeof first === "number" && timeBase > 0
+      && timestamps.every((stamp, index) => typeof stamp === "number" && Number.isSafeInteger(stamp)
+        && Math.abs((stamp - first) * timeBase - index * period) <= timeBase * 1.01
+        // A coarse time base must not hide alternating gaps behind the same average rate.
+        && (index === 0 || typeof timestamps[index - 1] === "number"
+          && stamp - timestamps[index - 1]! >= minStep && stamp - timestamps[index - 1]! <= maxStep));
+    if (!constant) return { rate: "30/1", copy: false, preserveFrames: false };
+    return { rate: video.frameRate, preserveFrames: true, copy: stream?.codec_name === "h264" && stream.pix_fmt === "yuv420p"
+      && video.width % 2 === 0 && video.height % 2 === 0 && stream.sample_aspect_ratio === "1:1"
+      && Number(stream.tags?.rotate ?? 0) === 0 && (stream.side_data_list ?? []).every(data => Number(data.rotation ?? 0) === 0) };
+  }
+
   private async inspect(path: string, signal?: AbortSignal): Promise<MediaProbe> {
     // Validate cheap container metadata before asking ffprobe to decode every
     // frame. This is a bounded worker, not a hostile-code or OS memory sandbox.

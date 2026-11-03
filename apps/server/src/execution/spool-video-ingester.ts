@@ -1,3 +1,4 @@
+import { videoSeconds } from "../media/frame-rate.js";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { link, mkdtemp, open, rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -82,7 +83,7 @@ export class SpoolVideoIngestor implements ExecutionOutputIngestor {
       const result: NormalizedVideoIngestion = { type: "normalized_video", derivation: receipt,
         artifact: { id: intent.artifactId, projectId: attempt.projectId, attemptId: attempt.id,
           artifact: { artifactId: intent.artifactId, kind: "video", sha256: source.sha256 }, path, mimeType: "video/mp4", fixture: false,
-          origin: "generated_video", physicalDurationSeconds: source.probe.video!.frames / 30, byteLength: source.byteLength,
+          origin: "generated_video", physicalDurationSeconds: videoSeconds(source.probe.video!), byteLength: source.byteLength,
           outputReceiptId: owned.spool.receiptId, outputSpoolId: owned.spool.id, derivationId: id, sourceDescriptorId: source.id },
         mediaSource: { id: intent.artifactId, projectId: attempt.projectId, source, origin: "generated_video", attemptId: attempt.id, derivationId: id } };
       assertNormalizedVideoIngestion(intent, attempt, output, result);
