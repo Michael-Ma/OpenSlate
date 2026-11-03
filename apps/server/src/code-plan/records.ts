@@ -19,7 +19,7 @@ export interface CodePlanStep {
   retryAt?: number;
   automaticRetries?: number;
 }
-export interface CodePlanSettings { ceilingMicros: string }
+export interface CodePlanSettings { ceilingMicros?: string; videoResolution?: import("./video-settings.js").CodePlanVideoResolution }
 export interface CodePlanChoice {
   id: string; projectId: string; choiceId: string; optionsDigest: string; question: string; options: JsonValue[];
   answer?: JsonValue; answeredAt?: string;

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { canonical, digest, invariant, newId } from "@openslate/core";
+import { canonical, codePlanExportSize, digest, invariant, newId } from "@openslate/core";
 import type { ArtifactRef, JsonObject } from "@openslate/core";
 import { ExecutionRegistry, executionIdentity, executionProfileSnapshot, profileExecutionIdentity, executionTaskId, isSpoolCompletion, isSpoolOutput, normalizeExecutionOutcome, MAX_EXECUTION_OUTPUT_BYTES, EXECUTION_SPOOL_LIMITS } from "@openslate/providers";
 import type { ExecutionOutcome, ExecutionProvider, IngestibleExecutionOutput } from "@openslate/providers";
@@ -26,6 +26,7 @@ import { assertCodePlanFirstDispatch } from "./provider-authority.js";
 import { makeCodePlanPoster } from "./posters.js";
 import type { CodePlanStep } from "./records.js";
 import type { CodePlanMediaKind } from "./identity.js";
+import { codePlanVideoProfile, filmVideoResolution, isCodePlanVideoResolution, videoSubmissionLock } from "./video-settings.js";
 export type { CodePlanMediaKind } from "./identity.js";
 export type CodePlanLiability = "reserved" | "charged" | "released";
 export interface CodePlanExecutionRecord {
@@ -142,9 +143,22 @@ export class CodePlanExecution {
     invariant(this.store.getProject(projectId).planMode === "code", "CODE_PLAN_MODE_INVALID", "Code execution requires a code-mode project");
     invariant(/^[a-f0-9]{64}$/.test(key) && ["image", "video", "speech", "music", "render"].includes(kind), "CODE_PLAN_INPUT_INVALID", "Use a content-addressed media step");
     const input = structuredClone(normalizedInput), model = this.ready(projectId, input, kind);
-    const profile = model.profile;
-    const lock = profile ? this.store.get<CodePlanCapabilityLock>("capability_lock", this.store.getProject(projectId).capabilityLockId)! : undefined;
-    const args = profile ? codePlanProviderArgs(profile, input, { enhance: false }) : input;
+    const identityProfile = model.profile;
+    const sourceLock = identityProfile ? this.store.get<CodePlanCapabilityLock>("capability_lock", this.store.getProject(projectId).capabilityLockId)! : undefined;
+    const resolution = model.videoResolution;
+    const lock = identityProfile?.adapter === "viggle-h3" && resolution !== identityProfile.configuration!.settings!.resolution
+      && isCodePlanVideoResolution(resolution) ? videoSubmissionLock(sourceLock!, identityProfile, resolution) : sourceLock;
+    const profile = lock?.profiles.find(row => row.id === identityProfile?.id);
+    let args = profile ? codePlanProviderArgs(profile, input, { enhance: false }) : input;
+    if (kind === "render") {
+      // Capture the export policy in this attempt, never in the content-addressed step input.
+      try {
+        const video = codePlanVideoProfile(this.store, projectId);
+        args = { ...args, ...codePlanExportSize(this.store.getProject(projectId), filmVideoResolution(this.store, projectId, video)) };
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "CODE_PLAN_VIDEO_SETTINGS_UNAVAILABLE")) throw error;
+      }
+    }
     const realRender = kind === "render" && this.store.get<CodePlanCapabilityLock>("capability_lock", this.store.getProject(projectId).capabilityLockId)?.profiles.some(row => row.adapter !== "fake");
     invariant(!realRender || this.localExecutor, "CODE_PLAN_RENDER_UNAVAILABLE", "Real projects require the installed local media executor");
     const prepared = this.store.transaction(() => {
@@ -161,6 +175,8 @@ export class CodePlanExecution {
         invariant(existing.specDigest === specDigest && existing.request.kind === kind, "CODE_PLAN_STEP_CONFLICT", "Step key already has different execution inputs");
         this.record(existing); return { attempt: existing, created: false };
       }
+      if (lock && lock.id !== sourceLock?.id && !this.store.get("capability_lock", lock.id))
+        this.store.insert("capability_lock", lock.id, projectId, lock);
       const id = newId(), at = new Date().toISOString(), inputs = this.resolveInputs(projectId, input);
       const attempt: Attempt = { id, projectId, nodeId: workKey, candidateId: null, ordinal, specDigest,
         fingerprint: key, workKey, phase: "submitting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.providerTimeoutMs + 600000,

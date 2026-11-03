@@ -53,6 +53,8 @@ import { GeminiMusicListener } from "./media/music-enrichment.js";
 import { registerMusicEnrichmentRoutes } from "./media/music-enrichment-routes.js";
 import { LocalMusicAnalyzer } from "./media/music-analyzer.js";
 import { registerCodePlanRoutes } from "./code-plan/routes.js";
+import { codePlanVideoSettings, filmVideoResolution } from "./code-plan/video-settings.js";
+import { providerPricing } from "./code-plan/model-pricing.js";
 import type { CodePlanPort } from "./code-plan/port.js";
 import { holdCodePlanRequest, wireCodePlans } from "./code-plan/director.js";
 
@@ -189,7 +191,29 @@ export function createApp(options: AppOptions = {}) {
     return reply.header("Cache-Control", "no-store").send({ codex, mediaTools, providersConfigured });
   });
   const modelSettings = () => new ProjectModelSettings(service(), providerCatalog());
-  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/settings/models", async request => modelSettings().status(request.params.projectId));
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/settings/models", async request => {
+    const { projectId } = request.params, status = modelSettings().status(projectId);
+    const project = service().store.getProject(projectId);
+    if (project.planMode === "code") {
+      const locked = service().store.get<{ profiles: import("@openslate/core").ProviderProfile[] }>("capability_lock", project.capabilityLockId)?.profiles ?? [];
+      status.options = status.options.map(row => {
+        const profile = locked.find(profile => profile.id === row.id) ?? row.profile;
+        return profile?.adapter === "viggle-h3" ? { ...row, pricing: providerPricing(profile, filmVideoResolution(service().store, projectId, profile))! } : row;
+      });
+    }
+    return status;
+  });
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/code-plan/video-settings", async request =>
+    codePlanVideoSettings(service().store, request.params.projectId));
+  app.put<{ Params: { projectId: string }; Body: { resolution: string } }>("/api/projects/:projectId/code-plan/video-settings", {
+    schema: { body: object({ resolution: { enum: ["480p", "768p", "1080p", "2k"] } }, ["resolution"]) },
+  }, async request => {
+    const { projectId } = request.params;
+    service().recovery.assertWritable(projectId);
+    codePlanVideoSettings(service().store, projectId);
+    invariant(options.codePlans, "SERVICE_UNAVAILABLE", "Code-plan execution is not installed");
+    return options.codePlans.setVideoSettings(projectId, request.body.resolution);
+  });
   app.post<{ Params: { projectId: string }; Body: ProjectModelPreviewInput }>("/api/projects/:projectId/settings/models/preview", {
     schema: { body: object({ expectedHeadVersion: { type: "integer", minimum: 0 }, expectedSelectionDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
       expectedCatalogDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, profileIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: string },

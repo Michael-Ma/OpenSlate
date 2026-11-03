@@ -10,11 +10,14 @@ import type { CodePlanCapabilityLock } from "./models.js";
 import type { CodePlanHold, CodePlanRun, CodePlanStep } from "./records.js";
 import { codePlanProviderArgs } from "./provider-input.js";
 import { modelPrice, supportedCodePlanAdapters } from "./models.js";
+import { isCodePlanVideoResolution, videoSubmissionLock, type VideoSubmissionPolicy } from "./video-settings.js";
 
 export type CodePlanAuthorityStore = Pick<Store, "get" | "getProject" | "db">;
 export interface CodePlanProviderAdmission {
   attempt: Attempt; candidate: null; grant: null; codePlan: CodePlanExecutionRecord;
   profile: ProviderProfile; capabilityLock: CodePlanCapabilityLock;
+  /** Original profile used by the journal identity; resolution alone may differ at submission. */
+  identityProfile?: ProviderProfile;
   /** Measured owned PNG dimensions, resolved by the host from the first-frame or first-reference image. */
   priceFrame?: { width: number; height: number };
   /** Adapter receipt projection of the step reservation, never a graph reservation row. */
@@ -25,6 +28,12 @@ const check = (value: unknown): void => invariant(value, "CODE_PLAN_PROVIDER_AUT
 
 export function assertCodePlanProviderAdmission(value: CodePlanProviderAdmission): void {
   const { attempt, profile, capabilityLock: lock, codePlan: record } = value, request = attempt.request;
+  if (value.identityProfile) {
+    const policy = lock.codePlanVideo as VideoSubmissionPolicy | undefined, original = value.identityProfile;
+    check(policy && policy.sourceProfileDefinitionDigest === digest(original) && original.adapter === "viggle-h3"
+      && canonical(profile) === canonical({ ...original,
+        configuration: { ...original.configuration!, settings: { ...original.configuration!.settings!, resolution: policy.resolution } } }));
+  }
   const args = providerProfileArguments(profile);
   check(isCodePlanAttempt(attempt) && attempt.candidateId === null && attempt.reservationId === null && value.candidate === null && value.grant === null
     && attempt.id === request.attemptId && attempt.nodeId === request.nodeId && attempt.fingerprint === request.fingerprint
@@ -42,7 +51,7 @@ export function assertCodePlanProviderAdmission(value: CodePlanProviderAdmission
     && canonical(request.profile.configuration) === canonical(profile.configuration)
     && Object.entries(args).every(([key, item]) => canonical(request.args[key]) === canonical(item))
     && canonical(request.args) === canonical(codePlanProviderArgs(profile, record.normalizedInput, request.args.enhance === false ? { enhance: false } : {}))
-    && record.normalizedInput.profileDefinitionDigest === digest(profile)
+    && record.normalizedInput.profileDefinitionDigest === digest(value.identityProfile ?? profile)
     && record.priceMicros === (profile.adapter === "viggle-h3" && request.args.enhance === undefined ? profile.unitCostMicros : modelPrice({ kind: request.kind as "image" | "video" | "speech" | "music", priceMicros: profile.unitCostMicros, profile }, record.normalizedInput, value.priceFrame))
     && ["reserved", "charged", "released"].includes(record.liability)
     && value.reservation.id === attempt.id && value.reservation.attemptId === attempt.id && value.reservation.projectId === attempt.projectId
@@ -68,7 +77,16 @@ export function codePlanAdmissionFromAttempt(store: Pick<Store, "get">, attempt:
   const lock = use ? store.get<CodePlanCapabilityLock>("capability_lock", use.capabilityLockId) : undefined;
   const profile = lock?.profiles.find(row => digest(row) === use?.profileDefinitionDigest);
   check(record && lock && profile);
+  let identityProfile: ProviderProfile | undefined;
+  if (lock?.codePlanVideo !== undefined) {
+    const policy = lock.codePlanVideo as VideoSubmissionPolicy;
+    const source = store.get<CodePlanCapabilityLock>("capability_lock", policy.sourceCapabilityLockId);
+    identityProfile = source?.profiles.find(row => digest(row) === policy.sourceProfileDefinitionDigest);
+    check(policy.version === 1 && isCodePlanVideoResolution(policy.resolution) && source?.projectId === attempt.projectId
+      && identityProfile && canonical(lock) === canonical(videoSubmissionLock(source!, identityProfile, policy.resolution)));
+  }
   const result: CodePlanProviderAdmission = { attempt, candidate: null, grant: null, codePlan: record!, profile: profile!, capabilityLock: lock!,
+    ...(identityProfile ? { identityProfile } : {}),
     reservation: { id: attempt.id, projectId: attempt.projectId, attemptId: attempt.id, micros: record!.priceMicros!, state: record!.liability } };
   const frame = attempt.request.inputs.find(row => row.kind === "image" && row.sha256 === (attempt.request.args.firstFrameSha256 ?? (Array.isArray(attempt.request.args.references) ? attempt.request.args.references[0] : undefined)));
   const artifact = frame ? store.get<{ projectId: string; width: number; height: number; artifact: { sha256: string } }>("artifact", frame.artifactId) : undefined;
@@ -93,7 +111,7 @@ export function assertCodePlanFirstDispatch(store: Store, previous: Attempt, exp
   const step = store.get<CodePlanStep>("code_plan_step", digest({ projectId: project.id, key: previous.fingerprint }));
   const lock = store.get<CodePlanCapabilityLock>("capability_lock", project.capabilityLockId);
   invariant(run?.planVersion === admission.codePlan.planVersion && step?.attemptId === previous.id
-    && step.priceMicros === admission.codePlan.priceMicros && lock?.profiles.some(row => canonical(row) === canonical(admission.profile))
+    && step.priceMicros === admission.codePlan.priceMicros && lock?.profiles.some(row => canonical(row) === canonical(admission.identityProfile ?? admission.profile))
     && !store.get<{ paused: boolean }>("execution_control", project.id)?.paused,
   "CODE_PLAN_SELECTION_CHANGED", "A later plan, profile change or Stop fenced this submission");
   if (moneyMicros(step.priceMicros) > 0n) invariant(!store.list<CodePlanHold>("code_plan_hold", project.id).some(hold => !hold.released),

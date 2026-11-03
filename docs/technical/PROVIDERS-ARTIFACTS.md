@@ -37,6 +37,18 @@ Legacy P4a code-plan prices use `unitCostMicros` per call for images, speech and
 
 Real local rendering reuses measured `media_source` descriptors, timeline documents, frozen manifests, FFmpeg, probing and managed installation. Artifact publication follows retained completion evidence; spooled raw bytes and normalized media retain distinct hashes. Demo projects keep fixture media and fixture renders. Offline adapter fixtures and synthetic MP4/WAV checks establish plumbing and recovery, not live account access or subjective output quality. See the [P4a report](../ai/code-plan/reports/P4a-report.md).
 
+### Code-film video quality and resolution (G1)
+
+New code films pin built-in `viggle-h3` revision 2: `quality: "high"`, `resolution: "1080p"`, with enhancement disabled for code submissions. The exact former revision 1 (`low`/`768p`) remains executable without rewriting its definition or journal identities. An old host configuration naming that exact built-in is normalized for new selections only. Other custom profile settings remain unchanged.
+
+The person's resolution is stored as `code_plan_settings.videoResolution` (`480p`, `768p`, `1080p`, `2k`) beside the ceiling. Absence uses the locked profile's resolution. Authenticated `GET`/`PUT /api/projects/:projectId/code-plan/video-settings` returns the version-one settings view, four resolution/second-pricing options in ascending price order, the film-aspect export size and `appliesTo: "unsent"`. PUT accepts only `{ resolution }`; invalid bodies return `VALIDATION_ERROR` (400). Graph films and films whose selected video model is not Viggle return `CODE_PLAN_VIDEO_SETTINGS_UNAVAILABLE` (409). Writes use the existing CSRF and recovery fences, wake the plan and emit `code_plan.changed`.
+
+Resolution never enters step normalization. At new intent admission, a changed resolution creates an immutable derived capability lock that retains the original lock/profile digests and changes only the execution profile's resolution. Provider mappings, attempts and call details therefore retain the exact submitted setting; historical recovery validates that snapshot without consulting current settings. Existing succeeded/in-flight/unknown attempts and artifacts remain unchanged. A later retake or authorized retry uses the current resolution; prior unknown liability is still counted. Changing settings itself dispatches no call.
+
+`read_film.models[].priceBasis`, previews, reservations, keyframe input options and the film's model-settings `ProviderOption.pricing` use the same current-resolution pricing function. An unanswered card is repriced on the awakened pass, retaining its conversation position; an answered card retains its exact answer and recipe. Viggle resolution supplied by the Director in `ctx.video` or `keyframe.video` is refused. Export attempts capture 480/720/1080 pixels on the short side for 480p/768p/1080p respectively, with 2k capped at 1080; 480p landscape is rounded to even 854×480. Completed renders replay without replacing their artifacts; a fresh render/variant captures the current size. Graph export sizes are unchanged.
+
+The published `VIGGLE_PRICE_CREDITS` table is unchanged. The lead's November 2, 2026 measurements in [G1](../ai/film-quality/cards/G1-video-quality-setting.md) matched it: five-second high-quality, enhancement-off jobs charged 15 credits for first-frame 768p, 25 for first-frame 1080p, and 30 for reference 1080p (one credit = $0.01). This card uses offline transports and does not claim a new live measurement.
+
 ## Output boundary
 
 1. Retain a provider effect/receipt and exact task identity where available.

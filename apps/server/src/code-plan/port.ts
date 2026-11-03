@@ -8,6 +8,8 @@ import type { CodePlanDiff, CodePlanSourceView, CodePlanStepDetail, CodePlanView
  * and every write refuses while installation recovery is quarantined.
  */
 export interface CodePlanPort {
+  videoSettings(projectId: string): ReturnType<typeof import("./video-settings.js").codePlanVideoSettings>;
+  setVideoSettings(projectId: string, resolution: unknown): ReturnType<typeof import("./video-settings.js").codePlanVideoSettings>;
   /** Browser read model, including stale choices; the Director's read_film filters them. */
   view(projectId: string): CodePlanView;
 

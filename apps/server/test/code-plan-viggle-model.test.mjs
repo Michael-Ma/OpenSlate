@@ -24,8 +24,8 @@ const options = { registry, credentials: key, enabledExecutions: [route], mediaT
 const builtin = new InstalledProviderCatalog(options).view().profiles.find(row => row.id === 'viggle-h3').profile;
 
 test('built-in Viggle installs without a config file and keeps every readiness fence', () => {
-  assert.deepEqual(builtin, { id: 'viggle-h3', revision: '1', kind: 'video', adapter: 'viggle-h3', executionVersion: '1',
-    configuration: { model: 'MiniMax-H3', settings: { quality: 'low', resolution: '768p', aspectRatio: '16:9' } },
+  assert.deepEqual(builtin, { id: 'viggle-h3', revision: '2', kind: 'video', adapter: 'viggle-h3', executionVersion: '1',
+    configuration: { model: 'MiniMax-H3', settings: { quality: 'high', resolution: '1080p', aspectRatio: '16:9' } },
     minFrames: 150, maxFrames: 450, maxConcurrency: 1, unitCostMicros: '750000', maxRetries: 0 });
   assert.deepEqual(new InstalledProviderCatalog(options).codeMediaProfiles(), [builtin]);
   assert.equal(new InstalledProviderCatalog().view().profiles.some(row => row.id === builtin.id), false);
@@ -76,15 +76,15 @@ test('ten-second vertical Viggle plan dry-runs, reserves the N6 table and dispat
   const frame = f.plans.steps(f.project.id)[0].result.artifact;
   const program = source(builtin.id, 10, `references:[${JSON.stringify(frame)}],aspectRatio:'9:16'`);
   const preview = await f.plans.dryRun(f.project.id, program);
-  assert.deepEqual(preview.findings, []); assert.equal(preview.certainMicros, '500000');
+  assert.deepEqual(preview.findings, []); assert.equal(preview.certainMicros, '600000');
   assert.equal(f.calls.video, 0);
   await f.submit(program); await f.finish();
   const step = f.plans.steps(f.project.id).find(row => row.kind === 'video');
-  assert.equal(step.state, 'succeeded'); assert.equal(step.priceMicros, '500000');
+  assert.equal(step.state, 'succeeded'); assert.equal(step.priceMicros, '600000');
   assert.equal(f.form.get('duration_s'), '10'); assert.equal(f.form.get('aspect_ratio'), '9:16'); assert.equal(f.form.get('enhance'), 'false');
-  assert.equal(f.form.get('resolution'), '768p'); assert.equal(f.form.get('quality'), 'low');
-  assert.equal(f.store.get('viggle_h3_execution_mapping', step.attemptId).estimatedMicros, '500000');
-  assert.equal(f.plans.view(f.project.id).spentMicros, '500000');
+  assert.equal(f.form.get('resolution'), '1080p'); assert.equal(f.form.get('quality'), 'high');
+  assert.equal(f.store.get('viggle_h3_execution_mapping', step.attemptId).estimatedMicros, '600000');
+  assert.equal(f.plans.view(f.project.id).spentMicros, '600000');
   const facts = f.plans.stepDetail(f.project.id, step.key).output;
   assert.equal(facts.width, 160); assert.equal(facts.height, 288); assert.equal(facts.durationSeconds, 10);
   assert.deepEqual(readCodeFilm(f.service, f.project.id).steps.find(row => row.key === step.key).output, facts);
@@ -171,7 +171,7 @@ test('all four built-in Viggle modes accept both duration boundaries with the N6
   for (const [i, fields] of inputs.entries()) for (const seconds of [5, 15]) {
     const input = normalizeStepInput('video', { model: builtin.id, prompt: 'Walk forward, camera follows', durationSeconds: seconds, ...fields }, { [builtin.id]: model });
     assert.equal(codePlanProviderArgs(builtin, input, { enhance: false }).durationFrames, seconds * 30);
-    assert.equal(modelPrice(model, input), String(seconds * (i === 0 || i === 2 ? 50000 : 30000)));
+    assert.equal(modelPrice(model, input), String(seconds * (i === 0 || i === 2 ? 60000 : 50000)));
   }
 });
 

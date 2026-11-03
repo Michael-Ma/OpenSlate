@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { compilePlan, shotIntentDigest } from "../dist/planning/index.js";
 import { composeScenePlan } from "../dist/planning/scene-composition.js";
 import { DEFAULT_PROFILES } from "../dist/contracts.js";
-import { explicitProjectAspect, frameMatchesAspect, projectAspect, projectExportSize, projectFormat } from "../dist/aspect.js";
+import { codePlanExportSize, explicitProjectAspect, frameMatchesAspect, projectAspect, projectExportSize, projectFormat } from "../dist/aspect.js";
 
 const hash = character => character.repeat(64);
 const codex = { id: "codex-image-v1", revision: "v1", kind: "image", adapter: "codex-image", executionVersion: "1", maxConcurrency: 1, unitCostMicros: "0", maxRetries: 0,
@@ -30,6 +30,19 @@ const source = (context, { image = "codex-image-v1", video = "viggle", frame = "
   return p.render("film", { timeline: edit ${render} });
 });`;
 const reels = { version: "film-kind@1", kind: "social", format: { platform: "ig_reels", aspect: "9:16" } };
+
+test("code-film resolution maps to even export dimensions while graph exports keep their sizes", () => {
+  for (const [resolution, short, long] of [["480p",480,854],["768p",720,1280],["1080p",1080,1920],["2k",1080,1920]]) {
+    for (const aspect of ["16:9","9:16","1:1"]) {
+      const project = { filmKind: { format: { aspect } } };
+      assert.deepEqual(codePlanExportSize(project, resolution), aspect === "1:1" ? {width:short,height:short}
+        : aspect === "9:16" ? {width:short,height:long} : {width:long,height:short});
+      assert.deepEqual(projectExportSize(project), aspect === "1:1" ? {width:720,height:720}
+        : aspect === "9:16" ? {width:720,height:1280} : {width:1280,height:720});
+    }
+  }
+  assert.deepEqual(codePlanExportSize({}, "1080p"), {width:1920,height:1080});
+});
 
 test("projectAspect reads film-kind@1 format defensively and defaults to 16:9", () => {
   assert.deepEqual(projectFormat({}), { aspect: "16:9", explicit: false, requested: null });

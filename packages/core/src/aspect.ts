@@ -68,6 +68,13 @@ export const LEGACY_EXPORT_SIZE: FrameSize = Object.freeze({ width: 1280, height
 export function projectExportSize(project: FormatSource): FrameSize {
   const aspect = explicitProjectAspect(project); return { ...(aspect ? EXPORT_SIZE[aspect] : LEGACY_EXPORT_SIZE) };
 }
+/** Code-film export ceiling. Storyboard exports continue using projectExportSize unchanged. */
+export function codePlanExportSize(project: FormatSource, resolution: "480p" | "768p" | "1080p" | "2k" | "4k"): FrameSize {
+  const short = resolution === "480p" ? 480 : resolution === "768p" ? 720 : 1080;
+  const long = Math.round(short * 16 / 9 / 2) * 2, aspect = projectAspect(project);
+  return aspect === "1:1" ? { width: short, height: short }
+    : aspect === "9:16" ? { width: short, height: long } : { width: long, height: short };
+}
 export function isProjectAspect(value: unknown): value is ProjectAspect {
   return typeof value === "string" && (PROJECT_ASPECTS as readonly string[]).includes(value);
 }

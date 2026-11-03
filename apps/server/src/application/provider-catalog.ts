@@ -17,9 +17,12 @@ const BUILT_IN_PROFILES: ProviderProfile[] = structuredClone(DEFAULT_PROFILES);
 const LYRIA_PROFILE: ProviderProfile = { id: "lyria-3.5-music", revision: "1", kind: "music", adapter: "gemini-lyria", executionVersion: "1",
   configuration: { model: "lyria-3.5", settings: {} }, maxConcurrency: 1, unitCostMicros: "80000", maxRetries: 0 };
 /** New code films use the model's duration range, independent of manual live-validation profiles. */
-const VIGGLE_PROFILE: ProviderProfile = { id: "viggle-h3", revision: "1", kind: "video", adapter: "viggle-h3", executionVersion: "1",
-  configuration: { model: "MiniMax-H3", settings: { quality: "low", resolution: "768p", aspectRatio: "16:9" } },
+const VIGGLE_PROFILE: ProviderProfile = { id: "viggle-h3", revision: "2", kind: "video", adapter: "viggle-h3", executionVersion: "1",
+  configuration: { model: "MiniMax-H3", settings: { quality: "high", resolution: "1080p", aspectRatio: "16:9" } },
   minFrames: 150, maxFrames: 450, maxConcurrency: 1, unitCostMicros: "750000", maxRetries: 0 };
+/** Exact former built-in only: saved films retain their definition, keys and low/768p calls. */
+const LEGACY_VIGGLE_PROFILE: ProviderProfile = { ...VIGGLE_PROFILE, revision: "1",
+  configuration: { model: "MiniMax-H3", settings: { quality: "low", resolution: "768p", aspectRatio: "16:9" } } };
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const generatedKinds = ["image", "video", "speech", "transcription", "music"] as const;
 interface Definition { label: string; profile: ProviderProfile }
@@ -135,7 +138,7 @@ function validateConfiguration(input: unknown): Configuration {
       if (entry.profile?.adapter === "codex-image" && isCodexImageRuntimeUpgrade(entry.profile.configuration?.settings?.runtimeVersion, CODEX_IMAGE_RUNTIME_VERSION))
         entry.profile.configuration!.settings!.runtimeVersion = CODEX_IMAGE_RUNTIME_VERSION;
       const policy = profilePolicy(entry.profile as ProviderProfile), profile = entry.profile as ProviderProfile;
-      invariant(profile.id !== VIGGLE_PROFILE.id || canonical(profile) === canonical(VIGGLE_PROFILE),
+      invariant(profile.id !== VIGGLE_PROFILE.id || [VIGGLE_PROFILE, LEGACY_VIGGLE_PROFILE].some(row => canonical(profile) === canonical(row)),
         "PROVIDER_CATALOG_INVALID", "The built-in Viggle identity requires its exact definition; use a distinct id for custom profiles");
       invariant(!policy.fixture && !used.has(profile.id), "PROVIDER_CATALOG_INVALID", "Additional external profiles require distinct nonreserved identities"); used.add(profile.id);
     }
@@ -181,6 +184,9 @@ export class InstalledProviderCatalog {
   constructor(options: { configuration?: unknown; registry?: ExecutionRegistry; credentials?: EnvironmentMediaCredentials;
     codexImageConfigured?: boolean; mediaTools?: { image: boolean; video: boolean; audio?: boolean }; enabledExecutions?: readonly ExecutionIdentity[] } = {}) {
     const configuration = options.configuration === undefined ? { version: 1 as const, profiles: [] } : validateConfiguration(options.configuration);
+    // Host configurations may still name the former built-in. Only new selections get the new default.
+    configuration.profiles = configuration.profiles.map(row => canonical(row.profile) === canonical(LEGACY_VIGGLE_PROFILE)
+      ? { ...row, profile: structuredClone(VIGGLE_PROFILE) } : row);
     this.#credentials = options.credentials ?? new EnvironmentMediaCredentials();
     const lyria = !configuration.profiles.some(row => row.profile.kind === "music") && (options.enabledExecutions ?? []).some(row => row.adapter === "gemini-lyria");
     const viggle = !configuration.profiles.some(row => row.profile.id === VIGGLE_PROFILE.id) && (options.enabledExecutions ?? []).some(row => row.adapter === "viggle-h3");
@@ -261,7 +267,8 @@ export class InstalledProviderCatalog {
     const effective = profile ? structuredClone(profile) : null;
     if (effective?.adapter === "codex-image" && isCodexImageRuntimeUpgrade(effective.configuration?.settings?.runtimeVersion, CODEX_IMAGE_RUNTIME_VERSION))
       effective.configuration!.settings!.runtimeVersion = CODEX_IMAGE_RUNTIME_VERSION;
-    const current = effective ? this.#definitions.find(item => item.profile.id === effective.id && canonical(item.profile) === canonical(effective)) : undefined;
+    const current = effective ? this.#definitions.find(item => item.profile.id === effective.id && (canonical(item.profile) === canonical(effective)
+      || canonical(effective) === canonical(LEGACY_VIGGLE_PROFILE) && canonical(item.profile) === canonical(VIGGLE_PROFILE))) : undefined;
     let registered = false;
     if (valid && profile) { try { registered = !!this.#registry?.forProfile(profile); } catch { /* A missing route remains unavailable. */ } }
     let credentialPresent: boolean | null = null, credentialUnavailable = false;
