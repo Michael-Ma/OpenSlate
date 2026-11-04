@@ -1,0 +1,1504 @@
+{
+  "date": "2026-11-03 America/Los_Angeles",
+  "initialBalanceCredits": 7995,
+  "finalBalanceCredits": 6460,
+  "expectedCredits": 1480,
+  "observedAccountDecreaseCredits": 1535,
+  "unexplainedDifferenceCredits": 55,
+  "runs": {
+    "matrix": {
+      "expectedCredits": 1365,
+      "jobs": [
+        {
+          "request": {
+            "event": "intent",
+            "index": 0,
+            "mode": "text",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 10,
+            "at": "2026-11-04T02:06:28.931Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 0,
+            "mode": "text",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 10,
+            "id": "vid_63cede5e-5420-43ef-bc65-035802e9a6a9",
+            "status": "ready",
+            "balance": {
+              "balance": 7895
+            },
+            "error": null,
+            "at": "2026-11-04T02:11:11.061Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 1,
+            "mode": "text",
+            "resolution": "480p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 10,
+            "at": "2026-11-04T02:07:42.653Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 1,
+            "mode": "text",
+            "resolution": "480p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 10,
+            "id": "vid_01eb8fde-81d9-4086-b238-75a9aa9fc095",
+            "status": "ready",
+            "balance": {
+              "balance": 7920
+            },
+            "error": null,
+            "at": "2026-11-04T02:09:56.318Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 2,
+            "mode": "text",
+            "resolution": "768p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 15,
+            "at": "2026-11-04T02:07:42.655Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 2,
+            "mode": "text",
+            "resolution": "768p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 15,
+            "id": "vid_8f9d0728-7c65-47e7-8029-4d3a8b218450",
+            "status": "ready",
+            "balance": {
+              "balance": 7895
+            },
+            "error": null,
+            "at": "2026-11-04T02:11:09.482Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 3,
+            "mode": "text",
+            "resolution": "768p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 15,
+            "at": "2026-11-04T02:07:42.656Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 3,
+            "mode": "text",
+            "resolution": "768p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 15,
+            "id": "vid_b0aaa2a9-c3c5-4521-8634-50fae5ee51d8",
+            "status": "ready",
+            "balance": {
+              "balance": 7945
+            },
+            "error": null,
+            "at": "2026-11-04T02:09:53.332Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 4,
+            "mode": "text",
+            "resolution": "1080p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 25,
+            "at": "2026-11-04T02:09:53.334Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 4,
+            "mode": "text",
+            "resolution": "1080p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 25,
+            "id": "vid_5f5dec45-39b6-4ead-ac46-6260cf79da81",
+            "status": "ready",
+            "balance": {
+              "balance": 7895
+            },
+            "error": null,
+            "at": "2026-11-04T02:11:11.000Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 5,
+            "mode": "text",
+            "resolution": "1080p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 25,
+            "at": "2026-11-04T02:09:56.318Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 5,
+            "mode": "text",
+            "resolution": "1080p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 25,
+            "id": "vid_4d8921ba-04d4-49ad-8454-816611a258b2",
+            "status": "ready",
+            "balance": {
+              "balance": 7785
+            },
+            "error": null,
+            "at": "2026-11-04T02:12:32.073Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 6,
+            "mode": "text",
+            "resolution": "2k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 30,
+            "at": "2026-11-04T02:11:09.483Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 6,
+            "mode": "text",
+            "resolution": "2k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 30,
+            "id": "vid_c1986242-dde6-4e40-9a38-45820f1f0f86",
+            "status": "ready",
+            "balance": {
+              "balance": 7735
+            },
+            "error": null,
+            "at": "2026-11-04T02:13:20.234Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 7,
+            "mode": "text",
+            "resolution": "2k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 30,
+            "at": "2026-11-04T02:11:11.002Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 7,
+            "mode": "text",
+            "resolution": "2k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 30,
+            "id": "vid_fe4d8b55-9212-4570-ad30-b9eabaaceba0",
+            "status": "ready",
+            "balance": {
+              "balance": 7600
+            },
+            "error": null,
+            "at": "2026-11-04T02:14:48.277Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 8,
+            "mode": "text",
+            "resolution": "4k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 50,
+            "at": "2026-11-04T02:11:11.063Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 8,
+            "mode": "text",
+            "resolution": "4k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 50,
+            "id": "vid_192ff415-c97e-4ae3-a7f7-a5b302186146",
+            "status": "ready",
+            "balance": {
+              "balance": 7445
+            },
+            "error": null,
+            "at": "2026-11-04T02:17:29.760Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 9,
+            "mode": "text",
+            "resolution": "4k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 50,
+            "at": "2026-11-04T02:12:32.074Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 9,
+            "mode": "text",
+            "resolution": "4k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 50,
+            "id": "vid_4fa42ebf-68ca-408d-a9d3-d42f44222b7b",
+            "status": "ready",
+            "balance": {
+              "balance": 7445
+            },
+            "error": null,
+            "at": "2026-11-04T02:17:28.577Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 10,
+            "mode": "first_frame",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 10,
+            "at": "2026-11-04T02:13:20.239Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 10,
+            "mode": "first_frame",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 10,
+            "id": "vid_02fb6cc6-6369-45f6-b2ba-f729bc2cde62",
+            "status": "ready",
+            "balance": {
+              "balance": 7565
+            },
+            "error": null,
+            "at": "2026-11-04T02:15:03.552Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 11,
+            "mode": "first_frame",
+            "resolution": "480p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 20,
+            "at": "2026-11-04T02:13:31.089Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 11,
+            "mode": "first_frame",
+            "resolution": "480p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 20,
+            "id": "vid_6c661a74-67bc-4bc7-937f-74bf107d15aa",
+            "status": "ready",
+            "balance": {
+              "balance": 7220
+            },
+            "error": null,
+            "at": "2026-11-04T02:20:25.617Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 12,
+            "mode": "first_frame",
+            "resolution": "768p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 15,
+            "at": "2026-11-04T02:13:31.091Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 12,
+            "mode": "first_frame",
+            "resolution": "768p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 15,
+            "id": "vid_1aaba048-f62e-4b93-a0c4-56cfe0f93c44",
+            "status": "ready",
+            "balance": {
+              "balance": 7535
+            },
+            "error": null,
+            "at": "2026-11-04T02:15:31.733Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 13,
+            "mode": "first_frame",
+            "resolution": "768p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 25,
+            "at": "2026-11-04T02:13:31.091Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 13,
+            "mode": "first_frame",
+            "resolution": "768p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 25,
+            "id": "vid_9094b280-0ccc-4e4d-af93-9955d229ff8b",
+            "status": "ready",
+            "balance": {
+              "balance": 7495
+            },
+            "error": null,
+            "at": "2026-11-04T02:17:19.026Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 14,
+            "mode": "first_frame",
+            "resolution": "1080p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 25,
+            "at": "2026-11-04T02:13:31.092Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 14,
+            "mode": "first_frame",
+            "resolution": "1080p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 25,
+            "id": "vid_82fb7cbd-1eba-4e24-aa4a-5be5370eba27",
+            "status": "ready",
+            "balance": {
+              "balance": 7370
+            },
+            "error": null,
+            "at": "2026-11-04T02:18:02.137Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 15,
+            "mode": "first_frame",
+            "resolution": "1080p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 35,
+            "at": "2026-11-04T02:14:48.280Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 15,
+            "mode": "first_frame",
+            "resolution": "1080p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 35,
+            "id": "vid_e1beeee5-5055-451e-a2a9-ead6968e0d23",
+            "status": "ready",
+            "balance": {
+              "balance": 7320
+            },
+            "error": null,
+            "at": "2026-11-04T02:19:29.112Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 16,
+            "mode": "first_frame",
+            "resolution": "2k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 30,
+            "at": "2026-11-04T02:15:03.555Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 16,
+            "mode": "first_frame",
+            "resolution": "2k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 30,
+            "id": "vid_70ce09ba-1e9f-4d10-9907-1e866a68f3cd",
+            "status": "ready",
+            "balance": {
+              "balance": 7260
+            },
+            "error": null,
+            "at": "2026-11-04T02:19:57.402Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 17,
+            "mode": "first_frame",
+            "resolution": "2k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 40,
+            "at": "2026-11-04T02:15:31.738Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 17,
+            "mode": "first_frame",
+            "resolution": "2k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 40,
+            "id": "vid_4684dd9c-d8ee-433e-8bb2-4821f4cadaaf",
+            "status": "ready",
+            "balance": {
+              "balance": 7345
+            },
+            "error": null,
+            "at": "2026-11-04T02:18:44.781Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 18,
+            "mode": "first_frame",
+            "resolution": "4k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 50,
+            "at": "2026-11-04T02:17:19.029Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 18,
+            "mode": "first_frame",
+            "resolution": "4k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 50,
+            "id": "vid_4611b297-137a-4e74-b9f2-d9a94960fa42",
+            "status": "ready",
+            "balance": {
+              "balance": 6915
+            },
+            "error": null,
+            "at": "2026-11-04T02:22:38.850Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 19,
+            "mode": "first_frame",
+            "resolution": "4k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 60,
+            "at": "2026-11-04T02:17:28.579Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 19,
+            "mode": "first_frame",
+            "resolution": "4k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 60,
+            "id": "vid_c85bd3fc-fd57-4e25-ad6e-710790b5b2df",
+            "status": "ready",
+            "balance": {
+              "balance": 6975
+            },
+            "error": null,
+            "at": "2026-11-04T02:22:02.608Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 20,
+            "mode": "first_last_frame",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 15,
+            "at": "2026-11-04T02:17:29.761Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 20,
+            "mode": "first_last_frame",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 15,
+            "id": "vid_20d38074-45ed-4bad-b18c-03c906804453",
+            "status": "ready",
+            "balance": {
+              "balance": 7290
+            },
+            "error": null,
+            "at": "2026-11-04T02:19:34.563Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 21,
+            "mode": "first_last_frame",
+            "resolution": "480p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 25,
+            "at": "2026-11-04T02:18:02.137Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 21,
+            "mode": "first_last_frame",
+            "resolution": "480p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 25,
+            "id": "vid_f60b61b6-bac9-44d2-bec7-e21709445046",
+            "status": "ready",
+            "balance": {
+              "balance": 7020
+            },
+            "error": null,
+            "at": "2026-11-04T02:21:30.698Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 22,
+            "mode": "first_last_frame",
+            "resolution": "768p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 25,
+            "at": "2026-11-04T02:18:44.783Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 22,
+            "mode": "first_last_frame",
+            "resolution": "768p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 25,
+            "id": "vid_cc8f83b2-17cd-4464-ac45-d4b8a736e31a",
+            "status": "ready",
+            "balance": {
+              "balance": 7185
+            },
+            "error": null,
+            "at": "2026-11-04T02:20:35.191Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 23,
+            "mode": "first_last_frame",
+            "resolution": "768p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 30,
+            "at": "2026-11-04T02:19:29.114Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 23,
+            "mode": "first_last_frame",
+            "resolution": "768p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 30,
+            "id": "vid_abf3769c-5e9e-40ee-9c51-d08a1b3c687c",
+            "status": "ready",
+            "balance": {
+              "balance": 7085
+            },
+            "error": null,
+            "at": "2026-11-04T02:21:16.455Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 24,
+            "mode": "first_last_frame",
+            "resolution": "1080p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 30,
+            "at": "2026-11-04T02:19:34.563Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 24,
+            "mode": "first_last_frame",
+            "resolution": "1080p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 30,
+            "id": "vid_9e7a8f81-5038-4678-b602-566ffe61aeff",
+            "status": "ready",
+            "balance": {
+              "balance": 7140
+            },
+            "error": null,
+            "at": "2026-11-04T02:20:57.854Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 25,
+            "mode": "first_last_frame",
+            "resolution": "1080p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 40,
+            "at": "2026-11-04T02:19:57.404Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 25,
+            "mode": "first_last_frame",
+            "resolution": "1080p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 40,
+            "id": "vid_79084489-a684-40e9-83b7-3b73fcf00c58",
+            "status": "ready",
+            "balance": {
+              "balance": 6790
+            },
+            "error": null,
+            "at": "2026-11-04T02:23:02.052Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 26,
+            "mode": "first_last_frame",
+            "resolution": "2k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 35,
+            "at": "2026-11-04T02:20:25.618Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 26,
+            "mode": "first_last_frame",
+            "resolution": "2k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 35,
+            "id": "vid_6d2551d9-0290-4500-9682-00fa0055e848",
+            "status": "ready",
+            "balance": {
+              "balance": 6940
+            },
+            "error": null,
+            "at": "2026-11-04T02:22:23.040Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 27,
+            "mode": "first_last_frame",
+            "resolution": "2k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 45,
+            "at": "2026-11-04T02:20:35.194Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 27,
+            "mode": "first_last_frame",
+            "resolution": "2k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 45,
+            "id": "vid_d6f616a6-5d75-4dce-89c6-58c3ca986052",
+            "status": "ready",
+            "balance": {
+              "balance": 6915
+            },
+            "error": null,
+            "at": "2026-11-04T02:22:38.857Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 28,
+            "mode": "first_last_frame",
+            "resolution": "4k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 55,
+            "at": "2026-11-04T02:20:57.856Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 28,
+            "mode": "first_last_frame",
+            "resolution": "4k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 55,
+            "id": "vid_cbbdf7e6-92e4-462d-97c7-127fe2b6107c",
+            "status": "ready",
+            "balance": {
+              "balance": 6560
+            },
+            "error": null,
+            "at": "2026-11-04T02:25:31.255Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 29,
+            "mode": "first_last_frame",
+            "resolution": "4k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 65,
+            "at": "2026-11-04T02:21:16.458Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 29,
+            "mode": "first_last_frame",
+            "resolution": "4k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 65,
+            "id": "vid_4db77bfa-bab0-4894-9ffe-3df8442608ee",
+            "status": "ready",
+            "balance": {
+              "balance": 6560
+            },
+            "error": null,
+            "at": "2026-11-04T02:26:06.246Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 30,
+            "mode": "reference",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 15,
+            "at": "2026-11-04T02:21:30.701Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 30,
+            "mode": "reference",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 15,
+            "id": "vid_9fc0ba94-9741-41ec-9fc6-45aa33eacb97",
+            "status": "ready",
+            "balance": {
+              "balance": 6840
+            },
+            "error": null,
+            "at": "2026-11-04T02:22:50.477Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 31,
+            "mode": "reference",
+            "resolution": "480p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 35,
+            "at": "2026-11-04T02:22:02.615Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 31,
+            "mode": "reference",
+            "resolution": "480p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 35,
+            "id": "vid_2ef0d0e7-aeaa-4d4a-ba3b-b4d69d6aaef9",
+            "status": "ready",
+            "balance": {
+              "balance": 6560
+            },
+            "error": null,
+            "at": "2026-11-04T02:25:25.066Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 32,
+            "mode": "reference",
+            "resolution": "768p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 25,
+            "at": "2026-11-04T02:22:23.042Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 32,
+            "mode": "reference",
+            "resolution": "768p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 25,
+            "id": "vid_6e501537-50fb-46bd-b9a2-4ebde6d527cc",
+            "status": "ready",
+            "balance": {
+              "balance": 6700
+            },
+            "error": null,
+            "at": "2026-11-04T02:24:00.802Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 33,
+            "mode": "reference",
+            "resolution": "768p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 45,
+            "at": "2026-11-04T02:22:38.853Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 33,
+            "mode": "reference",
+            "resolution": "768p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 45,
+            "id": "vid_ea85971f-6c9c-4ed0-b52a-c24fe1173375",
+            "status": "ready",
+            "balance": {
+              "balance": 6570
+            },
+            "error": null,
+            "at": "2026-11-04T02:24:42.362Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 34,
+            "mode": "reference",
+            "resolution": "1080p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 30,
+            "at": "2026-11-04T02:22:38.858Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 34,
+            "mode": "reference",
+            "resolution": "1080p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 30,
+            "id": "vid_69259b6c-d63d-4aac-9e52-8eee0943bc2e",
+            "status": "ready",
+            "balance": {
+              "balance": 6755
+            },
+            "error": null,
+            "at": "2026-11-04T02:23:52.687Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 35,
+            "mode": "reference",
+            "resolution": "1080p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 50,
+            "at": "2026-11-04T02:22:50.478Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 35,
+            "mode": "reference",
+            "resolution": "1080p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 50,
+            "id": "vid_eeea43be-dfdb-4cc1-b22d-90f1b740349a",
+            "status": "ready",
+            "balance": {
+              "balance": 6560
+            },
+            "error": null,
+            "at": "2026-11-04T02:25:41.832Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 36,
+            "mode": "reference",
+            "resolution": "2k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 35,
+            "at": "2026-11-04T02:23:02.053Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 36,
+            "mode": "reference",
+            "resolution": "2k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 35,
+            "id": "vid_8ee804c8-411c-43a7-9f83-5ca0238372b4",
+            "status": "ready",
+            "balance": {
+              "balance": 6645
+            },
+            "error": null,
+            "at": "2026-11-04T02:24:33.387Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 37,
+            "mode": "reference",
+            "resolution": "2k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 55,
+            "at": "2026-11-04T02:23:52.690Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 37,
+            "mode": "reference",
+            "resolution": "2k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 55,
+            "id": "vid_eeb4f6ca-3600-4a84-918c-5d507c7de9ed",
+            "status": "ready",
+            "balance": {
+              "balance": 6560
+            },
+            "error": null,
+            "at": "2026-11-04T02:26:36.790Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 38,
+            "mode": "reference",
+            "resolution": "4k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 55,
+            "at": "2026-11-04T02:24:00.804Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 38,
+            "mode": "reference",
+            "resolution": "4k",
+            "enhance": false,
+            "quality": "low",
+            "expected": 55,
+            "id": "vid_4aa806d3-b25b-49fe-9f10-4ea3001b4b0c",
+            "status": "ready",
+            "balance": {
+              "balance": 6540
+            },
+            "error": null,
+            "at": "2026-11-04T02:28:07.716Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 39,
+            "mode": "reference",
+            "resolution": "4k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 75,
+            "at": "2026-11-04T02:24:33.389Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 39,
+            "mode": "reference",
+            "resolution": "4k",
+            "enhance": true,
+            "quality": "low",
+            "expected": 75,
+            "id": "vid_35729744-4174-480b-9845-55bd6cad4345",
+            "status": "ready",
+            "balance": {
+              "balance": 6500
+            },
+            "error": null,
+            "at": "2026-11-04T02:29:18.257Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 40,
+            "mode": "text",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "high",
+            "expected": 10,
+            "at": "2026-11-04T02:24:42.363Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 40,
+            "mode": "text",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "high",
+            "expected": 10,
+            "id": "vid_6603193a-94fa-43e6-824e-ed4946c7afc7",
+            "status": "ready",
+            "balance": {
+              "balance": 6560
+            },
+            "error": null,
+            "at": "2026-11-04T02:25:20.769Z"
+          }
+        }
+      ],
+      "accountSnapshots": [
+        {
+          "event": "start",
+          "before": {
+            "balance": 7995
+          },
+          "cases": 41,
+          "budgetCredits": 2000,
+          "at": "2026-11-04T02:06:28.928Z"
+        },
+        {
+          "event": "start",
+          "before": {
+            "balance": 7985
+          },
+          "cases": 41,
+          "budgetCredits": 2000,
+          "at": "2026-11-04T02:07:42.650Z"
+        },
+        {
+          "event": "start",
+          "before": {
+            "balance": 7725
+          },
+          "cases": 41,
+          "budgetCredits": 2000,
+          "at": "2026-11-04T02:13:31.084Z"
+        },
+        {
+          "event": "finish",
+          "after": {
+            "balance": 6500
+          },
+          "expectedCredits": 1235,
+          "at": "2026-11-04T02:29:18.615Z"
+        }
+      ]
+    },
+    "extra": {
+      "expectedCredits": 15,
+      "jobs": [
+        {
+          "request": {
+            "event": "intent",
+            "index": 0,
+            "mode": "reference_video",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "high",
+            "expected": 15,
+            "at": "2026-11-04T02:21:50.943Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 0,
+            "mode": "reference_video",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "high",
+            "expected": 15,
+            "id": "vid_0cb231f3-7e9c-45fb-82dc-e6be9b3d1364",
+            "status": "ready",
+            "balance": {
+              "balance": 6570
+            },
+            "error": null,
+            "at": "2026-11-04T02:24:38.554Z"
+          }
+        }
+      ],
+      "accountSnapshots": [
+        {
+          "event": "start",
+          "before": {
+            "balance": 7005
+          },
+          "cases": 1,
+          "budgetCredits": 2000,
+          "at": "2026-11-04T02:21:50.940Z"
+        },
+        {
+          "event": "finish",
+          "after": {
+            "balance": 6570
+          },
+          "expectedCredits": 15,
+          "at": "2026-11-04T02:24:38.869Z"
+        }
+      ]
+    },
+    "isolated": {
+      "expectedCredits": 85,
+      "jobs": [
+        {
+          "request": {
+            "event": "intent",
+            "index": 0,
+            "mode": "first_frame",
+            "resolution": "480p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 20,
+            "at": "2026-11-04T02:27:15.741Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 0,
+            "mode": "first_frame",
+            "resolution": "480p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 20,
+            "id": "vid_d07d5bb9-5176-4f60-91a3-85046ae1526a",
+            "status": "ready",
+            "balance": {
+              "balance": 6540
+            },
+            "error": null,
+            "at": "2026-11-04T02:28:25.888Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 1,
+            "mode": "first_frame",
+            "resolution": "768p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 15,
+            "at": "2026-11-04T02:28:25.891Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 1,
+            "mode": "first_frame",
+            "resolution": "768p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 15,
+            "id": "vid_d835f6cb-9643-45ee-a50c-16be7d56bfe2",
+            "status": "ready",
+            "balance": {
+              "balance": 6525
+            },
+            "error": null,
+            "at": "2026-11-04T02:29:02.939Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 2,
+            "mode": "first_frame",
+            "resolution": "768p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 25,
+            "at": "2026-11-04T02:29:02.941Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 2,
+            "mode": "first_frame",
+            "resolution": "768p",
+            "enhance": true,
+            "quality": "low",
+            "expected": 25,
+            "id": "vid_0a46b074-a131-4f5c-ab3b-7f2a52ef90b8",
+            "status": "ready",
+            "balance": {
+              "balance": 6500
+            },
+            "error": null,
+            "at": "2026-11-04T02:30:09.889Z"
+          }
+        },
+        {
+          "request": {
+            "event": "intent",
+            "index": 3,
+            "mode": "first_frame",
+            "resolution": "1080p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 25,
+            "at": "2026-11-04T02:30:09.893Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 3,
+            "mode": "first_frame",
+            "resolution": "1080p",
+            "enhance": false,
+            "quality": "low",
+            "expected": 25,
+            "id": "vid_867d0f61-cb29-4a53-9b6a-ef3a280e9bef",
+            "status": "ready",
+            "balance": {
+              "balance": 6475
+            },
+            "error": null,
+            "at": "2026-11-04T02:30:56.572Z"
+          }
+        }
+      ],
+      "accountSnapshots": [
+        {
+          "event": "start",
+          "before": {
+            "balance": 6560
+          },
+          "cases": 4,
+          "budgetCredits": 2000,
+          "at": "2026-11-04T02:27:15.737Z"
+        },
+        {
+          "event": "reservation",
+          "index": 0,
+          "mode": "first_frame",
+          "resolution": "480p",
+          "enhance": true,
+          "quality": "low",
+          "expected": 20,
+          "before": {
+            "balance": 6560
+          },
+          "after": {
+            "balance": 6560
+          },
+          "at": "2026-11-04T02:27:18.072Z"
+        },
+        {
+          "event": "reservation",
+          "index": 1,
+          "mode": "first_frame",
+          "resolution": "768p",
+          "enhance": false,
+          "quality": "low",
+          "expected": 15,
+          "before": {
+            "balance": 6540
+          },
+          "after": {
+            "balance": 6540
+          },
+          "at": "2026-11-04T02:28:27.833Z"
+        },
+        {
+          "event": "reservation",
+          "index": 2,
+          "mode": "first_frame",
+          "resolution": "768p",
+          "enhance": true,
+          "quality": "low",
+          "expected": 25,
+          "before": {
+            "balance": 6525
+          },
+          "after": {
+            "balance": 6525
+          },
+          "at": "2026-11-04T02:29:05.522Z"
+        },
+        {
+          "event": "reservation",
+          "index": 3,
+          "mode": "first_frame",
+          "resolution": "1080p",
+          "enhance": false,
+          "quality": "low",
+          "expected": 25,
+          "before": {
+            "balance": 6500
+          },
+          "after": {
+            "balance": 6500
+          },
+          "at": "2026-11-04T02:30:11.736Z"
+        },
+        {
+          "event": "finish",
+          "after": {
+            "balance": 6475
+          },
+          "expectedCredits": 85,
+          "at": "2026-11-04T02:30:56.878Z"
+        }
+      ]
+    },
+    "extra-isolated": {
+      "expectedCredits": 15,
+      "jobs": [
+        {
+          "request": {
+            "event": "intent",
+            "index": 0,
+            "mode": "reference_video",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "high",
+            "expected": 15,
+            "at": "2026-11-04T02:31:11.762Z"
+          },
+          "result": {
+            "event": "result",
+            "index": 0,
+            "mode": "reference_video",
+            "resolution": "480p",
+            "enhance": false,
+            "quality": "high",
+            "expected": 15,
+            "id": "vid_450fcb11-e549-4fe8-bfe6-8e4925ff9d0a",
+            "status": "ready",
+            "balance": {
+              "balance": 6460
+            },
+            "error": null,
+            "at": "2026-11-04T02:32:18.860Z"
+          }
+        }
+      ],
+      "accountSnapshots": [
+        {
+          "event": "start",
+          "before": {
+            "balance": 6475
+          },
+          "cases": 1,
+          "budgetCredits": 2000,
+          "at": "2026-11-04T02:31:11.759Z"
+        },
+        {
+          "event": "finish",
+          "after": {
+            "balance": 6460
+          },
+          "expectedCredits": 15,
+          "at": "2026-11-04T02:32:19.503Z"
+        }
+      ]
+    }
+  }
+}
