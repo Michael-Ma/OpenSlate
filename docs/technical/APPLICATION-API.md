@@ -15,7 +15,11 @@ Below, `P` means `/api/projects/:projectId`. All listed reads require the applic
 | Route | Use and boundary |
 |---|---|
 | `GET /api/projects`, `POST /api/projects` | Film list/create; optional `planMode: "graph" \| "code"` selects the code-plan path; omitted/graph leaves the legacy record unchanged. Saved models are validated against the installed catalog |
-| `GET P`, `POST P/storyboard` | Snapshot and revision-checked brief/story/scene/shot, music and Undo commands |
+| `GET P`, `POST P/storyboard` | Snapshot and revision-checked brief/story/scene/shot, music (`soundtrack`), shot/scene moves and deletes, Fit to song lengths (`shotTiming`), Singing (`shotPerformance`), kept clip sound (`shotClipAudio`) and Undo commands |
+| `GET/PUT P/characters`, `POST P/characters/:characterId/sheet/generate`, `/import` or `/approve` | Cast, per-scene wardrobe and shot casting; a paid four-view sheet echoes `expectedEstimateMicros`, import makes an owned take, and free approval binds the sheet into later keyframes |
+| `POST P/scenes/:sceneId/remake-clips` | One to four saved clips in one scene remade from their current approved frames, saved recipe and voice; a human press with `confirmationDigest`, `reviewedFrames` and optional `expectedEstimateMicros` |
+| `GET P/audio-library/:audioId/timing`, `GET/POST P/audio-library/:audioId/song-analysis` | Free local tempo/beat/section timing and the shot-length fit; the person-started paid Gemini listen (`expectedSha256`) and its saved result |
+| `GET P/clip-audio/:artifactId/content` | Owned derived sound of a clip, for Film playback of kept clip sound |
 | `POST P/rename`, `POST P/archive`, `POST P/unarchive` | Keyed film management without detaching owned media; archive refuses running/unknown attempts |
 | `GET P/plan-imports`, `POST P/plan-imports`, `POST P/plan-imports/:requestId/confirm` or `/discard` | Text/Markdown proposal review and canonical publication |
 | `POST P/messages`, `GET P/director` | Explicit human words/scope, structured answers, request/runtime status |

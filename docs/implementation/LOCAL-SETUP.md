@@ -23,6 +23,7 @@ Use an explicit `OPENSLATE_PROVIDER_CONFIG` based on the [example catalog](../..
 | Direct MiniMax H3 | `OPENSLATE_MINIMAX_API_KEY`, H3 enable switch and exact download hosts |
 | Lyria music / song analysis | `OPENSLATE_GEMINI_API_KEY`; billing-enabled Gemini project |
 | Seedance / fal video (code films) | `OPENSLATE_MODELARK_API_KEY` / `OPENSLATE_FAL_API_KEY`, exact installed profiles |
+| fal lip sync (storyboard Singing shots) | `OPENSLATE_FAL_API_KEY`, `OPENSLATE_ENABLE_FAL_LIPSYNC` and an installed `fal-h3-lipsync` profile ([example](../../examples/fal-lipsync-provider-profiles.example.json)) |
 | Codex images | Existing ChatGPT login, absolute supported `OPENSLATE_CODEX_IMAGE_BINARY`; optional existing Codex home |
 
 See [activation variables](MEDIA-EXECUTION-LAUNCHER.md). Local credential presence does not verify provider access, quota or voice eligibility. A selected model or enabled route creates no paid work; review and start the intended operation in the app. Configured providers require no separate usage allowance or spending approval.

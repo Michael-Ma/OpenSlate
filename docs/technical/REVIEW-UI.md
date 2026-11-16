@@ -6,11 +6,11 @@
 
 The shell has a 52 px header, a 392 px Director column and **Plan / Keyframes / Assets / Film** views, plus Start and Settings. Narrow screens use a Director drawer. The dark palette, local Inter, shared controls and per-view styles come from [studio.css](../../apps/web/src/next/ui/studio.css) and the [Last Ferry design](../ai/prototypes/last-ferry/DESIGN.md). The current tree does not use Radix Themes or the earlier Day/Night workbench.
 
-- **Plan:** brief/story, scene/shot hierarchy, import review and revision-checked edits with Undo.
-- **Keyframes:** selected preview, motion explanation, editable shot fields, scene/shot state, current-frame viewing evidence, earlier takes, narration-fit choices and video confirmation.
-- **Director:** explicit @ scope, saved timestamps/runtime, structured question answers, anchored lettered notes and held proposals with Now/After effects. Selecting a preview does not change the composer target. Application-derived checks are separate from Director recommendations.
-- **Assets:** owned images, clips, audio and exports, filtered by role/scene/shot, with imports and bounded media loading.
-- **Film:** one clock for picture/narration/music, storyboard order/timing, music edits and a single readiness/history/download export surface.
+- **Plan:** brief/story, Cast ([CastPanel](../../apps/web/src/next/views/plan/CastPanel.tsx): characters, per-scene wardrobe, shot casting and the character-sheet review), Look (visual style), scene/shot hierarchy, move/delete dialogs, import review and revision-checked edits with Undo.
+- **Keyframes:** selected preview, motion explanation, editable shot fields, scene/shot state, current-frame viewing evidence, earlier takes, narration-fit choices, the Singing switch and lip-sync state for films with a song, and video confirmation.
+- **Director:** explicit @ scope, saved timestamps/runtime, structured question answers, anchored lettered notes, held proposals with Now/After effects, visual-style proposals and confirmation cards ([DecisionCards](../../apps/web/src/next/director/DecisionCards.tsx)) that apply only on the person's press. Selecting a preview does not change the composer target. Application-derived checks are separate from Director recommendations.
+- **Assets:** owned images, clips, audio and exports, filtered by role/scene/shot, with imports, bounded media loading and the optional paid **Analyze song** for music recordings.
+- **Film:** one clock for picture/narration/music, storyboard order/timing, music edits, Fit to song, per-shot Keep clip sound and level, and a single readiness/history/download export surface.
 - **Start/Settings:** film creation/rename/archive, sample path, provider choices, Director setup/review, stock/personal voices, computer status and language.
 
 ## Projection and command boundaries

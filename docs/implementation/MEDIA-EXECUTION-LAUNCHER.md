@@ -12,6 +12,8 @@ Host enablement chooses which compiled-in routes the local service can execute. 
 | Lyria music | `OPENSLATE_ENABLE_MUSIC_GENERATION` | `OPENSLATE_GEMINI_API_KEY`; default built-in music profile |
 | Seedance (code films) | `OPENSLATE_ENABLE_SEEDANCE_GENERATION` | `OPENSLATE_MODELARK_API_KEY`; installed profiles |
 | fal video (code films) | `OPENSLATE_ENABLE_FAL_VIDEO_GENERATION` | `OPENSLATE_FAL_API_KEY`; installed profiles |
+| fal H3 Max lip sync (storyboard Singing shots) | `OPENSLATE_ENABLE_FAL_LIPSYNC` | `OPENSLATE_FAL_API_KEY`; an installed `fal-h3-lipsync` profile ([example](../../examples/fal-lipsync-provider-profiles.example.json)); optional `OPENSLATE_FAL_DOWNLOAD_HOSTS` |
+| Gemini song analysis (storyboard) | None | `OPENSLATE_GEMINI_API_KEY`; each listen is started and paid for by the person in Assets |
 | OpenAI transcription | `OPENSLATE_ENABLE_TRANSCRIPTION=1` | OpenAI media key |
 
 Switches accept `0`/`1`; unset values follow configured credential/runtime defaults. FFmpeg/ffprobe are required for enabled media execution. Download allowlists contain exact trusted HTTPS hostnames separated by commas, without scheme/path/wildcards. An output-host error after video creation should recover the known job after correcting the allowlist and restarting; do not create a replacement.

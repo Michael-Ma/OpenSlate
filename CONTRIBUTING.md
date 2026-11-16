@@ -23,10 +23,10 @@ The Node pin comes from `.nvmrc`, pnpm from `package.json`, and the media releas
 ## Implementation boundaries
 
 - OpenSlate owns canonical state, requests, revisions, review, grants and execution. A model only proposes validated data.
-- Never evaluate model-authored JavaScript. Keep the bounded parser and all plan validation paths.
+- Storyboard declarations are never evaluated: keep the bounded parser and all plan validation paths. Code-film programs run only inside the QuickJS/WASM guest with its CPU, memory, host-call and source bounds; do not give the guest Node, filesystem, network or secret access, and never run model-authored code outside it.
 - Preserve immutable review inputs, one-use grants, candidate/attempt separation, persisted submission intent and unknown-outcome reconciliation.
 - Preserve request scope, edit-hold ownership and old epoch fencing. An unrelated request cannot borrow another edit's authority.
-- Keep Codex protocol details in `packages/director`, provider transport details behind adapters, and server/compiler modules out of browser bundles. Browser contracts come from `@openslate/core/public`.
+- Keep Codex and Claude Code protocol details in `packages/director`, provider transport details behind adapters, and server/compiler modules out of browser bundles. Browser contracts come from `@openslate/core/public`.
 - V0 is one user on one computer. Multi-host operation, remote GPU workers and shared databases need a separate design.
 - Keep credentials, databases, generated media, dependencies and build output out of commits.
 

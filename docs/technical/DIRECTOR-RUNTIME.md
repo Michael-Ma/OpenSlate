@@ -19,7 +19,9 @@ The App Server protocol and native image worker pin **0.162.1**. The default Dir
 
 The effective executable is discovered from explicit `OPENSLATE_CODEX_BINARY`, then `OPENSLATE_CODEX_IMAGE_BINARY`, the supported side-by-side installation, or bounded local application/PATH candidates. A configured old binary can use the verified versioned installation with `DIRECTOR_CODEX_VERSION_MISMATCH` notice; saved configuration and historical receipts keep their identities. Without a supported executable setup refuses. See [installation](../implementation/MANUAL-LIVE-PRODUCTION.md#codex).
 
-Turns use **high** reasoning effort. The exact local policy reduces native features, disables shell/web/built-in image generation for the Director, and exposes only the lock's MCP tools. The separate image worker has its own image-generation policy and account preparation. Studio-owned instruction-free homes, configuration checks, bridge credentials and epochs remain enforced. V0 trusts the installed runtime/sandbox; independent code-host/authentication isolation is unverified, as the [trust decision](../implementation/RUNTIME-TRUST-DECISION.md) explains.
+Turns use **high** reasoning effort. The exact local policy reduces native features, disables shell/web/built-in image generation for the Director, and exposes only the lock's MCP tools. The separate image worker has its own image-generation policy and account preparation. Studio-owned instruction-free homes, configuration checks, bridge credentials and epochs remain enforced.
+
+The policy sets `project_doc_max_bytes: 0` and empty `project_doc_fallback_filenames` and `project_root_markers`. With no root markers, Codex 0.162.1 treats the film workspace itself as the project root, so `AGENTS.md`, `.codex` configuration and repository skills in parent directories never reach the Director, even when the data directory sits inside a Git checkout (F5). Each private Codex home pins only that workspace as `trust_level: "untrusted"`; preparation clears earlier auto-trust records, and setup and launch refuse a configuration that differs (F5b). V0 trusts the installed runtime/sandbox; independent code-host/authentication isolation is unverified, as the [trust decision](../implementation/RUNTIME-TRUST-DECISION.md) explains.
 
 ## Claude Code
 
@@ -37,7 +39,7 @@ Owned discussion images and current keyframes enter bounded, hash-bound projecti
 
 ## Code-plan Director
 
-`planMode: "code"` takes the separate [code-plan input path](../../apps/server/src/code-plan/director.ts), projecting its current source/view rather than graph planning context. Current guidance is `code-plan@2.0.0` on tool contract **0.3.0**, handler **`code-plan-tools@3`**. The tools are `read_film`, `submit_plan`, `set_spend_limit`, `retry_step` and `read_clip_frames`. Archived 0.1.0 and 0.2.0 catalogs/guidance keep their identities and compatibility behavior; the current contract's shipped content may refresh on an eligible fresh turn.
+`planMode: "code"` takes the separate [code-plan input path](../../apps/server/src/code-plan/director.ts), projecting its current source/view rather than graph planning context. Current guidance is `code-plan@2.0.1` on tool contract **0.3.0**, handler **`code-plan-tools@3`**. The tools are `read_film`, `submit_plan`, `set_spend_limit`, `retry_step` and `read_clip_frames`. Archived 0.1.0 and 0.2.0 catalogs/guidance keep their identities and compatibility behavior; the current contract's shipped content may refresh on an eligible fresh turn.
 
 `submit_plan` carries the whole program, base version and durable invocation ID. `CodePlanRuntime` implements the port in production: dry-run validation, diffs, version fencing, publication and same-ID recovery. No native plan-file access is needed. Programs run later in the isolated [QuickJS replay sandbox](EXECUTION-ENGINE.md#code-plans-experimental), not inside the Director process or the graph declaration compiler.
 

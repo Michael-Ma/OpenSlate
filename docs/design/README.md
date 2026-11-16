@@ -6,7 +6,7 @@ OpenSlate is a single-user studio running on one computer: React browser UI, Fas
 
 | Mode | Planning and execution | Human decisions |
 |---|---|---|
-| Storyboard (`graph`, default) | Canonical brief/scenes/shots and restricted declarations compiled to an immutable operation graph; graph workers use candidates, grants, attempts and bindings | Make keyframes/voice, inspect returned frames and actual video recipe, then confirm scene video. Notes/proposals are separate typed decisions |
+| Storyboard (`graph`, default) | Canonical brief/scenes/shots, film kind (`film-kind@1`), cast and soundtrack; restricted declarations compiled to an immutable operation graph; graph workers use candidates, grants, attempts and bindings | Make keyframes/voice, inspect returned frames and actual video recipe, then confirm scene video. Notes, proposals and confirmation cards are separate typed decisions |
 | Code plan (`code`, experimental) | Director submits a full TypeScript program; disposable QuickJS/WASM passes call bounded host methods and reuse content-addressed journal results | Program choices, each declared shot's keyframe/video-input confirmation and a per-film liability ceiling (new default $4) |
 
 Models propose validated changes; application authority stays in OpenSlate. Storyboard declaration compilation never executes generated JavaScript. Code films do evaluate stripped TypeScript, only inside an isolated guest without Node/filesystem/network/secrets. New user direction fences incompatible old epochs, and neither mode can reuse a later request's authority for an earlier preparation.
@@ -59,6 +59,14 @@ Codex uses the accepted exact local policy and trusted installed sandbox. Claude
 
 The [Last Ferry design](../ai/prototypes/last-ferry/DESIGN.md) supplies the dark English/Chinese studio: Plan, Keyframes, Assets, Film, Start and Settings. Code films have no separate Keyframes tab; Plan holds references/keyframe/clip progress, Assets holds owned results, and Developer mode reveals Code. Choice cards stay with their originating reply and retire in place. [UI reference](../technical/REVIEW-UI.md).
 
-Local assembly uses 30 fps and 48 kHz, up to 360 seconds/64 clips/65 audio placements/eight audio lanes. Code-plan trims, speed/holds/zoom, captions, sound effects and fades are implemented; a general multitrack editor, transitions, waveforms and streaming remain pending. Existing eligible custom voice IDs are supported; in-app voice-clone enrollment, installers, portable relocation, multi-host deployment and local H3 inference remain outside delivered scope.
+Storyboard films (v8 guidance, contract 7.1.0) also carry:
+
+- **Film kind:** a structured `film-kind@1` record (kind, subtype, tones, format) that routes the Director's craft/type/format guidance; the Director asks when it is undecided.
+- **Cast:** recurring characters with per-scene wardrobe and four-view character sheets, reviewed in Plan › Cast and bound into their shots' keyframes.
+- **Music videos:** an imported song with local tempo/beat/section analysis and a suggested shot-length fit; an optional paid Gemini listen, started only by the person, adds section labels and timed lyrics. Shots marked Singing are made by MiniMax H3 Max lip sync on fal from the keyframe and the shot's stretch of the song.
+- **Clip sound:** a shot can keep its clip's own sound, ducked under narration; social and comedy films keep it by default.
+- **Director cards:** the Director offers two or three visual styles to choose from, and confirmation cards for using an earlier take, deleting shots or a scene, resuming after Stop or remaking one to four saved clips. Each card states what changes and what it may cost; only the person's press applies it.
+
+Local assembly uses 48 kHz audio and 1/30-second plan ticks; storyboard exports render at 30 fps and new code films at 24 fps, with clips keeping their native constant frame rate. Limits are 360 seconds/64 clips/65 audio placements/eight audio lanes. Code-plan trims, speed/holds/zoom, captions, sound effects and fades are implemented; a general multitrack editor, transitions, waveforms and streaming remain pending. Existing eligible custom voice IDs are supported; in-app voice-clone enrollment, installers, portable relocation, multi-host deployment and local H3 inference remain outside delivered scope.
 
 [Component references](../technical/README.md), [status/evidence](../implementation/STATUS.md), [studio guide](STORYBOARD-STUDIO.md) and [remaining acceptance](IMPLEMENTATION-PLAN.md) provide current details. Dated designs/reports describe only their own checkpoints.

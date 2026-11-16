@@ -14,7 +14,7 @@ The full catalog digest covers complete definitions, including labels, estimates
 
 Authenticated catalog/project views report installed definitions, saved provenance, registration, host enablement, local tools, credential presence and project compatibility. A credential-present row is not an API access/quota check. Removed installation profiles do not overwrite saved project definitions.
 
-Storyboard new-project selection is paired with an exact catalog digest and one profile per chosen kind; omitted kinds remain demo. The server creates a trusted selection inside the replay-safe command. A completed replay returns its original project even if the current catalog changed.
+Storyboard new-project selection is paired with an exact catalog digest and one profile per chosen kind; omitted kinds remain demo. The server creates a trusted selection inside the replay-safe command. A completed replay returns its original project even if the current catalog changed. A ready `fal-h3-lipsync` profile is never chosen as the video model; new projects whose video is a real model pin it beside that model, for Singing shots only.
 
 Existing storyboard projects use revision-bound model preview/apply. The preview names changes and preserved work; apply creates a successor lock and compatible pending graph. Completed outputs, in-flight work, dependencies protecting that work and separately reviewed audio plans remain pinned. A redefined saved profile ID must be installed under a distinct identity. Saving choices creates no generation grant and starts no director turn.
 
@@ -22,7 +22,7 @@ The compact settings UI shows model-per-job choices first and selected-account s
 
 ## Code-film locks
 
-New code films pin ready image/video/speech/music definitions, including additional ready video/music profiles. Their selected video remains the default. Enabled Viggle uses the built-in `viggle-h3` profile (MiniMax-H3, low, 768p, 5–15 seconds) for new code films; configured historical profiles stay available for saved locks/storyboard films. A saved code-film model list is not silently extended after catalog changes. Director runtime/model choice is separate. `read_film` reports actual locked capabilities, input-based prices and measured outputs; these are not vendor access or billing proofs. See [providers/artifacts](../technical/PROVIDERS-ARTIFACTS.md).
+New code films pin ready image/video/speech/music definitions, including additional ready video/music profiles. Their selected video remains the default. Enabled Viggle uses the built-in `viggle-h3` profile revision 2 (MiniMax-H3, high quality, 1080p, 5–15 seconds) for new code films, and each film can choose 480p, 768p, 1080p or 2K for clips not yet sent; saved films on revision 1 keep low/768p; configured historical profiles stay available for saved locks/storyboard films. A saved code-film model list is not silently extended after catalog changes. Director runtime/model choice is separate. `read_film` reports actual locked capabilities, input-based prices and measured outputs; these are not vendor access or billing proofs. See [providers/artifacts](../technical/PROVIDERS-ARTIFACTS.md).
 
 ## Source and checks
 

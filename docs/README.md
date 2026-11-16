@@ -7,7 +7,7 @@ These pages describe the current local studio and its implemented boundaries. [S
 | [Quick start](../README.md#getting-started) | Run the studio |
 | [Local setup](implementation/LOCAL-SETUP.md) | Tools, server configuration and provider keys |
 | [Launcher](implementation/LOCAL-LAUNCHER.md) | Start, restart, pairing and process ownership |
-| [Studio guide](design/STORYBOARD-STUDIO.md) | Chat, storyboard, audio, reviews and Timeline |
+| [Studio guide](design/STORYBOARD-STUDIO.md) | Plan, Cast, Keyframes, Assets and Film; Director notes and cards, audio, songs and reviews |
 | [Owner test guide](ai/code-plan/TEST-INSTRUCTIONS.md) | Chinese checklist, code films, Codex models and Claude Code |
 | [Human testing](implementation/MANUAL-LIVE-PRODUCTION.md) | Small real-provider walkthrough |
 | [Audio rehearsal](implementation/MANUAL-AUDIO-TESTING.md) | Writing/recording review without paid media |
