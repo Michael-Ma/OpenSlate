@@ -178,7 +178,8 @@ function directorSetup(world: FixtureWorld, projectId?: string): DirectorSetup {
     // The host's suggestion for this computer: no path when it has no Codex.
     defaults: { binaryPath: computer(world).codex ? CODEX_DEFAULTS.binaryPath : "", model: CODEX_DEFAULTS.model },
     locked: true, modelCalls: 4,
-    modelChoices: s.catalogStatus === "ready" ? [{ id: "gpt-6.1-sol", label: "gpt-6.1-sol" }, { id: "gpt-6-astra", label: "gpt-6-astra" }, { id: "gpt-6-astra-mini", label: "gpt-6-astra-mini" }] : [],
+    modelChoices: s.catalogStatus === "ready"
+      ? ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-astra-mini"].map(id => ({ id, label: id })) : [],
     modelCatalogStatus: s.catalogStatus, modelCatalogCheckedAt: s.catalogStatus === "unchecked" ? null : "2026-10-15T10:40:00.000Z",
     // Claude Code is installed and signed in on this sample computer; it directs code-plan films only.
     claude: { status: "ready", binaryPath: CLAUDE_BINARY, version: "2.1.312", reason: null, available: codeFilm(world, projectId),

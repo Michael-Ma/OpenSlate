@@ -9,7 +9,7 @@ const mode = process.env.FIXTURE_SCENARIO ?? "complete";
 const log = value => appendFileSync(process.env.FIXTURE_LOG, JSON.stringify(value) + "\n");
 if (process.argv.includes("--version")) {
   log({ kind: "version", pid: process.pid });
-  process.stdout.write(mode === "version-wrong" ? "codex-cli 0.0.0\n" : "codex-cli 0.162.1\n");
+  process.stdout.write(mode === "version-wrong" ? "codex-cli 0.0.0\n" : "codex-cli 0.170.0\n");
   process.exit(0);
 }
 const config = {};
@@ -49,7 +49,7 @@ lines.on("line", line => {
   if (method === "initialize") {
     if (mode === "initialize-hang") return;
     if (mode === "missing-result") return send({ id });
-    return respond(id, { userAgent: "codex-cli/0.162.1" });
+    return respond(id, { userAgent: "codex-cli/0.170.0" });
   }
   if (method === "initialized") return;
   if (method === "config/read") {
@@ -132,6 +132,15 @@ lines.on("line", line => {
       const split = row.indexOf(Buffer.from("你")) + 1;
       process.stdout.write(row.subarray(0, split));
       return setTimeout(() => { process.stdout.write(row.subarray(split)); completed("completed"); }, 10);
+    }
+    if (mode === "moderated-messages") {
+      for (const display of [{ mode: "hide", version: 1, replacement: { kind: "wellbeingPromptHelpline" } },
+        { mode: "block", version: 1, reason: { kind: "protection", protectionType: "fixture" } }, null, { mode: "show", version: 1, trustedContacts: "skip" }]) {
+        const text = display?.mode === "show" ? "Visible reply" : "Suppressed reply";
+        notify("item/completed", { threadId, turnId, item: { id: "message-" + (display?.mode ?? "unset"),
+          type: "agentMessage", text, phase: "final_answer", moderation: { moderated: true, display } } });
+      }
+      return completed("completed");
     }
     if (mode === "secret-message") { assistant(`redact ${credential}`); return completed("completed"); }
     if (mode === "activity") {

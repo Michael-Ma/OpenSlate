@@ -1,4 +1,4 @@
-import { VIGGLE_PRICE_CREDITS } from "@openslate/providers";
+import { CODEX_IMAGE_RUNTIME_VERSION, isCodexImageRuntimeUpgrade, VIGGLE_PRICE_CREDITS } from "@openslate/providers";
 import type { VideoImageSize } from "@openslate/providers";
 import type { JsonObject } from "@openslate/core";
 import type { ArtifactRecord } from "../execution/engine.js";
@@ -23,7 +23,7 @@ export function projectModels(store: Store, projectId: string, catalog?: Install
   const project = store.getProject(projectId), lock = store.get<CodePlanCapabilityLock>("capability_lock", project.capabilityLockId);
   const installed = lock && catalog ? catalog.projectView(lock.profiles, undefined, lock.localExecution).profiles : [];
   const recordedCodex = (profile: ProviderProfile): boolean => {
-    if (profile.adapter !== "codex-image" || profile.configuration?.settings?.runtimeVersion !== "0.153.4") return false;
+    if (profile.adapter !== "codex-image" || !isCodexImageRuntimeUpgrade(profile.configuration?.settings?.runtimeVersion, CODEX_IMAGE_RUNTIME_VERSION)) return false;
     try { profilePolicy(profile, { historical: true }); return true; } catch { return false; }
   };
   const real = lock?.profiles.filter(profile => supportedCodePlanAdapters.has(profile.adapter)

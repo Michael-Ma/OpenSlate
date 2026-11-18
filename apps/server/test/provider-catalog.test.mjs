@@ -26,22 +26,22 @@ const transcription = () => ({ label: "Configured transcription", profile: { id:
   configuration: { model: OPENAI_TRANSCRIPTION_MODEL, settings: {} }, maxConcurrency: 1, unitCostMicros: "20000", maxRetries: 0 } });
 const configuration = (...profiles) => ({ version: 1, profiles });
 
-test("startup accepts the previous Codex config in memory, reports one notice and exposes the ready current runtime", t => {
+for (const version of ["0.153.4", "0.162.1"]) test(`startup accepts Codex ${version} config in memory, reports one notice and exposes the ready current runtime`, t => {
   const f = codexImageFixture(t), profile = structuredClone(codexImageProfile);
-  profile.configuration.settings.runtimeVersion = "0.153.4";
+  profile.configuration.settings.runtimeVersion = version;
   const input = configuration({ label: "Old Codex images", profile }), file = join(f.directory, "providers.json"), bytes = JSON.stringify(input);
   writeFileSync(file, bytes);
   const notices = []; t.mock.method(console, "warn", value => notices.push(JSON.parse(value)));
   const installed = readInstalledProviderConfiguration(file);
-  assert.equal(installed.profiles[0].profile.configuration.settings.runtimeVersion, "0.162.1");
+  assert.equal(installed.profiles[0].profile.configuration.settings.runtimeVersion, "0.170.0");
   f.options.providerConfiguration = installed;
   const runtime = f.build(), row = runtime.providerCatalog.view().profiles.find(row => row.id === profile.id);
-  assert.equal(row.profile.configuration.settings.runtimeVersion, "0.162.1");
+  assert.equal(row.profile.configuration.settings.runtimeVersion, "0.170.0");
   assert.equal(row.profile.configuration.settings.directorModel, "gpt-6-astra");
   assert.equal(row.installedDefinition, true); assert.equal(row.readiness.realExecutionEnabled, true);
   assert.equal(notices.length, 1); assert.equal(notices[0].kind, "codex_image_profile_runtime_notice");
-  assert.deepEqual(notices[0].profileIds, [profile.id]); assert.match(notices[0].message, /Change runtimeVersion to "0\.162\.1"/);
-  assert.equal(readFileSync(file, "utf8"), bytes); assert.equal(input.profiles[0].profile.configuration.settings.runtimeVersion, "0.153.4");
+  assert.deepEqual(notices[0].profileIds, [profile.id]); assert.match(notices[0].message, /Change runtimeVersion to "0\.170\.0"/);
+  assert.equal(readFileSync(file, "utf8"), bytes); assert.equal(input.profiles[0].profile.configuration.settings.runtimeVersion, version);
   assert.equal(new InstalledProviderCatalog({ configuration: input }).digest, runtime.providerCatalog.digest);
   assert.equal(f.calls.prepare, 0); assert.equal(f.calls.start, 0); assert.equal(f.calls.api, 0);
 });
@@ -458,7 +458,7 @@ test("Viggle and MiniMax remain different saved choices and default profile byte
 
 test("Codex image catalog pins the supported worker without claiming a media API credential or quota estimate", () => {
   const row = { label: "Codex images", profile: { id: "codex-keyframes", revision: "manual-live-1", kind: "image", adapter: "codex-image", executionVersion: "1",
-    configuration: { model: "codex-image-generation", settings: { runtimeVersion: "0.162.1", directorModel: "gpt-6-astra", width: 1024, height: 1024 } }, maxConcurrency: 1, unitCostMicros: "0", maxRetries: 0 } };
+    configuration: { model: "codex-image-generation", settings: { runtimeVersion: "0.170.0", directorModel: "gpt-6-astra", width: 1024, height: 1024 } }, maxConcurrency: 1, unitCostMicros: "0", maxRetries: 0 } };
   assert.deepEqual(profilePolicy(row.profile), { credential: null, media: "image", fixture: false });
   const catalog = new InstalledProviderCatalog({ configuration: configuration(row) });
   const visible = catalog.view().profiles.find(value => value.profile.id === row.profile.id);

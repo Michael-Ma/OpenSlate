@@ -8,7 +8,7 @@ const scenario = "ready";
 const log = value => appendFileSync(process.env.SETUP_FIXTURE_LOG, JSON.stringify({ pid: process.pid, ...value }) + "\n");
 if (process.argv.includes("--version")) {
   log({ kind: "version" });
-  process.stdout.write(`codex-cli ${scenario === "version" ? "0.0.1" : "0.162.1"}\n`);
+  process.stdout.write(`codex-cli ${scenario === "version" ? "0.0.1" : "0.170.0"}\n`);
   process.exit(0);
 }
 // Deliberately follow CODEX_HOME, as native discovery and app-server do. The
@@ -46,7 +46,7 @@ lines.on("line", line => {
   if (method === "initialize") {
     if (scenario === "hang") return;
     if (scenario === "approval") { send({ id: "auth-request", method: "account/chatgptAuthTokens/refresh", params: {} }); return; }
-    return respond(id, { userAgent: "codex-cli/0.162.1" });
+    return respond(id, { userAgent: "codex-cli/0.170.0" });
   }
   if (method === "config/read") {
     if (imageProcess && imageScenario === "project-budget-drift") config.project_doc_max_bytes = 32768;
@@ -121,13 +121,14 @@ lines.on("line", line => {
     const thread=readHistory(),threadId=thread.id,turnId="turn-1";
     let bytes=imageScenario==="large"?largePng():png;
     const item={type:"imageGeneration",id:"image-1",status:"completed",result:bytes.toString("base64"),revisedPrompt:"Fixture image"};
-    if(["path","symlink","outside","personal-path"].includes(imageScenario)) {
+    if(["file-id-path","path","symlink","outside","personal-path"].includes(imageScenario)) {
       const outputHome=imageScenario==="personal-path"?process.env.IMAGE_FIXTURE_PERSONAL_HOME:process.env.CODEX_HOME;
       const folder=join(outputHome,"generated_images",threadId);mkdirSync(folder,{recursive:true});
       const path=join(folder,"result.png"),outside=join(process.env.HOME,"not-generated.png");
       if(imageScenario==="symlink"){writeFileSync(outside,bytes);symlinkSync(outside,path);}else writeFileSync(path,bytes);
       item.result="";item.savedPath=imageScenario==="outside"?outside:path;
     }
+    if (["file-id-path","file-id-only"].includes(imageScenario)) { delete item.result; item.fileId="file-image"; }
     if(imageScenario==="no-bytes")item.result="assistant said see /tmp/result.png";
     if(imageScenario==="usage")Object.assign(item,{status:"failed",result:"",failure:{type:"usageLimitExceeded",limitId:"images"}});
     if(imageScenario==="image-failed")Object.assign(item,{status:"failed",result:""});

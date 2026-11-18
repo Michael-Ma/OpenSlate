@@ -12,9 +12,8 @@ import { profilePolicy } from '../dist/application/provider-catalog.js';
 
 // Frozen synthetic old film, including its original plan keys, full profile lock and native/output receipts.
 // JSON records and tiny generated PNG bytes only; no database or customer media.
-const history = readFileSync(new URL('./codex-image-0.153.4-film.json', import.meta.url), 'utf8');
-
-async function oldFilm(t, changes) {
+async function oldFilm(t, changes, version = '0.153.4') {
+  const history = readFileSync(new URL(`./codex-image-${version}-film.json`, import.meta.url), 'utf8');
   const f = await realCodeFixture(t, changes), saved = JSON.parse(history.replaceAll('@ROOT@', f.root));
   f.store.transaction(() => {
     for (const table of ['events', 'entities', 'commands', 'projects']) f.store.db.prepare(`DELETE FROM ${table}`).run();
@@ -31,12 +30,12 @@ async function oldFilm(t, changes) {
   return f;
 }
 
-test('a completed 0.153.4 film replays without work and a changed prompt dispatches only one current-runtime image without Settings', async t => {
-  const f = await oldFilm(t);
+for (const version of ['0.153.4', '0.162.1']) test(`a completed ${version} film replays without work and a changed prompt dispatches only one current-runtime image without Settings`, async t => {
+  const f = await oldFilm(t, undefined, version);
   const steps = f.plans.steps(f.project.id), attempt = f.store.get('attempt', steps[0].attemptId);
   const mapping = f.store.get('codex_image_execution_mapping', attempt.id);
-  assert.equal(mapping.native.runtime.runtimeVersion, '0.153.4');
-  assert.equal(mapping.transport.runtimeVersion, '0.153.4');
+  assert.equal(mapping.native.runtime.runtimeVersion, version);
+  assert.equal(mapping.transport.runtimeVersion, version);
   assert.equal(mapping.transport.turnInputDigest, describeCodexImageInput(mapping.transport).turnInputDigest);
   assertCodexImageRecords(f.store, attempt);
   const immutable = ['capability_lock', 'attempt', 'code_plan_step', 'code_plan_execution', 'codex_image_execution_mapping',
@@ -63,7 +62,7 @@ test('a completed 0.153.4 film replays without work and a changed prompt dispatc
   assert.equal(f.execution.attempts(f.project.id).length, count + 1);
   assert.equal(f.calls.prepare, calls.prepare + 1); assert.equal(f.calls.start, calls.start + 1);
   const fresh = f.store.list('codex_image_execution_mapping', f.project.id).find(row => row.id !== mapping.id);
-  assert.equal(fresh.native.runtime.runtimeVersion, '0.162.1'); assert.equal(fresh.transport.runtimeVersion, '0.162.1');
+  assert.equal(fresh.native.runtime.runtimeVersion, '0.170.0'); assert.equal(fresh.transport.runtimeVersion, '0.170.0');
   assert.equal(fresh.native.runtime.model, 'gpt-6-astra'); assert.equal(fresh.transport.model, 'gpt-6-astra');
   assert.deepEqual(fresh.profileDefinition, mapping.profileDefinition, 'new intent retains the locked profile');
   assertCodexImageRecords(f.store, f.store.get('attempt', fresh.id));
@@ -105,7 +104,7 @@ test('an old keyframe card reuses its saved image and choice across restart; onl
   assert.equal(f.calls.start, calls.start + 1); assert.equal(f.calls.prepare, calls.prepare + 1);
   assert.equal(changed.choices.find(row => !row.stale).options[0].sha256, changed.steps.find(step => step.key !== key).artifact.sha256);
   assert.equal(changed.choices.find(row => row.choiceId === choice.choiceId).stale, true);
-  const fresh = f.store.list('codex_image_execution_mapping', f.project.id).find(row => row.native.runtime.runtimeVersion === '0.162.1');
+  const fresh = f.store.list('codex_image_execution_mapping', f.project.id).find(row => row.native.runtime.runtimeVersion === '0.170.0');
   assert.ok(fresh); assertCodexImageRecords(f.store, f.store.get('attempt', fresh.id));
   assert.deepEqual(f.store.get('capability_lock', lock.id), lock);
 });
@@ -126,12 +125,12 @@ for (const difference of ['revision', 'id', 'missing']) test(`an old film stays 
   assert.deepEqual(f.store.get('capability_lock', lock.id), lock);
 });
 
-test('new Codex image work records 0.162.1 and retains gpt-6-astra', async t => {
+test('new Codex image work records 0.170.0 and retains gpt-6-astra', async t => {
   const f = await realCodeFixture(t); await f.submit(imageSource); await f.finish();
   const mapping = f.store.list('codex_image_execution_mapping', f.project.id)[0];
-  assert.equal(mapping.native.runtime.runtimeVersion, '0.162.1'); assert.equal(mapping.transport.runtimeVersion, '0.162.1');
+  assert.equal(mapping.native.runtime.runtimeVersion, '0.170.0'); assert.equal(mapping.transport.runtimeVersion, '0.170.0');
   assert.equal(mapping.native.runtime.model, 'gpt-6-astra'); assert.equal(mapping.transport.model, 'gpt-6-astra');
-  assert.equal(mapping.profileDefinition.configuration.settings.runtimeVersion, '0.162.1');
+  assert.equal(mapping.profileDefinition.configuration.settings.runtimeVersion, '0.170.0');
   const downgraded = structuredClone(mapping);
   downgraded.native.runtime.runtimeVersion = '0.153.4';
   downgraded.transport = describeCodexImageInput({ ...mapping.transport, runtimeVersion: '0.153.4' });
@@ -143,7 +142,7 @@ test('an upgraded old-film turn with an unknown outcome reconciles across restar
   const f = await oldFilm(t); f.controls.lostStart = true; f.controls.pending = true;
   const source = f.store.list('code_plan_version', f.project.id)[0].source.replace('A window at dawn', 'An uncertain new picture');
   await f.submit(source); await f.tick();
-  const mapping = f.store.list('codex_image_execution_mapping', f.project.id).find(row => row.native.runtime.runtimeVersion === '0.162.1');
+  const mapping = f.store.list('codex_image_execution_mapping', f.project.id).find(row => row.native.runtime.runtimeVersion === '0.170.0');
   assert.ok(mapping); assert.equal(f.calls.start, 1); assert.equal(f.calls.prepare, 1);
   const intent = f.store.get('code_plan_execution', mapping.id), marker = f.store.get('codex_image_execution_dispatch', mapping.id);
   assert.equal(f.store.get('attempt', mapping.id).phase, 'submission_unknown');

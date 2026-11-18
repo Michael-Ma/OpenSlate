@@ -6,7 +6,7 @@ import { canonical,digest,DomainError,invariant } from '@openslate/core';
 import type { NativeDiagnostic } from '@openslate/core';
 import { classifyNativeDiagnostic } from '@openslate/director';
 import { logNativeDiagnostic } from '../application/native-diagnostics.js';
-import { assertExecutionRequest,describeCodexImageInput,inspectCodexImagePng,registerExecutionProvider } from '@openslate/providers';
+import { CODEX_IMAGE_RUNTIME_VERSION,assertExecutionRequest,describeCodexImageInput,inspectCodexImagePng,registerExecutionProvider } from '@openslate/providers';
 import type { CodexImageInput,CodexImageOutcome,CodexImagePrepared,CodexImageTransport,ExecutionCallOptions,ExecutionOutcome,ExecutionProvider,ExecutionRequest } from '@openslate/providers';
 import { InstallationRecoveryGuard } from '../application/installation-recovery.js';
 import type { Store } from '../persistence/store.js';
@@ -192,6 +192,6 @@ export class CodexImageExecution implements ExecutionProvider {
       }finally{await file.close();}
       stopped(signal);inspectCodexImagePng(bytes);images.push({artifactId:reference.id,sha256:reference.artifact.sha256,byteLength:bytes.byteLength,bytes});
     }
-    return {attemptId:attempt.id,requestDigest:digest(attempt.request),prompt:attempt.request.args.prompt as string,...codexImageTurnCanvas(attempt.request.args),runtimeVersion:'0.162.1',model:'gpt-6-astra',images};
+    return {attemptId:attempt.id,requestDigest:digest(attempt.request),prompt:attempt.request.args.prompt as string,...codexImageTurnCanvas(attempt.request.args),runtimeVersion:CODEX_IMAGE_RUNTIME_VERSION,model:'gpt-6-astra',images};
   }
 }

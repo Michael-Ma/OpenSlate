@@ -15,7 +15,7 @@ import { viggleSecondPricing } from "./video-settings.ts";
  * - `slow-models`: GET /api/providers answers after a moment.
  */
 
-export const CODEX_DEFAULTS = { binaryPath: "/usr/local/bin/codex", model: "gpt-6.1-sol" } as const;
+export const CODEX_DEFAULTS = { binaryPath: "/usr/local/bin/codex", model: "gpt-6.2-sol" } as const;
 const SLOW_MODELS_MS = 2500;
 const DIGEST = "c".repeat(64);
 const CHANGED_DIGEST = "b".repeat(64);

@@ -9,7 +9,7 @@ import { CODEX_IMAGE_RUNTIME_VERSION } from '@openslate/providers';
 import { CODEX_PROTOCOL_VERSION, supportedCodexConfig } from '../dist/runtime/policy.js';
 import { PROTOCOL_FIXTURE_LIMITS } from './fixture-timing.mjs';
 
-const fixture = JSON.parse(await readFile(new URL('./fixtures/codex-protocol-0.162.1.json', import.meta.url), 'utf8'));
+const fixture = JSON.parse(await readFile(new URL('./fixtures/codex-protocol-0.170.0.json', import.meta.url), 'utf8'));
 // Structural assertions against the binary-generated draft-07 shapes. No production validation is replaced here.
 function matches(schema, value) {
   if (schema.$ref) return matches(fixture.definitions[schema.$ref.replace('#/definitions/', '')], value);
@@ -33,13 +33,13 @@ const rpcSchemas = { initialize: 'v1/InitializeParams', 'config/read': 'v2/Confi
   'thread/start': 'v2/ThreadStartParams', 'thread/resume': 'v2/ThreadResumeParams', 'mcpServerStatus/list': 'v2/ListMcpServerStatusParams',
   'turn/start': 'v2/TurnStartParams', 'turn/interrupt': 'v2/TurnInterruptParams' };
 
-test('adapter start/resume requests and consumed notifications retain the real 0.162.1 shapes', async t => {
-  assert.equal(fixture.runtimeVersion, '0.162.1'); assert.equal(CODEX_IMAGE_RUNTIME_VERSION, CODEX_PROTOCOL_VERSION); assert.equal(fixture.experimental, true); assert.equal(Object.keys(fixture.sources).length, 30);
+test('adapter start/resume requests and consumed notifications retain the real 0.170.0 shapes', async t => {
+  assert.equal(fixture.runtimeVersion, '0.170.0'); assert.equal(CODEX_IMAGE_RUNTIME_VERSION, CODEX_PROTOCOL_VERSION); assert.equal(fixture.experimental, true); assert.equal(Object.keys(fixture.sources).length, 30);
   const root = await mkdtemp(join(tmpdir(), 'openslate-protocol-shapes-')), log = join(root, 'requests.jsonl');
   t.after(() => rm(root, { recursive: true, force: true }));
   const runtime = new CodexDirectorRuntime({ command: { file: process.execPath, args: [fileURLToPath(new URL('./runtime-fixture.mjs', import.meta.url))] },
-    cwd: root, env: { FIXTURE_LOG: log }, model: 'gpt-6.1-sol', runtimeVersion: '0.162.1',
-    policy: { mode: 'local', id: 'fixture', runtimeVersion: '0.162.1', config: { default_permissions: 'fixture',
+    cwd: root, env: { FIXTURE_LOG: log }, model: 'gpt-6.2-sol', runtimeVersion: '0.170.0',
+    policy: { mode: 'local', id: 'fixture', runtimeVersion: '0.170.0', config: { default_permissions: 'fixture',
       permissions: { fixture: { filesystem: { ':root': 'deny' }, network: { enabled: false } } }, 'features.unknown_disabled_reduction': false } }, limits: PROTOCOL_FIXTURE_LIMITS });
   t.after(() => runtime.close());
   const input = { projectId: 'project', requestId: 'request', epochId: 'epoch', turnId: 'turn', text: 'Reply OK', context: '{}', skills: [],
@@ -67,6 +67,11 @@ test('adapter start/resume requests and consumed notifications retain the real 0
     completedAtMs: 1, threadId: 'thread', turnId: 'turn', item: { type: 'agentMessage', id: 'message', text: 'OK', phase } });
   for (const status of ['inProgress', 'completed', 'failed']) valid('v2/ItemCompletedNotification', {
     completedAtMs: 1, threadId: 'thread', turnId: 'turn', item: { type: 'imageGeneration', id: 'image', status, result: '', savedPath: null, revisedPrompt: null, failure: null } });
+  const completedImage = { completedAtMs: 1, threadId: 'thread', turnId: 'turn',
+    item: { type: 'imageGeneration', id: 'image', status: 'completed', fileId: 'file-image', savedPath: '/worker/generated.png' } };
+  valid('v2/ItemCompletedNotification', completedImage);
+  delete completedImage.item.fileId;
+  assert.equal(matches(fixture.schemas['v2/ItemCompletedNotification'], completedImage), false);
   valid('ToolRequestUserInputParams', { threadId: 'thread', turnId: 'turn', itemId: 'item', isBlocking: true, questions: [
     { id: 'tone', header: 'Tone', question: 'Choose', isOther: true, isSecret: false, options: [{ label: 'Warm', description: 'Friendly' }] }] });
 });

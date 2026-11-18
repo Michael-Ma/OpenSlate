@@ -10,7 +10,7 @@ import { ImageRpc } from "../dist/media/image-rpc.js";
 import { CODEX_RUNTIME_LIMITS } from "../dist/runtime/policy.js";
 const entry=fileURLToPath(new URL("codex-image-fixture.mjs",import.meta.url));
 const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6XsAAAAASUVORK5CYII=","base64");
-const input=()=>({attemptId:"attempt-1",requestDigest:"a".repeat(64),prompt:"A small blue boot",width:1024,height:1024,runtimeVersion:"0.162.1",model:"gpt-6-astra",images:[]});
+const input=()=>({attemptId:"attempt-1",requestDigest:"a".repeat(64),prompt:"A small blue boot",width:1024,height:1024,runtimeVersion:"0.170.0",model:"gpt-6-astra",images:[]});
 async function fixture(t,scenario="inline",timeoutMs=2000) {
  const root=await realpath(await mkdtemp(join(tmpdir(),"openslate-codex-image-"))),nativeHome=join(root,"home"),codexHome=join(nativeHome,".codex");
  await mkdir(codexHome,{recursive:true});
@@ -145,8 +145,8 @@ test("large inline PNG exceeds the director line budget without exceeding the se
  // This tests the image payload limit, not a two-second CPU budget under parallel FFmpeg load.
  const f=await fixture(t,"large",10000),{outcome}=await run(f);assert.equal(outcome.kind,"completed",outcome.code);assert.ok(outcome.bytes.length>4*1024*1024);
 });
-test("private generated_images path is read exactly and survives worker reconstruction without authentication",async t=>{
- const f=await fixture(t,"path"),{prepared,outcome}=await run(f);assert.equal(outcome.kind,"completed",outcome.code);
+for (const scenario of ["path","file-id-path"]) test(`private generated_images ${scenario} is read exactly and survives worker reconstruction without authentication`,async t=>{
+ const f=await fixture(t,scenario),{prepared,outcome}=await run(f);assert.equal(outcome.kind,"completed",outcome.code);
  const path=join(f.privateHome,"generated_images",prepared.session.threadId,"result.png");assert.deepEqual(await readFile(path),png);
  assert.ok(!(await readdir(f.options.codexHome)).includes("generated_images"));
  await f.setPersonalServers({changed_before_recovery:{enabled:true,command:"FAKE_RECOVERY_MUST_NOT_RUN"}});
@@ -162,7 +162,7 @@ test("new private-home turns never adopt a savedPath under the personal Codex ho
  assert.equal((await f.make().lookup(prepared,{turnId:"turn-1"})).kind,"unknown");
  assert.equal(methods(await f.records()).filter(method=>method==="turn/start").length,1);
 });
-for(const scenario of ["symlink","outside","no-bytes","multiple","conflicting-item","wrong-event"])test(`no image is selected from ${scenario}`,async t=>{
+for(const scenario of ["symlink","outside","file-id-only","no-bytes","multiple","conflicting-item","wrong-event"])test(`no image is selected from ${scenario}`,async t=>{
  const f=await fixture(t,scenario),{outcome}=await run(f);assert.equal(outcome.kind,"unknown");assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
 });
 for(const [scenario,code]of [["usage","USAGE_LIMIT"],["image-failed","IMAGE_FAILED"],["image-refusal","IMAGE_FAILED"],["turn-failed","TURN_FAILED"],["turn-interrupted","TURN_INTERRUPTED"],["no-image","NO_IMAGE"]])test(`${scenario} remains a typed observed terminal result, without retry`,async t=>{
@@ -268,6 +268,7 @@ test("a codex-image-turn-v2 portrait turn asks for 1024x1536 through the same si
 
 test('a historical runtime input cannot prepare a new native image turn', async t => {
  const f=await fixture(t);
- await assert.rejects(f.worker.prepare({...input(),runtimeVersion:'0.153.4'}),{code:'CODEX_IMAGE_VERSION_UNSUPPORTED'});
+ for (const runtimeVersion of ['0.153.4','0.162.1'])
+  await assert.rejects(f.worker.prepare({...input(),runtimeVersion}),{code:'CODEX_IMAGE_VERSION_UNSUPPORTED'});
  assert.deepEqual(await f.records(),[]);
 });

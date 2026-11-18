@@ -131,7 +131,7 @@ async function verifyVersion(options: ReturnType<typeof validateOptions>, signal
         : new RuntimeFault("SETUP_BINARY_FAILED", "Selected native binary could not be checked", classifyNativeDiagnostic(error))); return; }
       const version = /^codex-cli (\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.+-]{1,120})?)$/.exec(stdout.trim())?.[1] ?? null;
       readiness.binaryVersion = { expectedVersion: CODEX_PROTOCOL_VERSION, foundVersion: version };
-      if (version !== CODEX_PROTOCOL_VERSION) no(new RuntimeFault("SETUP_VERSION_MISMATCH", "Select the pinned Codex 0.162.1 installation"));
+      if (version !== CODEX_PROTOCOL_VERSION) no(new RuntimeFault("SETUP_VERSION_MISMATCH", `Select the pinned Codex ${CODEX_PROTOCOL_VERSION} installation`));
       else yes();
     });
   });

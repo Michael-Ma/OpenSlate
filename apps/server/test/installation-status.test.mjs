@@ -80,7 +80,7 @@ test('Settings recognizes an app-bundled prerelease mismatch before setup and id
   const setup = response.json(); assert.equal(setup.codexVersion, '0.162.0-alpha.4');
   assert.equal(setup.codexDiagnostic.code, 'DIRECTOR_CODEX_VERSION_MISMATCH'); assert.equal(setup.codexDiagnostic.expectedVersion, CODEX_PROTOCOL_VERSION);
   assert.equal(setup.codexDiagnostic.foundVersion, '0.162.0-alpha.4'); assert.equal(setup.codexDiagnostic.binaryPath, setup.defaults.binaryPath);
-  assert.ok(setup.codexDiagnostic.installPath.endsWith('/.local/share/openslate-codex-0.162.1/node_modules/.bin/codex'));
+  assert.ok(setup.codexDiagnostic.installPath.endsWith('/.local/share/openslate-codex-0.170.0/node_modules/.bin/codex'));
   assert.equal(f.store.list('native_model_start', project.id).length, 0); assert.equal(f.store.list('project_director_selection', project.id).length, 0);
 });
 

@@ -29,9 +29,9 @@ async function fixture(t, scenario = "complete", overrides = {}) {
     bridge: { endpoint: "http://127.0.0.1:12345", projectId: "project-1", credential: randomBytes(32).toString("base64url"), entrypoint: bridgeEntry } };
   const options = { command: { file: process.execPath, args: [entry] }, cwd: root,
     env: { FIXTURE_SCENARIO: scenario, FIXTURE_LOG: join(root, "protocol.jsonl"), FIXTURE_SKILLS: JSON.stringify(input.skills) },
-    model: "fake-model", runtimeVersion: "0.162.1",
+    model: "fake-model", runtimeVersion: "0.170.0",
     // Local native trust is explicit; fake protocol tests are not independent isolation proof.
-    policy: { mode: "local", id: "fixture", runtimeVersion: "0.162.1",
+    policy: { mode: "local", id: "fixture", runtimeVersion: "0.170.0",
       config: { default_permissions: "fixture", permissions: { fixture: { network: { enabled: false }, filesystem: { "/": "none" } } } } },
     limits: { ...PROTOCOL_FIXTURE_LIMITS },
     ...overrides };
@@ -78,6 +78,13 @@ test("native progress retains only phase and state for the exact thread and turn
   ]);
   assert.ok(!JSON.stringify(events).includes('private'));
   assert.ok(!JSON.stringify(events).includes(f.input.bridge.credential));
+});
+
+test("native display restrictions are honored before publishing or recording assistant text", async t => {
+  const f = await fixture(t, "moderated-messages"), events = [];
+  const result = await deadline(f.runtime.start(f.input, { onEvent: event => events.push(event) }));
+  assert.equal(result.status, "completed"); assert.equal(result.text, "Visible reply");
+  assert.deepEqual(events.filter(event => event.kind === "assistant_message").map(event => event.text), ["Visible reply"]);
 });
 
 test("overlapping native items remain active until the last relevant item completes", async t => {

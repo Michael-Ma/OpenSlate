@@ -54,19 +54,19 @@ export function inspectSetup({ root, environment = process.env, nodeVersion = pr
   }
   if (environment.OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION === '1') {
     const configured = environment.OPENSLATE_CODEX_IMAGE_BINARY;
-    const pinned = join(home, '.local/share/openslate-codex-0.162.1/node_modules/.bin/codex');
+    const pinned = join(home, '.local/share/openslate-codex-0.170.0/node_modules/.bin/codex');
     const configuredPath = typeof configured === 'string' && isAbsolute(configured) && configured.length <= 4096 && !configured.includes('\0');
     const configuredProbe = configuredPath ? probe(configured, ['--version']) : null;
-    const configuredValid = configuredProbe?.status === 0 && configuredProbe.stdout?.trim() === 'codex-cli 0.162.1';
+    const configuredValid = configuredProbe?.status === 0 && configuredProbe.stdout?.trim() === 'codex-cli 0.170.0';
     const pinnedProbe = configuredPath && !configuredValid && existsSync(pinned) ? probe(pinned, ['--version']) : null;
-    const fallback = pinnedProbe?.status === 0 && pinnedProbe.stdout?.trim() === 'codex-cli 0.162.1';
+    const fallback = pinnedProbe?.status === 0 && pinnedProbe.stdout?.trim() === 'codex-cli 0.170.0';
     const binary = configuredValid ? configured : fallback ? pinned : configured;
     const versionProbe = configuredValid ? configuredProbe : fallback ? pinnedProbe : configuredProbe;
-    const valid = versionProbe?.status === 0 && versionProbe.stdout?.trim() === 'codex-cli 0.162.1';
+    const valid = versionProbe?.status === 0 && versionProbe.stdout?.trim() === 'codex-cli 0.170.0';
     tools.codexImage = binary ?? null;
     add('codex-image', 'Codex image runtime', valid ? fallback ? 'warning' : 'ready' : 'blocked',
-      valid ? fallback ? 'DIRECTOR_CODEX_VERSION_MISMATCH: configured binary does not report 0.162.1; using the supported side-by-side install. Sign-in and quota are checked before dispatch.' : 'Pinned runtime found; sign-in and quota are checked before dispatch.' : 'An absolute path to the pinned Codex 0.162.1 executable is required.',
-      `Install with npm install --prefix "${join(home, '.local/share/openslate-codex-0.162.1')}" --save-exact @openai/codex@0.162.1; set OPENSLATE_CODEX_IMAGE_BINARY to ${pinned}. Follow docs/implementation/MANUAL-LIVE-PRODUCTION.md for sign-in.`);
+      valid ? fallback ? 'DIRECTOR_CODEX_VERSION_MISMATCH: configured binary does not report 0.170.0; using the supported side-by-side install. Sign-in and quota are checked before dispatch.' : 'Pinned runtime found; sign-in and quota are checked before dispatch.' : 'An absolute path to the pinned Codex 0.170.0 executable is required.',
+      `Install with npm install --prefix "${join(home, '.local/share/openslate-codex-0.170.0')}" --save-exact @openai/codex@0.170.0; set OPENSLATE_CODEX_IMAGE_BINARY to ${pinned}. Follow docs/implementation/MANUAL-LIVE-PRODUCTION.md for sign-in.`);
   }
   if (environment.OPENSLATE_PROVIDER_CONFIG) {
     try {
@@ -80,12 +80,12 @@ export function inspectSetup({ root, environment = process.env, nodeVersion = pr
       'Add supported profiles using examples/live-provider-profiles.example.json, then choose the models in Project settings.');
       for (const entry of catalog.profiles.filter(entry => entry?.profile?.adapter === 'codex-image')) {
         const runtime = entry.profile.configuration?.settings?.runtimeVersion;
-        if (runtime === '0.162.1') continue;
-        const upgrade = runtime === '0.153.4';
+        if (runtime === '0.170.0') continue;
+        const upgrade = runtime === '0.153.4' || runtime === '0.162.1';
         add(`codex-image-profile:${entry.profile.id}`, 'Codex image profile', upgrade ? 'warning' : 'blocked',
-          upgrade ? `${entry.profile.id}: using Codex 0.162.1 for new images. Saved film inputs and receipts stay unchanged.`
+          upgrade ? `${entry.profile.id}: using Codex 0.170.0 for new images. Saved film inputs and receipts stay unchanged.`
             : `${entry.profile.id}: unsupported Codex image runtimeVersion.`,
-          `Change runtimeVersion to "0.162.1" in provider configuration profile ${entry.profile.id}. The server validates all other fields during startup.`);
+          `Change runtimeVersion to "0.170.0" in provider configuration profile ${entry.profile.id}. The server validates all other fields during startup.`);
       }
     } catch { add('catalog', 'Provider catalog', 'blocked', 'OPENSLATE_PROVIDER_CONFIG is not a readable bounded v1 provider catalog.', 'Start with examples/live-provider-profiles.example.json or examples/viggle-provider-profiles.example.json and set OPENSLATE_PROVIDER_CONFIG to your catalog.'); }
   } else add('catalog', 'Provider catalog', realEnabled ? 'warning' : 'ready', 'Built-in demo profiles selected. Choose an explicit catalog to use real models.',

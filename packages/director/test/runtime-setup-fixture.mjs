@@ -6,7 +6,7 @@ const scenario = process.env.SETUP_FIXTURE_SCENARIO ?? "ready";
 const log = value => appendFileSync(process.env.SETUP_FIXTURE_LOG, JSON.stringify({ pid: process.pid, ...value }) + "\n");
 if (process.argv.includes("--version")) {
   log({ kind: "version" });
-  process.stdout.write(scenario === "version-private" ? "PRIVATE_VERSION_OUTPUT\n" : `codex-cli ${scenario === "version" ? "0.0.1" : scenario === "version-alpha" ? "0.162.0-alpha.4" : "0.162.1"}\n`);
+  process.stdout.write(scenario === "version-private" ? "PRIVATE_VERSION_OUTPUT\n" : `codex-cli ${scenario === "version" ? "0.0.1" : scenario === "version-alpha" ? "0.162.0-alpha.4" : "0.170.0"}\n`);
   process.exit(0);
 }
 const config = {
@@ -43,7 +43,7 @@ lines.on("line", line => {
   if (method === "initialize") {
     if (scenario === "hang") return;
     if (scenario === "approval") { send({ id: "auth-request", method: "account/chatgptAuthTokens/refresh", params: {} }); return; }
-    return respond(id, { userAgent: "codex-cli/0.162.1" });
+    return respond(id, { userAgent: "codex-cli/0.170.0" });
   }
   if (method === "config/read") {
     if (verifying && scenario === "project-budget-drift") config.project_doc_max_bytes = 32768;
