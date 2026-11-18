@@ -70,23 +70,29 @@ const FRAMES = {
 };
 /** What `ctx.keyframe` offers on a model with references and first frames, with each clip's price. */
 const VIDEO_INPUTS = [["keyframe_and_references", "250000"], ["references_only", "250000"], ["first_frame", "150000"]] as const;
-/** The idea a 2.1.0 Director records in its scene: what it kept, the takes it weighed, the reading, the rule and its cut list. */
+/** The idea a 2.3.0 Director records in its scene: what it kept, the takes it weighed, the reading, what puts the take on screen, the rule and its cut list. */
 const IDEA = {
   format: "Short film",
   aim: "Calm, then Bittersweet",
   fixed: ["Mara, the harbour, the last ferry", "About ten seconds, quiet", "It ends with the ferry gone"],
+  obvious: "A woman watches the last ferry leave the harbour.",
   takes: [
     { title: "The ferry is the only warm light", basis: "bent: Mood first, object last", chosen: true },
     { title: "The bench remembers who sat there", basis: "template: Trace of someone" },
     { title: "The tide keeps the timetable", basis: "own" },
   ],
   reading: "The viewer first reads this as a woman waiting for a boat. Through the ferry's light crossing her face and leaving it, that becomes someone who chose to stay. The image they keep is the empty pier in the last of the light.",
+  proof: [
+    "A band of warm light slides across the blue water; nothing else in the harbour is warm",
+    "The light crosses Mara's face and she does not turn to follow it",
+    "The pier goes blue again, plank by plank, as the light leaves",
+  ],
   rule: "The harbour stays blue; every warm light belongs to the ferry.",
   cuts: [
     { sees: "The harbour, blue and still, one lamp on the pier", seconds: 3, clip: "1.1" },
-    { sees: "Warm light slides across the water toward the pier", seconds: 2, clip: "1.1" },
-    { sees: "Mara on the pier; the light crosses her face", seconds: 3.5, clip: "1.2" },
-    { sees: "The pier alone as the light leaves it", seconds: 1.5, clip: "1.2" },
+    { sees: "Warm light slides across the water toward the pier", seconds: 2, clip: "1.1", proof: 1 },
+    { sees: "Mara on the pier; the light crosses her face", seconds: 3.5, clip: "1.2", proof: 2 },
+    { sees: "The pier alone as the light leaves it", seconds: 1.5, clip: "1.2", proof: 3 },
   ],
 };
 const CLIP_OPEN = artifact("2.1", 301, "video"), CLIP_PIER = artifact("2.2-red", 302, "video"), RENDER = artifact("2.1", 401, "video");

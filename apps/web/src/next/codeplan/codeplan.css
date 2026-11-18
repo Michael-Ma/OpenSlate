@@ -82,6 +82,12 @@
 .cp-idea-rows dt{color:var(--text-2);font-size:12px;padding-top:1px}
 .cp-idea-rows dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .cp-idea-basis{display:inline-block;margin-left:8px;padding:0 7px;border:1px solid var(--hairline);border-radius:999px;font-size:11px;font-weight:400;color:var(--text-2);white-space:nowrap}
+.cp-idea-proof{margin:0;padding-left:18px}
+.cp-idea-proof li{margin:2px 0;overflow-wrap:anywhere}
+.cp-idea-proof li::marker{color:var(--text-2);font-size:12px}
+.cp-idea-proof .cp-idea-basis[data-shown="false"]{border-color:var(--amber-line);background:var(--amber-surface)}
+.cp-idea-rows .cp-idea-note{margin:4px 0 0;font-size:12px}
+.cp-cut-proof{display:inline-block;margin-left:6px;min-width:17px;padding:0 4px;border:1px solid var(--hairline);border-radius:999px;font-size:10.5px;line-height:15px;text-align:center;color:var(--text-2)}
 .cp-idea-more{margin-top:8px;font-size:12.5px;line-height:1.5}
 .cp-idea-more summary{cursor:pointer;color:var(--text-2)}
 .cp-idea-more summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
