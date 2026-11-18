@@ -198,6 +198,8 @@ export interface ChoiceCard {
   at: string | null;
   /** The latest plan no longer reaches it: it says so and asks nothing. */
   stale: boolean;
+  /** The input the Director would pick for this keyframe's clip, and why. The person still picks. */
+  suggest: { input: KeyframeInput; why: string } | null;
 }
 
 export function choiceCard(choice: CodePlanChoiceView, steps: readonly CodePlanStepView[] = []): ChoiceCard {
@@ -223,7 +225,14 @@ export function choiceCard(choice: CodePlanChoiceView, steps: readonly CodePlanS
     keyframe: oneFrame ? first : null,
     at: choice.askedAt ?? (done && typeof choice.answeredAt === "string" ? choice.answeredAt : null),
     stale: choice.stale === true,
+    suggest: oneFrame ? suggestionOf((choice as { suggest?: unknown }).suggest, options) : null,
   };
+}
+
+/** A suggestion counts only when it names one of the card's own options. */
+function suggestionOf(value: unknown, options: readonly ChoiceOption[]): ChoiceCard["suggest"] {
+  if (!isObject(value) || typeof value.input !== "string" || !options.some((option) => option.keyframe?.input === value.input)) return null;
+  return { input: value.input as KeyframeInput, why: text(value.why, 160) };
 }
 
 /**
@@ -605,6 +614,45 @@ function clipsByShot(view: CodePlanView): Map<string, NonNullable<DeclaredShot["
   return new Map([...newest].map(([shot, value]) => [shot, value.clip]));
 }
 
+/** How a take relates to the skill's templates: taken as it is, bent, or the Director's own. */
+export type TakeBasis = "template" | "bent" | "own" | "unknown";
+export interface IdeaTake { title: string; basis: TakeBasis; /** The template's name, when one was used or bent. */ template: string; chosen: boolean }
+export interface IdeaCut { sees: string; seconds: number; clip: string }
+/** The idea behind the film, as the Director recorded it in `ctx.scene`: what it kept, what it considered, and what the viewer will see. */
+export interface FilmIdea {
+  fixed: string[];
+  takes: IdeaTake[];
+  /** The chosen take; null when none is marked. */
+  chosen: IdeaTake | null;
+  reading: string;
+  rule: string;
+  cuts: IdeaCut[];
+  cutSeconds: number;
+}
+
+function takeBasis(value: unknown): Pick<IdeaTake, "basis" | "template"> {
+  const raw = text(value, 120), match = /^(template|bent)\s*:\s*(.*)$/i.exec(raw);
+  if (match) return { basis: match[1]!.toLowerCase() as "template" | "bent", template: match[2]!.trim() };
+  return { basis: raw.toLowerCase() === "own" ? "own" : "unknown", template: "" };
+}
+
+/** Reads the first scene that records an idea. Every field is optional: a plan may record only part of it, or none. */
+export function filmIdea(view: Pick<CodePlanView, "declarations">): FilmIdea | null {
+  const rows = (Array.isArray(view.declarations?.scenes) ? view.declarations.scenes : []).filter(isObject).slice(0, 200);
+  const row = rows.find((scene) => typeof scene.reading === "string" || Array.isArray(scene.takes) || Array.isArray(scene.cuts));
+  if (!row) return null;
+  const list = (value: unknown, max: number): unknown[] => (Array.isArray(value) ? value.slice(0, max) : []);
+  const fixed = list(row.fixed, 12).map((item) => text(item, 200)).filter(Boolean);
+  const takes = list(row.takes, 6).filter(isObject).map((take): IdeaTake => ({ title: pick(take, ["title", "name", "take"], 240), ...takeBasis(take.basis), chosen: take.chosen === true }))
+    .filter((take) => take.title);
+  const cuts = list(row.cuts, 64).filter(isObject).map((cut): IdeaCut => ({ sees: text(cut.sees, 200),
+    seconds: typeof cut.seconds === "number" && Number.isFinite(cut.seconds) && cut.seconds > 0 && cut.seconds <= 600 ? Math.round(cut.seconds * 10) / 10 : 0, clip: text(cut.clip, 120) }))
+    .filter((cut) => cut.sees);
+  const idea: FilmIdea = { fixed, takes, chosen: takes.find((take) => take.chosen) ?? null, reading: text(row.reading, 600), rule: text(row.rule, 300), cuts,
+    cutSeconds: Math.round(cuts.reduce((sum, cut) => sum + cut.seconds, 0) * 10) / 10 };
+  return idea.reading || idea.takes.length || idea.cuts.length ? idea : null;
+}
+
 export function declaredPlan(view: CodePlanView): DeclaredPlan {
   // Image steps carry their shot now; the prompt match keeps older plans working.
   const byShot = bestPictures(view, (step) => step.shotId ?? null), byPrompt = bestPictures(view, (step) => text(step.label, 200)), clips = clipsByShot(view);
@@ -695,7 +743,8 @@ export interface VersionRow {
   current: boolean;
 }
 
-const FINDINGS = new Set(["SOURCE_SYNTAX", "RUNTIME_ERROR", "UNAWAITED_CALL", "STEP_LIMIT", "CEILING"]);
+const FINDINGS = new Set(["SOURCE_SYNTAX", "RUNTIME_ERROR", "UNAWAITED_CALL", "STEP_LIMIT", "CEILING",
+  "CUTS_UNUSED_SHOT", "CUTS_UNKNOWN_CLIP", "CUTS_LENGTH", "CUTS_SHAPE", "ZOOM_SOFT", "SUGGEST_UNAVAILABLE"]);
 const KIND_LABEL: Record<CodePlanStepKind, Msg> = {
   image: msg("codeplan.kind.image"), video: msg("codeplan.kind.video"), speech: msg("codeplan.kind.speech"), music: msg("codeplan.kind.music"), render: msg("codeplan.kind.render"),
 };

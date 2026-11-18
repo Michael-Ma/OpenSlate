@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { Picture } from "../keyframes/parts.tsx";
 import { MediaViewer, useNaturalAspect, ViewerClip } from "../media/Viewer.tsx";
-import { answerPress, threadChoices, type ChoiceCard, type ChoiceOption } from "../model/code-plan.ts";
+import { answerPress, threadChoices, type ChoiceCard, type ChoiceOption, type KeyframeInput } from "../model/code-plan.ts";
 import { formatMicros } from "../model/price.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { Modal } from "../views/plan/Modal.tsx";
@@ -112,12 +112,18 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
         <MediaViewer items={[{ key: card.choiceId, artifact: card.keyframe, title: card.question || t("codeplan.keyframe.eyebrow") }]} start={0} onClose={() => setWatching(false)} />
       ) : null}
       {card.keyframe && !card.answered ? <p className="cp-input-ask">{t("codeplan.keyframe.ask")}</p> : null}
+      {card.suggest && !card.answered ? (
+        <p className="cp-suggest" data-act="code-plan-suggest" data-input={card.suggest.input}>
+          {t(card.suggest.why ? "codeplan.keyframe.suggest_line" : "codeplan.keyframe.suggest_line_bare", { option: inputName(t, card.suggest.input, card.options.find((option) => option.keyframe?.input === card.suggest!.input)?.keyframe?.references ?? 0), why: card.suggest.why })}
+        </p>
+      ) : null}
       {watching && card.clip ? (
         <MediaViewer items={[{ key: card.choiceId, artifact: card.clip.artifact, title: card.question || t("codeplan.choice.watch"), ...(card.clip.poster ? { poster: card.clip.poster } : {}), ...(card.clip.stepKey ? { stepKey: card.clip.stepKey } : {}) }]} start={0} onClose={() => setWatching(false)} />
       ) : null}
       <div className={`cp-options${card.media ? " media" : ""}${card.keyframe ? " inputs" : ""}`}>
         {card.options.map((option) => {
-          if (option.keyframe) return <VideoInputOption key={option.index} option={option} primary={option.index === 0 && !card.answered} off={off} offTitle={!card.answered && guard.disabled ? guard.title : undefined} onChoose={choose} />;
+          if (option.keyframe) return <VideoInputOption key={option.index} option={option} suggested={!card.answered && card.suggest?.input === option.keyframe.input}
+            primary={!card.answered && (card.suggest ? card.suggest.input === option.keyframe.input : option.index === 0)} off={off} offTitle={!card.answered && guard.disabled ? guard.title : undefined} onChoose={choose} />;
           const name = optionName(option, t);
           if (option.artifact) {
             // A press opens the options large, this one first; a paid clip never starts from a press on a thumbnail.
@@ -160,14 +166,17 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
 }
 
 /** One way for this shot's clip to use its keyframe. A press confirms the picture and starts the clip, so it says what that costs. */
-function VideoInputOption({ option, primary, off, offTitle, onChoose }: { option: ChoiceOption; primary: boolean; off: boolean; offTitle: string | undefined; onChoose(option: ChoiceOption): void }) {
+const inputName = (t: ReturnType<typeof useI18n>["t"], input: KeyframeInput, references: number): string =>
+  t(input === "keyframe_and_references" && references === 0 ? "codeplan.keyframe.input.keyframe_only" : `codeplan.keyframe.input.${input}` as const);
+
+function VideoInputOption({ option, primary, suggested, off, offTitle, onChoose }: { option: ChoiceOption; primary: boolean; suggested: boolean; off: boolean; offTitle: string | undefined; onChoose(option: ChoiceOption): void }) {
   const { t, locale } = useI18n();
   const { input, priceMicros, references } = option.keyframe!;
-  const name = t(input === "keyframe_and_references" && references === 0 ? "codeplan.keyframe.input.keyframe_only" : `codeplan.keyframe.input.${input}` as const);
+  const name = inputName(t, input, references);
   return (
     <button type="button" className={`cp-input${option.chosen ? " chosen" : ""}${primary ? " primary" : ""}`} data-act="code-plan-choose" data-option={option.index} data-input={input}
       aria-pressed={option.chosen} disabled={off} title={offTitle} onClick={() => onChoose(option)}>
-      <span className="cp-input-name">{option.chosen ? <span aria-hidden="true">✓ </span> : null}{name}{priceMicros ? <span className="cp-input-price"> · {formatMicros(priceMicros, locale)}</span> : null}</span>
+      <span className="cp-input-name">{option.chosen ? <span aria-hidden="true">✓ </span> : null}{name}{priceMicros ? <span className="cp-input-price"> · {formatMicros(priceMicros, locale)}</span> : null}{suggested ? <span className="cp-input-badge">{t("codeplan.keyframe.suggested")}</span> : null}</span>
       <span className="cp-input-hint">{t(`codeplan.keyframe.hint.${input}` as const)}</span>
     </button>
   );
