@@ -14,7 +14,7 @@ OpenSlate is a local video studio with a conversational Director, storyboard edi
 
 **The Director**
 
-- Native **Codex 0.162.1**, default **`gpt-6.1-sol`**, with other model IDs supplied by the installed runtime/account. Saved model selections are preserved. Director turns use high reasoning effort.
+- Native **Codex 0.170.0**, default **`gpt-6.2-sol`**, with other model IDs supplied by the installed runtime/account. Saved model selections are preserved. Director turns use high reasoning effort.
 - Optional **Claude Code** for code-plan films: **Opus 5.5** (`claude-opus-5-5`) or **Sonnet 5.5** (`claude-sonnet-5-5`) on the user's Claude subscription. Storyboard films use Codex or the scripted demo Director.
 - The Director reads project evidence and proposes changes through validated MCP tools. Storyboard films use guidance **8.1.0** on tool contract **7.1.0** (25 tools), routed to craft, type and format packages by film kind; code films use **code-plan 2.2.0** on contract **0.3.0** (5 tools). It cannot run shell commands, browse the web, read arbitrary files or obtain provider keys through those tools.
 - Storyboard Directors leave notes, held proposals, visual-style choices and confirmation cards (earlier takes, deletions, resume after Stop, saved-clip remakes). Each card states its cost and only the person's press applies it; storyboard video starts only from a scene confirmation or such a press, and keyframes only when the person asks for them. Code films permit generation within their saved plan and spend limit. The Director can inspect pictures/contact sheets and read song analysis, but cannot listen to audio.
@@ -81,7 +81,7 @@ pnpm setup:test-media
 pnpm check:toolchain
 ```
 
-For a real Director or Codex images, install **`@openai/codex@0.162.1`** side by side and sign in using the [pinned installation instructions](docs/implementation/MANUAL-LIVE-PRODUCTION.md#codex). Claude Code is optional: the adapter accepts **2.1.312 or later 2.x**, with a local Claude subscription login. Neither a Codex account nor a Claude plan supplies the other vendors' media credits.
+For a real Director or Codex images, install **`@openai/codex@0.170.0`** side by side and sign in using the [pinned installation instructions](docs/implementation/MANUAL-LIVE-PRODUCTION.md#codex). Claude Code is optional: the adapter accepts **2.1.312 or later 2.x**, with a local Claude subscription login. Neither a Codex account nor a Claude plan supplies the other vendors' media credits.
 
 Configure the server locally; the launcher loads private `.env.live.local`, preserving exported variables. The names below come from the [setup](docs/implementation/LOCAL-SETUP.md) and [provider activation](docs/implementation/MEDIA-EXECUTION-LAUNCHER.md) guides; credentials never enter plans or browser code.
 
