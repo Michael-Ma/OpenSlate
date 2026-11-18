@@ -1,5 +1,5 @@
 import { codePlanArtifacts, codePlanRenderSources, object } from "./artifacts.js";
-import { cutListFindings, renderTimelineFrames, zoomSoftFindings } from "./cut-findings.js";
+import { cutListFindings, renderTimelineFrames, repeatedRowFindings, zoomSoftFindings } from "./cut-findings.js";
 import { lyriaFailureMessage } from "../execution/gemini-lyria-execution.js";
 import { videoI2vFailure } from "../execution/video-i2v-execution.js";
 import { modelPrice, modelDescriptions, codePlanPriceFrame } from "./models.js";
@@ -602,6 +602,7 @@ export class CodePlanRuntime implements CodePlanPort {
       const step = dry ? virtual.get(key) : this.store.get<CodePlanStep>("code_plan_step", entityId(projectId, key));
       const size = codePlanRenderAdviceSize(this.store, projectId, input, sources, step?.retryAt === undefined ? step?.attemptId : undefined);
       diff.findings.push(...zoomSoftFindings({ ...input, ...size }, sources));
+      diff.findings.push(...repeatedRowFindings(input, sources));
     }
     diff.findings.push(...cutListFindings(declarations.scenes, declarations.shots, lengths));
     diff.reusedSteps = reused.size;

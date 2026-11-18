@@ -116,8 +116,10 @@ test('saved plan fixture replays identical media keys, prices, choices and answe
   await f.submit(saved.source);let v=await f.until(waiting),c=v.choices[0];
   f.runtime.answer(f.id,{choiceId:c.choiceId,optionsDigest:c.optionsDigest,answer:c.options.find(o=>o.keyframeInput==='first_frame')});await f.until(done);
   assert.deepEqual(f.runtime.steps(f.id).map(({kind,key,priceMicros,input})=>({kind,key,priceMicros,input})),saved.steps);
-  const before=f.runtime.view(f.id),calls=structuredClone(f.calls.submit);await f.restart();await f.submit(saved.source);v=await f.until(done);
+  const before=f.runtime.view(f.id),calls=structuredClone(f.calls.submit);await f.restart();const {diff}=await f.submit(saved.source);v=await f.until(done);
   assert.deepEqual(v.steps.map(s=>[s.key,s.priceMicros]),before.steps.map(s=>[s.key,s.priceMicros]));assert.deepEqual(v.choices,before.choices);assert.deepEqual(f.calls.submit,calls);
+  assert.deepEqual(before.versions[0].diff.findings, []);
+  assert.deepEqual(diff.findings, before.versions[0].diff.findings);
 });
 
 
