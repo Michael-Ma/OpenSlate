@@ -41,7 +41,7 @@ Owned discussion images and current keyframes enter bounded, hash-bound projecti
 
 `planMode: "code"` takes the separate [code-plan input path](../../apps/server/src/code-plan/director.ts) and projects the film's current source and view. Current guidance is `code-plan@2.3.0` on tool contract **0.3.0**, handler **`code-plan-tools@3`**. The tools are `read_film`, `submit_plan`, `set_spend_limit`, `retry_step` and `read_clip_frames`. Archived 0.1.0 and 0.2.0 catalogs and guidance keep their identities and compatibility behavior. The current contract's shipped content may refresh on an eligible fresh turn.
 
-The guidance asks the Director to record three visible or audible details that distinguish its take and mark the cuts that show them. In review, it describes the result in one sentence as a stranger would.
+The guidance asks the Director to record three visible or audible details that distinguish its take and mark the cuts that show them. A cut that shows two details can carry both proof numbers, as in `proof: [2, 3]`. In review, the Director describes the result in one sentence as a stranger would.
 
 `submit_plan` carries the whole program, base version and durable invocation ID. `CodePlanRuntime` implements the port in production: dry-run validation, diffs, version fencing, publication and same-ID recovery. No native plan-file access is needed. Programs run later in the isolated [QuickJS replay sandbox](EXECUTION-ENGINE.md#code-plans-experimental), not inside the Director process or the graph declaration compiler.
 

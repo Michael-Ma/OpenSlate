@@ -5,7 +5,7 @@ import type { CodePlanDiff } from "@openslate/core/public";
 
 type Finding = CodePlanDiff["findings"][number];
 type Cut = { sees: string; seconds: number; clip: string; proof?: unknown };
-const proofShape = (): Finding[] => [{ code: "PROOF_SHAPE", detail: "Write proof as a list of up to three sentences, and mark a cut with proof: 1, 2 or 3." }];
+const proofShape = (): Finding[] => [{ code: "PROOF_SHAPE", detail: "Write proof as a list of up to three sentences, and mark a cut with proof: 2 or proof: [2, 3]." }];
 const numberList = (numbers: readonly number[]) => numbers.length === 1 ? String(numbers[0]) : `${numbers.slice(0, -1).join(", ")} and ${numbers.at(-1)}`;
 const rounded = (seconds: number) => Number(seconds.toFixed(2));
 
@@ -22,9 +22,12 @@ function proofFindings(proofScene: Record<string, unknown> | undefined, cuts: re
   for (const cut of cuts) {
     totalSeconds += cut.seconds;
     if (!Object.hasOwn(cut, "proof")) continue;
-    const mark = cut.proof;
-    if (typeof mark !== "number" || !Number.isInteger(mark) || mark < 1 || mark > proof.length) return proofShape();
-    seen.add(mark);
+    const marks: readonly unknown[] = Array.isArray(cut.proof) ? cut.proof : [cut.proof];
+    if (marks.length < 1 || marks.length > 3 || new Set(marks).size !== marks.length) return proofShape();
+    for (const mark of marks) {
+      if (typeof mark !== "number" || !Number.isInteger(mark) || mark < 1 || mark > proof.length) return proofShape();
+      seen.add(mark);
+    }
     markedSeconds += cut.seconds;
   }
   const missing = proof.map((_, index) => index + 1).filter(mark => !seen.has(mark));

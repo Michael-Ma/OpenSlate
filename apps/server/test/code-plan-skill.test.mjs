@@ -67,8 +67,9 @@ test('2.3.0 example dry-runs, submits and reviews cleanly with distinct shots an
   assert.ok(scenes[0].obvious.trim());
   assert.equal(scenes[0].proof.length, 3);
   assert.ok(scenes[0].proof.every(text => typeof text === 'string' && text.trim()));
-  assert.deepEqual([...new Set(cuts.flatMap(cut => cut.proof === undefined ? [] : [cut.proof]))].sort(), [1, 2, 3]);
-  assert.ok(cuts.filter(cut => cut.proof).reduce((sum, cut) => sum + cut.seconds, 0) * 3 >= cuts.reduce((sum, cut) => sum + cut.seconds, 0));
+  assert.deepEqual(cuts.map(cut => cut.proof), [1, undefined, 1, [2, 3]]);
+  assert.deepEqual([...new Set(cuts.flatMap(cut => cut.proof ?? []))].sort(), [1, 2, 3]);
+  assert.equal(cuts.filter(cut => cut.proof !== undefined).reduce((sum, cut) => sum + cut.seconds, 0), 8);
   assert.equal(scenes[0].format, 'Short film'); assert.equal(scenes[0].aim, 'Calm');
   assert.equal(scenes[0].takes.length, 3);
   assert.equal(scenes[0].takes.filter(take => take.chosen).length, 1);

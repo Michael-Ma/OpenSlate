@@ -10,13 +10,18 @@ import { codePlanFixture } from './code-plan-e2e-fixture.mjs';
 const cut = (seconds, proof) => ({ sees: 'A shadow crosses the sill', seconds, clip: 'opening', ...(proof === undefined ? {} : { proof }) });
 const proof = ['The curtain rises', 'The shadow moves', 'The bell answers'];
 const scene = (cuts = [], list = proof) => ({ cuts, proof: list });
-const shape = { code: 'PROOF_SHAPE', detail: 'Write proof as a list of up to three sentences, and mark a cut with proof: 1, 2 or 3.' };
+const shape = { code: 'PROOF_SHAPE', detail: 'Write proof as a list of up to three sentences, and mark a cut with proof: 2 or proof: [2, 3].' };
 const unseen = detail => ({ code: 'PROOF_UNSEEN', detail });
 const short = detail => ({ code: 'PROOF_SHORT', detail });
 const cutsShape = { code: 'CUTS_SHAPE', detail: 'Use at most 64 cuts: an array of objects with string sees, positive number seconds and string clip.' };
 
 for (const [name, scenes, expected] of [
   ['all three proofs above a third', [scene([cut(1, 1), cut(1, 2), cut(1, 3), cut(2)])], []],
+  ['a list mark covers both proofs', [scene([cut(1, 1), cut(1, [2, 3]), cut(2)])], []],
+  ['one mark in a list is accepted', [scene([cut(1, [1])], ['The curtain rises'])], []],
+  ['three marks in any order are accepted', [scene([cut(1, [3, 1, 2])])], []],
+  ['a cut with two marks counts its seconds once', [scene([cut(1, 1), cut(1, [2, 3]), cut(6)])],
+    [short('The cuts that show the proof total 2 of 8 seconds; the take needs at least a third of the film.')]],
   ['exactly a third is enough', [scene([cut(1, 1), cut(2)], ['The curtain rises'])], []],
   ['one missing takes precedence over a short duration', [scene([cut(1, 1), cut(1, 3), cut(10)])], [unseen('No cut shows proof 2.')]],
   ['two missing in list order', [scene([cut(1, 1)])], [unseen('No cut shows proofs 2 and 3.')]],
@@ -40,7 +45,10 @@ for (const [name, scenes, expected] of [
   ...[null, 'a sentence', [], [...proof, 'A fourth proof'], [''], ['  '], ['x'.repeat(241)], [1], Array(1)]
     .map((list, index) => [`bad proof list ${index + 1}`, [scene([cut(1, 1)], list)], [shape]]),
   ...[0, -1, 4, 1.5, '1', null].map(mark => [`bad mark ${JSON.stringify(mark)}`, [scene([cut(1, mark)])], [shape]]),
+  ...[[], [2, 2], [1, 4], [1, '2'], [[1]], [1, 2, 3, 4], Array(1)]
+    .map(mark => [`bad list mark ${JSON.stringify(mark)}`, [scene([cut(1, mark)])], [shape]]),
   ['a mark must fit the list, even below four', [scene([cut(1, 2)], ['The curtain rises'])], [shape]],
+  ['a list mark must also fit the proof list', [scene([cut(1, [1, 2])], ['The curtain rises'])], [shape]],
 ]) test(`proof advice: ${name}`, () => {
   assert.deepEqual(cutListFindings(scenes, []), expected);
 });
@@ -146,7 +154,7 @@ for (const repeated of [false, true]) test(`submit_plan preserves media and choi
   assert.deepEqual(baseline.findings, repeatAdvice);
   assert.equal(baseline.reusedSteps, 3);
   const annotate = cuts => film({ obvious: 'The sun rises', proof, cuts }, repeated);
-  const marked = cuts.map((row, index) => ({ ...row, proof: index + 1 }));
+  const marked = [cut(1, 1), cut(1), cut(1, [2, 3])];
   for (const [source, findings] of [
     [annotate(marked), repeatAdvice],
     [annotate(cuts), [...repeatAdvice, unseen('No cut shows proofs 1, 2 and 3.')]],

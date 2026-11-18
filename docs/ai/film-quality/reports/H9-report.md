@@ -4,7 +4,7 @@
 
 Code-plan 2.3.0 asks the Director to name the obvious film, write three visible or audible details that distinguish the chosen take, and mark the cuts that show them. The craft guidance carries the take through each block and the ending, writes feelings as observable actions, asks repeated footage to change, and calls for a one-sentence cold read during review.
 
-The application pins the manifest and all six files with package digest `da0de310c033c7fb6014794defd714ab107d5f456b12d4f02e6b823f68e5e6dd`. Tool contract **0.3.0**, plan language **1.0.0**, workflow **1.0.0**, the file inventory and `personTurnFiles` retain their existing values. This package ships separately from the storyboard release registry.
+The application pins the manifest and all six files with package digest `712c72a27716b3cd4a18094824bd5397bf92fb247c0c698f211ef4dca88db279` as of H9b. Tool contract **0.3.0**, plan language **1.0.0**, workflow **1.0.0**, the file inventory and `personTurnFiles` retain their existing values. This package ships separately from the storyboard release registry.
 
 | Turn | Guidance supplied |
 |---|---|
@@ -17,9 +17,9 @@ The existing fresh-turn path gives a film previously locked to 2.2.0 a separate 
 ## Factual corrections
 
 - The advisory sentence in `SKILL.md` now also names `UNAWAITED_CALL`, `STEP_LIMIT` and `CEILING`. The sentence describes the three codes and omits the claim that each finding includes guidance detail, since the step and spending findings can be code-only. The two submit-rejection findings are `SOURCE_SYNTAX` and `RUNTIME_ERROR`.
-- In the example, row 2 marks proof 2 where the steam is grey, which row 4 pays off in gold. Row 4 marks proof 3 for the chime. The four marks are now `1, 2, 1, 3` and cover all 9.5 declared seconds. The chime still starts at tick 195, the start of the last row. Shot lengths, ranges, prompts and cue placement keep the lead's values.
+- In the revised example, row 2 carries no mark. Row 4 marks both the steam turning gold and the chime with `proof: [2, 3]`. The cuts are marked `1`, unmarked, `1`, and `[2, 3]`, covering 8 of the 9.5 declared seconds. The chime starts at tick 195, the start of the last row.
 
-The Studio declaration comment accurately lists the optional idea fields. The film-craft text accurately describes numeric, one-based proof marks in the scene carrying the list. Its call for three proofs, plain sight words, a marked final cut and a stranger's reading is direction for the Director. The cut-list check accepts up to 64 cuts across the declarations, with string `sees`, finite positive `seconds`, and a string shot ID or `still` as `clip`. Its proof check accepts one to three nonblank strings of up to 240 JavaScript string units and marks within that list's length. `PROOF_SHAPE` covers malformed lists or marks. `PROOF_UNSEEN` names missing marks. Once each proof has a mark, `PROOF_SHORT` compares marked seconds with one third of the first proof scene's declared cut seconds. These are structural checks. The film-craft guidance and Studio declaration comment passed the factual review without edits.
+The Studio declaration comment lists the optional idea fields. The film-craft guidance uses one-based proof numbers in the scene carrying the list. It calls for three proofs, plain sight words, a marked final cut and a stranger's reading. The cut-list check accepts up to 64 cuts across the declarations, with string `sees`, finite positive `seconds`, and a string shot ID or `still` as `clip`. The proof check accepts one to three nonblank strings of up to 240 JavaScript string units. A cut mark can be one integer or a list of one to three distinct integers in the proof list's range. `PROOF_SHAPE` covers malformed lists or marks. `PROOF_UNSEEN` names missing marks. Once each proof has a mark, `PROOF_SHORT` compares marked seconds with one third of the first proof scene's declared cut seconds. Each marked cut contributes its duration once.
 
 ## Repeated rows and the reviewed example
 
@@ -31,14 +31,14 @@ The scripted reviewer previously imposed its whole-clip trim on each occurrence 
 
 Four tests were added for the 2.2.0 predecessor policy, both outcomes of artifact ID comparison, and the advisory-code inventory. Three existing skill tests were updated for the release, package budgets and actual scripted review, and the existing lock test now checks the 2.3.0 pin. The 2.1.0 preservation case still runs. The example test checks the unmodified initial dry run, the initial submission, the reviewed submission and complete dry runs of both sources. It verifies the marked time, a mark for every proof, and every non-`own` basis against its declared structure or shape. Package validation checks relative links. No tests were deleted.
 
-| Injected files | Words | Limit |
+| Injected files | Original H9 words | Limit |
 |---|---:|---:|
 | All six | 14,474 | <14,900 |
 | Four on application turns | 7,648 | <7,900 |
 
 The diff review traced the timeline through normalization and replay and found that passing normalized rows alone would remove the IDs again. The implementation keeps them solely in the in-memory advice path. The review also identified the scripted trim's effect on the cut list and chime and checked that the example test runs the actual offline review turn.
 
-## Verification
+## Original H9 verification
 
 Pinned toolchain: Node **24.15.0**, pnpm **10.33.0**, FFmpeg and ffprobe **8.1.1**, and Hiragino Sans GB for CJK captions. Checks used temporary fixture data, fake providers and loopback only. Command logs are in `/tmp/openslate-h9.U3WYPV`.
 
@@ -71,3 +71,24 @@ Section 16 of the design notes was edited separately while H9 was running. Its s
 - Added: `docs/ai/film-quality/reports/H9-report.md`. No files were deleted.
 
 One proposed commit, `feat(code-plan): release take-on-screen guidance 2.3.0`, covers these 17 files. The work is uncommitted. There are no browser contract changes.
+
+## H9b
+
+A cut can use a one-based number or a list of one to three distinct numbers in range. Each number covers its proof and each marked cut contributes its seconds once. Invalid marks produce `PROOF_SHAPE` with the detail “Write proof as a list of up to three sentences, and mark a cut with proof: 2 or proof: [2, 3].”
+
+The revised 2.3.0 package contains 14,492 words across six files and 7,666 across the four application-turn files. The lock tests compare the pinned digest with the exact package bytes.
+
+Added 12 proof-finding cases and updated the example and submission tests to exercise both mark forms. The diff review traced the validator through dry run and replay. The submission tests verify identical step keys, prices, choices and provider calls when only proof annotations change.
+
+Checks used the pinned toolchain and temporary fixture data. Logs are in `/tmp/openslate-h9b.9t7s8p`.
+
+| Check | Result |
+|---|---|
+| `pnpm build` | 5 workspace builds passed, 0 failed. Vite reported its existing dynamic-import and bundle-size advisories. |
+| Focused proof and example tests | 74 passed, 0 failed, 0 skipped |
+| Skill and code-plan suites | 677 passed, 0 failed, 0 skipped |
+| `pnpm demo:code` | Passed. Four plan versions, two answered choices, one lookup recovery, zero duplicate submissions, $0.40 of a $4.00 fixture ceiling, final state `done`. |
+| `pnpm check`, including `pnpm test` | 5,469 tests. 5,468 passed, 0 failed, 1 skipped (the optional native Codex probe), 0 cancelled. |
+| `pnpm -r typecheck` | 5 workspaces passed, 0 failed |
+
+The Codex run stalled after these checks when the machine slept, before its closing message; the lead read the two rows above from the run's own logs (`check.log`, `status`), confirmed that the pinned digest equals the digest of the package files, and stopped the process.
