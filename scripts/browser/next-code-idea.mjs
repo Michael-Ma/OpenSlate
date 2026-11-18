@@ -28,6 +28,7 @@ export const scenarios = [
       await idea.waitFor();
       const order = await page.locator(".scenes > [data-scene]").evaluateAll((nodes) => nodes.map((node) => node.dataset.scene));
       expect(order[0] === "idea" && order.includes("harbour"), `the idea comes first: ${order.join(" ")}`);
+      expect((await idea.locator("[data-idea='format']").innerText()) === "Short film" && (await idea.locator("[data-idea='aim']").innerText()) === "Calm, then Bittersweet", "the format and the aim come first");
       expect((await idea.locator("[data-idea='take'] b").innerText()) === "The ferry is the only warm light", "the chosen take is named");
       expect(/Bent from: Mood first, object last/.test(await idea.locator("[data-idea='take']").innerText()), "the take says which template it bends");
       expect(/^The viewer first reads this as/.test(await idea.locator("[data-idea='reading']").innerText()), "the reading is shown");

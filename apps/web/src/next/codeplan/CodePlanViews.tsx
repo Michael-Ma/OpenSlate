@@ -113,6 +113,8 @@ function IdeaPanel({ idea }: { idea: FilmIdea }) {
         <span className="meta">{t("codeplan.idea.note")}</span>
       </div>
       <dl className="cp-idea-rows">
+        {idea.format ? (<><dt>{t("codeplan.idea.format")}</dt><dd data-idea="format">{idea.format}</dd></>) : null}
+        {idea.aim ? (<><dt>{t("codeplan.idea.aim")}</dt><dd data-idea="aim">{idea.aim}</dd></>) : null}
         {idea.chosen ? (
           <>
             <dt>{t("codeplan.idea.take")}</dt>
