@@ -207,7 +207,7 @@ test('saved finished clips replay and locally rerender at 24 fps after restart w
   assert.equal(providerCalls, 0); assert.equal(plans.steps(project.id).filter(step => step.kind === 'video').length, 1);
   const intents = store.list('code_plan_render_intent', project.id); assert.equal(intents.length, 2);
   for (const intent of intents) { assert.equal(intent.recipe.frameRate.numerator, 24); assert.equal(intent.recipe.totalFrames, 72); }
-  const captured = await captureEditedCodePlanRender(store, media, project.id, { timeline: [artifact] }, '0.3.0');
+  const captured = await captureEditedCodePlanRender(store, media, project.id, { timeline: [artifact] }, '0.3.0', { artifactDir: `${directory}-artifacts` });
   assert.equal(captured.clips[0].durationFrames, 90);
   const timeline = createLocalTimelineDocument({ projectId: project.id, clips: captured.clips, audio: [] });
   assert.equal(timeline.totalFrames, 90); assert.deepEqual(parseLocalTimelineDocument(timeline), timeline);
