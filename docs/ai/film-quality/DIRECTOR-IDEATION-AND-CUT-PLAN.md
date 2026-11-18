@@ -455,6 +455,15 @@ The paper tests of sections 7, 12 and 13 judged plans by their words. This one h
 - On the six open briefs 2.2.0 was already readable on paper with GPT 6.2. The gain is where the brief fixes the moments.
 - The first draft let one stranger read the birthday film as a memorial. The stranger's read before submitting was added for that, and in the next round both strangers read a celebration.
 
+### A real Director turn
+
+On the released build the real Director (Codex 0.170.0, `gpt-6.2-sol`) planned the pigeon brief up to its keyframes for $0. It recorded the obvious film and three proofs, marked their cuts (11.1 of 25 seconds), got no finding, gave the chair a picture and a clip of its own at the pigeon's eye level, and used no range twice. Its take was "Permission from Nobody": the pigeon takes a fluttering napkin on the empty chair as permission and bows back. Two strangers reading that plan saw the napkin and the pigeon lowering itself and read a thief checking for witnesses; neither read a bow. The proof reached the screen; its meaning is not yet certain, and the Director's own stranger's read did not catch it.
+
+### Still open
+
+- **An independent cold read.** The Director reads its own cut list knowing what it meant. A second model that sees only the cut list and the prompts, called by the studio at dry run and reported as advice, would be the blind read of this section built into the product.
+- **A real film** with 2.3.0, to see what the footage does with a proof and whether the review's cold read repairs it.
+
 ### Limits
 
 Paper is not footage: the video model may not deliver a bow or a rocking chair, and only a real film tests the review's cold read. One sample per brief. The measure answers whether the take is on screen, not whether the take is good.

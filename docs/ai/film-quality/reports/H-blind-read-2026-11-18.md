@@ -64,6 +64,16 @@ The Director ran once more on the same eight briefs with the final text, and the
 - **The birthday film** was read as a celebration by both strangers ("as if a humble plant stood in for a birthday or celebration cake"). The Director's notes now include the stranger's sentence it wrote for itself before submitting.
 - **Still partial:** the flask advert (one stranger of two named the window) and the platform (both saw the light leave the bench; one judge wanted more).
 
+## A real Director turn on the released build
+
+After the release a side studio ran the pigeon brief with the real Director (Codex 0.170.0, `gpt-6.2-sol`, skill 2.3.0), up to the keyframes. No video was bought; spend $0. The owner's studio was not used. Files: `data/test-runs/20261118-take-on-screen/live/` (the plan in `plans/pigeon-v1.ts`, screenshots and the recording in `raw/`).
+
+- **The mechanism works end to end.** The first turn took about three minutes. The plan records `obvious` and three proofs, marks the cuts that show them (11.1 of 25 seconds), and the dry run returned no finding. The idea panel shows them as "Seen on screen". The reply opens with the take and what the viewer will see of it.
+- **The take has pictures of its own.** Take: "Permission from Nobody", a pigeon takes a napkin fluttering on an empty chair as permission and bows back. The chair has its own reference picture and its own clip, framed level at the pigeon's height, used in two different ranges; the pigeon's clip is used in three different ranges at three sizes. Nothing is shown twice. The lamp-post keyframe has the croissant across the beak like a moustache.
+- **A blind read of this plan was only partial.** Both strangers saw the napkin corner flick and the pigeon lower itself, and both remembered the moustache. Neither read a bow or a permission: one wrote that the pigeon "seems to check for witnesses, and all that moves is a napkin corner", the other took the napkin for "a false alarm" and the lowering for "the bird gathering its nerve". So the proof is on screen and its meaning is not yet certain. A gesture that can be read two ways (a bow or a crouch) needs something that settles it, and the Director's own stranger's read did not catch this: it knows what it meant.
+
+What this suggests next: an independent cold read inside the studio (a second model that sees only the cut list and prompts, reported to the Director as advice at dry run), and one real film to see what the footage does with the bow.
+
 ## Limits
 
 - Paper is not footage. The video model may not deliver a bow or a quilt pulled over a clock; the review step and its cold read are for that, and only a real film tests them.
