@@ -297,6 +297,16 @@ The Director's model planned eight briefs, three times, with the new files (`arm
 
 Order: H2 merges first, then H1 (its example uses H2's shapes), then H3. Two paid films follow, each asked for first.
 
+### Built and verified, 2026-11-17
+
+All three cards are merged into local `main` (not pushed). Reports: [H1](reports/H1-report.md), [H2](reports/H2-report.md).
+
+- Codex ran `pnpm check` on the merged state: 5,366 tests passed, none failed, one optional probe skipped; five workspace typechecks passed.
+- The lead ran all 217 browser scenarios against a disposable fixture studio. One older scenario failed because the new suggestion line shared an attribute with the option buttons; after the fix the affected scenarios pass. Two scenarios are new: the idea above the storyboard on a desktop and on a phone, with the suggestion on the keyframe card.
+- New Director turns get skill 2.1.0 and the new tool schema. A turn already under way when the studio is updated keeps its old lock and fails closed; the next turn works.
+- Known limits: a still that belongs to no shot comes from `ctx.image` and has no confirmation card; the templates reach the Director on every turn (about 2,200 words of the 9,055); variety across runs is partial.
+- Not done: no film has been made with 2.1.0. The plans are better on paper; whether the films are better is still to be seen.
+
 ## Appendix A: the proposed skill text
 
 ### The idea, before any plan
