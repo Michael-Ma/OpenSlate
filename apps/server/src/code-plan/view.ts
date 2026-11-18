@@ -9,6 +9,7 @@ import { codePlanShotLinks } from "./projection.js";
 import type { CodePlanPoster } from "./posters.js";
 import { codePlanArtifacts, codePlanRenderSources, publicArtifact } from "./artifacts.js";
 import { codePlanFitWarning } from "./fit-warning.js";
+import { codePlanRenderAdviceSize } from "./render-size.js";
 
 export const emptyDiff = (): CodePlanDiff => ({ reusedSteps: 0, newSteps: [], cancelledSteps: 0,
   certainMicros: "0", dependsOnPending: false, findings: [] });
@@ -56,7 +57,9 @@ export function codePlanView(store: Store, execution: CodePlanExecution, project
     declarations: run?.declarations ?? { scenes: [], shots: [] },
     ...(references.length ? { references } : {}),
     steps: steps.map(step => {
-      const fitWarning = step.kind === "render" ? codePlanFitWarning(step.input, sizes) : undefined;
+      const fitWarning = step.kind === "render"
+        ? codePlanFitWarning({ ...step.input, ...codePlanRenderAdviceSize(store, projectId, step.input, sizes,
+          step.retryAt === undefined ? step.attemptId : undefined) }, sizes) : undefined;
       return { key: step.key, kind: step.kind, state: step.state, model: String(step.input.model),
       label: stepLabel(step.input), ...(step.result?.ok ? { artifact: mediaArtifact(step.result.artifact) } : {}),
       ...(links.has(step.key) ? { shotId: links.get(step.key)! } : {}),

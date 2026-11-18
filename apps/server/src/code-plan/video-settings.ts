@@ -20,16 +20,19 @@ export function filmVideoResolution(store: Pick<Store, "get">, projectId: string
 export function currentVideoModel(store: Pick<Store, "get">, projectId: string, model: CodePlanModel): CodePlanModel {
   return model.profile?.adapter === "viggle-h3" ? { ...model, videoResolution: filmVideoResolution(store, projectId, model.profile) } : model;
 }
-export function codePlanVideoProfile(store: Store, projectId: string): ProviderProfile {
+function codePlanVideoProfile(store: Store, projectId: string): ProviderProfile | undefined {
   const project = store.getProject(projectId), lock = store.get<CodePlanCapabilityLock>("capability_lock", project.capabilityLockId);
   const preferred = lock?.preferredProfileIds as { video?: string } | undefined;
   const profile = lock?.profiles.find(row => row.id === preferred?.video) ?? lock?.profiles.find(row => row.kind === "video");
-  invariant(project.planMode === "code" && profile?.adapter === "viggle-h3", "CODE_PLAN_VIDEO_SETTINGS_UNAVAILABLE",
-    "Video settings require a code film using Viggle");
-  return profile;
+  return project.planMode === "code" && profile?.adapter === "viggle-h3" ? profile : undefined;
+}
+export function codePlanRenderResolution(store: Store, projectId: string): ViggleH3Resolution | undefined {
+  const profile = codePlanVideoProfile(store, projectId);
+  return profile && filmVideoResolution(store, projectId, profile);
 }
 export function codePlanVideoSettings(store: Store, projectId: string) {
   const project = store.getProject(projectId), profile = codePlanVideoProfile(store, projectId);
+  invariant(profile, "CODE_PLAN_VIDEO_SETTINGS_UNAVAILABLE", "Video settings require a code film using Viggle");
   const resolution = filmVideoResolution(store, projectId, profile);
   return { version: 1 as const, projectId, model: "viggle-h3" as const,
     quality: profile.configuration!.settings!.quality as "high" | "low", resolution,

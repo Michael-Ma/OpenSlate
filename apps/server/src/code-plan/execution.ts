@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { canonical, codePlanExportSize, digest, invariant, newId } from "@openslate/core";
+import { canonical, digest, invariant, newId } from "@openslate/core";
 import type { ArtifactRef, JsonObject } from "@openslate/core";
 import { ExecutionRegistry, executionIdentity, executionProfileSnapshot, profileExecutionIdentity, executionTaskId, isSpoolCompletion, isSpoolOutput, normalizeExecutionOutcome, MAX_EXECUTION_OUTPUT_BYTES, EXECUTION_SPOOL_LIMITS } from "@openslate/providers";
 import type { ExecutionOutcome, ExecutionProvider, IngestibleExecutionOutput } from "@openslate/providers";
@@ -26,7 +26,9 @@ import { assertCodePlanFirstDispatch } from "./provider-authority.js";
 import { makeCodePlanPoster } from "./posters.js";
 import type { CodePlanStep } from "./records.js";
 import type { CodePlanMediaKind } from "./identity.js";
-import { codePlanVideoProfile, filmVideoResolution, isCodePlanVideoResolution, videoSubmissionLock } from "./video-settings.js";
+import { codePlanRenderResolution, isCodePlanVideoResolution, videoSubmissionLock } from "./video-settings.js";
+import { codePlanRenderSources } from "./artifacts.js";
+import { codePlanRenderSize } from "./render-size.js";
 export type { CodePlanMediaKind } from "./identity.js";
 export type CodePlanLiability = "reserved" | "charged" | "released";
 export interface CodePlanExecutionRecord {
@@ -152,11 +154,9 @@ export class CodePlanExecution {
     let args = profile ? codePlanProviderArgs(profile, input, { enhance: false }) : input;
     if (kind === "render") {
       // Capture the export policy in this attempt, never in the content-addressed step input.
-      try {
-        const video = codePlanVideoProfile(this.store, projectId);
-        args = { ...args, ...codePlanExportSize(this.store.getProject(projectId), filmVideoResolution(this.store, projectId, video)) };
-      } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "CODE_PLAN_VIDEO_SETTINGS_UNAVAILABLE")) throw error;
+      const resolution = codePlanRenderResolution(this.store, projectId);
+      if (resolution !== undefined) {
+        args = { ...args, ...codePlanRenderSize(this.store.getProject(projectId), resolution, input, codePlanRenderSources(this.store, projectId)) };
       }
     }
     const realRender = kind === "render" && this.store.get<CodePlanCapabilityLock>("capability_lock", this.store.getProject(projectId).capabilityLockId)?.profiles.some(row => row.adapter !== "fake");
