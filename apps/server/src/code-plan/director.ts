@@ -120,7 +120,8 @@ export function codeDirectorInput(service: ProductionService, options: DirectorS
   const environment = directorSkillEnvironment(options, version);
   // A fresh 0.3.0 turn follows current guidance; 0.1.0 and 0.2.0 stay on their archived packages. An epoch
   // already under way keeps the lock it started with.
-  const outdated = !binding && version === CODE_PLAN_TOOL_CONTRACT && lock?.skills[0]?.packageDigest !== CODE_PLAN_GUIDANCE_DIGEST;
+  const outdated = !binding && version === CODE_PLAN_TOOL_CONTRACT && (lock?.skills[0]?.packageDigest !== CODE_PLAN_GUIDANCE_DIGEST
+    || !lock?.bindings.some(row => row.kind === "handler" && row.digest === toolCatalog(version).digest));
   if (!lock || outdated) {
     lock = createDirectorSkillLock(options, CODE_PLAN_TOOL_CONTRACT).lock;
     store.insert("director_skill_lock", lock.id, turn.projectId, { id: lock.id, projectId: turn.projectId, lock });

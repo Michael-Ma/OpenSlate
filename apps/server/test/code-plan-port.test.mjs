@@ -195,7 +195,7 @@ test("held execution finishes existing work and free renders, release dispatches
   f.runtime.setCeiling(f.projectId, { ceilingMicros: "1000000", by: "person" });
   const source = film(`
     const first = await ctx.image({ model: "paid", prompt: "first" });
-    await Promise.all([ctx.render({ timeline: [first.artifact] }), ctx.image({ model: "paid", prompt: "second" })]);
+    await Promise.all([ctx.render({ timeline: [{ artifact: first.artifact, durationFrames: 30 }] }), ctx.image({ model: "paid", prompt: "second" })]);
   `);
   await submit(f, source); await settle(f, "waiting");
   f.runtime.raiseCeiling(f.projectId, "1200000");

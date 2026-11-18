@@ -258,6 +258,45 @@ The famous screenwriting books mostly teach how to sustain 100 minutes and how t
 
 A paper test of Appendix B against Appendix A, free: the same four briefs, two runs each, with a different three moves offered to each B run. Three questions: do two runs of one brief now find different ideas; are the fixed points still kept; do the calm briefs stay calm. In Phase 3, offered moves would replace "sparks": they stay on the subject, where a third of the outside words were misused.
 
+## 12. Decision and build, 2026-11-17: templates by kind, and skill 2.1.0
+
+The owner's answer: build it. Templates should be sorted by kind of video, each kind researched, and the Director must stay free to use a template, change one or invent.
+
+### The design
+
+- **Kinds are sorted by what the viewer comes for**, not by subject: a laugh, tension, feeling, calm, wonder, desire, satisfaction, energy. A short list of formats (advert, social post, trailer or pastiche) adds the rules a format brings. A check against how makers sort short video found three things outside the eight: the rousing anthem spot (left out; close to Energy), pastiche (made a move that works in any kind) and loops (not possible: the timeline only cuts).
+- **Four more surveys** found five to seven documented shapes for each kind, with a known example, the stale version and one way to bend it (`templates-1` to `templates-4` in the working folder). About 45 survived as one line each in `skills/code-plan/references/templates.md`: blocks in order, the turn marked, and a note where the edit must build what the video model does badly. Shapes that need a dissolve, a split screen or a reversed clip were dropped or rewritten for cuts.
+- **Freedom is written into the method.** Each take records its `basis`: "template: <name>", "bent: <name>" or "own". At least one of the three takes must owe nothing to the library. The file says that every template used straight is somebody's cliché, and what bending means: change who does it, where the turn falls or what the last picture is.
+- **Earlier work is reused.** `skills/v8.1.0` already held a premise method and per-type rules for the older Director (`craft-story`, `craft-comedy`, `type-*`); its comedy mechanisms and format rules are folded into the new file.
+- Section 11's additions (blocks and a fulcrum, wit at the cut, the order for judging a cut, the checks on a take) are in `film-craft.md`.
+
+### Paper test of the 2.1.0 text (free)
+
+The Director's model planned eight briefs, three times, with the new files (`arm-c1`, `arm-c2`, `arm-c3`): the four earlier briefs and four new ones (a flask advert, a creepy lift, a birthday film for a mother who grows flowers, "something amazing with a whale"). Today's skill planned the four new briefs once (`arm-a3`).
+
+| Brief | Today's skill | 2.1.0, three runs |
+|---|---|---|
+| Flask advert | Someone comes in from the rain and opens the flask | One band of light describes the metal, then warmth at the rim, no person; a crave sequence; hero in light |
+| Creepy lift | A chair that changes places | The doors open on another copy of the landing (twice); a mirror that shows the doors still open after they close |
+| Birthday film | A child gives a plant | The gardener's ritual, with one new pot where the first picture showed a gap (twice); the flower keeps her company |
+| Whale | A whale returns a fallen star | The whale lifts the sea like a blanket under a buoy; a whale's shade crosses a picnic in a desert (twice) |
+
+- **How the takes were chosen** (24 films): one straight from a template, about thirteen bent, about ten the Director's own. It uses the library as asked.
+- **Variety across runs** is better than in section 7 and still partial: the lift, the whale and the cat each repeated one idea in two of three runs, and the three platform films share one reading.
+- **A fault found and fixed.** In the first two runs the Director held still pictures for most of some films, because a still costs nothing: an eight-second still as the pigeon's final portrait, sixteen of twenty seconds in the lift. The craft text now limits a still to a thing that would not move anyway, for a second or two, and gives whatever is alive, and the kept image, a clip. The third run followed it.
+- **Cost** stays under the earlier plans: about $0.75–1.50 a film before retakes, against $1.50–2.50, because stills replace bought inserts.
+- The limits of section 7 stand: these are plans, I am not a blind judge, and only films show whether a better plan is a better film.
+
+### The build
+
+| Card | Who | What |
+|---|---|---|
+| [H1](cards/H1-skill-idea-and-cut.md) | Lead writes the text; Codex releases | Skill 2.1.0: `SKILL.md`, `film-craft.md`, new `templates.md`, the example plan, `studio.d.ts` |
+| [H2](cards/H2-edit-tools.md) | Codex | Still rows, punch-in to 2×, cut pairs on a render, advisory findings for the cut list, a suggested video input on the keyframe card |
+| H3 | Lead | The idea above the storyboard (chosen take, reading, rule; other takes, fixed points and the cut list folded), the suggestion on the keyframe card, words for the new findings |
+
+Order: H2 merges first, then H1 (its example uses H2's shapes), then H3. Two paid films follow, each asked for first.
+
 ## Appendix A: the proposed skill text
 
 ### The idea, before any plan

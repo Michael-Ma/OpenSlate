@@ -1,0 +1,47 @@
+{
+  "source": "export default async function(ctx) { await ctx.scene({id:'room',title:'Room'}); await ctx.shot({id:'opening',title:'The room wakes'}); const k=await ctx.keyframe('opening',{prompt:'Saved room before the curtain moves',video:{durationSeconds:6}}); if(!k.ok)return; const clip=await ctx.video({...k.input,shot:'opening',prompt:'A curtain moves',durationSeconds:6}); if(clip.ok)await ctx.render([{artifact:clip.artifact,startFrame:3,durationFrames:20,fit:'cover'}]); }",
+  "steps": [
+    {
+      "kind": "image",
+      "key": "a822e4d1a01287d1ea9707486f580a5f851edcabc32eb32467a0625494268263",
+      "priceMicros": "10000",
+      "input": {
+        "model": "fake-image",
+        "prompt": "Saved room before the curtain moves"
+      }
+    },
+    {
+      "kind": "video",
+      "key": "88dd515267d0fa4f940aa84fa5e2ad77e74096596ed2d1871ddfac344828a0e4",
+      "priceMicros": "100000",
+      "input": {
+        "durationSeconds": 6,
+        "firstFrame": {
+          "kind": "image",
+          "sha256": "ee7678649b52170e6f46d3dbc184a974fadfabf5fcaaac96faeee9cb46ecbc87"
+        },
+        "model": "fake-video",
+        "prompt": "A curtain moves"
+      }
+    },
+    {
+      "kind": "render",
+      "key": "e80c03d3f46ec05307887a5180850a96e03e529611eb7abe599a5fab30374560",
+      "priceMicros": "0",
+      "input": {
+        "model": "local-render",
+        "timeline": [
+          {
+            "artifact": {
+              "kind": "video",
+              "sha256": "0ec9d5b4a07bc54ba8879551a0e1957ba5f6f319b8b1c99747b04210003318e5"
+            },
+            "durationFrames": 20,
+            "fit": "cover",
+            "startFrame": 3
+          }
+        ]
+      }
+    }
+  ]
+}

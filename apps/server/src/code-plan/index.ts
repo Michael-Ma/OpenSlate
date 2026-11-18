@@ -1,8 +1,10 @@
+import { codePlanArtifacts, codePlanRenderSources, object } from "./artifacts.js";
+import { cutListFindings, renderTimelineFrames, zoomSoftFindings } from "./cut-findings.js";
 import { lyriaFailureMessage } from "../execution/gemini-lyria-execution.js";
 import { videoI2vFailure } from "../execution/video-i2v-execution.js";
 import { modelPrice, modelDescriptions, codePlanPriceFrame } from "./models.js";
 import { createHash, randomInt } from "node:crypto";
-import { canonical, digest, DomainError, invariant, moneyMicros } from "@openslate/core";
+import { canonical, EXPORT_SIZE, projectAspect, digest, DomainError, invariant, moneyMicros } from "@openslate/core";
 import type { JsonObject, JsonValue } from "@openslate/core";
 import type { CodePlanDiff, CodePlanSourceView, CodePlanStepDetail, CodePlanView } from "@openslate/core/public";
 import type { Store } from "../persistence/store.js";
@@ -377,6 +379,7 @@ export class CodePlanRuntime implements CodePlanPort {
     const reachedChoices = new Set<string>();
     const lock = this.store.list<{ lock: { compatibility: { toolContract: string } } }>("director_skill_lock", projectId).at(-1)?.lock;
     const filmQualityEnabled = !lock || lock.compatibility.toolContract === "0.3.0";
+    const renderInputs: JsonObject[] = [];
     const confirmedKeyframes = new Map<string, { frame: JsonObject; choice: string }>();
     const journalKeys = new Set(journal.filter(step => step.attemptId || step.result).map(step => step.key));
     let budget = false, limited = false;
@@ -436,7 +439,14 @@ export class CodePlanRuntime implements CodePlanPort {
         invariant(typeof shot === "string" && shot.length > 0 && shot.length <= 120 && declaration,
           "CODE_PLAN_KEYFRAME_INPUT", "ctx.keyframe needs a shot declared in this pass");
         invariant(raw && typeof raw === "object" && !Array.isArray(raw), "CODE_PLAN_KEYFRAME_INPUT", "Use a keyframe input with video settings");
-        const { video, ...picture } = raw as Record<string, unknown>;
+        const { video, suggest, ...picture } = raw as Record<string, unknown>;
+        invariant(suggest === undefined || suggest && typeof suggest === "object" && !Array.isArray(suggest)
+          && Object.keys(suggest).every(key => ["input", "why"].includes(key))
+          && typeof (suggest as Record<string, unknown>).input === "string"
+          && ["keyframe_and_references", "references_only", "first_frame"].includes(String((suggest as Record<string, unknown>).input))
+          && typeof (suggest as Record<string, unknown>).why === "string" && String((suggest as Record<string, unknown>).why).length >= 1
+          && String((suggest as Record<string, unknown>).why).length <= 160,
+          "CODE_PLAN_KEYFRAME_INPUT", "suggest needs an input of keyframe_and_references, references_only or first_frame and a why of 1–160 characters");
         invariant(video && typeof video === "object" && !Array.isArray(video)
           && typeof (video as Record<string, unknown>).durationSeconds === "number"
           && Number.isFinite((video as Record<string, unknown>).durationSeconds) && Number((video as Record<string, unknown>).durationSeconds) > 0,
@@ -469,8 +479,10 @@ export class CodePlanRuntime implements CodePlanPort {
         }
         if (modes.includes("first_frame")) add("first_frame", { firstFrame: frame });
         invariant(options.length > 0, "CODE_PLAN_KEYFRAME_INPUT", "This video model cannot use keyframes; choose a model with references or first-frame input");
+        const available = suggest && options.some(option => option.keyframeInput === (suggest as Record<string, unknown>).input);
+        if (suggest && !available) diff.findings.push({ code: "SUGGEST_UNAVAILABLE", detail: `Shot ${shot}: the suggested video input is not offered on this card.` });
         const answer = this.choose(projectId, [`${shot}-keyframe`, {
-          question: typeof declaration.title === "string" ? declaration.title : shot, options,
+          question: typeof declaration.title === "string" ? declaration.title : shot, options, ...(available ? { suggest } : {}),
         }], dry, reachedChoices, true) as JsonObject | typeof SANDBOX_PENDING;
         if (answer === SANDBOX_PENDING) return answer;
         const choice = String(answer.keyframeInput);
@@ -487,6 +499,14 @@ export class CodePlanRuntime implements CodePlanPort {
         && virtual.has(stepKey(kind, normalized));
       const input = kind === "video" && !journaledDefault
         ? this.options.execution.normalizeVideoInput(projectId, normalized, models[String(normalized.model)]!) : normalized;
+      if (kind === "render") {
+        const media = codePlanArtifacts(this.store, projectId);
+        for (const value of Array.isArray(input.timeline) ? input.timeline : []) {
+          const ref = object(object(value).artifact ?? value);
+          if (ref.kind === "image") invariant(media.find(ref), "CODE_PLAN_ARTIFACT_INVALID", "Still requires an owned picture of this film");
+        }
+        renderInputs.push(input);
+      }
       const key = stepKey(kind, input), id = entityId(projectId, key);
       reached.add(key);
       let step = dry ? virtual.get(key) : this.store.get<CodePlanStep>("code_plan_step", id);
@@ -573,6 +593,16 @@ export class CodePlanRuntime implements CodePlanPort {
       const rejected = settled.find(result => result.status === "rejected");
       if (rejected?.status === "rejected") outcome = { state: "error", error: errorView(rejected.reason) };
     } catch (error) { outcome = { state: "error", error: errorView(error) }; }
+    const sources = codePlanRenderSources(this.store, projectId);
+    const lengths: number[] = [];
+    for (const input of renderInputs) {
+      const frames = renderTimelineFrames(input, sources);
+      if (frames !== undefined) lengths.push(frames / 30);
+      const dimensions = (() => { try { return codePlanVideoSettings(this.store, projectId).exportSize; }
+        catch { return { ...EXPORT_SIZE[projectAspect(this.store.getProject(projectId))], ...input }; } })();
+      diff.findings.push(...zoomSoftFindings({ ...input, width: dimensions.width, height: dimensions.height }, sources));
+    }
+    diff.findings.push(...cutListFindings(declarations.scenes, declarations.shots, lengths));
     diff.reusedSteps = reused.size;
     diff.cancelledSteps = journal.filter(step => !step.attemptId && step.state !== "cancelled" && !reached.has(step.key)).length;
     diff.certainMicros = diff.newSteps.reduce((sum, step) => sum + moneyMicros(step.priceMicros), 0n).toString();
@@ -591,6 +621,7 @@ export class CodePlanRuntime implements CodePlanPort {
     invariant(typeof choiceId === "string" && choiceId.length > 0 && choiceId.length <= 200 && raw && typeof raw === "object",
       "CODE_PLAN_CHOICE", "Use a bounded choice id and question/options");
     const { question, options } = raw as Record<string, unknown>;
+    const suggest = keyframe ? (raw as Record<string, unknown>).suggest : undefined;
     invariant(typeof question === "string" && question.length <= 4096 && Array.isArray(options) && options.length > 0 && options.length <= 200
       && Buffer.byteLength(canonical(options)) <= 64 * 1024, "CODE_PLAN_CHOICE", "Use a bounded question and 1 to 200 JSON options");
     // A setting changes prices, not the person's chosen input. Keep an answered recipe's exact row/answer.
@@ -601,11 +632,18 @@ export class CodePlanRuntime implements CodePlanPort {
     const equivalent = keyframe ? this.choices(projectId).filter(choice => choice.choiceId === choiceId
       && canonical(recipe(choice.options)) === canonical(recipe(options))) : [];
     const answered = equivalent.find(choice => choice.answer !== undefined);
-    if (answered) { reached.add(answered.id); return answered.answer; }
+    if (answered) {
+      reached.add(answered.id);
+      const { suggest: _old, ...rest } = answered;
+      const next = { ...rest, ...(suggest ? { suggest: suggest as NonNullable<CodePlanChoice["suggest"]> } : {}) };
+      if (!dry && canonical(next) !== canonical(answered)) this.store.put("code_plan_choice", answered.id, projectId, next);
+      return answered.answer;
+    }
     const optionsDigest = digest(options), id = entityId(projectId, digest({ choiceId, optionsDigest }));
     reached.add(id);
     const previous = this.store.get<CodePlanChoice>("code_plan_choice", id);
-    const choice: CodePlanChoice = { ...previous, id, projectId, choiceId, question, options: options as JsonValue[], optionsDigest,
+    const { suggest: _oldSuggestion, ...prior } = previous ?? {};
+    const choice: CodePlanChoice = { ...prior, ...(suggest ? { suggest: suggest as NonNullable<CodePlanChoice["suggest"]> } : {}), id, projectId, choiceId, question, options: options as JsonValue[], optionsDigest,
       ...(!previous && !dry ? { askedAt: equivalent.find(choice => !choice.stale)?.askedAt ?? stamp() } : {}) };
     if (!dry && (!previous || canonical(previous) !== canonical(choice))) this.store.put("code_plan_choice", id, projectId, choice);
     return Object.hasOwn(choice, "answer") ? choice.answer : SANDBOX_PENDING;
