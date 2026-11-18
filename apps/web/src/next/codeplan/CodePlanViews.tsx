@@ -5,7 +5,7 @@ import { numberLocale } from "../i18n/translate.ts";
 import { Picture } from "../keyframes/parts.tsx";
 import { useArtifactUrl } from "../media/useArtifactUrl.ts";
 import { MediaViewer, type ViewerItem } from "../media/Viewer.tsx";
-import { artifactRefOf, declaredPlan, latestRender, makingMsg, stepRow, stepRows, type DeclaredPlan, type DeclaredShot, type Making, type StepRow } from "../model/code-plan.ts";
+import { artifactRefOf, declaredPlan, filmIdea, latestRender, makingMsg, stepRow, stepRows, type DeclaredPlan, type DeclaredShot, type FilmIdea, type IdeaTake, type Making, type StepRow } from "../model/code-plan.ts";
 import { CodePlanMedia, useMode } from "../store/react.tsx";
 import { Thumb } from "../views/plan/ShotRow.tsx";
 import { useCodePlan } from "./CodePlanContext.tsx";
@@ -41,6 +41,7 @@ export function CodePlanPlanView() {
   // Waiting minutes move on while something is being made, without a new view.
   const minute = useMinute(!!view?.steps.some((step) => step.reached && step.state === "in_flight"));
   const plan = useMemo(() => (view ? declaredPlan(view) : null), [view, minute]);
+  const idea = useMemo(() => (view ? filmIdea(view) : null), [view]);
   // Each shot's frame and clip open in one viewer, in film order.
   const media = useMemo(() => (plan ? shotMedia(plan) : []), [plan]);
   const [viewing, setViewing] = useState<number | null>(null);
@@ -56,6 +57,7 @@ export function CodePlanPlanView() {
           {/* Before the first pass ends, an empty list only means the run has not reached the declarations yet. */}
           {!plan.scenes.length && !plan.loose.length ? <ViewMessage title={t(view?.lastPassAt ? "codeplan.plan.no_rows" : "codeplan.plan.first_pass")} /> : null}
           <div className="scenes">
+            {idea ? <IdeaPanel idea={idea} /> : null}
             {plan.references.length ? (
               <section className="scene panel cp-refs" data-scene="references" aria-label={t("codeplan.plan.references")}>
                 <div className="scene-top">
@@ -94,6 +96,58 @@ export function CodePlanPlanView() {
 }
 
 /** A minute counter that ticks only while `active`, so waiting times stay true on screen. */
+/**
+ * The idea behind the film, above its shots: the take the Director chose, how the viewer's reading should change, the
+ * visual rule, and folded below them the takes it passed on, what it kept from the brief and its cut list.
+ */
+function IdeaPanel({ idea }: { idea: FilmIdea }) {
+  const { t } = useI18n();
+  const basis = (take: IdeaTake): string | null => take.basis === "template" && take.template ? t("codeplan.idea.basis.template", { name: take.template })
+    : take.basis === "bent" && take.template ? t("codeplan.idea.basis.bent", { name: take.template }) : take.basis === "own" ? t("codeplan.idea.basis.own") : null;
+  const others = idea.takes.filter((take) => take !== idea.chosen);
+  const chosenBasis = idea.chosen ? basis(idea.chosen) : null;
+  return (
+    <section className="scene panel cp-idea" data-scene="idea" aria-label={t("codeplan.idea.title")}>
+      <div className="scene-top">
+        <h2>{t("codeplan.idea.title")}</h2>
+        <span className="meta">{t("codeplan.idea.note")}</span>
+      </div>
+      <dl className="cp-idea-rows">
+        {idea.chosen ? (
+          <>
+            <dt>{t("codeplan.idea.take")}</dt>
+            <dd data-idea="take"><b>{idea.chosen.title}</b>{chosenBasis ? <span className="cp-idea-basis">{chosenBasis}</span> : null}</dd>
+          </>
+        ) : null}
+        {idea.reading ? (<><dt>{t("codeplan.idea.reading")}</dt><dd data-idea="reading">{idea.reading}</dd></>) : null}
+        {idea.rule ? (<><dt>{t("codeplan.idea.rule")}</dt><dd data-idea="rule">{idea.rule}</dd></>) : null}
+      </dl>
+      {others.length ? (
+        <details className="cp-idea-more" data-idea="others">
+          <summary>{t("codeplan.idea.others", { count: others.length })}</summary>
+          <ul>{others.map((take, index) => { const label = basis(take); return <li key={index}>{take.title}{label ? <span className="cp-idea-basis">{label}</span> : null}</li>; })}</ul>
+        </details>
+      ) : null}
+      {idea.fixed.length ? (
+        <details className="cp-idea-more" data-idea="fixed">
+          <summary>{t("codeplan.idea.fixed", { count: idea.fixed.length })}</summary>
+          <ul>{idea.fixed.map((point, index) => <li key={index}>{point}</li>)}</ul>
+        </details>
+      ) : null}
+      {idea.cuts.length ? (
+        <details className="cp-idea-more" data-idea="cuts">
+          <summary>{t("codeplan.idea.cuts", { count: idea.cuts.length, seconds: idea.cutSeconds })}</summary>
+          <p className="cp-idea-note">{t("codeplan.idea.cuts_note")}</p>
+          <table className="cp-cuts">
+            <thead><tr><th scope="col">#</th><th scope="col">{t("codeplan.idea.cut_sees")}</th><th scope="col">{t("codeplan.idea.cut_seconds")}</th><th scope="col">{t("codeplan.idea.cut_clip")}</th></tr></thead>
+            <tbody>{idea.cuts.map((cut, index) => <tr key={index}><td>{index + 1}</td><td>{cut.sees}</td><td>{cut.seconds || "–"}</td><td>{cut.clip}</td></tr>)}</tbody>
+          </table>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
 function useMinute(active: boolean): number {
   const [minute, setMinute] = useState(0);
   useEffect(() => {

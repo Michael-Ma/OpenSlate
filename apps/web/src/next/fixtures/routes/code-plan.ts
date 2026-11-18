@@ -70,6 +70,23 @@ const FRAMES = {
 };
 /** What `ctx.keyframe` offers on a model with references and first frames, with each clip's price. */
 const VIDEO_INPUTS = [["keyframe_and_references", "250000"], ["references_only", "250000"], ["first_frame", "150000"]] as const;
+/** The idea a 2.1.0 Director records in its scene: what it kept, the takes it weighed, the reading, the rule and its cut list. */
+const IDEA = {
+  fixed: ["Mara, the harbour, the last ferry", "About ten seconds, quiet", "It ends with the ferry gone"],
+  takes: [
+    { title: "The ferry is the only warm light", basis: "bent: Mood first, object last", chosen: true },
+    { title: "The bench remembers who sat there", basis: "template: Trace of someone" },
+    { title: "The tide keeps the timetable", basis: "own" },
+  ],
+  reading: "The viewer first reads this as a woman waiting for a boat. Through the ferry's light crossing her face and leaving it, that becomes someone who chose to stay. The image they keep is the empty pier in the last of the light.",
+  rule: "The harbour stays blue; every warm light belongs to the ferry.",
+  cuts: [
+    { sees: "The harbour, blue and still, one lamp on the pier", seconds: 3, clip: "1.1" },
+    { sees: "Warm light slides across the water toward the pier", seconds: 2, clip: "1.1" },
+    { sees: "Mara on the pier; the light crosses her face", seconds: 3.5, clip: "1.2" },
+    { sees: "The pier alone as the light leaves it", seconds: 1.5, clip: "1.2" },
+  ],
+};
 const CLIP_OPEN = artifact("2.1", 301, "video"), CLIP_PIER = artifact("2.2-red", 302, "video"), RENDER = artifact("2.1", 401, "video");
 
 interface CodeFilm {
@@ -231,7 +248,8 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
     if (film.confirm) {
       const options = VIDEO_INPUTS.map(([keyframeInput, priceMicros]) => ({ ...FRAMES.open[0]!, keyframeInput, references: [FRAMES.terminal[0]!], priceMicros }));
       const pick = ONE_CHOSEN.includes(stage) ? options[film.pickOpen] : undefined;
-      choices.push({ choiceId: "frame-1.1", optionsDigest: hex("frame-1.1:confirm"), question: "The harbour at dusk", options, ...(film.retired ? { askedAt: todayAt(10, 37) } : {}), ...(pick ? { answer: pick, answeredAt: todayAt(10, 38) } : {}) });
+      choices.push({ choiceId: "frame-1.1", optionsDigest: hex("frame-1.1:confirm"), question: "The harbour at dusk", options,
+        suggest: { input: "first_frame", why: "The next cut matches this framing, so the harbour must not shift." }, ...(film.retired ? { askedAt: todayAt(10, 37) } : {}), ...(pick ? { answer: pick, answeredAt: todayAt(10, 38) } : {}) });
       if (film.retired) choices.push({ choiceId: "frame-1.1", optionsDigest: hex("frame-1.1:terminal"), question: "The terminal at night", options: VIDEO_INPUTS.map(([keyframeInput, priceMicros]) => ({ ...FRAMES.terminal[0]!, keyframeInput, references: [], priceMicros })), askedAt: todayAt(10, 32), stale: true });
     } else choice("frame-1.1", FRAMES.open, ONE_CHOSEN.includes(stage) ? film.pickOpen : null, [10, 38]);
   }
@@ -255,7 +273,7 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
     // Charged plus possibly charged; then dispatched and not yet known.
     spentMicros: sum(steps.filter((step) => step.state === "succeeded" || step.state === "failed" || step.state === "unknown")),
     reservedMicros: sum(steps.filter((step) => step.state === "in_flight")),
-    declarations: { scenes: film.current === null ? [] : [{ id: "harbour", title: terminal ? "Closing time" : "Harbour at dawn", purpose: "Mara waits for the last ferry." }], shots },
+    declarations: { scenes: film.current === null ? [] : [{ id: "harbour", title: terminal ? "Closing time" : "Harbour at dawn", purpose: "Mara waits for the last ferry.", ...IDEA }], shots },
     steps,
     choices,
     ...(film.shared ? { references: [FRAMES.terminal[0]!] } : {}),

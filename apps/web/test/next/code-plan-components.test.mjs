@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { transformWithOxc } from '../../node_modules/vite/dist/node/index.js';
-import { answerPress, choiceCard, CEILING_PRESS, declaredPlan, makingMsg, makingNow, retryPress, runStrip, stepRows, threadChoices, TONE_CLASS, TONE_GLYPH } from '../../src/next/model/code-plan.ts';
+import { answerPress, choiceCard, CEILING_PRESS, declaredPlan, filmIdea, makingMsg, makingNow, retryPress, runStrip, stepRows, threadChoices, TONE_CLASS, TONE_GLYPH } from '../../src/next/model/code-plan.ts';
 import { labelList } from '../../src/next/model/director.ts';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
 import { formatMicros } from '../../src/next/model/price.ts';
@@ -308,7 +308,7 @@ test('a render step is named "Film render", not "No prompt"; other unlabelled st
 test('Plan before the first pass ends says the plan is running, not that it declares nothing', async () => {
   const parts = await load('parts.tsx', ['ViewHead', 'ViewMessage', 'StepCard', 'StepStatus', 'stepLabel'], { useI18n: () => i18n('en') });
   const plan = async (codePlan) => (await load('CodePlanViews.tsx', ['CodePlanPlanView'], {
-    useI18n: () => i18n('en'), useCodePlan: () => ({ error: null, loading: false, reload() {}, ...codePlan }), declaredPlan, makingMsg, useDeveloperMode: () => false, useState: React.useState, useEffect: React.useEffect, MediaViewer: () => null,
+    useI18n: () => i18n('en'), useCodePlan: () => ({ error: null, loading: false, reload() {}, ...codePlan }), declaredPlan, filmIdea, makingMsg, useDeveloperMode: () => false, useState: React.useState, useEffect: React.useEffect, MediaViewer: () => null,
     CodePlanMedia: ({ children }) => React.createElement('div', null, children), Thumb: ({ label, picture }) => React.createElement('span', { className: 'thumb', 'data-picture': picture?.artifactId ?? '' }, label), Picture: () => null, ...parts,
   })).CodePlanPlanView;
   const Running = await plan({ view: view({ planVersion: 1, state: 'running', lastPassAt: null }) });
@@ -374,4 +374,30 @@ test('the spend limit is changed in the run strip', async () => {
   const html = renderToStaticMarkup(React.createElement(Strip));
   assert.match(html, /data-act="code-plan-limit-open"/);
   assert.match(html, />Change<\/button>/);
+});
+
+test('Plan shows the idea above the shots: the chosen take, the reading and the rule, with the rest folded', async () => {
+  const parts = await load('parts.tsx', ['ViewHead', 'ViewMessage', 'StepCard', 'StepStatus', 'stepLabel'], { useI18n: () => i18n('en') });
+  const plan = async (codePlan) => (await load('CodePlanViews.tsx', ['CodePlanPlanView'], {
+    useI18n: () => i18n('en'), useCodePlan: () => ({ error: null, loading: false, reload() {}, ...codePlan }), declaredPlan, filmIdea, makingMsg, useDeveloperMode: () => false, useState: React.useState, useEffect: React.useEffect, MediaViewer: () => null,
+    CodePlanMedia: ({ children }) => React.createElement('div', null, children), Thumb: ({ label, picture }) => React.createElement('span', { className: 'thumb', 'data-picture': picture?.artifactId ?? '' }, label), Picture: () => null, ...parts,
+  })).CodePlanPlanView;
+  const scene = { id: 'terrace', title: 'The terrace', fixed: ['A pigeon', 'It ends smug on the lamp post'], reading: 'The viewer first reads this as a theft.', rule: 'Furniture towers over the pigeon.',
+    takes: [{ title: 'The empty chair is the guard', basis: 'bent: Bomb under the table', chosen: true }, { title: 'A heist film', basis: 'template: Grand build, small payoff' }, { title: 'Its own', basis: 'own' }],
+    cuts: [{ sees: 'The croissant', seconds: 2, clip: 's1' }, { sees: 'The chair', seconds: 0.8, clip: 's1' }] };
+  const Idea = await plan({ view: view({ planVersion: 1, state: 'done', lastPassAt: '2026-10-29T22:45:40Z', declarations: { scenes: [scene], shots: [{ id: 's1', scene: 'terrace' }] } }) });
+  const html = renderToStaticMarkup(React.createElement(Idea));
+  assert.match(html, /data-scene="idea"/);
+  assert.ok(html.indexOf('data-scene="idea"') < html.indexOf('data-scene="terrace"'), 'the idea comes before the scenes');
+  assert.match(html, /<dd data-idea="take"><b>The empty chair is the guard<\/b><span class="cp-idea-basis">Bent from: Bomb under the table<\/span><\/dd>/);
+  assert.match(html, /<dd data-idea="reading">The viewer first reads this as a theft\.<\/dd>/);
+  assert.match(html, /<dd data-idea="rule">Furniture towers over the pigeon\.<\/dd>/);
+  assert.match(html, /<summary>2 other takes it considered<\/summary>/);
+  assert.match(html, /Template: Grand build, small payoff/);
+  assert.match(html, /The Director&#x27;s own/);
+  assert.match(html, /<summary>Kept from your brief \(2 points\)<\/summary>/);
+  assert.match(html, /<summary>Cut list: 2 cuts · 2\.8 s<\/summary>/);
+  assert.doesNotMatch(html, /<details[^>]*open/, 'the folded parts start closed');
+  const Plain = await plan({ view: view({ planVersion: 1, state: 'done', lastPassAt: '2026-10-29T22:45:40Z', declarations: { scenes: [{ id: 'a', title: 'A' }], shots: [{ id: 's1', scene: 'a' }] } }) });
+  assert.doesNotMatch(renderToStaticMarkup(React.createElement(Plain)), /data-scene="idea"/, 'a plan that records no idea shows none');
 });

@@ -6,7 +6,7 @@ import { StudioStore } from '../../src/next/store/store.ts';
 import { ApiError } from '../../src/next/api/client.ts';
 import { artifactContentPath, codePlanArtifactContentPath, codePlanVersionPath, CODE_PLAN_PATH } from '../../src/next/api/code-plan.ts';
 import {
-  TONE_CLASS, TONE_GLYPH, chosenArtifacts, makingMsg, makingNow, makingOf, limitDraft, answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
+  TONE_CLASS, TONE_GLYPH, chosenArtifacts, filmIdea, makingMsg, makingNow, makingOf, limitDraft, answerPress, artifactRefOf, attentionViews, ceilingPress, changeBlocks, choiceCard, codePlanAttentionItems, codePlanHeading, declaredPlan, diffCounts, diffSummary,
   findingMsg, isCodeProject, latestRender, lineDiff, needsAttention, optionArtifact, optionLabel, placeByTime, previousVersion, problemCause, retryPress, runStrip,
   sourcePress, stepProblem, stepRow, stepRows, threadChoices, versionRows,
 } from '../../src/next/model/code-plan.ts';
@@ -751,4 +751,38 @@ test('a step goes by its shot title, not the English prompt the models read', ()
   const titled = view({ declarations: { scenes: [], shots: [{ id: 'tofu-03', title: '检测到饭香' }] }, steps: [step] });
   assert.equal(stepRow(step, titled, 'zh-CN').label, '检测到饭香');
   assert.equal(stepRow({ ...step, shotId: undefined }, titled, 'zh-CN').label, 'The low close camera watches Tofu');
+});
+
+test('the idea is read from the scene that records it, bounded, and absent when the plan records none', () => {
+  assert.equal(filmIdea({ declarations: { scenes: [{ id: 's', title: 'A scene' }], shots: [] } }), null, 'older plans have no idea');
+  assert.equal(filmIdea({ declarations: { scenes: [{ takes: [], cuts: [] }], shots: [] } }), null, 'empty fields are no idea');
+  const idea = filmIdea({ declarations: { shots: [], scenes: [{ id: 'intro' }, {
+    fixed: ['A pigeon', 'A terrace', 7, ''],
+    takes: [{ title: 'The empty chair is the guard', basis: 'bent: Bomb under the table', chosen: true }, { title: 'A heist film', basis: 'Template:  Grand build, small payoff' },
+      { title: 'Its own', basis: 'own' }, { title: 'No basis' }, { basis: 'own' }, 'not a take'],
+    reading: ' The viewer first reads this as a theft. ', rule: 'Furniture towers over the pigeon.',
+    cuts: [{ sees: 'The croissant', seconds: 2, clip: 'shot-1' }, { sees: 'The chair', seconds: 0.8, clip: 'shot-2' }, { sees: 'No length', seconds: -1, clip: 'shot-2' }, { seconds: 3, clip: 'shot-3' }],
+  }] } });
+  assert.deepEqual(idea.fixed, ['A pigeon', 'A terrace']);
+  assert.deepEqual(idea.takes.map((take) => [take.basis, take.template, take.chosen]), [['bent', 'Bomb under the table', true], ['template', 'Grand build, small payoff', false], ['own', '', false], ['unknown', '', false]]);
+  assert.equal(idea.chosen.title, 'The empty chair is the guard');
+  assert.equal(idea.reading, 'The viewer first reads this as a theft.');
+  assert.deepEqual(idea.cuts.map((cut) => cut.seconds), [2, 0.8, 0], 'a cut without what is seen is dropped; a bad length reads as zero');
+  assert.equal(idea.cutSeconds, 2.8);
+  const many = filmIdea({ declarations: { shots: [], scenes: [{ cuts: Array.from({ length: 90 }, (_, n) => ({ sees: `cut ${n}`, seconds: 1, clip: 'a' })) }] } });
+  assert.equal(many.cuts.length, 64);
+  assert.equal(many.chosen, null);
+});
+
+test('a keyframe card carries the Director\'s suggestion only when it names one of its own options', () => {
+  const frame = ref('a1');
+  const options = [{ ...frame, keyframeInput: 'keyframe_and_references', references: [frame], priceMicros: '250000' }, { ...frame, keyframeInput: 'first_frame', references: [], priceMicros: '150000' }];
+  const base = { choiceId: 'shot-1-keyframe', optionsDigest: 'd', question: 'The chair', options };
+  assert.deepEqual(choiceCard({ ...base, suggest: { input: 'first_frame', why: 'The match cut needs this exact framing.' } }).suggest, { input: 'first_frame', why: 'The match cut needs this exact framing.' });
+  assert.equal(choiceCard(base).suggest, null);
+  assert.equal(choiceCard({ ...base, suggest: { input: 'references_only', why: 'x' } }).suggest, null, 'an input the card does not offer');
+  assert.equal(choiceCard({ ...base, suggest: 'first_frame' }).suggest, null);
+  assert.equal(choiceCard({ choiceId: 'tone', optionsDigest: 'd', question: 'Tone?', options: ['Warm', 'Cool'], suggest: { input: 'first_frame', why: 'x' } }).suggest, null, 'only a keyframe card');
+  for (const code of ['CUTS_UNUSED_SHOT', 'CUTS_UNKNOWN_CLIP', 'CUTS_LENGTH', 'CUTS_SHAPE', 'ZOOM_SOFT', 'SUGGEST_UNAVAILABLE'])
+    assert.ok(!en(findingMsg(code)).startsWith('Finding '), `${code} has its own words`);
 });
