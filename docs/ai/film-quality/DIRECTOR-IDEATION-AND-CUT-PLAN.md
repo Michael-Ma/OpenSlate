@@ -307,6 +307,59 @@ All three cards are merged into local `main` (not pushed). Reports: [H1](reports
 - Known limits: a still that belongs to no shot comes from `ctx.image` and has no confirmation card; the templates reach the Director on every turn (about 2,200 words of the 9,055); variety across runs is partial.
 - Not done: no film has been made with 2.1.0. The plans are better on paper; whether the films are better is still to be seen.
 
+## 13. Two layers, 2026-11-17: format first, then aim
+
+The owner asked why the library was sorted by what the viewer comes for and not by kinds of video such as social, ads, film, micro drama, music video and explainer. Both matter, and they decide different things. The owner's decision: format first, then aim, with both classifications researched again and templates found for each.
+
+### What each layer decides
+
+| Layer | Decides |
+|---|---|
+| Format: what the film is and what it is for | Length, picture shape, what the first three seconds must do, whether there is a product, speech or text, how it ends, the unit of structure |
+| Aim: the response the last picture should leave | Which family of shapes, where the turn falls, what the last picture is |
+
+A format's structure gives the slots; an aim's shape fills the turn. An advert (format) built as problem and solution can have a crave sequence (aim) as its solution.
+
+### How the two lists were made
+
+Seven more surveys (`layers-1` to `layers-7` in the working folder).
+
+- **Formats.** Evidence from advertising awards and platform ad formats, social platform categories, short-drama platforms and the Chinese regulator's definition, one-minute festivals, music-video and explainer practice, corporate video, and the template galleries of CapCut, InVideo, Synthesia, HeyGen, Kling and Runway. Findings: the industry treats "social" as a placement and a length band, not a format, and every other format appears there; "ads" covers three things with different rules (a direct advert, a brand film, a showcase); "film" covers a short story, a trailer and a documentary piece; occasion videos (birthday, wedding, invitation, tribute) and narrated stories are among the largest demands on template tools and were in neither earlier list.
+- **Aims.** Evidence from Cowen and Keltner's 27 emotions evoked by short videos, Unruly's 18 responses to adverts, System1, Kantar and the IPA on emotional advertising, Berger and Milkman on what spreads, film theory on suspense and surprise, and research on being moved, elevation and awe. Findings: two of the eight were weak. "Tension" joined two mechanisms that manage information in opposite ways (suspense: the viewer knows more; twist: the viewer knows less). "Feel" joined two directions (closeness restored; something lost). Three responses had no home: pride and resolve, understanding, and concern for an issue. The micro-drama survey added a fourth: 爽, the relish of seeing someone wronged proved right.
+
+### The lists
+
+**Thirteen formats:** Short film, Micro drama, Narrated story, Advert, Brand film, Showcase, Social post, Music video, Explainer, Mini documentary, Trailer, Occasion, Visual piece. Where the film runs (a vertical feed, or widescreen) is a separate setting that applies to every format.
+
+**Fourteen aims:** Laugh, Suspense, Twist, Moved, Bittersweet, Inspire, Payback, Wonder, Calm, Crave, Satisfying, Thrill, Understand, Concern. One main aim owns the last picture; at most one second aim carries the build.
+
+Mapping from the eight: Laugh, Wonder and Calm kept; Tension split into Suspense and Twist; Feel split into Moved and Bittersweet; Desire renamed Crave, Satisfaction renamed Satisfying, Energy renamed Thrill; Inspire, Payback, Understand and Concern added.
+
+Each format has its constraints and four to eight structures (about 75 in all); each aim has its definition, what separates good from generic and four to eight shapes (about 80). They are in `skills/code-plan/references/formats.md` and `aims.md`. The freedom rules are unchanged: use, bend or leave; at least one take owes nothing to the files.
+
+### What the tool cannot do, written into each format
+
+No lip-synced speech (voice-over and captions carry words); no readable text inside pictures; music is generated and cannot be cut to its beat, and the person cannot supply a song; no real person's face, voice or words unless supplied. So a micro drama here carries its lines as captions and one inner voice; a music video is planned by time at a tempo that was asked for, never on the beat; an explainer uses concrete pictures and no labelled diagram; a mini documentary keeps an illustrated look and says so.
+
+### Paper test (free)
+
+The Director's model planned the eight earlier briefs once and eight new briefs twice with the two files (`arm-d1`, `arm-d2`, `arm-d3`), and skill 2.1.0 planned the new briefs once (`arm-c4`). The new briefs: a 40-second 短剧 about a courier who is the heir, why the sky is blue, a teaser for a novel, a lo-fi music video, a bedtime story, an oat-milk advert, a piece about a grandfather's noodle shop, a Reels POV.
+
+- **Reading the brief.** Format and aim were read correctly in all 24 films, the same in both runs: the 短剧 as Micro drama and Payback, the bedtime story as Narrated story and Calm with Moved, the Reels brief as a vertical Social post and Laugh.
+- **What the format layer changed.** Mostly constraints, not ideas. With 2.1.0 the explainer planned labelled diagrams, which the tool cannot make; with the two files it planned illustrations without labels or numbers. The noodle-shop piece gained an illustrated look, a disclosure caption and a request for a real photo, and declined to imply a bereavement the brief did not state. The novel teaser stated that it invents no quote and no tagline.
+- **What it did not change.** Idea quality on these briefs is close between 2.1.0 and the two files: 2.1.0 already knew what a short drama or a Reels post is. One 2.1.0 idea was wittier than either two-layer run (the office motion-sensor light that decides you have left).
+- **No regression** on the eight earlier briefs. All eight chosen takes there were the Director's own; on the new briefs seven of eight were bent from a structure.
+- **Variety** across the two runs is still partial: the music video, the bedtime story, the advert and the noodle shop found the same idea twice.
+
+### The build
+
+| Card | Who | What |
+|---|---|---|
+| [H4](cards/H4-formats-and-aims.md) | Lead writes the text; Codex releases | Skill 2.2.0: `formats.md`, `aims.md`, the craft and skill sentences, the example; the two idea files are supplied only on turns the person starts |
+| H5 | Lead | The idea panel shows the format and the aim first |
+
+The two files are about 6,800 words. Supplying them only on person-started turns keeps review and repair turns at about 7,000 words.
+
 ## Appendix A: the proposed skill text
 
 ### The idea, before any plan
