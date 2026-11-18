@@ -7,7 +7,7 @@ import type { CodePlanChoice, CodePlanHold, CodePlanRun, CodePlanReview, CodePla
 import { codePlanCeiling } from "./settings.js";
 import { codePlanShotLinks } from "./projection.js";
 import type { CodePlanPoster } from "./posters.js";
-import { codePlanArtifacts, pictureSize, publicArtifact } from "./artifacts.js";
+import { codePlanArtifacts, codePlanRenderSources, publicArtifact } from "./artifacts.js";
 import { codePlanFitWarning } from "./fit-warning.js";
 
 export const emptyDiff = (): CodePlanDiff => ({ reusedSteps: 0, newSteps: [], cancelledSteps: 0,
@@ -46,8 +46,7 @@ export function codePlanView(store: Store, execution: CodePlanExecution, project
       if (references.length === 24) break inputs;
     }
   }
-  const sizes = new Map(media.records.filter(record => record.artifact.kind === "video" && media.posters.has(record.id))
-    .map(record => [`video:${record.artifact.sha256}`, pictureSize(media.posters.get(record.id))]));
+  const sizes = codePlanRenderSources(store, projectId);
   const accounting = execution.accounting(projectId), attempts = execution.attempts(projectId);
   return {
     projectId, planVersion: run?.planVersion ?? null, state: run?.state ?? "empty",
@@ -70,8 +69,8 @@ export function codePlanView(store: Store, execution: CodePlanExecution, project
     }),
     choices: choices
       .sort((a, b) => Number(Object.hasOwn(a, "answer")) - Number(Object.hasOwn(b, "answer")))
-      .map(({ choiceId, optionsDigest, question, options, answer, answeredAt, askedAt, stale }) => ({ choiceId, optionsDigest, question, options,
-        ...(answer !== undefined ? { answer } : {}), ...(answeredAt ? { answeredAt } : {}),
+      .map(({ choiceId, optionsDigest, question, options, answer, answeredAt, askedAt, stale, suggest }) => ({ choiceId, optionsDigest, question, options,
+        ...(answer !== undefined ? { answer } : {}), ...(answeredAt ? { answeredAt } : {}), ...(suggest ? { suggest } : {}),
         ...(askedAt ? { askedAt } : {}), ...(stale ? { stale } : {}) })),
     reviews: store.list<CodePlanReview>("code_plan_review", projectId)
       .filter(review => run?.reviewKeys?.includes(review.id))

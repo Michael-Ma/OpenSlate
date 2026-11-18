@@ -28,8 +28,8 @@ export function rowEdits(row: Record<string, unknown>, index: number): RowEdits 
   if (row.zoom !== undefined) {
     const zoom = row.zoom as Record<string, unknown>;
     invariant(zoom && typeof zoom === "object" && !Array.isArray(zoom) && Object.keys(zoom).every(key => ["scale", "x", "y"].includes(key))
-      && typeof zoom.scale === "number" && Number.isFinite(zoom.scale) && zoom.scale > 1 && zoom.scale <= 1.4,
-    "CODE_PLAN_RENDER_INPUT", `${name}: zoom.scale must be greater than 1 and at most 1.4`);
+      && typeof zoom.scale === "number" && Number.isFinite(zoom.scale) && zoom.scale > 1 && zoom.scale <= 2,
+    "CODE_PLAN_RENDER_INPUT", `${name}: zoom.scale must be greater than 1 and at most 2`);
     for (const key of ["x", "y"]) invariant(zoom[key] === undefined || typeof zoom[key] === "number" && Number.isFinite(zoom[key]) && Number(zoom[key]) >= 0 && Number(zoom[key]) <= 1,
       "CODE_PLAN_RENDER_INPUT", `${name}: zoom.${key} must be in 0–1 (default 0.5)`);
     result.zoom = { scale: zoom.scale, ...(zoom.x === undefined ? {} : { x: zoom.x as number }), ...(zoom.y === undefined ? {} : { y: zoom.y as number }) };

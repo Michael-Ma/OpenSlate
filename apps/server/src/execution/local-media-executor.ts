@@ -1,6 +1,6 @@
 import { videoTicks } from "../media/frame-rate.js";
 import { join, resolve } from "node:path";
-import { canonical, CODE_PLAN_TOOL_CONTRACT, digest, invariant, snapshotLocalExecution } from "@openslate/core";
+import { canonical, EXPORT_SIZE, projectAspect, CODE_PLAN_TOOL_CONTRACT, digest, invariant, snapshotLocalExecution } from "@openslate/core";
 import type { ArtifactRef, JsonObject, LocalExecutionIdentity } from "@openslate/core";
 import type { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
@@ -9,6 +9,7 @@ import { createLocalTimelineDocument, LocalTimelineStore, parseLocalTimelineDocu
 import { rowEdits, rowFrames, type LocalTimelineDocument, type StoredLocalTimeline, type RenderExtras, type SoundName } from "../media/local-timeline.js";
 import type { LocalMediaService } from "../media/local-media.js";
 import type { TimelineRenderInput, TimelineRenderManifest } from "../media/local-media.js";
+import { codePlanArtifacts, object } from "../code-plan/artifacts.js";
 import { validateRenderInput } from "../code-plan/identity.js";
 import { validateCaptions } from "../media/captions.js";
 import { installManagedVideo } from "../media/managed-video.js";
@@ -40,7 +41,7 @@ export async function captureEditedCodePlanRender(store: Store, media: LocalMedi
   check(options.signal);
   args = structuredClone(args); validateRenderInput(args);
   const rows = args.timeline as Record<string, unknown>[];
-  const additions = args.captions !== undefined || rows?.some(row => row.speed !== undefined || row.holdFrames !== undefined || row.zoom !== undefined)
+  const additions = args.captions !== undefined || rows?.some(row => object(row.artifact ?? row).kind === "image" || row.speed !== undefined || row.holdFrames !== undefined || row.zoom !== undefined)
     || (args.audio as Record<string, unknown>[] | undefined)?.some(row => row.sound !== undefined || row.fadeInSamples !== undefined);
   const mastering: RenderExtras = contract === "0.3.0" ? { mastering: "loudnorm-0.3.0" } : {};
   if (!additions) return { ...captureCodePlanRender(store, projectId, args), ...mastering };
@@ -48,15 +49,26 @@ export async function captureEditedCodePlanRender(store: Store, media: LocalMedi
   const project = store.getProject(projectId);
   invariant(project.planMode === "code", "CODE_PLAN_RENDER_INPUT", "Edited rendering requires a code film");
   // Reuse the existing ownership resolver, with one source frame so only the edited total is bounded.
-  const captured = rows.map((row, index) => {
+  const captured = [];
+  for (const [index, row] of rows.entries()) {
     try {
       const edits = rowEdits(row, index), { speed: _speed, holdFrames: _hold, zoom: _zoom, ...plain } = row;
+      if (object(row.artifact).kind === "image") {
+        const picture = codePlanArtifacts(store, projectId).find(row.artifact);
+        invariant(picture?.artifact.kind === "image", "CODE_PLAN_ARTIFACT_INVALID", "Still requires an owned picture of this film");
+        const source = await media.supplyStill({ artifactId: picture.id, path: picture.path, sha256: picture.artifact.sha256,
+          durationFrames: row.durationFrames as number }, options);
+        const dimensions = EXPORT_SIZE[projectAspect(project)];
+        const clip = { source, startFrame: 0, durationFrames: row.durationFrames as number, fit: (row.fit ?? "contain") as "contain" | "cover", ...edits };
+        captured.push({ capture: { projectId, targetRevisionId: project.revisionId, width: Number(args.width ?? dimensions.width), height: Number(args.height ?? dimensions.height), clips: [clip] }, clip });
+        continue;
+      }
       const capture = captureCodePlanRender(store, projectId, { timeline: [{ ...(row.artifact ? plain : { artifact: plain }), durationFrames: 1 }],
         ...(args.width === undefined ? {} : { width: args.width }), ...(args.height === undefined ? {} : { height: args.height }) });
       const clip = capture.clips[0]!;
-      return { capture, clip: { ...clip, durationFrames: (row.durationFrames ?? videoTicks(clip.source.probe.video!)) as number, ...edits } };
+      captured.push({ capture, clip: { ...clip, durationFrames: (row.durationFrames ?? videoTicks(clip.source.probe.video!)) as number, ...edits } });
     } catch (error) { if (error instanceof Error) error.message = `Row ${index + 1}: ${error.message}`; throw error; }
-  });
+  }
   const clips = captured.map(item => item.clip), totalFrames = clips.reduce((sum, row) => sum + rowFrames(row), 0);
   invariant(Number.isSafeInteger(totalFrames) && totalFrames > 0 && totalFrames <= project.maxFrames, "MEDIA_DURATION_MISMATCH", `Edited film length must be in 1–${project.maxFrames} frames`);
   const audio: NonNullable<TimelineRenderInput["audio"]> = [], sounds = new Map<SoundName, Awaited<ReturnType<LocalMediaService["supplySound"]>>>();
@@ -72,8 +84,15 @@ export async function captureEditedCodePlanRender(store: Store, media: LocalMedi
     } else {
       const { fadeInSamples, ...plain } = row;
       try {
-        const capture = captureCodePlanRender(store, projectId, { timeline: [{ artifact: rows[0]!.artifact ?? rows[0], durationFrames: 1 }], audio: [plain] });
-        audio.push({ ...capture.audio![0]!, ...(fadeInSamples === undefined ? {} : { fadeInSamples: fadeInSamples as number }) });
+        invariant(Object.keys(plain).every(key => ["artifact", "startSample", "durationSamples", "atSample", "gainMilliDb", "fadeOutSamples"].includes(key)), "CODE_PLAN_RENDER_INPUT", "Unsupported audio placement parameters");
+        const record = codePlanArtifacts(store, projectId).find(plain.artifact);
+        const owned = record && store.get<{ projectId: string; source: import("../media/types.js").SuppliedMedia }>("media_source", record.id);
+        invariant(record?.fixture === false && record.artifact.kind === "audio" && owned?.projectId === projectId && owned.source.kind === "audio"
+          && owned.source.artifactId === record.id && owned.source.sha256 === record.artifact.sha256, "MEDIA_SOURCE_UNAVAILABLE", "Render requires an exact owned, measured audio source");
+        audio.push({ source: owned.source, startSample: Number(plain.startSample ?? 0), durationSamples: Number(plain.durationSamples ?? owned.source.probe.audio!.samples),
+          atSample: Number(plain.atSample ?? 0), gainMilliDb: Number(plain.gainMilliDb ?? 0),
+          ...(plain.fadeOutSamples === undefined ? {} : { fadeOutSamples: plain.fadeOutSamples as number }),
+          ...(fadeInSamples === undefined ? {} : { fadeInSamples: fadeInSamples as number }) });
       } catch (error) { if (error instanceof Error) error.message = `Audio row ${index + 1}: ${error.message}`; throw error; }
     }
   }

@@ -44,7 +44,15 @@ export function validateRenderInput(source: Record<string, unknown>, options: { 
   let total = 0, measured = true;
   source.timeline.forEach((raw, index) => {
     invariant(raw && typeof raw === "object" && !Array.isArray(raw), "CODE_PLAN_RENDER_INPUT", `Row ${index + 1}: use a video artifact or timeline clip`);
-    const row = raw as Record<string, unknown>, edits = rowEdits(row, index);
+    const row = raw as Record<string, unknown>;
+    const ref = (row.artifact ?? row) as Record<string, unknown>;
+    if (ref.kind === "image") {
+      invariant(row.artifact && row.durationFrames !== undefined, "CODE_PLAN_RENDER_INPUT", `Row ${index + 1}: a still row needs durationFrames`);
+      invariant(Object.keys(row).every(key => ["artifact", "durationFrames", "fit", "zoom"].includes(key)),
+        "CODE_PLAN_RENDER_INPUT", `Row ${index + 1}: a still row takes durationFrames, fit and zoom only`);
+      number(row.durationFrames, 1, 300, `Row ${index + 1}: durationFrames`);
+    }
+    const edits = rowEdits(row, index);
     if (row.startFrame !== undefined) number(row.startFrame, 0, 10799, `Row ${index + 1}: startFrame`);
     if (row.durationFrames !== undefined) { number(row.durationFrames, 1, 10800, `Row ${index + 1}: durationFrames`); total += rowFrames({ durationFrames: row.durationFrames as number, ...edits }); }
     else measured = false;

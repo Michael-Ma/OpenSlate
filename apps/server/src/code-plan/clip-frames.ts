@@ -10,11 +10,15 @@ import type { ArtifactRecord } from "../execution/engine.js";
 import type { CodePlanStep } from "./records.js";
 import { runMediaProcess } from "../media/process.js";
 import { imageFormat, imageInputArgs } from "../media/image-input.js";
+import { rowFrames } from "../media/local-timeline.js";
+import { codePlanRenderSources, object } from "./artifacts.js";
+import { renderSource, renderTimelineFrames } from "./cut-findings.js";
 import { codePlanArtifacts } from "./artifacts.js";
 
-export interface ClipFramesInput { artifactId: string; startFrame?: number; endFrame?: number; everyFrames?: number }
+export interface ClipFramesInput { artifactId: string; startFrame?: number; endFrame?: number; everyFrames?: number; cuts?: boolean; fromCut?: number }
 export interface VideoFramesMetadata {
   artifactId: string; stepKey: string; fps: 30; durationFrames: number; width: number; height: number;
+  cuts?: { cut: number; frame: number; beforeShotId?: string; afterShotId?: string }[];
   frames: number[]; motion: number[]; sheet: { columns: number; rows: number; sha256: string; byteLength: number };
 }
 export interface PictureFramesMetadata {
@@ -46,9 +50,53 @@ function mediaTool(name: "ffmpeg" | "ffprobe"): string {
   return realpathSync(path);
 }
 
+/** Resolve boundaries from the render's frozen recipe, rather than a later plan's timeline. */
+export function renderCutPairs(store: Store, projectId: string, artifactId: string, fromCut = 1) {
+  invariant(Number.isSafeInteger(fromCut) && fromCut >= 1 && fromCut <= 63, "CODE_PLAN_FRAME_RANGE", "fromCut must be a cut number from 1 to 63");
+  const steps = store.list<CodePlanStep>("code_plan_step", projectId);
+  const step = steps.find(step => step.kind === "render" && step.result?.ok && step.result.artifacts.some(ref => ref.artifactId === artifactId));
+  invariant(step, "CODE_PLAN_ARTIFACT_INVALID", "cuts: true reads a render");
+  const sources = codePlanRenderSources(store, projectId);
+  const timeline = (Array.isArray(step.input.timeline) ? step.input.timeline : []).map(object);
+  const intent = step.attemptId ? store.get<{ recipe: { frameRate: { numerator: number }; clips: { durationFrames: number; speed?: 1; holdFrames?: number }[] } }>("code_plan_render_intent", step.attemptId) : undefined;
+  let cursor = 0;
+  const cuts = timeline.slice(0, -1).map((row, index) => {
+    const frozen = intent?.recipe.clips[index];
+    const frames = frozen ? rowFrames(frozen) : renderTimelineFrames({ timeline: [row] }, sources);
+    invariant(frames !== undefined, "CODE_PLAN_FRAME_RANGE", "The render has no measured cut boundaries");
+    cursor += frames;
+    const fps = intent?.recipe.frameRate.numerator ?? 30;
+    const frame = Math.round(Math.round(cursor * fps / 30) * 30 / fps);
+    const before = renderSource(row, sources)?.shotId, after = renderSource(timeline[index + 1]!, sources)?.shotId;
+    return { cut: index + 1, frame, ...(before ? { beforeShotId: before } : {}), ...(after ? { afterShotId: after } : {}) };
+  });
+  // Native-rate rows shorter than one output frame can disappear at rounding boundaries.
+  const totalTicks = intent ? intent.recipe.clips.reduce((sum, row) => sum + rowFrames(row), 0) : renderTimelineFrames(step.input, sources);
+  const fps = intent?.recipe.frameRate.numerator ?? 30;
+  const end = totalTicks === undefined ? Infinity : Math.round(Math.round(totalTicks * fps / 30) * 30 / fps);
+  const visible: typeof cuts = [];
+  for (let index = 0; index < cuts.length;) {
+    const first = cuts[index]!;
+    let last = index;
+    while (cuts[last + 1]?.frame === first.frame) last++;
+    const final = cuts[last]!;
+    // A row rounded to no output pictures contributes no side of a cut.
+    if (first.frame > 0 && first.frame < end) visible.push({ cut: final.cut, frame: final.frame,
+      ...(first.beforeShotId ? { beforeShotId: first.beforeShotId } : {}),
+      ...(final.afterShotId ? { afterShotId: final.afterShotId } : {}) });
+    index = last + 1;
+  }
+  invariant(!visible.length && fromCut === 1 || visible.some(cut => cut.cut >= fromCut), "CODE_PLAN_FRAME_RANGE", "fromCut is past the render's last cut");
+  return visible.filter(cut => cut.cut >= fromCut).slice(0, 18);
+}
+
 /** Only transient files and bytes: no artifact, entity, media step or paid operation is created. */
 export async function readClipFrames(store: Store, projectId: string, input: ClipFramesInput,
   options: { signal?: AbortSignal; ffmpegPath?: string; ffprobePath?: string } = {}) {
+  invariant(!input.cuts || input.startFrame === undefined && input.endFrame === undefined && input.everyFrames === undefined,
+    "CODE_PLAN_FRAME_RANGE", "cuts: true cannot be combined with startFrame, endFrame or everyFrames");
+  invariant(input.fromCut === undefined || input.cuts === true, "CODE_PLAN_FRAME_RANGE", "fromCut needs cuts: true");
+  const cuts = input.cuts ? renderCutPairs(store, projectId, input.artifactId, input.fromCut) : undefined;
   const record = ownedPictureOrVideo(store, projectId, input.artifactId);
   const picture = record.artifact.kind === "image", maxInputBytes = (picture ? 32 : 256) * 1024 * 1024;
   const signal = AbortSignal.any([AbortSignal.timeout(25_000), ...(options.signal ? [options.signal] : [])]);
@@ -100,16 +148,18 @@ export async function readClipFrames(store: Store, projectId: string, input: Cli
     const start = input.startFrame ?? 0, end = input.endFrame ?? durationFrames - 1, every = input.everyFrames ?? 15;
     invariant(Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && end >= start && end < durationFrames
       && Number.isSafeInteger(every) && every >= 1 && every <= 90, "CODE_PLAN_FRAME_RANGE", "Use an inclusive frame range inside the clip and everyFrames from 1 to 90");
-    const count = Math.floor((end - start) / every) + 1;
+    const frames = cuts ? cuts.flatMap(cut => [cut.frame - 1, cut.frame]) : Array.from({ length: Math.floor((end - start) / every) + 1 }, (_, index) => start + index * every);
+    invariant(frames.every(frame => frame >= 0 && frame < durationFrames), "CODE_PLAN_FRAME_RANGE", "Cut boundaries exceed the rendered picture");
+    const count = frames.length;
     invariant(count <= 36, "CODE_PLAN_FRAME_LIMIT", `At most 36 cells. Use everyFrames >= ${Math.ceil((end - start + 1) / 36)} or narrow the range (everyFrames is at most 90).`);
-    const frames = Array.from({ length: count }, (_, index) => start + index * every);
-    const columns = Math.min(6, Math.ceil(Math.sqrt(count * width / height))), rows = Math.ceil(count / columns);
+    const selected = [...new Set(frames)];
+    const columns = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(count * width / height)))), rows = Math.max(1, Math.ceil(count / columns));
     const cellWidth = Math.min(320, Math.floor(2048 / columns));
     const pictureHeight = Math.max(1, Math.min(Math.floor(cellWidth * height / width), Math.floor(2048 / rows) - 28)), cellHeight = pictureHeight + 28;
-    await run(options.ffmpegPath ?? mediaTool("ffmpeg"), ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...inputOptions,
+    if (count) await run(options.ffmpegPath ?? mediaTool("ffmpeg"), ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...inputOptions,
       "-noautorotate", "-i", source, "-an", "-vf",
-      `fps=30:round=near:start_time=0,select='gte(n,${start})*not(mod(n-${start},${every}))',scale=${cellWidth}:${pictureHeight}:force_original_aspect_ratio=decrease:flags=bilinear,pad=${cellWidth}:${pictureHeight}:(ow-iw)/2:(oh-ih)/2:color=black`,
-      "-fps_mode", "vfr", "-frames:v", String(count), "-threads", "1", join(directory, "%02d.png")]);
+      `fps=30:round=near:start_time=0,select='${selected.map(frame => `eq(n,${frame})`).join("+")}',scale=${cellWidth}:${pictureHeight}:force_original_aspect_ratio=decrease:flags=bilinear,pad=${cellWidth}:${pictureHeight}:(ow-iw)/2:(oh-ih)/2:color=black`,
+      "-fps_mode", "vfr", "-frames:v", String(selected.length), "-threads", "1", join(directory, "%02d.png")]);
     const sheet = createCanvas(columns * cellWidth, rows * cellHeight), context = sheet.getContext("2d");
     context.fillStyle = "#111111"; context.fillRect(0, 0, sheet.width, sheet.height);
     context.font = "16px sans-serif";
@@ -117,10 +167,10 @@ export async function readClipFrames(store: Store, projectId: string, input: Cli
     let previous: Uint8ClampedArray | undefined;
     for (let index = 0; index < count; index++) {
       signal.throwIfAborted();
-      const image = await loadImage(await readFile(join(directory, `${String(index + 1).padStart(2, "0")}.png`)));
+      const image = await loadImage(await readFile(join(directory, `${String(selected.indexOf(frames[index]!) + 1).padStart(2, "0")}.png`)));
       const x = index % columns * cellWidth, y = Math.floor(index / columns) * cellHeight;
       context.drawImage(image, x, y, cellWidth, pictureHeight);
-      context.fillStyle = "white"; context.fillText(`f${frames[index]} · ${(frames[index]! / 30).toFixed(1)}s`, x + 5, y + pictureHeight + 20);
+      context.fillStyle = "white"; context.fillText(`${cuts ? `cut ${cuts[Math.floor(index / 2)]!.cut} ${index % 2 ? "after" : "before"} · f${frames[index]}` : `f${frames[index]} · ${(frames[index]! / 30).toFixed(1)}s`}`, x + 5, y + pictureHeight + 20);
       pixels.drawImage(image, 0, 0, 32, 32);
       const current = pixels.getImageData(0, 0, 32, 32).data;
       let difference = 0;
@@ -132,7 +182,7 @@ export async function readClipFrames(store: Store, projectId: string, input: Cli
     invariant(jpeg.byteLength <= MAX_BYTES, "CODE_PLAN_SHEET_LIMIT", "The contact sheet exceeds 1.5 MiB; request fewer frames");
     signal.throwIfAborted();
     const metadata: ClipFramesMetadata = { artifactId: record.id, stepKey: clipDescription(store, projectId, record.id).stepKey,
-      fps: 30, durationFrames, width, height, frames, motion,
+      fps: 30, durationFrames, width, height, frames, motion, ...(cuts ? { cuts } : {}),
       sheet: { columns, rows, sha256: createHash("sha256").update(jpeg).digest("hex"), byteLength: jpeg.byteLength } };
     return { metadata, content: [{ type: "text" as const, text: JSON.stringify(metadata) }, { type: "image" as const, mimeType: "image/jpeg" as const, data: jpeg.toString("base64") }] };
   } finally { await rm(directory, { recursive: true, force: true }); }

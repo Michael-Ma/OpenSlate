@@ -21,6 +21,7 @@ export interface CodePlanStep {
 }
 export interface CodePlanSettings { ceilingMicros?: string; videoResolution?: import("./video-settings.js").CodePlanVideoResolution }
 export interface CodePlanChoice {
+  suggest?: import("@openslate/core/public").CodePlanInputSuggestion;
   id: string; projectId: string; choiceId: string; optionsDigest: string; question: string; options: JsonValue[];
   answer?: JsonValue; answeredAt?: string;
   askedAt?: string; stale?: true;

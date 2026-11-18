@@ -838,7 +838,14 @@ export interface CodePlanStepDetail {
   };
 }
 
+export interface CodePlanInputSuggestion {
+  input: "keyframe_and_references" | "references_only" | "first_frame";
+  why: string;
+}
+
 export interface CodePlanChoiceView {
+  /** Display advice only; the person still chooses. Present only for an offered input. */
+  suggest?: CodePlanInputSuggestion;
   choiceId: string;
   optionsDigest: string;
   question: string;
