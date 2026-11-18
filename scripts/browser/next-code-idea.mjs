@@ -50,8 +50,8 @@ export const scenarios = [
       expect(/The obvious film it set aside: A woman watches the last ferry leave the harbour\./.test(await idea.locator("[data-idea='obvious']").innerText()), "the obvious film is named with the takes it passed on");
       await idea.locator("[data-idea='cuts'] summary").click();
       expect((await idea.locator(".cp-cuts tbody tr").count()) === 4, "the cut list has its four cuts");
-      const marks = await idea.locator(".cp-cuts tbody tr").evaluateAll((rows) => rows.map((row) => row.querySelector(".cp-cut-proof")?.textContent ?? "-"));
-      expect(marks.join(" ") === "- 1 2 3", `the cuts that show the proof are marked: ${marks.join(" ")}`);
+      const proofMarks = await idea.locator(".cp-cuts tbody tr").evaluateAll((rows) => rows.map((row) => [...row.querySelectorAll(".cp-cut-proof")].map((mark) => mark.textContent).join("+") || "-"));
+      expect(proofMarks.join(" ") === "- 1 2 3", `the cuts that show the proof are marked: ${proofMarks.join(" ")}`);
       const cutsLine = await idea.locator("[data-idea='cuts'] summary").innerText();
       expect(/Cut list:\s4\scuts\s.\s10\ss/.test(cutsLine), `the cut list says its length: ${JSON.stringify(cutsLine)}`);
       await shot(page, "idea-open");
