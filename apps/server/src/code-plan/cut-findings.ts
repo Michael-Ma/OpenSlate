@@ -81,20 +81,22 @@ export const renderSource = (row: Record<string, unknown>, sources: RenderSource
   return sources.get(sourceKey(renderArtifact(row)));
 };
 
-interface RepeatSource { key: string; zoom: unknown; range?: { start: number; duration: number } }
+interface RepeatSource { contentKey: string; artifactId: string | undefined; zoom: unknown; range?: { start: number; duration: number } }
 function repeatSource(value: unknown, sources: RenderSources): RepeatSource | undefined {
   const row = object(value), ref = renderArtifact(row);
   if (typeof ref.sha256 !== "string") return undefined;
-  const key = sourceKey(ref), zoom = row.zoom;
-  if (ref.kind === "image") return { key, zoom };
+  const source = { contentKey: sourceKey(ref), artifactId: typeof ref.artifactId === "string" ? ref.artifactId : undefined, zoom: row.zoom };
+  if (ref.kind === "image") return source;
   if (ref.kind !== "video") return undefined;
-  const start = row.startFrame ?? 0, duration = row.durationFrames ?? sources.get(key)?.durationFrames;
+  const start = row.startFrame ?? 0, duration = row.durationFrames ?? sources.get(source.contentKey)?.durationFrames;
   if (typeof start !== "number" || !Number.isSafeInteger(start) || start < 0 || !positive(duration)) return undefined;
-  return { key, zoom, range: { start, duration } };
+  return { ...source, range: { start, duration } };
 }
 
 function rowsRepeat(a: RepeatSource, b: RepeatSource): boolean {
-  if (a.key !== b.key || !isDeepStrictEqual(a.zoom, b.zoom)) return false;
+  const sameArtifact = a.artifactId !== undefined && b.artifactId !== undefined
+    ? a.artifactId === b.artifactId : a.contentKey === b.contentKey;
+  if (!sameArtifact || !isDeepStrictEqual(a.zoom, b.zoom)) return false;
   if (!a.range || !b.range) return !a.range && !b.range;
   const overlap = Math.min(a.range.start + a.range.duration, b.range.start + b.range.duration) - Math.max(a.range.start, b.range.start);
   return overlap > Math.min(a.range.duration, b.range.duration) / 2;

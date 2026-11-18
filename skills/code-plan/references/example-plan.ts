@@ -12,9 +12,9 @@ export default async function film(ctx: Studio): Promise<void> {
       "One soft chime as the light touches the cup"],
     rule: "Stay beside the window; let the light be the only arrival.",
     cuts: [{ sees: "The curtain lifts; a bar of sun lands on the left end of the sill", seconds: 3, clip: "shot-1", proof: 1 },
-      { sees: "The white cup in shade, its steam grey", seconds: 1.5, clip: "shot-2" },
+      { sees: "The white cup in shade, its steam grey", seconds: 1.5, clip: "shot-2", proof: 2 },
       { sees: "The bar of sun slides along the sill toward the cup", seconds: 2, clip: "shot-1", proof: 1 },
-      { sees: "The sun climbs the cup and the steam turns gold; a chime", seconds: 3, clip: "shot-2", proof: 2 }] });
+      { sees: "The sun climbs the cup and the steam turns gold; a chime", seconds: 3, clip: "shot-2", proof: 3 }] });
   const shots = [
     { id: "shot-1", title: "The room wakes", targetSeconds: 5, // Clear action: the curtain reveals the sunrise.
       frame: "Wide view of a quiet kitchen at dawn, the room still in blue shade. A misty window above a wooden sill; a white cup stands on the right end of the sill, a folded blue cloth beside it. The curtain covers the left half of the glass. The window and sill form a simple, still composition, with the pale sky visible through the glass.",

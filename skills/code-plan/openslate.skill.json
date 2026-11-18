@@ -1,6 +1,6 @@
 {
   "id": "code-plan",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "entry": "SKILL.md",
   "files": ["SKILL.md", "references/film-craft.md", "references/formats.md", "references/aims.md", "references/studio.d.ts", "references/example-plan.ts"],
   "personTurnFiles": ["references/formats.md", "references/aims.md"],

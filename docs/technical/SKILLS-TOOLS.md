@@ -36,7 +36,9 @@ Parallel authors each work in their own worktree on `skills/next`. Whoever merge
 
 ## Code-plan mode
 
-`skills/code-plan` is a separate schema 1 instruction package, version **2.0.1** (G3: each shot is generated at the length its story beat needs), with its own **0.3.0** catalog and **`code-plan-tools@3`** handler. It is outside the storyboard release automation. `CODE_PLAN_GUIDANCE_DIGEST` pins its exact bytes; verified references include `studio.d.ts`, the example and film-craft guidance. They are injected as text. The instruction loader never evaluates them; the submitted program runs later in the isolated replay sandbox.
+`skills/code-plan` is a separate schema 1 instruction package, version **2.3.0**, with its own **0.3.0** catalog and **`code-plan-tools@3`** handler. It is outside the storyboard release automation. `CODE_PLAN_GUIDANCE_DIGEST` pins its exact bytes. The Director receives verified references, including `studio.d.ts`, the example and film-craft guidance, as text. The submitted program runs later in the isolated replay sandbox.
+
+The guidance asks the Director to write what a viewer will see or hear of the chosen take, mark the cuts that carry it, and read the film as a stranger during review. Person-started turns receive all six files, and other turns receive four, with formats and aims reserved for person-started turns.
 
 Code contracts 0.1.0, 0.2.0 and 0.3.0 are separate from `SUPPORTED_TOOL_CONTRACTS` / `RELEASED_TOOL_CONTRACTS` for storyboard tools. Archived `skills/code-plan-v1` and `skills/code-plan-v2` preserve the older packages. Bound epochs retain their catalog; compatible fresh turns can refresh current-contract guidance without rewriting old journal results or granting media authority.
 
