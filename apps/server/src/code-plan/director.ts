@@ -135,8 +135,10 @@ export function codeDirectorInput(service: ProductionService, options: DirectorS
   const reviewRequest = store.get<{ reviewKey: string }>("code_plan_review_request", turn.requestId);
   const review = reviewRequest ? store.get<CodePlanReview>("code_plan_review", reviewRequest.reviewKey) : undefined;
   const mediaFailure = store.get("code_plan_failure_request", turn.requestId);
+  const request = projectRequest(store, store.get<RequestRecord>("message", turn.requestId)!);
   const activation = activateSkills(lock, { ...environment, requestId: turn.requestId, contextDigest: digest(film), selectedSkillIds: ["code-plan"] });
-  const reads = skills.flatMap(skill => skill.manifest.files.map(path => {
+  const reads = skills.flatMap(skill => skill.manifest.files
+    .filter(path => request.source === "user" || !skill.manifest.personTurnFiles?.includes(path)).map(path => {
     const read = readActivatedSkillFile(lock!, activation, environment, { skillId: skill.id, path });
     return { skillId: skill.id, path, ...read };
   }));
@@ -154,7 +156,6 @@ export function codeDirectorInput(service: ProductionService, options: DirectorS
     store.appendEvent(turn.projectId, "director.context_captured", { requestId: turn.requestId, epochId: actor.epochId,
       contextSnapshotId: activation.contextSnapshotId, activationId: activation.activationId, lockId: lock!.id });
   });
-  const request = projectRequest(store, store.get<RequestRecord>("message", turn.requestId)!);
   const catalog = toolCatalog(version);
   return { projectId: turn.projectId, requestId: turn.requestId, epochId: actor.epochId, turnId: turn.id,
     text: request.source === "user" ? request.text : `Application action (not user conversation): ${request.text}`,

@@ -3,7 +3,7 @@ name: code-plan
 description: Author and revise replayable TypeScript films through the OpenSlate code-plan tools.
 ---
 
-Read [film craft](references/film-craft.md) and [templates](references/templates.md), supplied every turn: find the idea before writing a plan, then watch and cut from evidence.
+Read [film craft](references/film-craft.md), supplied every turn, and [formats](references/formats.md) and [aims](references/aims.md), supplied on turns the person starts: decide the format, then the aim, and find the idea before writing a plan; then watch and cut from evidence.
 Write the complete program as `export default async function film(ctx: Studio): Promise<void>`.
 Read [the Studio API](references/studio.d.ts) and [the two-shot example](references/example-plan.ts), both supplied in context.
 Call `read_film` first: it contains the current source, version, run state, media results, choices, cost, logs and installed models.
@@ -15,7 +15,7 @@ A refusal includes its code and diff; fix the program using that evidence. Refre
 If no edit is needed, reply without submitting. The turn's terminal state releases its paid-dispatch hold.
 
 All effects go through ctx. Await every ctx call, including declarations and logging; await Promise.all when running media concurrently.
-`scene(declaration)` and `shot(declaration)` accept bounded JSON objects, return those objects, and declare storyboard rows for this pass. The first scene carries the idea (`fixed`, `takes`, `reading`, `rule`, `cuts`; see film craft).
+`scene(declaration)` and `shot(declaration)` accept bounded JSON objects, return those objects, and declare storyboard rows for this pass. The first scene carries the idea (`format`, `aim`, `fixed`, `takes`, `reading`, `rule`, `cuts`; see film craft).
 `image({model?, prompt, references?, aspectRatio?, variant?, ...parameters})` is for shared references only: character sheets, set plates, anything used across shots. It takes no `shot`. Image references are owned pictures, at most `read_film.models[].maxReferences`; `aspectRatio` must be in that model's `imageAspectRatios`. A ratio is a preference: read the real size from `read_film.steps[].output`. `video({model?, references?, firstFrame?, lastFrame?, prompt, durationSeconds?, aspectRatio?, shot?, variant?, ...parameters})` does the same for clips.
 Buy one clip per declared shot; the same clip may feed several cuts. Do not add a choice asking the person to approve a clip: they see every clip and will say if one should change. Ask only if they asked to review clips first.
 `speech({model?, text, voice?, instructions?, shot?, variant?})` returns a media result for a spoken line; real speech defaults to the stock voice coral and empty instructions.

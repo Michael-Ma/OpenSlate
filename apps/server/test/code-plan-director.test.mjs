@@ -22,6 +22,8 @@ import { runSandbox, SANDBOX_PENDING } from '../dist/code-plan/sandbox.js';
 import { createApp } from '../dist/app.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
+const personFiles = ['SKILL.md', 'references/film-craft.md', 'references/formats.md', 'references/aims.md', 'references/studio.d.ts', 'references/example-plan.ts'];
+const applicationFiles = personFiles.filter(path => !['references/formats.md', 'references/aims.md'].includes(path));
 const example = readFileSync(join(repositoryRoot, 'skills/code-plan/references/example-plan.ts'), 'utf8');
 const diff = () => ({ reusedSteps: 0, newSteps: [], cancelledSteps: 0, certainMicros: '0', dependsOnPending: true, findings: [] });
 const identity = input => Object.fromEntries(['projectId','requestId','epochId','turnId'].map(key => [key,input[key]]));
@@ -105,15 +107,16 @@ test('code turn pins only code-plan instructions and source, skips fresh graph u
   assert.deepEqual(a.input.skills.map(skill => skill.name), ['code-plan']);
   assert.equal(a.input.bridge.toolContractVersion, CODE_PLAN_TOOL_CONTRACT);
   assert.equal(context.references.find(row=>row.path==='references/film-craft.md').content, readFileSync(join(repositoryRoot, 'skills/code-plan/references/film-craft.md'), 'utf8'));
-  assert.equal(context.references.find(row=>row.path==='references/templates.md').content, readFileSync(join(repositoryRoot, 'skills/code-plan/references/templates.md'), 'utf8'));
+  for (const path of personFiles) assert.equal(context.references.find(row => row.path === path).content,
+    readFileSync(join(repositoryRoot, 'skills/code-plan', path), 'utf8'));
   assert.equal(context.film.source, null); assert.equal(context.snapshot, undefined);
-  assert.deepEqual(context.references.map(row=>row.path), ['SKILL.md','references/film-craft.md','references/templates.md','references/studio.d.ts','references/example-plan.ts']);
+  assert.deepEqual(context.references.map(row=>row.path), personFiles);
   assert.match(context.instructions, /read-only/); assert.doesNotMatch(a.input.context, /Confirm in this chat|prepare_change|filmPlanning/);
   const lock = f.store.list('director_skill_lock', f.project.id)[0].lock;
-  assert.equal(f.store.list('skill_read', f.project.id).length, 5);
+  assert.equal(f.store.list('skill_read', f.project.id).length, 6);
   assert.equal(f.store.list('director_context', f.project.id).length, 1);
   assert.equal(lock.schemaVersion, 1); assert.equal(lock.skills[0].packageDigest, CODE_PLAN_GUIDANCE_DIGEST);
-  assert.equal(lock.skills[0].version, '2.1.0');
+  assert.equal(lock.skills[0].version, '2.2.0');
   assert.equal(skillPackageDigest(readSkillPackageFiles(join(repositoryRoot, 'skills/code-plan'))), CODE_PLAN_GUIDANCE_DIGEST);
   assert.equal(f.prepare(a.turn, a.human, a.bridge).bridge.toolContractVersion, CODE_PLAN_TOOL_CONTRACT);
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 1);
@@ -125,6 +128,39 @@ test('code turn pins only code-plan instructions and source, skips fresh graph u
   assert.equal(result.version, 1);
   const b = f.turn('Read it');
   assert.equal(JSON.parse(b.input.context).film.source, example);
+});
+
+for (const source of ['app', 'director']) test(`${source}-started turns omit idea references and record only the supplied reads`, t => {
+  const f = fixture(t), first = f.turn('Find an idea', { source: 'user' });
+  const firstReads = f.store.list('skill_read', f.project.id);
+  assert.deepEqual(JSON.parse(first.input.context).references.map(row => row.path), personFiles);
+  const next = f.turn('Find an idea', { source }); // Same text: source, not wording, selects the files.
+  const context = JSON.parse(next.input.context);
+  assert.deepEqual(context.references.map(row => row.path), applicationFiles);
+  const reads = f.store.list('skill_read', f.project.id).filter(row => row.requestId === next.turn.requestId);
+  assert.deepEqual(reads.map(row => row.evidence.path), applicationFiles);
+  assert.ok(reads.every(row => row.evidence.lockId === context.toolContract.lockId));
+  const lock = f.store.get('director_skill_lock', context.toolContract.lockId).lock;
+  const skill = verifySkillLock(lock, { snapshotRoot: f.config.snapshotRoot,
+    compatibility: lock.compatibility, availableToolIds: toolCatalog(CODE_PLAN_TOOL_CONTRACT).names,
+    bindings: lock.bindings })[0];
+  assert.deepEqual(skill.manifest.files, personFiles, 'filtering must not trim the lock or snapshot');
+  assert.equal(lock.skills[0].packageDigest, CODE_PLAN_GUIDANCE_DIGEST);
+  assert.deepEqual(f.store.list('skill_read', f.project.id).filter(row => row.requestId === first.turn.requestId), firstReads);
+  const again = f.turn('Review the displayed keyframes', { source: 'user' });
+  assert.deepEqual(JSON.parse(again.input.context).references.map(row => row.path), personFiles, 'explicit user source wins over application-like text');
+});
+
+for (const version of ['0.1.0', '0.2.0']) test(`${version} manifests without personTurnFiles supply every file on application turns`, async t => {
+  const { createDirectorSkillLock } = await import('../dist/application/director-capabilities.js');
+  const f = fixture(t), old = createDirectorSkillLock(f.config, version).lock;
+  f.store.insert('director_skill_lock', old.id, f.project.id, { id: old.id, projectId: f.project.id, lock: old });
+  const { input, turn } = f.turn('Application review', { source: 'app' });
+  const manifest = JSON.parse(readFileSync(join(repositoryRoot, version === '0.1.0' ? 'skills/code-plan-v1' : 'skills/code-plan-v2', 'openslate.skill.json'), 'utf8'));
+  assert.equal(Object.hasOwn(manifest, 'personTurnFiles'), false);
+  assert.deepEqual(JSON.parse(input.context).references.map(row => row.path), manifest.files);
+  assert.deepEqual(f.store.list('skill_read', f.project.id).filter(row => row.requestId === turn.requestId).map(row => row.evidence.path), manifest.files);
+  assert.equal(f.store.list('director_skill_lock', f.project.id).length, 1);
 });
 
 test('each turn carries the recent conversation, so a short reply answers what the Director offered', t => {
@@ -155,12 +191,15 @@ test('fresh code guidance preserves an older package snapshot, lock and recorded
   const f = fixture(t), packageRoot = join(f.root, 'previous-code-plan');
   const files = readSkillPackageFiles(join(repositoryRoot, 'skills/code-plan'));
   const manifest = JSON.parse(files['openslate.skill.json']);
-  delete files['references/templates.md'];
-  files['SKILL.md'] = files['SKILL.md'].replace(' and [templates](references/templates.md)', '');
+  // Synthetic predecessor: tests preservation of old bytes, not reconstruction of the released 2.1.0 package.
+  delete files['references/formats.md']; delete files['references/aims.md'];
+  delete manifest.personTurnFiles;
+  files['SKILL.md'] = '---\nname: code-plan\ndescription: Synthetic prior code-plan guidance.\n---\nRead [templates](references/templates.md).\n';
+  files['references/templates.md'] = '# Templates\n\nPrior idea shapes.\n';
   const oldCraft = '# Film craft\n\nRequest a clip longer than the retained beat, then cut it down after watching.\n';
   mkdirSync(join(packageRoot, 'references'), { recursive: true });
   for (const [path, source] of Object.entries({ ...files,
-    'openslate.skill.json': JSON.stringify({ ...manifest, version: '2.0.1', files: manifest.files.filter(path => path !== 'references/templates.md') }), 'references/film-craft.md': oldCraft })) {
+    'openslate.skill.json': JSON.stringify({ ...manifest, version: '2.1.0', files: [...applicationFiles, 'references/templates.md'] }), 'references/film-craft.md': oldCraft })) {
     writeFileSync(join(packageRoot, path), source);
   }
   const environment = { snapshotRoot: f.config.snapshotRoot, compatibility: manifest.compatibility,
@@ -173,19 +212,21 @@ test('fresh code guidance preserves an older package snapshot, lock and recorded
   const evidence = { id: newId(), projectId: f.project.id, requestId: human.requestId, epochId: bridge.actor.epochId,
     evidence: { lockId: previous.id, packageDigest: previous.skills[0].packageDigest } };
   f.store.insert('skill_read', evidence.id, f.project.id, evidence);
-  assert.equal(previous.skills[0].version, '2.0.1');
+  assert.equal(previous.skills[0].version, '2.1.0');
   const next = f.turn('Carry on'), context = JSON.parse(next.input.context);
   const current = f.store.get('director_skill_lock', context.toolContract.lockId).lock;
   assert.notEqual(current.id, previous.id);
-  assert.equal(current.skills[0].version, '2.1.0');
+  assert.equal(current.skills[0].version, '2.2.0');
   assert.equal(current.skills[0].packageDigest, CODE_PLAN_GUIDANCE_DIGEST);
   assert.match(context.references.find(row => row.path === 'references/film-craft.md').content, /ceil\(targetSeconds \+ 1\.5\)/);
   assert.deepEqual(f.store.get('director_skill_lock', previous.id), saved);
   assert.deepEqual(f.store.get('skill_read', evidence.id), evidence);
   const oldPackage = verifySkillLock(previous, environment)[0];
   assert.equal(readFileSync(join(oldPackage.immutableRoot, 'references/film-craft.md'), 'utf8'), oldCraft);
-  assert.ok(!oldPackage.manifest.files.includes('references/templates.md'));
-  assert.equal(context.references.find(row => row.path === 'references/templates.md').content, readFileSync(join(repositoryRoot, 'skills/code-plan/references/templates.md'), 'utf8'));
+  assert.ok(oldPackage.manifest.files.includes('references/templates.md'));
+  assert.equal(readFileSync(join(oldPackage.immutableRoot, 'references/templates.md'), 'utf8'), files['references/templates.md']);
+  for (const path of ['references/formats.md', 'references/aims.md']) assert.equal(context.references.find(row => row.path === path).content,
+    readFileSync(join(repositoryRoot, 'skills/code-plan', path), 'utf8'));
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2);
   assert.equal(f.port.calls.length, 0, 'refreshing guidance submits no plan or media');
 });
@@ -293,7 +334,7 @@ test('Director failures queue two application repair turns per version, then ask
   await f.port.submit(f.project.id,{source:example,basedOnVersion:null,author:'director',invocationId:'seed'});
   f.port.fail={version:1,message:'Missing value',stack:'film:12'};
   // Leave the failed version unchanged, simulating unsuccessful repair replies.
-  local.fake.runtime.start=async input=>{ const ctx=JSON.parse(input.context);assert.deepEqual(ctx.repair,f.port.fail);return completed(input); };
+  local.fake.runtime.start=async input=>{ const ctx=JSON.parse(input.context);assert.deepEqual(ctx.repair,f.port.fail);assert.deepEqual(ctx.references.map(row=>row.path),applicationFiles);return completed(input); };
   local.tick();local.tick();assert.equal(f.store.list('code_plan_repair_request',f.project.id).length,1);await local.settle();
   local.tick();await local.settle();assert.equal(f.store.list('code_plan_repair_request',f.project.id).length,2);
   local.tick();local.tick();await local.settle();
@@ -433,7 +474,7 @@ test('paid media failures queue exactly one Director notification per attempt, i
  const f=fixture(t),local=f.local();await f.port.submit(f.project.id,{source:example,basedOnVersion:null,author:'user',invocationId:'seed'});
  const original=f.port.view.bind(f.port),step={key:'b'.repeat(64),kind:'video',model:'fake-video',state:'failed',label:'tofu-05',priceMicros:'100000',reached:true,updatedAt:'2026-10-30',attempts:1,error:{code:'SUBMISSION_RESPONSE_LOST',retry:'consent',mayHaveCharged:true}};
  f.port.view=projectId=>({...original(projectId),steps:[step]});let turns=0;
- local.fake.runtime.start=async input=>{turns++;const context=JSON.parse(input.context);assert.equal(context.mediaFailure.stepKey,step.key);assert.equal(context.mediaFailure.shotLabel,'tofu-05');assert.equal(context.mediaFailure.retry,'consent');assert.equal(context.mediaFailure.mayHaveCharged,true);assert.equal(context.mediaFailure.priceMicros,'100000');return completed(input);};
+ local.fake.runtime.start=async input=>{turns++;const context=JSON.parse(input.context);assert.deepEqual(context.references.map(row=>row.path),applicationFiles);assert.equal(context.mediaFailure.stepKey,step.key);assert.equal(context.mediaFailure.shotLabel,'tofu-05');assert.equal(context.mediaFailure.retry,'consent');assert.equal(context.mediaFailure.mayHaveCharged,true);assert.equal(context.mediaFailure.priceMicros,'100000');return completed(input);};
  local.tick();local.tick();await local.settle();local.tick();await local.settle();assert.equal(turns,1);
  assert.equal(f.store.list('code_plan_failure_request',f.project.id).length,1);
  // The marker survives a new controller and changed plan version.

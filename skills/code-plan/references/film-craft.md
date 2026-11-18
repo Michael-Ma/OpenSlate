@@ -4,9 +4,9 @@
 
 A brief is a wish, not a shot list. First write what the person fixed (subject, place, tone, length, language, the moments and the ending they named) and what they left open. Keep every fixed point: a named ending keeps its event and its feeling. Moments listed in a brief must appear; how they are seen, in what order and what joins them is your work.
 
-Decide what the viewer comes for: a laugh, tension, feeling, calm, wonder, desire, satisfaction or energy. Read that part of [templates](templates.md). Write the obvious film in one sentence: the one anybody would make from this brief. Then find three other takes. Each names where its pleasure comes from and its decisive moment; if two takes share both, replace one. A template is a starting shape: use one, bend one, cross two, or leave them when the brief offers something better. At least one take owes nothing to the templates. A mood ("cinematic", "whimsical") is not a take.
+Decide the format first: what the film is and what it is for. Read its part of [formats](formats.md): it sets the length, the picture shape, what the first seconds must do, how the film ends and its unit of structure. Then decide the aim, the response the last picture should leave, with at most one second aim for the build, and read those parts of [aims](aims.md). Write the obvious film in one sentence: the one anybody would make from this brief. Then find three other takes. Each names where its pleasure comes from and its decisive moment; if two takes share both, replace one. A format's structure gives the slots and an aim's shape fills the turn. Both are starting points: use one, bend one, cross two, or leave them when the brief offers something better. At least one take owes nothing to those files. A mood ("cinematic", "whimsical") is not a take.
 
-Choose the take that keeps the fixed points, leaves the viewer something to work out or notice, and fits the ceiling. A calm film needs no twist. Then write the reading: "The viewer first reads this as __. Through __, that becomes __. The image they keep is __." "Through" must be something visible. Check it. What is mismatched in it? In a comedy, what rule is broken, and why is it harmless? Does something from the first seconds come back changed in the kept image? Could a stranger watching silently say what happened?
+Choose the take that keeps the fixed points, leaves the viewer something to work out or notice, and fits the ceiling. A calm film needs no twist. Then write the reading: "The viewer first reads this as __. Through __, that becomes __. The image they keep is __." "Through" must be something visible. Check it. What is mismatched in it? In a comedy, what rule is broken, and why is it harmless? Does something from the first seconds come back changed in the kept image? In a film without words, could a stranger watching silently say what happened?
 
 Choose one bold visual rule that expresses the reading and sustain it through framing, light, colour, scale or camera position. Keep the other components alike, so that the one you break at the turn is felt. Compose the kept image as a picture worth pausing on.
 
@@ -14,7 +14,7 @@ Work backwards from the kept image: plant what gives it meaning, withhold what w
 
 You may enrich a fixed moment while its outcome stays the same. An addition that reverses an outcome, starts a new problem or replaces the requested last image needs the person's agreement first.
 
-Record the idea in the first `ctx.scene`: `fixed` (a list), `takes` (each `{title, basis, chosen?}`), `reading` and `rule`. Open your reply with the chosen take in two lines and the others in one line each, then carry on. Respect the requested length and language.
+Record the idea in the first `ctx.scene`: `format`, `aim`, `fixed` (a list), `takes` (each `{title, basis, chosen?}`), `reading` and `rule`. Open your reply with the chosen take in two lines and the others in one line each, then carry on. Respect the requested length and language.
 
 ## Cut list, then shots
 
@@ -72,6 +72,8 @@ Use review, frame-reading, captions and sounds only when exposed by the installe
 ## Sound and words
 
 Every film has music unless the person says otherwise. Plan mood and changes with the blocks; generate and trim when cut length is known. Put sound effects on the three or four cuts that matter, at observed contacts or reveals; a sound can stand for an event you do not show. Normalized clips are silent; prompts cannot supply their soundtrack. A music pause can strengthen the reversal.
+
+When the format has words, voice-over carries them: about 2.4 words a second, one sentence a picture, each line over the picture it is about. Words give the meaning and pictures the evidence, so never say what the picture already shows. No mouth will match a voice: keep a speaker's face out of the shot, or let a caption or a look carry the line.
 
 Captions use the person's language. Vertical Chinese: at most 8 characters a line and 7 characters a second. Shorten crowded text. Place it on the finished timeline away from action; never ask picture models to draw it. Use `fit: "cover"` for vertical so there are no bars; check faces and story props survive the crop.
 
