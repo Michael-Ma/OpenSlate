@@ -13,6 +13,7 @@ import { layoutCaptions, rasterizeCaption, systemCaptionFont, validateCaptions }
 import { normalizeStepInput, stepKey, validateRenderInput } from '../dist/code-plan/identity.js';
 import { captureEditedCodePlanRender, LocalMediaExecutor } from '../dist/execution/local-media-executor.js';
 import { captureCodePlanRender } from '../dist/media/timeline-capture.js';
+import { readClipFrames, renderCutPairs } from '../dist/code-plan/clip-frames.js';
 import { Store } from '../dist/persistence/store.js';
 import { projectFixture } from './execution-fixture.mjs';
 import { CodePlanRuntime } from '../dist/code-plan/index.js';
@@ -119,8 +120,8 @@ test('fixed punch-in changes geometry without changing time and honours the focu
 
 test('row ranges, edited duration, captions and sounds are refused at plan normalization with row/range context', () => {
   const base = () => ({ timeline: [{ artifact: ref(video), durationFrames: 30 }] });
-  for (const patch of [{ speed: 0 }, { speed: 1.1 }, { speed: Infinity }, { holdFrames: 0 }, { holdFrames: 91 }, { holdFrames: 1.5 }, { zoom: { scale: 1 } }, { zoom: { scale: 1.41 } }, { zoom: { scale: 1.2, x: -0.1 } }, { zoom: { scale: 1.2, y: 1.1 } }])
-    assert.throws(() => normalizeStepInput('render', { timeline: [{ ...base().timeline[0], ...patch }] }), error => /Row 1/.test(error.message) && /0.5|1–90|1.4|0–1/.test(error.message));
+  for (const patch of [{ speed: 0 }, { speed: 1.1 }, { speed: Infinity }, { holdFrames: 0 }, { holdFrames: 91 }, { holdFrames: 1.5 }, { zoom: { scale: 1 } }, { zoom: { scale: 2.01 } }, { zoom: { scale: 1.2, x: -0.1 } }, { zoom: { scale: 1.2, y: 1.1 } }])
+    assert.throws(() => normalizeStepInput('render', { timeline: [{ ...base().timeline[0], ...patch }] }), error => /Row 1/.test(error.message) && /0.5|1–90|at most 2|0–1/.test(error.message));
   assert.throws(() => normalizeStepInput('render', { timeline: [{ artifact: ref(video), durationFrames: 10800, speed: 0.5 }] }), /1–10800/);
   assert.throws(() => normalizeStepInput('render', { ...base(), audio: [{ sound: 'explosion', atSample: 0 }] }), /Audio row 1.*pop.*boing/);
   assert.throws(() => normalizeStepInput('render', { ...base(), audio: [{ sound: 'pop', atSample: -1 }] }), /Audio row 1.*0–/);
@@ -309,4 +310,89 @@ test('measured mastering keeps a transient sound over a mostly silent film at -1
   const { stderr } = await run(ffmpeg, ['-nostdin', '-v', 'info', '-i', result.artifact.path, '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json', '-f', 'null', '-']);
   const stats = JSON.parse(stderr.slice(stderr.lastIndexOf('{'), stderr.lastIndexOf('}') + 1));
   assert.ok(Math.abs(Number(stats.input_i) + 14) <= 1, stats.input_i); assert.ok(Number(stats.input_tp) <= -1.4, stats.input_tp);
+});
+
+
+async function ownedStill(f) {
+  const path = join(root, 'owned-still.png');
+  await run(ffmpeg, ['-nostdin','-v','error','-y','-i',join(root,'moving.mp4'),'-frames:v','1','-threads','1',path]);
+  const bytes = await readFile(path), artifact = {artifactId:randomUUID(),kind:'image',sha256:createHash('sha256').update(bytes).digest('hex')};
+  f.store.insert('artifact',artifact.artifactId,f.project.id,{artifact,path,mimeType:'image/png',fixture:false,width:320,height:180});
+  return artifact;
+}
+for (const stillOnly of [false,true]) test(`H2 ${stillOnly?'stills-only':'still between clips'} renders an exact probed MP4 at film fps, with fit and 2x zoom`, async t=>{
+  const f=await sqlFixture(t), picture=await ownedStill(f), still={artifact:picture,durationFrames:30,fit:'cover',zoom:{scale:2,x:0,y:1}};
+  const rows=stillOnly?[still,{...still,durationFrames:15,fit:'contain'}]:[{artifact:ref(video),durationFrames:15},still,{artifact:ref(video),startFrame:60,durationFrames:15}];
+  const args={timeline:rows,width:320,height:180};
+  const capture=await captureEditedCodePlanRender(f.store,media,f.project.id,args,'0.3.0');
+  assert.equal(timeline(capture).totalFrames,stillOnly?45:60);
+  const result=await media.render(await media.freezeManifest({...capture,outputFrameRate:24})), probe=await probed(result.artifact.path);
+  assert.equal(Number(probe.streams[0].nb_read_frames),stillOnly?36:48);assert.equal(probe.streams[0].r_frame_rate,'24/1');
+  assert.equal(probe.streams[0].codec_name,'h264');assert.equal(result.artifact.probe.durationSeconds,stillOnly?1.5:2);
+  if(stillOnly) {
+    const withAudio=await captureEditedCodePlanRender(f.store,media,f.project.id,{...args,audio:[{artifact:ref(voice),durationSamples:48000,fadeInSamples:1000}]},'0.3.0');
+    assert.equal(withAudio.audio.length,1);assert.equal(withAudio.audio[0].fadeInSamples,1000);
+  }
+});
+
+test('H2 still execution is one free render step, durable on replay; foreign images and corrupt bytes fail closed',async t=>{
+  const f=await sqlFixture(t),picture=await ownedStill(f),source=`export default async function(ctx){await ctx.render({timeline:[{artifact:${JSON.stringify(picture)},durationFrames:30}],width:320,height:180});}`;
+  await f.plans.submit(f.project.id,{source,basedOnVersion:null,author:'user',invocationId:randomUUID()});
+  for(let i=0;i<10 && f.plans.view(f.project.id).state!=='done';i++)await f.plans.tick();
+  assert.equal(f.plans.view(f.project.id).state,'done',JSON.stringify(f.plans.view(f.project.id)));
+  assert.equal(f.plans.steps(f.project.id).length,1);assert.equal(f.plans.view(f.project.id).spentMicros,'0');assert.equal(f.provider.acceptedCount(),0);
+  const call=media.supplyStill;media.supplyStill=()=>{throw Error('must replay frozen source')};
+  try {await f.plans.submit(f.project.id,{source,basedOnVersion:1,author:'user',invocationId:randomUUID()});await f.plans.tick();assert.equal(f.plans.view(f.project.id).state,'done');}finally{media.supplyStill=call;}
+  await assert.rejects(captureEditedCodePlanRender(f.store,media,f.project.id,{timeline:[{artifact:{...picture,sha256:'f'.repeat(64)},durationFrames:30}]},'0.3.0'),/owned picture/);
+  const record=f.store.get('artifact',picture.artifactId);
+  await assert.rejects(media.supplyStill({artifactId:picture.artifactId,path:record.path,sha256:'f'.repeat(64),durationFrames:30}),/differs from the owned picture/);
+});
+
+async function cutRender(f, rows, fps=30) {
+  const result=await media.render(await media.freezeManifest(input({projectId:f.project.id,clips:rows,...(fps===24?{outputFrameRate:24}:{})}))),artifact={artifactId:randomUUID(),sha256:result.artifact.sha256,kind:'video'},attemptId=randomUUID();
+  f.store.insert('artifact',artifact.artifactId,f.project.id,{artifact,path:result.artifact.path,mimeType:'video/mp4',fixture:false,physicalDurationSeconds:result.artifact.probe.durationSeconds});
+  const inputs=rows.map(row=>({artifact:ref(row.source),startFrame:row.startFrame,durationFrames:row.durationFrames,...(row.speed?{speed:row.speed}:{}),...(row.holdFrames?{holdFrames:row.holdFrames}:{})}));
+  f.store.insert('code_plan_step',randomUUID(),f.project.id,{key:'render-key',kind:'render',input:{timeline:inputs},attemptId,result:{ok:true,artifact,artifacts:[artifact]}});
+  f.store.insert('code_plan_step',randomUUID(),f.project.id,{key:'video-key',kind:'video',shotId:'opening',input:{},result:{ok:true,artifact:ref(video),artifacts:[ref(video)]}});
+  f.store.insert('code_plan_render_intent',attemptId,f.project.id,{recipe:result.manifest});
+  return artifact;
+}
+for(const fps of [30,24]) test(`H2 cut pairs show both sides with finished-film ticks and shot ids at ${fps}fps`,async t=>{
+  const f=await sqlFixture(t),artifact=await cutRender(f,[clip(video,{startFrame:0,durationFrames:10}),clip(video,{startFrame:30,durationFrames:20}),clip(video,{startFrame:70,durationFrames:30})],fps);
+  const sheet=await readClipFrames(f.store,f.project.id,{artifactId:artifact.artifactId,cuts:true},{ffmpegPath:ffmpeg,ffprobePath:ffprobe});
+  assert.deepEqual(sheet.metadata.frames,[9,10,29,30]);assert.deepEqual(sheet.metadata.cuts,[{cut:1,frame:10,beforeShotId:'opening',afterShotId:'opening'},{cut:2,frame:30,beforeShotId:'opening',afterShotId:'opening'}]);
+  assert.equal(sheet.metadata.motion.length,4);assert.ok(sheet.content[1].data.length>100);
+  for(const field of ['startFrame','endFrame','everyFrames'])await assert.rejects(readClipFrames(f.store,f.project.id,{artifactId:artifact.artifactId,cuts:true,[field]:1}),/cannot be combined/);
+  await assert.rejects(readClipFrames(f.store,f.project.id,{artifactId:video.artifactId,cuts:true}),/cuts: true reads a render/);
+});
+
+test('H2 cut sheets page at 18 cuts and do not scan past fromCut; one-row renders have an empty cut sheet',async t=>{
+  const f=await sqlFixture(t),artifact=await cutRender(f,Array.from({length:40},()=>clip(video,{startFrame:0,durationFrames:2})));
+  const opts={ffmpegPath:ffmpeg,ffprobePath:ffprobe};
+  const first=await readClipFrames(f.store,f.project.id,{artifactId:artifact.artifactId,cuts:true},opts);assert.equal(first.metadata.cuts.length,18);assert.equal(first.metadata.frames.length,36);
+  const next=await readClipFrames(f.store,f.project.id,{artifactId:artifact.artifactId,cuts:true,fromCut:19},opts);assert.equal(next.metadata.cuts[0].cut,19);assert.equal(next.metadata.cuts.at(-1).cut,36);
+  const last=await readClipFrames(f.store,f.project.id,{artifactId:artifact.artifactId,cuts:true,fromCut:37},opts);assert.equal(last.metadata.cuts.length,3);
+  await assert.rejects(readClipFrames(f.store,f.project.id,{artifactId:artifact.artifactId,cuts:true,fromCut:40}),/last cut/);
+  const single=await cutRender(f,[clip(video,{startFrame:0,durationFrames:5})]);assert.deepEqual((await readClipFrames(f.store,f.project.id,{artifactId:single.artifactId,cuts:true},opts)).metadata.frames,[]);
+});
+
+
+test('H2 cut pairs preserve repeated sample cells at nearby native-24fps cuts',async t=>{
+  const f=await sqlFixture(t);
+  f.store.insert('artifact',black.artifactId,f.project.id,{artifact:ref(black),path:(await media.verifiedSource(black)).path,mimeType:'video/mp4',fixture:false});
+  const artifact=await cutRender(f,[clip(black,{startFrame:0,durationFrames:2}),clip(video,{startFrame:0,durationFrames:2}),clip(black,{startFrame:0,durationFrames:2})],24);
+  const sheet=await readClipFrames(f.store,f.project.id,{artifactId:artifact.artifactId,cuts:true},{ffmpegPath:ffmpeg,ffprobePath:ffprobe});
+  assert.deepEqual(sheet.metadata.frames,[2,3,3,4]);assert.equal(sheet.metadata.motion[2],0);
+  assert.ok(sheet.metadata.motion[1]>0.05);assert.ok(sheet.metadata.motion[3]>0.05);
+});
+
+
+test('H2 zero-picture 24fps rows do not mislabel the visible cut sides',async t=>{
+  const f=await sqlFixture(t);
+  f.store.insert('artifact',black.artifactId,f.project.id,{artifact:ref(black),path:(await media.verifiedSource(black)).path,mimeType:'video/mp4',fixture:false});
+  f.store.insert('code_plan_step',randomUUID(),f.project.id,{key:'black',kind:'video',shotId:'black',input:{},result:{ok:true,artifact:ref(black),artifacts:[ref(black)]}});
+  const artifact=await cutRender(f,[clip(black,{startFrame:0,durationFrames:2}),clip(video,{startFrame:0,durationFrames:1}),clip(black,{startFrame:0,durationFrames:2})],24);
+  const sheet=await readClipFrames(f.store,f.project.id,{artifactId:artifact.artifactId,cuts:true},{ffmpegPath:ffmpeg,ffprobePath:ffprobe});
+  assert.deepEqual(sheet.metadata.cuts,[{cut:2,frame:3,beforeShotId:'black',afterShotId:'black'}]);
+  assert.deepEqual(sheet.metadata.frames,[2,3]);assert.equal(sheet.metadata.motion[1],0);
 });
