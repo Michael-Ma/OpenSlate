@@ -1,10 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { canonical, digest } from "@openslate/core";
-import { codexImageCanvasValid, codexImageTurnText, describeCodexImageInput } from "../dist/index.js";
+import { codexImageCanvasValid, codexImageTurnText, describeCodexImageInput, isCodexImageRuntimeUpgrade } from "../dist/index.js";
 
 const input = (extra = {}) => ({ attemptId: "attempt-1", requestDigest: "a".repeat(64), prompt: "A cat eyeing toast", width: 1024, height: 1024,
-  runtimeVersion: "0.162.1", model: "gpt-6-astra", images: [{ artifactId: "ref-1", sha256: "b".repeat(64), byteLength: 100 }], ...extra });
+  runtimeVersion: "0.170.0", model: "gpt-6-astra", images: [{ artifactId: "ref-1", sha256: "b".repeat(64), byteLength: 100 }], ...extra });
+
+test("runtime-only upgrades retain the intermediate receipt pair and reject downgrades or unknowns", () => {
+  const versions = ["0.153.4", "0.162.1", "0.170.0"];
+  for (const [index, recorded] of versions.entries()) for (const [next, installed] of versions.entries())
+    assert.equal(isCodexImageRuntimeUpgrade(recorded, installed), index < next);
+  assert.equal(isCodexImageRuntimeUpgrade("0.150.0", "0.170.0"), false);
+  assert.equal(isCodexImageRuntimeUpgrade("0.162.1", "0.170.1"), false);
+});
 
 test("codex-image-turn-v1 stays byte-for-byte: same body, digest and turn text as before v2", () => {
   const value = input({ runtimeVersion: "0.153.4" }), description = describeCodexImageInput(value);

@@ -61,7 +61,7 @@ function questions(value: unknown): DirectorQuestion[] {
 
 /**
  * One native process per authority epoch/run. Persistent thread IDs never carry application authority.
- * Protocol shape is pinned to the 0.162.1 compatibility fixtures, including experimental named permissions.
+ * Protocol shape is pinned to the 0.170.0 compatibility fixtures, including experimental named permissions.
  * Reference: https://developers.openai.com/codex/app-server . A new native version requires new evidence.
  */
 export class CodexDirectorRuntime implements DirectorRuntime {
@@ -159,6 +159,9 @@ export class CodexDirectorRuntime implements DirectorRuntime {
         if (message.method === "item/completed") {
           const item = object(params.item);
           if (item.type === "agentMessage" && typeof item.text === "string") {
+            // A recovered message can carry a native display restriction on its raw text.
+            const moderation = object(item.moderation), display = object(moderation.display);
+            if (display.mode === "hide" || display.mode === "block" || (moderation.moderated === true && display.mode !== "show")) return;
             const text = redact(item.text, secrets);
             requireRuntime(Buffer.byteLength(text) <= 1024 * 1024, "RUNTIME_OUTPUT_LIMIT", "Assistant message exceeds its byte limit");
             const phase = item.phase === "commentary" ? "commentary" : ["final", "final_answer", "finalAnswer"].includes(String(item.phase)) ? "final" : "unknown";

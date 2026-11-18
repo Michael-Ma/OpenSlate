@@ -40,7 +40,7 @@ export function snapshotProtocol(directory) {
     for (const child of Object.values(value)) visit(child);
   };
   visit(schemas);
-  return { runtimeVersion: '0.162.1', experimental: true, sources, schemas,
+  return { runtimeVersion: '0.170.0', experimental: true, sources, schemas,
     definitions: Object.fromEntries([...used].sort().map(name => [name, definitions[name]])) };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

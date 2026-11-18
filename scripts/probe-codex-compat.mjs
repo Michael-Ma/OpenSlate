@@ -15,8 +15,10 @@ import { CODEX_DISABLED_FEATURES, CODEX_PROTOCOL_VERSION, CODEX_PROJECT_ISOLATIO
   CODEX_RUNTIME_LIMITS, projectIsolationMatches, supportedCodexConfig, toml } from '../packages/director/dist/runtime/policy.js';
 
 const binary = process.argv[2];
-if (!binary?.startsWith('/')) throw Error('Usage: node scripts/probe-codex-compat.mjs ABSOLUTE_CODEX_BINARY [EVIDENCE_DIRECTORY]');
-const root = await realpath(await mkdtemp(join(process.argv[3] ? resolve(process.argv[3]) : tmpdir(), 'openslate-native-compat-')));
+const preflightOnly = process.argv.includes('--preflight-only');
+const evidenceDirectory = process.argv.slice(3).find(arg => arg !== '--preflight-only');
+if (!binary?.startsWith('/')) throw Error('Usage: node scripts/probe-codex-compat.mjs ABSOLUTE_CODEX_BINARY [EVIDENCE_DIRECTORY] [--preflight-only]');
+const root = await realpath(await mkdtemp(join(evidenceDirectory ? resolve(evidenceDirectory) : tmpdir(), 'openslate-native-compat-')));
 const home = join(root, 'home'), codexHome = join(root, 'codex-home'), repository = join(root, 'repository');
 const sourceHome = join(home, '.codex'), privateHome = { home: codexHome, authSource: join(sourceHome, 'auth.json') };
 const data = join(repository, 'data'), workspace = join(data, 'test-runs/probe/native');
@@ -79,7 +81,7 @@ async function discovery(overrides, image = false, persistent = false) {
     const effective = await rpc.request('config/read', { cwd: workspace, includeLayers: true });
     const projectLayers = effective.layers.filter(layer => layer.name.type === 'project').map(layer => layer.name.dotCodexFolder);
     const skills = image ? undefined : (await rpc.request('skills/list', { cwds: [workspace], forceReload: true })).data;
-    const opened = await rpc.request('thread/start', { cwd: workspace, model: image ? 'gpt-6-astra' : 'gpt-6.1-sol',
+    const opened = await rpc.request('thread/start', { cwd: workspace, model: image ? 'gpt-6-astra' : 'gpt-6.2-sol',
       ...(image ? { modelProvider: 'openai', historyMode: 'legacy', allowProviderModelFallback: false } : {}), ephemeral: !persistent,
       approvalPolicy: 'never', permissions: id, baseInstructions: 'Synthetic OpenSlate application instructions.' });
     let persistedConfig = null;
@@ -141,7 +143,7 @@ try {
   assert.equal(evidence.account.account, null);
   const models = await transport.request('model/list', { limit: 100, includeHidden: true });
   evidence.models = models.data.map(model => ({ id: model.model, hidden: model.hidden }));
-  assert.ok(evidence.models.some(model => model.id === 'gpt-6.1-sol'));
+  for (const id of ['gpt-6.2-sol', 'gpt-6.2-astra']) assert.ok(evidence.models.some(model => model.id === id && !model.hidden));
   assert.ok(evidence.models.some(model => model.id === 'gpt-6-astra'));
   const effective = (await transport.request('config/read', { cwd: workspace, includeLayers: false })).config;
   evidence.disabledFeatures = CODEX_DISABLED_FEATURES.every(name => effective.features[name] === false);
@@ -149,16 +151,22 @@ try {
   assert.equal(evidence.disabledFeatures, true); assert.equal(evidence.unknownFeatureSkipped, true);
   await transport.close(); transport = undefined;
   runtime = new CodexDirectorRuntime({ command: { file: binary }, cwd: workspace, env,
-    privateCodexHome: privateHome, model: 'gpt-6.1-sol', runtimeVersion: CODEX_PROTOCOL_VERSION, policy: { mode: 'local', id, runtimeVersion: CODEX_PROTOCOL_VERSION, config },
+    privateCodexHome: privateHome, model: 'gpt-6.2-sol', runtimeVersion: CODEX_PROTOCOL_VERSION, policy: { mode: 'local', id, runtimeVersion: CODEX_PROTOCOL_VERSION, config },
     limits: { startupTimeoutMs: 30000, runTimeoutMs: 30000 } });
+  const controller = new AbortController();
   evidence.result = await runtime.start({ projectId: 'compat-project', requestId: 'compat-request', epochId: 'compat-epoch', turnId: 'compat-turn',
     text: 'Reply OK. Do not call tools.', context: '{}', skills: [pinnedSkill], bridge: { endpoint, projectId: 'compat-project', credential: 'offline-compatibility-credential',
-      entrypoint: fileURLToPath(new URL('../packages/director/dist/tools/mcp.js', import.meta.url)) } }, { onEvent(event) { events.push(event); } });
+      entrypoint: fileURLToPath(new URL('../packages/director/dist/tools/mcp.js', import.meta.url)) } }, { signal: controller.signal, onEvent(event) {
+        events.push(event);
+        if (preflightOnly && event.kind === 'runtime_started') controller.abort();
+      } });
   evidence.threadAndMcpReady = events.some(event => event.kind === 'runtime_started');
   evidence.turnStarted = events.some(event => event.kind === 'turn_started');
   assert.equal(evidence.threadAndMcpReady, true, JSON.stringify(evidence.result));
-  assert.equal(evidence.turnStarted, true, JSON.stringify(evidence.result));
-  assert.equal(requests.length, 1); assert.equal(evidence.result.status, 'failed');
+  assert.equal(evidence.turnStarted, !preflightOnly, JSON.stringify(evidence.result));
+  assert.equal(evidence.result.dispatched, !preflightOnly);
+  assert.equal(requests.length, preflightOnly ? 0 : 1);
+  assert.equal(evidence.result.status, preflightOnly ? 'interrupted' : 'failed');
   await verifyPrivateCodexHome(codexHome);
   evidence.setup = { status: 'unverified', reason: 'No ChatGPT sign-in in the disposable home; real providers were not contacted. Image config/thread preflight only, no authenticated readiness or image turn.' };
 } catch (error) {

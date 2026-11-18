@@ -4,8 +4,8 @@ import type { PrivateCodexHome } from "./private-home.js";
 
 export type CodexConfigValue = string | number | boolean | readonly CodexConfigValue[] | { readonly [key: string]: CodexConfigValue };
 /** Updating this requires regenerating protocol fixtures and rerunning compatibility evidence. */
-export const CODEX_PROTOCOL_VERSION = "0.162.1";
-/** In 0.162.1 an empty marker list makes cwd the project root. This stops ancestor
+export const CODEX_PROTOCOL_VERSION = "0.170.0";
+/** In 0.170.0 an empty marker list makes cwd the project root. This stops ancestor
  * .codex config and repo skill discovery; a zero document budget alone does not.
  * Application workspaces are owned, and explicit pinned skills remain available. */
 export const CODEX_PROJECT_ISOLATION_CONFIG = Object.freeze({
@@ -22,7 +22,7 @@ export const CODEX_DISABLED_FEATURES = ["apps", "plugins", "remote_plugin", "hoo
   "browser_use_external", "computer_use", "in_app_browser", "image_generation", "memories", "multi_agent", "multi_agent_v2",
   "skill_search", "skill_mcp_dependency_install", "tool_suggest", "sleep_tool", "workspace_dependencies", "code_mode", "unbounded_connection_retries"];
 const FEATURE_KEYS = new Set([...CODEX_DISABLED_FEATURES, "code_mode_host", "skip_host_skill_discovery", "default_mode_request_user_input"]);
-/** 0.162.1 strict config rejects unknown feature keys. Omit unknown *disabled* reductions;
+/** 0.170.0 strict config rejects unknown feature keys. Omit unknown *disabled* reductions;
  * never silently enable an unverified capability or weaken the rest of strict config. */
 export function supportedCodexConfig(config: Readonly<Record<string, CodexConfigValue>>): Record<string, CodexConfigValue> {
   return Object.fromEntries(Object.entries(config).filter(([key, value]) => {

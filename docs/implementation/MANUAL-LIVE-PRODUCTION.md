@@ -21,14 +21,14 @@ The launcher loads private `.env.live.local`; exported variables take precedence
 Install the exact supported version side by side:
 
 ```sh
-npm install --prefix "$HOME/.local/share/openslate-codex-0.162.1" --save-exact @openai/codex@0.162.1
-"$HOME/.local/share/openslate-codex-0.162.1/node_modules/.bin/codex" --version
-"$HOME/.local/share/openslate-codex-0.162.1/node_modules/.bin/codex" login
+npm install --prefix "$HOME/.local/share/openslate-codex-0.170.0" --save-exact @openai/codex@0.170.0
+"$HOME/.local/share/openslate-codex-0.170.0/node_modules/.bin/codex" --version
+"$HOME/.local/share/openslate-codex-0.170.0/node_modules/.bin/codex" login
 ```
 
-Expected version: **`codex-cli 0.162.1`**. Preserve older installations while other studios use them. `OPENSLATE_CODEX_BINARY` selects the Director executable; `OPENSLATE_CODEX_IMAGE_BINARY` selects the separate image worker. Startup can discover the versioned install. A configured old executable uses that supported install with a notice when available, or setup refuses. Historical model choices, media inputs and receipts are not rewritten.
+Expected version: **`codex-cli 0.170.0`**. Preserve older installations while other studios use them. `OPENSLATE_CODEX_BINARY` selects the Director executable; `OPENSLATE_CODEX_IMAGE_BINARY` selects the separate image worker. Startup can discover the versioned install. A configured old executable uses that supported install with a notice when available, or setup refuses. Historical model choices, media inputs and receipts are not rewritten.
 
-Settings → Models → Director reads actual models from the runtime/account. New selections default to **`gpt-6.1-sol`**, and turns reason at high effort. Choose another returned model if desired; do not assume every account has the same catalog. Existing films retain their chosen model. Run the zero-model-turn setup check before a small writing turn. The image worker uses ChatGPT login and **`gpt-6-astra`** internally; changing the Director model does not change it. `OPENSLATE_OPENAI_API_KEY` is for media API routes, not that ChatGPT login.
+Settings → Models → Director reads actual models from the runtime/account. New selections default to **`gpt-6.2-sol`**, and turns reason at high effort. Choose another returned model if desired; do not assume every account has the same catalog. Existing films retain their chosen model. Run the zero-model-turn setup check before a small writing turn. The image worker uses ChatGPT login and **`gpt-6-astra`** internally; changing the Director model does not change it. `OPENSLATE_OPENAI_API_KEY` is for media API routes, not that ChatGPT login.
 
 ## Optional Claude Code
 

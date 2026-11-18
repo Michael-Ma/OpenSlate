@@ -49,10 +49,15 @@ export async function realCodeFixture(t, changes = {}) {
       response.headers = {'content-type':'video/mp4','content-length':String(f.video.length)}; callback(response); });
     return client;
   } };
+  const startedThreads = new Set();
   f.transport = {
-    async prepare(input) { f.calls.prepare++; return { runtime:{version:1,runtimeVersion:'0.162.1',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
+    async prepare(input) { f.calls.prepare++; return { runtime:{version:1,runtimeVersion:'0.170.0',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'chatgpt'},
       session:{threadId:`thread-${input.attemptId}`,turnInputDigest:describeCodexImageInput(input).turnInputDigest} }; },
-    async start(prepared) { f.calls.start++; assert.equal(f.store.list('codex_image_execution_dispatch', f.project.id).length, f.calls.start);
+    async start(prepared) {
+      f.calls.start++;
+      const threadId = prepared.session.threadId;
+      assert.ok(f.store.get('codex_image_execution_dispatch', threadId.slice('thread-'.length)), 'this attempt has a durable dispatch marker before start');
+      assert.ok(!startedThreads.has(threadId), 'a native thread starts only once'); startedThreads.add(threadId);
       if (f.controls.lostStart) throw Error('lost native reply after turn start');
       return {kind:'pending',threadId:prepared.session.threadId,turnId:'turn-fixture'}; },
     async lookup(prepared) { f.calls.lookup++; return f.controls.pending ? {kind:'unknown',code:'UNAVAILABLE'}

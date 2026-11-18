@@ -107,7 +107,7 @@ export class LocalDirectorController {
     if (config.startupTimeoutMs !== undefined) readCodexStartupTimeout({ OPENSLATE_CODEX_STARTUP_TIMEOUT_MS: String(config.startupTimeoutMs) });
     this.setup = config.setup ?? setupLocalCodex;
     const discovered = config.defaults ? null : selectLocalCodexBinary({ home: config.codexInstallHome });
-    this.defaults = config.defaults ?? { binaryPath: discovered!.binaryPath, model: "gpt-6.1-sol" };
+    this.defaults = config.defaults ?? { binaryPath: discovered!.binaryPath, model: "gpt-6.2-sol" };
     this.defaultBinaryDiagnostic = discovered?.diagnostic;
     try { this.imageProjector = config.ffmpegPath ? new KeyframeProjector(service, { ffmpegPath: config.ffmpegPath, ...(config.media ? { media: config.media } : {}) }) : null; }
     catch (error) { if (!['ENOENT', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; this.imageProjector = null; }

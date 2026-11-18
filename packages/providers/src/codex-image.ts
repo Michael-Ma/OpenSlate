@@ -1,14 +1,15 @@
 import { createHash } from "node:crypto";
 import { canonical, digest, invariant } from "@openslate/core";
 
-export const CODEX_IMAGE_RUNTIME_VERSION = '0.162.1';
+export const CODEX_IMAGE_RUNTIME_VERSION = '0.170.0';
 /** Recorded versions preserve immutable inputs; workers admit only the current pin for new turns. */
-export type CodexImageRuntimeVersion = typeof CODEX_IMAGE_RUNTIME_VERSION | '0.153.4';
+export type CodexImageRuntimeVersion = typeof CODEX_IMAGE_RUNTIME_VERSION | '0.153.4' | '0.162.1';
 export const isRecordedCodexImageRuntime = (value: unknown): value is CodexImageRuntimeVersion =>
-  value === CODEX_IMAGE_RUNTIME_VERSION || value === '0.153.4';
-/** The sole automatic upgrade. Other profile fields must still match the installed definition exactly. */
+  value === CODEX_IMAGE_RUNTIME_VERSION || value === '0.162.1' || value === '0.153.4';
+/** Forward-only pairs, including receipts from the earlier side-by-side upgrade. */
 export const isCodexImageRuntimeUpgrade = (recorded: unknown, installed: unknown): boolean =>
-  recorded === '0.153.4' && installed === CODEX_IMAGE_RUNTIME_VERSION;
+  (recorded === '0.153.4' && installed === '0.162.1') ||
+  (installed === CODEX_IMAGE_RUNTIME_VERSION && recorded !== installed && isRecordedCodexImageRuntime(recorded));
 
 export const CODEX_IMAGE_LIMITS = Object.freeze({ promptBytes: 32768, references: 8, referenceBytes: 4 * 1024 ** 2,
   totalReferenceBytes: 24 * 1024 ** 2, outputBytes: 32 * 1024 ** 2, dimension: 4096, revisedPromptBytes: 32768 });

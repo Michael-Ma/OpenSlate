@@ -11,15 +11,15 @@ import { CodexImageWorkerTransport } from "../dist/index.js";
 
 const entry = fileURLToPath(new URL("codex-image-fixture.mjs", import.meta.url));
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6XsAAAAASUVORK5CYII=", "base64");
-const input = () => ({ attemptId: "legacy-attempt", requestDigest: "a".repeat(64), prompt: "A blue boot", width: 1024, height: 1024,
-  runtimeVersion: "0.153.4", model: "gpt-6-astra", images: [] });
+const input = runtimeVersion => ({ attemptId: "legacy-attempt", requestDigest: "a".repeat(64), prompt: "A blue boot", width: 1024, height: 1024,
+  runtimeVersion, model: "gpt-6-astra", images: [] });
 
 // Author an old synthetic receipt directly. No new-home history is ever relabelled
 // as V1, and no prepare/turn call or authentication file is needed to recover it.
-async function legacyFixture(t) {
+async function legacyFixture(t, runtimeVersion = "0.153.4") {
   const root = await realpath(await mkdtemp(join(tmpdir(), "openslate-image-legacy-")));
   const nativeHome = join(root, "home"), codexHome = join(nativeHome, ".codex"), directory = join(root, "images");
-  const value = input(), turnInputDigest = describeCodexImageInput(value).turnInputDigest;
+  const value = input(runtimeVersion), turnInputDigest = describeCodexImageInput(value).turnInputDigest;
   const workspace = join(directory, "workspaces", turnInputDigest), configurations = join(directory, "configurations");
   await Promise.all([mkdir(codexHome, { recursive: true }), mkdir(workspace, { recursive: true }), mkdir(configurations, { recursive: true })]);
   const options = { command: { file: process.execPath, args: [entry] }, nativeHome, codexHome, directory,
@@ -29,7 +29,13 @@ async function legacyFixture(t) {
     forced_login_method: "chatgpt", approval_policy: "never", web_search: "disabled", "skills.bundled.enabled": false, "skills.config": [],
     permissions: { openslate_local: { filesystem: { ":root": "deny", ":minimal": "read", [workspace]: "write", [binary]: "read" }, network: { enabled: false } } } },
     workspace, binary, args: [entry], runtimeDigest, environmentDigest: digest({ ...options.env, HOME: nativeHome, CODEX_HOME: codexHome }) };
-  const prepared = { runtime: { version: 1, runtimeVersion: "0.153.4", runtimeDigest, configurationDigest: digest(config), model: "gpt-6-astra", authMode: "chatgpt" },
+  const privateHome = join(directory, "runtime", "director-home");
+  if (runtimeVersion === "0.162.1") {
+    await mkdir(privateHome, { recursive: true });
+    Object.assign(config, { version: 2, codexHome: privateHome,
+      environmentDigest: digest({ ...options.env, HOME: nativeHome, CODEX_HOME: privateHome }) });
+  }
+  const prepared = { runtime: { version: 1, runtimeVersion, runtimeDigest, configurationDigest: digest(config), model: "gpt-6-astra", authMode: "chatgpt" },
     session: { threadId: "thread-legacy", turnInputDigest } };
   const configPath = join(configurations, `${prepared.runtime.configurationDigest}.json`), configBytes = JSON.stringify(config);
   await writeFile(configPath, configBytes);
@@ -43,7 +49,7 @@ async function legacyFixture(t) {
   const saveImage = async (home = codexHome) => { const folder = join(home, "generated_images", prepared.session.threadId); await mkdir(folder, { recursive: true });
     const path = join(folder, "original.png"); await writeFile(path, png); return path; };
   const completed = savedPath => ({ id: "turn-legacy", status: "completed", items: [{ type: "imageGeneration", id: "image-legacy", status: "completed", result: "", savedPath }] });
-  return { options, value, prepared, configPath, configBytes, history, setServers, make, records, saveImage, completed, privateHome: join(directory, "runtime", "director-home") };
+  return { options, value, prepared, configPath, configBytes, history, setServers, make, records, saveImage, completed, privateHome };
 }
 
 function assertReadOnly(rows, codexHome) {
@@ -122,12 +128,12 @@ test("V1 expired or lost preparation cannot be recreated or resumed as a first i
   assert.equal(await readFile(f.configPath, "utf8"), f.configBytes);
 });
 
-test('a 0.153.4 receipt reads its original hashed binary even when the configured new binary differs', async t => {
-  const f = await legacyFixture(t);
-  await f.history([f.completed(await f.saveImage())]);
+for (const version of ["0.153.4", "0.162.1"]) test(`a ${version} receipt reads its original hashed binary even when the configured new binary differs`, async t => {
+  const f = await legacyFixture(t, version), home = version === "0.153.4" ? f.options.codexHome : f.privateHome;
+  await f.history([f.completed(await f.saveImage(home))]);
   const worker = f.make({ command: { file: join(f.options.directory, 'new-binary-must-not-run'), args: [entry] } });
   const outcome = await worker.lookup(f.prepared, { turnId: 'turn-legacy' });
   assert.equal(outcome.kind, 'completed', outcome.code); assert.deepEqual(Buffer.from(outcome.bytes), png);
-  assertReadOnly(await f.records(), f.options.codexHome);
+  assertReadOnly(await f.records(), home);
   assert.equal(await readFile(f.configPath, 'utf8'), f.configBytes);
 });

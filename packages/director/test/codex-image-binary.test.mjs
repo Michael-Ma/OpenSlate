@@ -15,7 +15,7 @@ for (const layout of ['sibling', 'nested']) test(`Codex image resolves the offic
   const triple = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-${process.platform === 'darwin' ? 'apple-darwin' : 'unknown-linux-musl'}`;
   const binary = join(optional, 'vendor', triple, 'bin/codex');
   await mkdir(dirname(binary), { recursive: true }); await writeFile(binary, 'synthetic native bytes');
-  await writeFile(join(optional, 'package.json'), JSON.stringify({ name: `@openai/codex-${process.platform}-${process.arch}`, version: '0.162.1' }));
+  await writeFile(join(optional, 'package.json'), JSON.stringify({ name: `@openai/codex-${process.platform}-${process.arch}`, version: '0.170.0' }));
   assert.equal(await resolveCodexImageBinary(launcher), await realpath(binary));
 });
 

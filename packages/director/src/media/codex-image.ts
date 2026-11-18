@@ -23,7 +23,7 @@ export interface CodexImageWorkerOptions {
   /** Trusted host cold process preparation limit, separately bounded from image execution. */
   startupTimeoutMs?: number;
 }
-export interface CodexImageReadiness { status: "ready" | "blocked"; code: string | null; runtimeVersion: "0.162.1"; authMode: "chatgpt"; nativeDiagnostic?: NativeDiagnostic }
+export interface CodexImageReadiness { status: "ready" | "blocked"; code: string | null; runtimeVersion: typeof CODEX_IMAGE_RUNTIME_VERSION; authMode: "chatgpt"; nativeDiagnostic?: NativeDiagnostic }
 type Ready = { options: CodexDirectorOptions; binary: string; runtimeDigest: string; root: string };
 type Configuration = { config: Record<string, CodexConfigValue>; workspace: string; binary: string;
   args: string[]; runtimeDigest: string; environmentDigest: string } &
@@ -190,8 +190,8 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       const ready = await this.#setup(signal), config = this.#configuration(ready, ready.options.cwd);
       rpc = await this.#launch(config, CHECK, ready.options.privateCodexHome); await this.#initialize(rpc, signal); await this.#check(rpc, config, signal);
       await this.#close(rpc); rpc = undefined; imageStopped(signal);
-      return { status: "ready", code: null, runtimeVersion: "0.162.1", authMode: "chatgpt" };
-    } catch (error) { return { status: "blocked", code: safeCode(error), runtimeVersion: "0.162.1", authMode: "chatgpt", nativeDiagnostic: classifyNativeDiagnostic(error) }; }
+      return { status: "ready", code: null, runtimeVersion: CODEX_IMAGE_RUNTIME_VERSION, authMode: "chatgpt" };
+    } catch (error) { return { status: "blocked", code: safeCode(error), runtimeVersion: CODEX_IMAGE_RUNTIME_VERSION, authMode: "chatgpt", nativeDiagnostic: classifyNativeDiagnostic(error) }; }
     // Successful readiness already confirmed cleanup in the try block. A later
     // cleanup fault must not replace the primary failure returned above.
     finally { if (rpc) try { await this.#close(rpc); } catch { /* Preserve the primary start diagnostic. */ } }
@@ -227,7 +227,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
         throw new RuntimeFault("RUNTIME_INSTRUCTIONS_UNEXPECTED", "Unexpected inherited native image instructions",
           instructionSourcesDiagnostic(response.instructionSources, this.#input.nativeHome));
       imageStopped(signal);
-      const prepared: CodexImagePrepared = { runtime: { version: 1, runtimeVersion: "0.162.1", runtimeDigest: ready.runtimeDigest,
+      const prepared: CodexImagePrepared = { runtime: { version: 1, runtimeVersion: CODEX_IMAGE_RUNTIME_VERSION, runtimeDigest: ready.runtimeDigest,
         configurationDigest, model: MODEL, authMode: "chatgpt" }, session: { threadId, turnInputDigest: description.turnInputDigest } };
       rpc.finishStartup();
       requireRuntime(!this.#closed, "CODEX_IMAGE_CLOSED", "Image worker closed before prepared handoff");
@@ -249,7 +249,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     requireRuntime(digest(config) === prepared.runtime.configurationDigest && (config.version === 1 ||
       (config.version === 2 && config.codexHome === join(root, "runtime", "director-home"))) &&
       config.environmentDigest === digest(await this.#environment(config)) &&
-      config.runtimeDigest === prepared.runtime.runtimeDigest && (prepared.runtime.runtimeVersion === "0.153.4" || config.binary === (await this.#command(signal)).file) &&
+      config.runtimeDigest === prepared.runtime.runtimeDigest && (prepared.runtime.runtimeVersion !== CODEX_IMAGE_RUNTIME_VERSION || config.binary === (await this.#command(signal)).file) &&
       isDeepStrictEqual(config.args, [...(this.#input.command.args ?? [])]) && config.workspace === join(root, "workspaces", prepared.session.turnInputDigest) &&
       config.config.model === MODEL && config.config.model_provider === "openai" && config.config["features.image_generation"] === true && config.config.forced_login_method === "chatgpt",
     "CODEX_IMAGE_CONFIG_MISMATCH", "Saved image worker configuration differs from this installation");
@@ -273,13 +273,16 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     if (!image) return { kind: "failed", threadId, turnId, code: "NO_IMAGE" };
     imageStopped(signal);
     requireRuntime(image && validId(image.id) && image.type === "imageGeneration" && image.status === "completed" &&
-      typeof image.result === "string" && (image.failure === undefined || image.failure === null),
+      (typeof image.result === "string" || validId(image.fileId)) && (image.failure === undefined || image.failure === null),
     "CODEX_IMAGE_COMPLETION_MISSING", "Completed turn has no unique successful image item");
     requireRuntime(image.revisedPrompt === undefined || image.revisedPrompt === null ||
       (typeof image.revisedPrompt === "string" && Buffer.byteLength(image.revisedPrompt) <= CODEX_IMAGE_LIMITS.revisedPromptBytes),
     "CODEX_IMAGE_ITEM_INVALID", "Image metadata exceeds its bound");
     let bytes: Buffer | undefined;
-    const encoded = image.result.startsWith("data:image/png;base64,") ? image.result.slice(22) : image.result;
+    // The fileId form identifies an attachment, not a path. Only the item's exact
+    // savedPath can supply its local bytes. Legacy items can still carry inline PNG.
+    const inline = image.fileId === undefined && typeof image.result === "string" ? image.result : "";
+    const encoded = inline.startsWith("data:image/png;base64,") ? inline.slice(22) : inline;
     if (encoded.length > 0 && encoded.length <= Math.ceil(CODEX_IMAGE_LIMITS.outputBytes / 3) * 4 && encoded.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
       const value = Buffer.from(encoded, "base64");
       if (value.toString("base64") === encoded && value.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) bytes = value;
@@ -300,7 +303,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     return { kind: "completed", threadId, turnId, itemId: image.id, bytes: new Uint8Array(bytes), revisedPrompt: typeof image.revisedPrompt === "string" ? image.revisedPrompt : null };
   }
   async #history(rpc: ImageRpc, prepared: CodexImagePrepared, config: Configuration, selectedTurn?: string, signal?: AbortSignal): Promise<CodexImageOutcome> {
-    // Legacy history supports both recorded 0.153.4 turns and the current runtime with one bounded read.
+    // Read the recorded thread on its original binary with one bounded history request.
     // Never fall back to resume/start when history is unavailable, incomplete, oversized or ambiguous.
     const response = object(await rpc.request("thread/read", { threadId: prepared.session.threadId, includeTurns: true }, signal));
     const thread = object(response.thread);
@@ -335,7 +338,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     const item = (raw: unknown): void => {
       const value = object(raw); if (value.type !== "imageGeneration") return;
       requireRuntime(validId(value.id), "CODEX_IMAGE_ITEM_INVALID", "Image item has no stable identity");
-      const snapshot = { type: value.type, id: value.id, status: value.status, result: value.result, savedPath: value.savedPath ?? null,
+      const snapshot = { type: value.type, id: value.id, status: value.status, result: value.result, fileId: value.fileId, savedPath: value.savedPath ?? null,
         revisedPrompt: value.revisedPrompt ?? null, failure: value.failure ?? null };
       const previous = images.get(value.id);
       requireRuntime(!previous || isDeepStrictEqual(previous, snapshot), "CODEX_IMAGE_ITEM_CONFLICT", "Image completion item changed");
