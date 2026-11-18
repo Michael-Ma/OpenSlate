@@ -370,6 +370,14 @@ Both cards are merged into local `main` (not pushed). Report: [H4](reports/H4-re
 - Known limits: on a person-started turn the Director reads about 13,800 words of skill; variety across runs is partial; a micro drama or a music video here is the version this tool can make (captions for lines, a generated song, no cutting on the beat), not the full form.
 - Not done: no film has been made with 2.1.0 or 2.2.0.
 
+## 14. Two real films, 2026-11-17
+
+Two films were made with skill 2.2.0 through the whole flow, recorded, for a studio estimate of $2.86 (Viggle's balance fell by $1.08). The record is in [the live-run report](reports/H-live-run-2026-11-17.md).
+
+- **The method works on real footage.** The pigeon brief, which gave a four-row film with skill 2.0.1, gave ten rows from four clips and two stills, with the glances built in the edit, no retake, and 28 seconds of video bought against 40. In review the Director found the head turn outside its planned ranges and moved the cuts onto it.
+- **Three faults that only a real run could show** were found and fixed (cards [H6](cards/H6-still-row-roots.md) and [H7](cards/H7-vertical-render-and-review-time.md)): a still row could not read a picture the film owns; every vertical code film was rendered widescreen since G1; and the review turn ran out of time at 180 seconds without saying so.
+- **Still open:** the second film's idea was mild; the review loop is slow; the Director cannot use GPT 6.2 until the studio's pinned Codex version is raised.
+
 ## Appendix A: the proposed skill text
 
 ### The idea, before any plan
