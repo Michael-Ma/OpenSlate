@@ -360,6 +360,16 @@ The Director's model planned the eight earlier briefs once and eight new briefs 
 
 The two files are about 6,800 words. Supplying them only on person-started turns keeps review and repair turns at about 7,000 words.
 
+### Built and verified, 2026-11-17
+
+Both cards are merged into local `main` (not pushed). Report: [H4](reports/H4-report.md).
+
+- Codex ran `pnpm check` on the merged state: 5,379 tests passed, none failed, one optional probe skipped; five workspace typechecks passed.
+- The lead ran all 217 browser scenarios against a disposable fixture studio; all passed, including the idea panel showing the format and the aim.
+- The manifest gained an optional field, `personTurnFiles`. Review, repair and media-failure turns get four files; turns the person starts get six. The lock and the digest still cover every file.
+- Known limits: on a person-started turn the Director reads about 13,800 words of skill; variety across runs is partial; a micro drama or a music video here is the version this tool can make (captions for lines, a generated song, no cutting on the beat), not the full form.
+- Not done: no film has been made with 2.1.0 or 2.2.0.
+
 ## Appendix A: the proposed skill text
 
 ### The idea, before any plan
