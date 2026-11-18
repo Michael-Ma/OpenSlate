@@ -37,7 +37,7 @@ function timelineFromManifest(manifest: TimelineRenderManifest): LocalTimelineDo
 }
 
 /** Only code films enter this adapter. The graph capture and saved recipes retain their original shape. */
-export async function captureEditedCodePlanRender(store: Store, media: LocalMediaService, projectId: string, args: Record<string, unknown>, contract: string, options: { signal?: AbortSignal } = {}): Promise<TimelineRenderInput> {
+export async function captureEditedCodePlanRender(store: Store, media: LocalMediaService, projectId: string, args: Record<string, unknown>, contract: string, options: { artifactDir: string; signal?: AbortSignal }): Promise<TimelineRenderInput> {
   check(options.signal);
   args = structuredClone(args); validateRenderInput(args);
   const rows = args.timeline as Record<string, unknown>[];
@@ -57,7 +57,7 @@ export async function captureEditedCodePlanRender(store: Store, media: LocalMedi
         const picture = codePlanArtifacts(store, projectId).find(row.artifact);
         invariant(picture?.artifact.kind === "image", "CODE_PLAN_ARTIFACT_INVALID", "Still requires an owned picture of this film");
         const source = await media.supplyStill({ artifactId: picture.id, path: picture.path, sha256: picture.artifact.sha256,
-          durationFrames: row.durationFrames as number }, options);
+          durationFrames: row.durationFrames as number, artifactDir: options.artifactDir }, options);
         const dimensions = EXPORT_SIZE[projectAspect(project)];
         const clip = { source, startFrame: 0, durationFrames: row.durationFrames as number, fit: (row.fit ?? "contain") as "contain" | "cover", ...edits };
         captured.push({ capture: { projectId, targetRevisionId: project.revisionId, width: Number(args.width ?? dimensions.width), height: Number(args.height ?? dimensions.height), clips: [clip] }, clip });
@@ -233,7 +233,7 @@ export class LocalMediaExecutor implements LocalExecutionPort {
       // The exact saved film lock wins over the build default. Q3 changes the imported constant, not this adapter.
       const skill = this.store.list<{ lock: { compatibility: { toolContract: string } } }>("director_skill_lock", previous.projectId).at(-1);
       const contract = this.injectedContract ?? skill?.lock.compatibility.toolContract ?? CODE_PLAN_TOOL_CONTRACT;
-      const input = await captureEditedCodePlanRender(this.store, this.media, previous.projectId, previous.request.args, contract, { signal });
+      const input = await captureEditedCodePlanRender(this.store, this.media, previous.projectId, previous.request.args, contract, { artifactDir: this.artifactDir, signal });
       check(signal);
       const timeline = createLocalTimelineDocument(timelineInput(input));
       await this.timelines.put(timeline, { signal });

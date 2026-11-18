@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonical, digest } from '@openslate/core';
@@ -23,7 +23,7 @@ import { findCjkCaptionFont, loadTestToolchain, mediaConfigure, mediaDecoderSupp
 
 const run = promisify(execFile), ffmpeg = process.env.OPENSLATE_FFMPEG_PATH, ffprobe = process.env.OPENSLATE_FFPROBE_PATH;
 const invalid = /Row|row|Caption|caption|frames|placements|length/;
-let root, media, video, black, voice, sounds;
+let root, uploadDir, executionBlobs, media, video, black, voice, sounds;
 const clip = (source = video, edits = {}) => ({ source, startFrame: 3, durationFrames: 30, fit: 'cover', ...edits });
 const input = (changes = {}) => ({ projectId: 'film', targetRevisionId: 'target', width: 320, height: 180, clips: [clip()], ...changes });
 const manifest = changes => media.freezeManifest(input(changes));
@@ -40,13 +40,17 @@ function timeline(m) { const { projectId, clips, audio = [], captions, mastering
 
 before(async () => {
   root = await mkdtemp(join(tmpdir(), 'openslate-q4-'));
+  uploadDir = join(root, 'uploads');
+  executionBlobs = join(root, 'execution-output', 'blobs');
+  await mkdir(uploadDir);
+  await mkdir(executionBlobs, { recursive: true });
   for (const [name, filter] of [['moving', 'testsrc2=s=320x180:r=30:d=4'], ['black', 'color=c=black:s=360x640:r=30:d=3']])
-    await run(ffmpeg, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', filter, '-an', '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', join(root, `${name}.mp4`)], { timeout: 30000 });
-  await run(ffmpeg, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=4', '-c:a', 'pcm_s16le', join(root, 'voice.wav')]);
-  media = new LocalMediaService({ rootDir: join(root, 'media'), allowedInputRoots: [root], ffmpegPath: ffmpeg, ffprobePath: ffprobe });
-  video = await media.importMedia({ artifactId: 'moving', path: join(root, 'moving.mp4'), kind: 'video' });
-  black = await media.importMedia({ artifactId: 'black', path: join(root, 'black.mp4'), kind: 'video' });
-  voice = await media.importMedia({ artifactId: 'voice', path: join(root, 'voice.wav'), kind: 'audio' });
+    await run(ffmpeg, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', filter, '-an', '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', join(executionBlobs, `${name}.mp4`)], { timeout: 30000 });
+  await run(ffmpeg, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=4', '-c:a', 'pcm_s16le', join(executionBlobs, 'voice.wav')]);
+  media = new LocalMediaService({ rootDir: join(root, 'media'), allowedInputRoots: [uploadDir, executionBlobs], ffmpegPath: ffmpeg, ffprobePath: ffprobe });
+  video = await media.importMedia({ artifactId: 'moving', path: join(executionBlobs, 'moving.mp4'), kind: 'video' });
+  black = await media.importMedia({ artifactId: 'black', path: join(executionBlobs, 'black.mp4'), kind: 'video' });
+  voice = await media.importMedia({ artifactId: 'voice', path: join(executionBlobs, 'voice.wav'), kind: 'audio' });
   sounds = new Map(); for (const name of SOUND_NAMES) sounds.set(name, await media.supplySound(name));
 });
 after(async () => { if (root) await rm(root, { recursive: true, force: true }); });
@@ -254,10 +258,13 @@ test('real code-plan execution persists all edits, stays free and replays its co
 
 test('code contract injection masters only 0.3.0, and old capture stays byte-for-byte identical', async t => {
   const f = await sqlFixture(t), args = { timeline: [{ artifact: ref(video), durationFrames: 30 }], audio: [{ artifact: ref(voice), durationSamples: 48000 }] };
-  const legacy = captureCodePlanRender(f.store, f.project.id, args), old = await captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.2.0'), current = await captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.3.0');
+  const { artifactDir } = f.worker;
+  const legacy = captureCodePlanRender(f.store, f.project.id, args);
+  const old = await captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.2.0', { artifactDir });
+  const current = await captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.3.0', { artifactDir });
   assert.equal(canonical(old), canonical(legacy)); assert.equal(old.mastering, undefined); assert.equal(current.mastering, 'loudnorm-0.3.0');
   const silent = await media.render(await media.freezeManifest({ ...current, audio: [] })); assert.equal(silent.artifact.probe.audio, undefined);
-  assert.equal((await captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.1.0')).mastering, undefined);
+  assert.equal((await captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.1.0', { artifactDir })).mastering, undefined);
 });
 
 test('eight clips, eight captions and twelve sounds render within the local timeout with a recoverable receipt', async () => {
@@ -282,19 +289,20 @@ test('one source frame at every speed and maximum hold keep their exact rounded 
 
 test('edited total bounds apply after speed and hold, with sample positions in the finished film', async t => {
   const f = await sqlFixture(t), project = f.store.getProject(f.project.id); f.store.saveProject({ ...project, maxFrames: 90 }, project.headVersion);
+  const { artifactDir } = f.worker;
   const args = { timeline: [{ artifact: ref(video), durationFrames: 120, speed: 2, holdFrames: 30 }], audio: [{ artifact: ref(voice), startSample: 0, durationSamples: 48000, atSample: 96000, fadeInSamples: 4800 }] };
-  const captured = await captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.3.0');
+  const captured = await captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.3.0', { artifactDir });
   const document = timeline(captured); assert.equal(document.totalFrames, 90); assert.equal(document.audio[0].atSample, 96000);
-  await assert.rejects(captureEditedCodePlanRender(f.store, media, f.project.id, { ...args, timeline: [{ ...args.timeline[0], holdFrames: 31 }] }, '0.3.0'), /1–90 frames/);
+  await assert.rejects(captureEditedCodePlanRender(f.store, media, f.project.id, { ...args, timeline: [{ ...args.timeline[0], holdFrames: 31 }] }, '0.3.0', { artifactDir }), /1–90 frames/);
   const abort = new AbortController(); abort.abort();
-  await assert.rejects(captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.3.0', { signal: abort.signal }), { code: 'MEDIA_CANCELLED' });
+  await assert.rejects(captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.3.0', { artifactDir, signal: abort.signal }), { code: 'MEDIA_CANCELLED' });
 });
 
 test('caption receipt survives reopen without font lookup and detects tampered PNG bytes', async () => {
   const m = await manifest({ captions: [{ text: 'Frozen 你好', atFrame: 2, durationFrames: 20 }] }), result = await media.render(m);
-  const reopened = new LocalMediaService({ rootDir: media.rootDir, allowedInputRoots: [root], ffmpegPath: ffmpeg, ffprobePath: ffprobe });
+  const reopened = new LocalMediaService({ rootDir: media.rootDir, allowedInputRoots: [uploadDir, executionBlobs], ffmpegPath: ffmpeg, ffprobePath: ffprobe });
   assert.equal((await reopened.readCompletion(m.digest, result.artifact.sha256)).manifest.captions[0].font.family, m.captions[0].font.family);
-  const { chmod, writeFile } = await import('node:fs/promises'), path = join(media.rootDir, 'blobs', `${m.captions[0].sha256}.png`), bytes = await readFile(path);
+  const { chmod } = await import('node:fs/promises'), path = join(media.rootDir, 'blobs', `${m.captions[0].sha256}.png`), bytes = await readFile(path);
   try { await chmod(path, 0o600); await writeFile(path, Buffer.alloc(bytes.length)); await assert.rejects(media.render(m), /Caption 1.*PNG changed/); }
   finally { await writeFile(path, bytes); await chmod(path, 0o444); }
 });
@@ -313,39 +321,70 @@ test('measured mastering keeps a transient sound over a mostly silent film at -1
 });
 
 
-async function ownedStill(f) {
-  const path = join(root, 'owned-still.png');
-  await run(ffmpeg, ['-nostdin','-v','error','-y','-i',join(root,'moving.mp4'),'-frames:v','1','-threads','1',path]);
-  const bytes = await readFile(path), artifact = {artifactId:randomUUID(),kind:'image',sha256:createHash('sha256').update(bytes).digest('hex')};
-  f.store.insert('artifact',artifact.artifactId,f.project.id,{artifact,path,mimeType:'image/png',fixture:false,width:320,height:180});
+async function ownedStill(f, directory = join(f.worker.artifactDir, 'images', 'blobs')) {
+  const { stdout: bytes } = await run(ffmpeg, ['-nostdin', '-v', 'error', '-i', join(executionBlobs, 'moving.mp4'),
+    '-frames:v', '1', '-threads', '1', '-c:v', 'png', '-f', 'image2pipe', 'pipe:1'], { encoding: 'buffer' });
+  const artifact = { artifactId: randomUUID(), kind: 'image', sha256: createHash('sha256').update(bytes).digest('hex') };
+  const path = join(directory, `${artifact.sha256}.png`);
+  await mkdir(directory, { recursive: true });
+  await writeFile(path, bytes);
+  f.store.insert('artifact', artifact.artifactId, f.project.id, { artifact, path, mimeType: 'image/png', fixture: false, width: 320, height: 180 });
   return artifact;
 }
 for (const stillOnly of [false,true]) test(`H2 ${stillOnly?'stills-only':'still between clips'} renders an exact probed MP4 at film fps, with fit and 2x zoom`, async t=>{
   const f=await sqlFixture(t), picture=await ownedStill(f), still={artifact:picture,durationFrames:30,fit:'cover',zoom:{scale:2,x:0,y:1}};
   const rows=stillOnly?[still,{...still,durationFrames:15,fit:'contain'}]:[{artifact:ref(video),durationFrames:15},still,{artifact:ref(video),startFrame:60,durationFrames:15}];
   const args={timeline:rows,width:320,height:180};
-  const capture=await captureEditedCodePlanRender(f.store,media,f.project.id,args,'0.3.0');
+  const capture=await captureEditedCodePlanRender(f.store,media,f.project.id,args,'0.3.0',{artifactDir:f.worker.artifactDir});
   assert.equal(timeline(capture).totalFrames,stillOnly?45:60);
   const result=await media.render(await media.freezeManifest({...capture,outputFrameRate:24})), probe=await probed(result.artifact.path);
   assert.equal(Number(probe.streams[0].nb_read_frames),stillOnly?36:48);assert.equal(probe.streams[0].r_frame_rate,'24/1');
   assert.equal(probe.streams[0].codec_name,'h264');assert.equal(result.artifact.probe.durationSeconds,stillOnly?1.5:2);
   if(stillOnly) {
-    const withAudio=await captureEditedCodePlanRender(f.store,media,f.project.id,{...args,audio:[{artifact:ref(voice),durationSamples:48000,fadeInSamples:1000}]},'0.3.0');
+    const withAudio=await captureEditedCodePlanRender(f.store,media,f.project.id,{...args,audio:[{artifact:ref(voice),durationSamples:48000,fadeInSamples:1000}]},'0.3.0',{artifactDir:f.worker.artifactDir});
     assert.equal(withAudio.audio.length,1);assert.equal(withAudio.audio[0].fadeInSamples,1000);
   }
 });
 
 test('H2 still execution is one free render step, durable on replay; foreign images and corrupt bytes fail closed',async t=>{
   const f=await sqlFixture(t),picture=await ownedStill(f),source=`export default async function(ctx){await ctx.render({timeline:[{artifact:${JSON.stringify(picture)},durationFrames:30}],width:320,height:180});}`;
+  const { artifactDir } = f.worker;
   await f.plans.submit(f.project.id,{source,basedOnVersion:null,author:'user',invocationId:randomUUID()});
   for(let i=0;i<10 && f.plans.view(f.project.id).state!=='done';i++)await f.plans.tick();
   assert.equal(f.plans.view(f.project.id).state,'done',JSON.stringify(f.plans.view(f.project.id)));
   assert.equal(f.plans.steps(f.project.id).length,1);assert.equal(f.plans.view(f.project.id).spentMicros,'0');assert.equal(f.provider.acceptedCount(),0);
   const call=media.supplyStill;media.supplyStill=()=>{throw Error('must replay frozen source')};
   try {await f.plans.submit(f.project.id,{source,basedOnVersion:1,author:'user',invocationId:randomUUID()});await f.plans.tick();assert.equal(f.plans.view(f.project.id).state,'done');}finally{media.supplyStill=call;}
-  await assert.rejects(captureEditedCodePlanRender(f.store,media,f.project.id,{timeline:[{artifact:{...picture,sha256:'f'.repeat(64)},durationFrames:30}]},'0.3.0'),/owned picture/);
+  await assert.rejects(captureEditedCodePlanRender(f.store,media,f.project.id,{timeline:[{artifact:{...picture,sha256:'f'.repeat(64)},durationFrames:30}]},'0.3.0',{artifactDir}),/owned picture/);
   const record=f.store.get('artifact',picture.artifactId);
-  await assert.rejects(media.supplyStill({artifactId:picture.artifactId,path:record.path,sha256:'f'.repeat(64),durationFrames:30}),/differs from the owned picture/);
+  await assert.rejects(media.supplyStill({artifactId:picture.artifactId,path:record.path,sha256:'f'.repeat(64),durationFrames:30,artifactDir}),{code:'MEDIA_INTEGRITY_ERROR'});
+});
+
+test('H6 a still from the upload root renders at film fps', async t => {
+  const f = await sqlFixture(t), picture = await ownedStill(f, uploadDir);
+  const args = { timeline: [{ artifact: picture, durationFrames: 30 }], width: 320, height: 180 };
+  const captured = await captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.3.0', { artifactDir: f.worker.artifactDir });
+  const result = await media.render(await media.freezeManifest({ ...captured, outputFrameRate: 24 }));
+  assert.equal(result.artifact.probe.video.frames, 24);
+  assert.equal(result.artifact.probe.video.frameRate, '24/1');
+});
+
+test('H6 a still outside the artifact and input roots is refused', async t => {
+  const f = await sqlFixture(t), { artifactDir } = f.worker;
+  const picture = await ownedStill(f, `${artifactDir}-outside`);
+  const args = { timeline: [{ artifact: picture, durationFrames: 30 }] };
+  await assert.rejects(captureEditedCodePlanRender(f.store, media, f.project.id, args, '0.3.0', { artifactDir }), {
+    code: 'MEDIA_PATH_REJECTED', message: 'Row 1: Input is outside configured local roots',
+  });
+});
+
+test('H6 a still cannot use a symlink even when its target is an owned artifact', async t => {
+  const f = await sqlFixture(t), picture = await ownedStill(f), { artifactDir } = f.worker;
+  const record = f.store.get('artifact', picture.artifactId), path = join(artifactDir, 'still-link.png');
+  await symlink(record.path, path);
+  await assert.rejects(media.supplyStill({ ...picture, path, durationFrames: 30, artifactDir }), {
+    code: 'MEDIA_PATH_REJECTED', message: 'Input symlinks are not accepted',
+  });
 });
 
 async function cutRender(f, rows, fps=30) {

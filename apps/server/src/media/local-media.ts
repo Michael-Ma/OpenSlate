@@ -295,14 +295,17 @@ export class LocalMediaService {
   }
 
   /** A verified owned picture held locally; this is part of rendering, never a provider step. */
-  async supplyStill(input: { artifactId: string; path: string; sha256: string; durationFrames: number }, options: { signal?: AbortSignal } = {}): Promise<SuppliedMedia> {
+  async supplyStill(input: { artifactId: string; path: string; sha256: string; durationFrames: number; artifactDir: string }, options: { signal?: AbortSignal } = {}): Promise<SuppliedMedia> {
     input = structuredClone(input);
     const { signal } = options;
     integer(input.durationFrames, 1, 300, "still durationFrames");
     invariant(ID.test(input.artifactId) && HASH.test(input.sha256), "MEDIA_INVALID_INPUT", "Use an owned picture identity");
+    invariant(isAbsolute(input.artifactDir), "MEDIA_INVALID_INPUT", "A still requires an absolute artifact directory");
     return this.exclusive(async () => this.temporary(async dir => {
+      const root = await realpath(input.artifactDir);
+      invariant(root !== "/", "MEDIA_INVALID_INPUT", "A still requires a private artifact directory");
       const source = join(dir, "picture"), output = join(dir, "still.mp4");
-      await this.snapshot(input.path, source, signal);
+      await this.snapshot(input.path, source, signal, [...this.roots, root]);
       const original = await this.hashFile(source, 32 * 1024 * 1024, signal);
       invariant(original.sha256 === input.sha256, "MEDIA_INTEGRITY_ERROR", "Still source differs from the owned picture");
       const inputArgs = imageInputArgs(imageFormat(await readFile(source)));
