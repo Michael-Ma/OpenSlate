@@ -97,8 +97,9 @@ export function CodePlanPlanView() {
 
 /** A minute counter that ticks only while `active`, so waiting times stay true on screen. */
 /**
- * The idea behind the film, above its shots: the take the Director chose, how the viewer's reading should change, the
- * visual rule, and folded below them the takes it passed on, what it kept from the brief and its cut list.
+ * The idea behind the film, above its shots: the take the Director chose, how the viewer's reading should change, what
+ * will put the take on screen, the visual rule, and folded below them the takes it passed on, what it kept from the
+ * brief and its cut list.
  */
 function IdeaPanel({ idea }: { idea: FilmIdea }) {
   const { t } = useI18n();
@@ -122,12 +123,29 @@ function IdeaPanel({ idea }: { idea: FilmIdea }) {
           </>
         ) : null}
         {idea.reading ? (<><dt>{t("codeplan.idea.reading")}</dt><dd data-idea="reading">{idea.reading}</dd></>) : null}
+        {idea.proof.length ? (
+          <>
+            <dt>{t("codeplan.idea.proof")}</dt>
+            <dd data-idea="proof">
+              <ol className="cp-idea-proof">
+                {idea.proof.map((item) => (
+                  <li key={item.number} value={item.number}>
+                    {item.text}
+                    {idea.cuts.length ? <span className="cp-idea-basis" data-shown={item.seconds > 0}>{item.seconds > 0 ? t("codeplan.idea.proof_seconds", { seconds: item.seconds }) : t("codeplan.idea.proof_unseen")}</span> : null}
+                  </li>
+                ))}
+              </ol>
+              {idea.cutSeconds > 0 ? <p className="cp-idea-note" data-idea="proof-share">{t("codeplan.idea.proof_share", { seconds: idea.proofSeconds, total: idea.cutSeconds })}</p> : null}
+            </dd>
+          </>
+        ) : null}
         {idea.rule ? (<><dt>{t("codeplan.idea.rule")}</dt><dd data-idea="rule">{idea.rule}</dd></>) : null}
       </dl>
       {others.length ? (
         <details className="cp-idea-more" data-idea="others">
           <summary>{t("codeplan.idea.others", { count: others.length })}</summary>
           <ul>{others.map((take, index) => { const label = basis(take); return <li key={index}>{take.title}{label ? <span className="cp-idea-basis">{label}</span> : null}</li>; })}</ul>
+          {idea.obvious ? <p className="cp-idea-note" data-idea="obvious">{t("codeplan.idea.obvious", { text: idea.obvious })}</p> : null}
         </details>
       ) : null}
       {idea.fixed.length ? (
@@ -142,7 +160,7 @@ function IdeaPanel({ idea }: { idea: FilmIdea }) {
           <p className="cp-idea-note">{t("codeplan.idea.cuts_note")}</p>
           <table className="cp-cuts">
             <thead><tr><th scope="col">#</th><th scope="col">{t("codeplan.idea.cut_sees")}</th><th scope="col">{t("codeplan.idea.cut_seconds")}</th><th scope="col">{t("codeplan.idea.cut_clip")}</th></tr></thead>
-            <tbody>{idea.cuts.map((cut, index) => <tr key={index}><td>{index + 1}</td><td>{cut.sees}</td><td>{cut.seconds || "–"}</td><td>{cut.clip}</td></tr>)}</tbody>
+            <tbody>{idea.cuts.map((cut, index) => <tr key={index} data-proof={cut.proof.join(" ") || undefined}><td>{index + 1}</td><td>{cut.sees}{cut.proof.map((mark) => <span key={mark} className="cp-cut-proof" title={t("codeplan.idea.cut_proof", { number: mark })}>{mark}</span>)}</td><td>{cut.seconds || "–"}</td><td>{cut.clip}</td></tr>)}</tbody>
           </table>
         </details>
       ) : null}

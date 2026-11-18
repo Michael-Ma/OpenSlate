@@ -1,5 +1,5 @@
 import { codePlanArtifacts, codePlanRenderSources, object } from "./artifacts.js";
-import { cutListFindings, renderTimelineFrames, zoomSoftFindings } from "./cut-findings.js";
+import { cutListFindings, renderTimelineFrames, repeatedRowFindings, zoomSoftFindings } from "./cut-findings.js";
 import { lyriaFailureMessage } from "../execution/gemini-lyria-execution.js";
 import { videoI2vFailure } from "../execution/video-i2v-execution.js";
 import { modelPrice, modelDescriptions, codePlanPriceFrame } from "./models.js";
@@ -380,7 +380,7 @@ export class CodePlanRuntime implements CodePlanPort {
     const reachedChoices = new Set<string>();
     const lock = this.store.list<{ lock: { compatibility: { toolContract: string } } }>("director_skill_lock", projectId).at(-1)?.lock;
     const filmQualityEnabled = !lock || lock.compatibility.toolContract === "0.3.0";
-    const renderInputs: { input: JsonObject; key: string }[] = [];
+    const renderInputs: { input: JsonObject; key: string; timeline: unknown }[] = [];
     const confirmedKeyframes = new Map<string, { frame: JsonObject; choice: string }>();
     const journalKeys = new Set(journal.filter(step => step.attemptId || step.result).map(step => step.key));
     let budget = false, limited = false;
@@ -507,7 +507,9 @@ export class CodePlanRuntime implements CodePlanPort {
           const ref = object(object(value).artifact ?? value);
           if (ref.kind === "image") invariant(media.find(ref), "CODE_PLAN_ARTIFACT_INVALID", "Still requires an owned picture of this film");
         }
-        renderInputs.push({ input, key });
+        // Normalized inputs deliberately drop artifact ids for content-addressed replay.
+        const timeline = Array.isArray(args[0]) ? args[0] : object(args[0]).timeline;
+        renderInputs.push({ input, key, timeline });
       }
       reached.add(key);
       let step = dry ? virtual.get(key) : this.store.get<CodePlanStep>("code_plan_step", id);
@@ -596,12 +598,13 @@ export class CodePlanRuntime implements CodePlanPort {
     } catch (error) { outcome = { state: "error", error: errorView(error) }; }
     const sources = codePlanRenderSources(this.store, projectId);
     const lengths: number[] = [];
-    for (const { input, key } of renderInputs) {
+    for (const { input, key, timeline } of renderInputs) {
       const frames = renderTimelineFrames(input, sources);
       if (frames !== undefined) lengths.push(frames / 30);
       const step = dry ? virtual.get(key) : this.store.get<CodePlanStep>("code_plan_step", entityId(projectId, key));
       const size = codePlanRenderAdviceSize(this.store, projectId, input, sources, step?.retryAt === undefined ? step?.attemptId : undefined);
       diff.findings.push(...zoomSoftFindings({ ...input, ...size }, sources));
+      diff.findings.push(...repeatedRowFindings({ timeline }, sources));
     }
     diff.findings.push(...cutListFindings(declarations.scenes, declarations.shots, lengths));
     diff.reusedSteps = reused.size;

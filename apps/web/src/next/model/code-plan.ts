@@ -617,7 +617,9 @@ function clipsByShot(view: CodePlanView): Map<string, NonNullable<DeclaredShot["
 /** How a take relates to the skill's templates: taken as it is, bent, or the Director's own. */
 export type TakeBasis = "template" | "bent" | "own" | "unknown";
 export interface IdeaTake { title: string; basis: TakeBasis; /** The template's name, when one was used or bent. */ template: string; chosen: boolean }
-export interface IdeaCut { sees: string; seconds: number; clip: string }
+export interface IdeaCut { sees: string; seconds: number; clip: string; /** Which of the proof this cut shows, as numbers in the list; empty when it shows none. */ proof: number[] }
+/** One thing the viewer will see or hear that the obvious film would not contain, with the seconds of the cuts that show it. */
+export interface IdeaProof { number: number; text: string; seconds: number }
 /** The idea behind the film, as the Director recorded it in `ctx.scene`: what it kept, what it considered, and what the viewer will see. */
 export interface FilmIdea {
   /** What the film is and what it is for, in the Director's words ("Advert", "Short film"). */
@@ -625,10 +627,16 @@ export interface FilmIdea {
   /** The response it aims at, with a second aim when there is one ("Laugh, then Moved"). */
   aim: string;
   fixed: string[];
+  /** The film anybody would make from this brief, which the take sets aside. */
+  obvious: string;
   takes: IdeaTake[];
   /** The chosen take; null when none is marked. */
   chosen: IdeaTake | null;
   reading: string;
+  /** What puts the take on screen: at most three things, numbered as the cuts name them. */
+  proof: IdeaProof[];
+  /** Seconds of the cuts that show any of the proof. */
+  proofSeconds: number;
   rule: string;
   cuts: IdeaCut[];
   cutSeconds: number;
@@ -649,11 +657,16 @@ export function filmIdea(view: Pick<CodePlanView, "declarations">): FilmIdea | n
   const fixed = list(row.fixed, 12).map((item) => text(item, 200)).filter(Boolean);
   const takes = list(row.takes, 6).filter(isObject).map((take): IdeaTake => ({ title: pick(take, ["title", "name", "take"], 240), ...takeBasis(take.basis), chosen: take.chosen === true }))
     .filter((take) => take.title);
+  const proofText = list(row.proof, 3).map((item) => text(item, 240));
+  // A cut names one proof (`proof: 2`) or several (`proof: [2, 3]`); a mark counts only when it names a proof in the list.
+  const shown = (value: unknown): number[] => [...new Set((Array.isArray(value) ? value.slice(0, 3) : [value]).filter((mark): mark is number => typeof mark === "number" && Number.isInteger(mark) && !!proofText[mark - 1]))].sort();
   const cuts = list(row.cuts, 64).filter(isObject).map((cut): IdeaCut => ({ sees: text(cut.sees, 200),
-    seconds: typeof cut.seconds === "number" && Number.isFinite(cut.seconds) && cut.seconds > 0 && cut.seconds <= 600 ? Math.round(cut.seconds * 10) / 10 : 0, clip: text(cut.clip, 120) }))
+    seconds: typeof cut.seconds === "number" && Number.isFinite(cut.seconds) && cut.seconds > 0 && cut.seconds <= 600 ? Math.round(cut.seconds * 10) / 10 : 0, clip: text(cut.clip, 120), proof: shown(cut.proof) }))
     .filter((cut) => cut.sees);
-  const idea: FilmIdea = { format: text(row.format, 80), aim: text(row.aim, 120), fixed, takes, chosen: takes.find((take) => take.chosen) ?? null, reading: text(row.reading, 600), rule: text(row.rule, 300), cuts,
-    cutSeconds: Math.round(cuts.reduce((sum, cut) => sum + cut.seconds, 0) * 10) / 10 };
+  const seconds = (rows: IdeaCut[]): number => Math.round(rows.reduce((sum, cut) => sum + cut.seconds, 0) * 10) / 10;
+  const proof = proofText.flatMap((line, index): IdeaProof[] => (line ? [{ number: index + 1, text: line, seconds: seconds(cuts.filter((cut) => cut.proof.includes(index + 1))) }] : []));
+  const idea: FilmIdea = { format: text(row.format, 80), aim: text(row.aim, 120), fixed, obvious: text(row.obvious, 300), takes, chosen: takes.find((take) => take.chosen) ?? null, reading: text(row.reading, 600),
+    proof, proofSeconds: seconds(cuts.filter((cut) => cut.proof.length)), rule: text(row.rule, 300), cuts, cutSeconds: seconds(cuts) };
   return idea.reading || idea.takes.length || idea.cuts.length ? idea : null;
 }
 
@@ -748,7 +761,7 @@ export interface VersionRow {
 }
 
 const FINDINGS = new Set(["SOURCE_SYNTAX", "RUNTIME_ERROR", "UNAWAITED_CALL", "STEP_LIMIT", "CEILING",
-  "CUTS_UNUSED_SHOT", "CUTS_UNKNOWN_CLIP", "CUTS_LENGTH", "CUTS_SHAPE", "ZOOM_SOFT", "SUGGEST_UNAVAILABLE"]);
+  "CUTS_UNUSED_SHOT", "CUTS_UNKNOWN_CLIP", "CUTS_LENGTH", "CUTS_SHAPE", "PROOF_SHAPE", "PROOF_UNSEEN", "PROOF_SHORT", "ROW_REPEATED", "ZOOM_SOFT", "SUGGEST_UNAVAILABLE"]);
 const KIND_LABEL: Record<CodePlanStepKind, Msg> = {
   image: msg("codeplan.kind.image"), video: msg("codeplan.kind.video"), speech: msg("codeplan.kind.speech"), music: msg("codeplan.kind.music"), render: msg("codeplan.kind.render"),
 };

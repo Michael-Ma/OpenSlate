@@ -1,5 +1,6 @@
 // Next UI, a code film's idea. Plan shows what the Director chose before planning any shot (its take, the reading,
-// the visual rule) above the storyboard, with the takes it passed on, the fixed points and the cut list folded; the
+// what will put the take on screen, the visual rule) above the storyboard, with the takes it passed on, the obvious
+// film it set aside, the fixed points and the cut list folded; the
 // keyframe card says which video input the Director would pick and why, and the person still picks. The fixture film
 // is simulated: nothing is generated, charged, saved or sent. Set BROWSER_CHECK_SHOTS=/some/dir to save screenshots.
 import { mkdirSync } from "node:fs";
@@ -33,6 +34,11 @@ export const scenarios = [
       expect(/Bent from: Mood first, object last/.test(await idea.locator("[data-idea='take']").innerText()), "the take says which template it bends");
       expect(/^The viewer first reads this as/.test(await idea.locator("[data-idea='reading']").innerText()), "the reading is shown");
       expect(/every warm light belongs to the ferry/.test(await idea.locator("[data-idea='rule']").innerText()), "the visual rule is shown");
+      // What puts the take on screen: three things, each with the seconds of the cuts that show it.
+      const proof = await idea.locator("[data-idea='proof'] li").allInnerTexts();
+      expect(proof.length === 3 && /A band of warm light slides across the blue water/.test(proof[0]) && /2\ss$/.test(proof[0].trim()) && /3\.5\ss$/.test(proof[1].trim()) && /1\.5\ss$/.test(proof[2].trim()), `proof: ${proof.join(" | ")}`);
+      const share = await idea.locator("[data-idea='proof-share']").innerText();
+      expect(/take\s7\sof\sthe\sfilm.s\s10\ss/.test(share), `the share of the film: ${JSON.stringify(share)}`);
 
       // The rest is there but folded, so the idea stays three lines.
       const folded = await idea.locator("details").evaluateAll((nodes) => nodes.map((node) => `${node.dataset.idea}:${node.open}`));
@@ -41,8 +47,11 @@ export const scenarios = [
       await idea.locator("[data-idea='others'] summary").click();
       const others = await idea.locator("[data-idea='others'] li").allInnerTexts();
       expect(others.length === 2 && /Template: Trace of someone/.test(others[0]) && /The Director's own/.test(others[1]), `other takes: ${others.join(" | ")}`);
+      expect(/The obvious film it set aside: A woman watches the last ferry leave the harbour\./.test(await idea.locator("[data-idea='obvious']").innerText()), "the obvious film is named with the takes it passed on");
       await idea.locator("[data-idea='cuts'] summary").click();
       expect((await idea.locator(".cp-cuts tbody tr").count()) === 4, "the cut list has its four cuts");
+      const proofMarks = await idea.locator(".cp-cuts tbody tr").evaluateAll((rows) => rows.map((row) => [...row.querySelectorAll(".cp-cut-proof")].map((mark) => mark.textContent).join("+") || "-"));
+      expect(proofMarks.join(" ") === "- 1 2 3", `the cuts that show the proof are marked: ${proofMarks.join(" ")}`);
       const cutsLine = await idea.locator("[data-idea='cuts'] summary").innerText();
       expect(/Cut list:\s4\scuts\s.\s10\ss/.test(cutsLine), `the cut list says its length: ${JSON.stringify(cutsLine)}`);
       await shot(page, "idea-open");

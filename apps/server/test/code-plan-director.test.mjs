@@ -116,7 +116,7 @@ test('code turn pins only code-plan instructions and source, skips fresh graph u
   assert.equal(f.store.list('skill_read', f.project.id).length, 6);
   assert.equal(f.store.list('director_context', f.project.id).length, 1);
   assert.equal(lock.schemaVersion, 1); assert.equal(lock.skills[0].packageDigest, CODE_PLAN_GUIDANCE_DIGEST);
-  assert.equal(lock.skills[0].version, '2.2.0');
+  assert.equal(lock.skills[0].version, '2.3.0');
   assert.equal(skillPackageDigest(readSkillPackageFiles(join(repositoryRoot, 'skills/code-plan'))), CODE_PLAN_GUIDANCE_DIGEST);
   assert.equal(f.prepare(a.turn, a.human, a.bridge).bridge.toolContractVersion, CODE_PLAN_TOOL_CONTRACT);
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 1);
@@ -187,19 +187,23 @@ test('a fresh turn re-pins a film whose saved guidance is older than this build,
   assert.equal(locks.at(-1).lock.skills[0].packageDigest, saved.lock.skills[0].packageDigest);
 });
 
-test('fresh code guidance preserves an older package snapshot, lock and recorded turn evidence', t => {
+for (const version of ['2.1.0', '2.2.0']) test(`fresh code guidance preserves the ${version} snapshot, lock and recorded turn evidence`, t => {
   const f = fixture(t), packageRoot = join(f.root, 'previous-code-plan');
   const files = readSkillPackageFiles(join(repositoryRoot, 'skills/code-plan'));
   const manifest = JSON.parse(files['openslate.skill.json']);
-  // Synthetic predecessor: tests preservation of old bytes, not reconstruction of the released 2.1.0 package.
-  delete files['references/formats.md']; delete files['references/aims.md'];
-  delete manifest.personTurnFiles;
-  files['SKILL.md'] = '---\nname: code-plan\ndescription: Synthetic prior code-plan guidance.\n---\nRead [templates](references/templates.md).\n';
-  files['references/templates.md'] = '# Templates\n\nPrior idea shapes.\n';
+  // Synthetic predecessors verify old-byte preservation with each historical file policy.
+  const ideaPath = version === '2.1.0' ? 'references/templates.md' : 'references/formats.md';
+  if (version === '2.1.0') {
+    delete files['references/formats.md']; delete files['references/aims.md'];
+    delete manifest.personTurnFiles;
+    manifest.files = [...applicationFiles, ideaPath];
+    files['SKILL.md'] = '---\nname: code-plan\ndescription: Synthetic prior code-plan guidance.\n---\nRead [templates](references/templates.md).\n';
+  }
+  files[ideaPath] = '# Prior idea shapes\n';
   const oldCraft = '# Film craft\n\nRequest a clip longer than the retained beat, then cut it down after watching.\n';
   mkdirSync(join(packageRoot, 'references'), { recursive: true });
   for (const [path, source] of Object.entries({ ...files,
-    'openslate.skill.json': JSON.stringify({ ...manifest, version: '2.1.0', files: [...applicationFiles, 'references/templates.md'] }), 'references/film-craft.md': oldCraft })) {
+    'openslate.skill.json': JSON.stringify({ ...manifest, version }), 'references/film-craft.md': oldCraft })) {
     writeFileSync(join(packageRoot, path), source);
   }
   const environment = { snapshotRoot: f.config.snapshotRoot, compatibility: manifest.compatibility,
@@ -212,19 +216,19 @@ test('fresh code guidance preserves an older package snapshot, lock and recorded
   const evidence = { id: newId(), projectId: f.project.id, requestId: human.requestId, epochId: bridge.actor.epochId,
     evidence: { lockId: previous.id, packageDigest: previous.skills[0].packageDigest } };
   f.store.insert('skill_read', evidence.id, f.project.id, evidence);
-  assert.equal(previous.skills[0].version, '2.1.0');
+  assert.equal(previous.skills[0].version, version);
   const next = f.turn('Carry on'), context = JSON.parse(next.input.context);
   const current = f.store.get('director_skill_lock', context.toolContract.lockId).lock;
   assert.notEqual(current.id, previous.id);
-  assert.equal(current.skills[0].version, '2.2.0');
+  assert.equal(current.skills[0].version, '2.3.0');
   assert.equal(current.skills[0].packageDigest, CODE_PLAN_GUIDANCE_DIGEST);
   assert.match(context.references.find(row => row.path === 'references/film-craft.md').content, /ceil\(targetSeconds \+ 1\.5\)/);
   assert.deepEqual(f.store.get('director_skill_lock', previous.id), saved);
   assert.deepEqual(f.store.get('skill_read', evidence.id), evidence);
   const oldPackage = verifySkillLock(previous, environment)[0];
   assert.equal(readFileSync(join(oldPackage.immutableRoot, 'references/film-craft.md'), 'utf8'), oldCraft);
-  assert.ok(oldPackage.manifest.files.includes('references/templates.md'));
-  assert.equal(readFileSync(join(oldPackage.immutableRoot, 'references/templates.md'), 'utf8'), files['references/templates.md']);
+  assert.ok(oldPackage.manifest.files.includes(ideaPath));
+  assert.equal(readFileSync(join(oldPackage.immutableRoot, ideaPath), 'utf8'), files[ideaPath]);
   for (const path of ['references/formats.md', 'references/aims.md']) assert.equal(context.references.find(row => row.path === path).content,
     readFileSync(join(repositoryRoot, 'skills/code-plan', path), 'utf8'));
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2);

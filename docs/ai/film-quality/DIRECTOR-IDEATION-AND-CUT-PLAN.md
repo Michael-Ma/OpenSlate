@@ -416,6 +416,58 @@ The owner watched the two films and said the chosen take cannot be seen in them.
 7. A cold read in review: one sentence a stranger would say after watching silently, compared with the obvious film. If they match, repair it in the edit or say that the take did not land.
 8. The paper test's gate becomes the blind read: a second model, shown only the cut list, must be able to state the take.
 
+## 16. Skill 2.3.0: the take acted on screen, 2026-11-18
+
+The owner approved the eight changes of section 15. This is what was built and how it was tested.
+
+### In the skill text
+
+- **Act the take.** After the reading the Director writes `proof`: three things the viewer will see or hear in this film that the obvious film would not contain (an action, a picture, a sound). Each is something a camera or a microphone records. A way of cutting is not proof. If three cannot be written, the take is a title and another is chosen.
+- **The take runs through the whole film.** Every block shows it again; a moment the brief fixed keeps its outcome and is filmed as this take would film it; the kept image carries the take as well as the brief's ending.
+- **The cut list is written in plain sight words.** `sees` says what is in frame and what it does, with no word for what it means. A cut that shows one proof takes its number, as in `proof: 2`. List the numbers when a cut shows several proofs, as in `proof: [2, 3]`. Marked cuts add up to at least a third of the film and include the last one. Each cut contributes its duration once. [H9b](cards/H9b-proof-marks-list.md)
+- **A stranger's read before submitting.** The Director reads its `sees` lines alone and says in one sentence what the film is. If that is the obvious film, or a film the person did not ask for, the cut list is not finished.
+- **A repeat must change:** closer, shorter, a different reaction, something moved. The same range or the same still twice shows nothing new.
+- **What the take turns into a character gets a shot of its own**, a composed picture from the eye level of whoever looks at it, never a crop of a set plate. At least one shot exists only for the take.
+- **A feeling is an action.** The prompt says what the body does. When light, weather or an object carries the take, the prompt says where it starts, where it goes and what it touches last.
+- **In review** the Director finds each proof in the footage first, and after the render writes the sentence a stranger would say. If that is the obvious film's sentence, it repairs the edit, uses the one retake that would show the take, or says plainly that the take did not land.
+- The first scene now also records `obvious` and `proof`.
+
+Proposal 3 of section 15 ("the block that carries the take gets the most screen time and its own shots") became the one-third rule and the shot that exists only for the take, because a take that runs through every block has no single block of its own.
+
+### In the studio
+
+- **Four advisory findings** at dry run (card [H8](cards/H8-proof-findings.md)): `PROOF_SHAPE`, `PROOF_UNSEEN` (a proof no cut shows), `PROOF_SHORT` (the marked cuts are under a third of the film) and `ROW_REPEATED` (the timeline shows the same part of one clip twice, or holds the same picture twice with the same framing). They never refuse a plan. The real pigeon timeline of 2026-11-17 would have received `ROW_REPEATED` for both of its repeats.
+- **The idea panel** shows the proof under the reading as "Seen on screen", each point with the seconds of the cuts that show it and a line for their share of the film; the cut list marks those cuts; the obvious film is named with the takes the Director passed on.
+- Released as skill 2.3.0 (card [H9](cards/H9-skill-2.3.0-release.md)); tool contract stays 0.3.0. A film planned before 2.3.0 records no proof and gets no proof finding; `ROW_REPEATED` reads only the timeline, so an older plan can receive it on a fresh dry run.
+
+### The gate: a blind read
+
+The paper tests of sections 7, 12 and 13 judged plans by their words. This one hides the words: a second model writes down only what a camera and a microphone would record, two strangers from two model families say what the film is, and two judges compare that with the plan. The record is in [the blind-read report](reports/H-blind-read-2026-11-18.md).
+
+| | 2.2.0 | 2.3.0 draft | 2.3.0 released text |
+|---|---:|---:|---:|
+| Points of 64 (eight briefs, four verdicts each) | 48 | 52 | 59 |
+| Verdicts that were only the obvious film | 5 of 32 | 0 | 0 |
+| Pigeon brief, points of 8 | 2 | 7 | 7 |
+| Night platform brief, points of 8 | 1 | 6 | 6 |
+
+- The failure the owner saw is the 2.2.0 column of the last two rows: when the brief names every moment, the take stayed in the notes. With 2.3.0 a stranger described the pigeon film as "a comic standoff in which the pigeon treats an empty chair as if it were a person guarding the croissant", which is the take the real film had and did not show.
+- On the six open briefs 2.2.0 was already readable on paper with GPT 6.2. The gain is where the brief fixes the moments.
+- The first draft let one stranger read the birthday film as a memorial. The stranger's read before submitting was added for that, and in the next round both strangers read a celebration.
+
+### A real Director turn
+
+On the released build the real Director (Codex 0.170.0, `gpt-6.2-sol`) planned the pigeon brief up to its keyframes for $0. It recorded the obvious film and three proofs, marked their cuts (11.1 of 25 seconds), got no finding, gave the chair a picture and a clip of its own at the pigeon's eye level, and used no range twice. Its take was "Permission from Nobody": the pigeon takes a fluttering napkin on the empty chair as permission and bows back. Two strangers reading that plan saw the napkin and the pigeon lowering itself and read a thief checking for witnesses; neither read a bow. The proof reached the screen; its meaning is not yet certain, and the Director's own stranger's read did not catch it.
+
+### Still open
+
+- **An independent cold read.** The Director reads its own cut list knowing what it meant. A second model that sees only the cut list and the prompts, called by the studio at dry run and reported as advice, would be the blind read of this section built into the product.
+- **A real film** with 2.3.0, to see what the footage does with a proof and whether the review's cold read repairs it.
+
+### Limits
+
+Paper is not footage: the video model may not deliver a bow or a rocking chair, and only a real film tests the review's cold read. One sample per brief. The measure answers whether the take is on screen, not whether the take is good.
+
 ## Appendix A: the proposed skill text
 
 ### The idea, before any plan

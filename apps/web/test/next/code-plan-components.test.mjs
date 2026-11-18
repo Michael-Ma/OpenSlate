@@ -384,7 +384,8 @@ test('Plan shows the idea above the shots: the chosen take, the reading and the 
   })).CodePlanPlanView;
   const scene = { id: 'terrace', title: 'The terrace', format: 'Short film', aim: 'Laugh', fixed: ['A pigeon', 'It ends smug on the lamp post'], reading: 'The viewer first reads this as a theft.', rule: 'Furniture towers over the pigeon.',
     takes: [{ title: 'The empty chair is the guard', basis: 'bent: Bomb under the table', chosen: true }, { title: 'A heist film', basis: 'template: Grand build, small payoff' }, { title: 'Its own', basis: 'own' }],
-    cuts: [{ sees: 'The croissant', seconds: 2, clip: 's1' }, { sees: 'The chair', seconds: 0.8, clip: 's1' }] };
+    obvious: 'A pigeon steals a croissant.', proof: ['The chair fills the frame, seen from the table top', 'The pigeon backs away behind the cup', 'A low drum each time the chair is seen'],
+    cuts: [{ sees: 'The croissant', seconds: 2, clip: 's1' }, { sees: 'The chair', seconds: 0.8, clip: 's1', proof: 1 }, { sees: 'The pigeon ducks; a drum hit', seconds: 1, clip: 's1', proof: [2, 1] }] };
   const Idea = await plan({ view: view({ planVersion: 1, state: 'done', lastPassAt: '2026-10-29T22:45:40Z', declarations: { scenes: [scene], shots: [{ id: 's1', scene: 'terrace' }] } }) });
   const html = renderToStaticMarkup(React.createElement(Idea));
   assert.match(html, /data-scene="idea"/);
@@ -393,12 +394,23 @@ test('Plan shows the idea above the shots: the chosen take, the reading and the 
   assert.match(html, /<dd data-idea="format">Short film<\/dd>.*<dd data-idea="aim">Laugh<\/dd>.*<dd data-idea="take">/s);
   assert.match(html, /<dd data-idea="reading">The viewer first reads this as a theft\.<\/dd>/);
   assert.match(html, /<dd data-idea="rule">Furniture towers over the pigeon\.<\/dd>/);
+  assert.match(html, /<dd data-idea="reading">.*<dd data-idea="proof">.*<dd data-idea="rule">/s, 'what puts the take on screen sits between the reading and the rule');
+  assert.match(html, /<li value="1">The chair fills the frame, seen from the table top<span class="cp-idea-basis" data-shown="true">1\.8 s<\/span><\/li>/);
+  assert.match(html, /<li value="2">The pigeon backs away behind the cup<span class="cp-idea-basis" data-shown="true">1 s<\/span><\/li>/);
+  assert.match(html, /<li value="3">A low drum each time the chair is seen<span class="cp-idea-basis" data-shown="false">in no cut yet<\/span><\/li>/);
+  assert.match(html, /<p class="cp-idea-note" data-idea="proof-share">The cuts that show these take 1\.8 of the film(&#x27;|’|')s 3\.8 s\.<\/p>/);
+  assert.match(html, /<p class="cp-idea-note" data-idea="obvious">The obvious film it set aside: A pigeon steals a croissant\.<\/p>/);
+  assert.match(html, /<tr data-proof="1"><td>2<\/td><td>The chair<span class="cp-cut-proof" title="Shows point 1 of “Seen on screen”">1<\/span><\/td>/);
+  assert.match(html, /<tr data-proof="1 2"><td>3<\/td><td>The pigeon ducks; a drum hit<span class="cp-cut-proof" title="Shows point 1 of “Seen on screen”">1<\/span><span class="cp-cut-proof" title="Shows point 2 of “Seen on screen”">2<\/span><\/td>/, 'a cut that shows two is marked with both');
+  assert.doesNotMatch(html, /<tr data-proof[^>]*><td>1<\/td>/, 'a cut that shows no proof carries no mark');
   assert.match(html, /<summary>2 other takes it considered<\/summary>/);
   assert.match(html, /Template: Grand build, small payoff/);
   assert.match(html, /The Director&#x27;s own/);
   assert.match(html, /<summary>Kept from your brief \(2 points\)<\/summary>/);
-  assert.match(html, /<summary>Cut list: 2 cuts · 2\.8 s<\/summary>/);
+  assert.match(html, /<summary>Cut list: 3 cuts · 3\.8 s<\/summary>/);
   assert.doesNotMatch(html, /<details[^>]*open/, 'the folded parts start closed');
   const Plain = await plan({ view: view({ planVersion: 1, state: 'done', lastPassAt: '2026-10-29T22:45:40Z', declarations: { scenes: [{ id: 'a', title: 'A' }], shots: [{ id: 's1', scene: 'a' }] } }) });
   assert.doesNotMatch(renderToStaticMarkup(React.createElement(Plain)), /data-scene="idea"/, 'a plan that records no idea shows none');
+  const Older = await plan({ view: view({ planVersion: 1, state: 'done', lastPassAt: '2026-10-29T22:45:40Z', declarations: { scenes: [{ ...scene, obvious: undefined, proof: undefined }], shots: [{ id: 's1', scene: 'terrace' }] } }) });
+  assert.doesNotMatch(renderToStaticMarkup(React.createElement(Older)), /data-idea="(proof|proof-share|obvious)"/, 'a plan from before 2.3.0 shows no proof');
 });

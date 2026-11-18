@@ -58,8 +58,8 @@ export class FakeWorkflowDirector implements DirectorRuntime {
         }
         // A bounded demo edit of literal cut fields only. Never evaluates model-authored source.
         const source = trimFakeReviewPlan(film.source, cuts);
-        await invoke("submit_plan", { source, basedOnVersion: film.planVersion, summary: "Scripted clip review: trim source cut points; preserve generation inputs." });
-        const text = "Scripted review watched the contact sheets and saved trimmed cut points.";
+        await invoke("submit_plan", { source, basedOnVersion: film.planVersion, summary: "Scripted clip review of the saved assembly." });
+        const text = "Scripted review read the contact sheets and saved the reviewed assembly.";
         await options.onEvent?.({ ...identity, kind: "assistant_message", text, phase: "final" });
         return { ...identity, status: "completed", text, dispatched: true };
       }
@@ -214,6 +214,9 @@ export default async function(ctx) {
   const cuts = ${JSON.stringify(cuts)};
   return ${name}({ ...ctx, render: input => {
     const timeline = Array.isArray(input) ? input : input.timeline;
+    // A whole-clip trim is only useful for the one-row fixture. A planned assembly
+    // already has separate ranges, cut-list durations and timed cues to preserve.
+    if (!Array.isArray(timeline) || timeline.length !== 1) return ctx.render(input);
     const trimmed = timeline.map(row => {
       const artifact = row.artifact || row;
       const cut = cuts.find(cut => cut.artifactId === artifact.artifactId);

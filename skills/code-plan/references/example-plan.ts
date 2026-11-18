@@ -2,22 +2,26 @@ export default async function film(ctx: Studio): Promise<void> {
   await ctx.scene({ id: "scene-1", title: "A quiet morning",
     format: "Short film", aim: "Calm",
     fixed: ["A kitchen at dawn", "Tea by the window", "A calm ending"],
+    obvious: "The sun rises over a kitchen, then a cup of tea steams.",
     takes: [{ title: "A room wakes", basis: "bent: A day in one place", chosen: true },
       { title: "An absent guest", basis: "template: Trace of someone" },
       { title: "Light finds its home", basis: "own" }],
     reading: "The viewer first reads this as an empty room. Through light reaching a waiting cup, that becomes a place ready for someone. The image they keep is steam rising in the first sun.",
+    proof: ["A bar of sunlight slides along the sill and climbs the white cup",
+      "The steam is grey in the shade and turns gold where the light reaches it",
+      "One soft chime as the light touches the cup"],
     rule: "Stay beside the window; let the light be the only arrival.",
-    cuts: [{ sees: "The curtain reveals dawn", seconds: 3, clip: "shot-1" },
-      { sees: "A cup waits in stillness", seconds: 1.5, clip: "shot-2" },
-      { sees: "Light settles on the sill", seconds: 2, clip: "shot-1" },
-      { sees: "Steam makes the room feel lived in", seconds: 3, clip: "shot-2" }] });
+    cuts: [{ sees: "The curtain lifts; a bar of sun lands on the left end of the sill", seconds: 3, clip: "shot-1", proof: 1 },
+      { sees: "The white cup in shade, its steam grey", seconds: 1.5, clip: "shot-2" },
+      { sees: "The bar of sun slides along the sill toward the cup", seconds: 2, clip: "shot-1", proof: 1 },
+      { sees: "The sun climbs the cup and the steam turns gold; a chime", seconds: 3, clip: "shot-2", proof: [2, 3] }] });
   const shots = [
     { id: "shot-1", title: "The room wakes", targetSeconds: 5, // Clear action: the curtain reveals the sunrise.
-      frame: "Wide view of a quiet kitchen at dawn. A misty window catches the first golden light, above a wooden sill with a white cup on its right end. A folded blue cloth rests beside the cup. The window and sill form a simple, still composition, with the pale sky visible through the glass.",
-      motion: "Slow gentle push in toward a misty kitchen window as dawn light reaches the sill. A breeze lifts the curtain, revealing a clear patch of glass with the sunrise beyond. The white cup remains on the right end of the sill, catching the new light. End with the curtain resting beside the window and the golden sky clearly visible through the glass." },
+      frame: "Wide view of a quiet kitchen at dawn, the room still in blue shade. A misty window above a wooden sill; a white cup stands on the right end of the sill, a folded blue cloth beside it. The curtain covers the left half of the glass. The window and sill form a simple, still composition, with the pale sky visible through the glass.",
+      motion: "Slow gentle push in toward a misty kitchen window, the room in blue shade. A breeze lifts the curtain, and a narrow bar of golden sunlight lands on the left end of the wooden sill. The bar slides slowly to the right along the sill toward the white cup. End with the curtain resting beside the window and the bar of light stopped just short of the cup, which is still in shade." },
     { id: "shot-2", title: "Tea is ready", targetSeconds: 3, // Quick insert: steam above the cup.
-      frame: "Close-up of the white tea cup on the right end of the wooden window sill. The folded blue cloth sits behind it, and soft morning light catches the rim. A narrow curl of steam hangs above the tea. The misty glass is softly out of focus behind the cup, with the curtain resting at its side.",
-      motion: "Locked camera beside a white cup of tea on a wooden window sill, framed in close-up. A curl of steam rises above the rim, then unfurls into the morning light. The blue cloth and softly blurred window stay still behind the cup. End with a thin trail of steam hanging over the tea and the bright rim remaining clearly visible in the foreground." },
+      frame: "Close-up of the white tea cup on the right end of the wooden window sill, in cool blue shade. The folded blue cloth sits behind it. A narrow curl of pale grey steam hangs above the tea. A bar of golden sunlight lies on the sill at the left edge of the frame. The misty glass is softly out of focus behind the cup.",
+      motion: "Locked camera beside a white cup of tea on a wooden window sill, framed in close-up, the cup in cool shade with pale grey steam above it. The bar of golden sunlight slides in from the left and climbs the side of the cup to its rim. Where the light reaches the steam, the steam turns gold. End with the whole cup in warm sun and a thin gold trail of steam above it." },
   ];
   for (const { id, title, targetSeconds } of shots) await ctx.shot({ id, sceneId: "scene-1", title, targetSeconds });
   // Small offline fixture: a real recurring cast/set first needs the shared references in film-craft.md.
@@ -55,7 +59,7 @@ export default async function film(ctx: Studio): Promise<void> {
   const range = (index: number, startFrame: number, durationFrames: number) => ({
     artifact: ready[index].artifact, motion: ready[index].motion, startFrame, durationFrames, fit: "cover" as const });
   const timeline = [range(0, 0, 90), { artifact: ready[1].frame, durationFrames: 45, fit: "contain" as const },
-    range(0, 90, 60), range(1, 0, 90)]; // One clip, two distinct ranges; a confirmed frame held for 1.5 s.
+    range(0, 90, 60), range(1, 0, 90)]; // One clip, two distinct ranges; a confirmed frame held for 1.5 s. The chime lands as the last row starts.
   // Make the score once the final cut length is known; adapt fake-music to an installed model from read_film.
   const filmSamples = timeline.reduce((sum, row) => sum + row.durationFrames, 0) * 1600;
   const music = await ctx.music({ model: "fake-music", prompt: "Warm, reflective piano and soft strings at a slow tempo", durationSeconds: Math.ceil(filmSamples / 48000 / 30) * 30 });
@@ -68,6 +72,6 @@ export default async function film(ctx: Studio): Promise<void> {
   const rendered = await ctx.render({ timeline,
     captions: [{ text: "Morning", atFrame: 0, durationFrames: 30 }],
     audio: [{ artifact: music.artifact, atSample: 0, startSample: leadIn, durationSamples: filmSamples, gainMilliDb: -6000,
-      fadeInSamples: 4800, fadeOutSamples: Math.min(96000, filmSamples) }, { sound: "ding", atSample: 48000, gainMilliDb: -9000 }] });
+      fadeInSamples: 4800, fadeOutSamples: Math.min(96000, filmSamples) }, { sound: "ding", atSample: 195 * 1600, gainMilliDb: -9000 }] });
   await ctx.log(rendered.ok ? "Film rendered" : `Render failed: ${rendered.error.code}`);
 }
