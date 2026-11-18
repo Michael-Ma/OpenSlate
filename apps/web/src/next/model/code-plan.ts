@@ -225,7 +225,7 @@ export function choiceCard(choice: CodePlanChoiceView, steps: readonly CodePlanS
     keyframe: oneFrame ? first : null,
     at: choice.askedAt ?? (done && typeof choice.answeredAt === "string" ? choice.answeredAt : null),
     stale: choice.stale === true,
-    suggest: oneFrame ? suggestionOf((choice as { suggest?: unknown }).suggest, options) : null,
+    suggest: oneFrame ? suggestionOf(choice.suggest, options) : null,
   };
 }
 

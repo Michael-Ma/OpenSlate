@@ -248,7 +248,8 @@ function viewOf(film: CodeFilm, projectId: string): CodePlanView {
     if (film.confirm) {
       const options = VIDEO_INPUTS.map(([keyframeInput, priceMicros]) => ({ ...FRAMES.open[0]!, keyframeInput, references: [FRAMES.terminal[0]!], priceMicros }));
       const pick = ONE_CHOSEN.includes(stage) ? options[film.pickOpen] : undefined;
-      choices.push({ choiceId: "frame-1.1", optionsDigest: hex("frame-1.1:confirm"), question: "The harbour at dusk", options, ...(film.retired ? { askedAt: todayAt(10, 37) } : {}), ...(pick ? { answer: pick, answeredAt: todayAt(10, 38) } : {}) });
+      choices.push({ choiceId: "frame-1.1", optionsDigest: hex("frame-1.1:confirm"), question: "The harbour at dusk", options,
+        suggest: { input: "first_frame", why: "The next cut matches this framing, so the harbour must not shift." }, ...(film.retired ? { askedAt: todayAt(10, 37) } : {}), ...(pick ? { answer: pick, answeredAt: todayAt(10, 38) } : {}) });
       if (film.retired) choices.push({ choiceId: "frame-1.1", optionsDigest: hex("frame-1.1:terminal"), question: "The terminal at night", options: VIDEO_INPUTS.map(([keyframeInput, priceMicros]) => ({ ...FRAMES.terminal[0]!, keyframeInput, references: [], priceMicros })), askedAt: todayAt(10, 32), stale: true });
     } else choice("frame-1.1", FRAMES.open, ONE_CHOSEN.includes(stage) ? film.pickOpen : null, [10, 38]);
   }
