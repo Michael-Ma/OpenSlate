@@ -39,7 +39,7 @@ interface AudioPlacement { artifact: Artifact; startSample?: number; durationSam
 interface SoundPlacement { sound: "pop" | "thud" | "whoosh" | "ding" | "tick" | "boing"; atSample: number; gainMilliDb?: number }
 interface Caption { text: string; atFrame: number; durationFrames: number; position?: "top" | "middle" | "bottom" }
 interface Studio {
-  /** The first scene may carry format, aim, fixed, takes, reading, rule and cuts. */
+  /** The first scene may carry format, aim, fixed, obvious, takes, reading, proof, rule and cuts. */
   scene<T extends { [key: string]: Json }>(declaration: T): Promise<T>;
   shot<T extends { [key: string]: Json }>(declaration: T): Promise<T>;
   /** Shared references only: character sheets, set plates, pictures used across shots. No shot. */
