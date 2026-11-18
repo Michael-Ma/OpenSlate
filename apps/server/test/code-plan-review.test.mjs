@@ -14,6 +14,8 @@ import { createDirectorSkillLock } from '../dist/application/director-capabiliti
 
 const identity = input => Object.fromEntries(['projectId', 'requestId', 'epochId', 'turnId'].map(key => [key, input[key]]));
 const completed = input => ({ ...identity(input), status: 'completed', text: 'Reviewed', dispatched: true });
+const unfinishedNotice = 'The review of the clips did not finish, so the film was cut from the planned ranges. Ask the Director to review the clips again.';
+const notices = (f, id) => f.service.snapshot(id).conversation.filter(message => message.text === unfinishedNotice);
 const plan = (take = 'one', extra = '') => `export default async function film(ctx) {
   const image = await ctx.image({ prompt: "review frame" }); if (!image.ok) return;
   const clip = await ctx.video({ firstFrame: image.artifact, motion: "Jump then land", durationSeconds: 6, variant: ${JSON.stringify(take)}, shot: "shot-1" }); if (!clip.ok) return;
@@ -54,6 +56,7 @@ test('review stops execution, starts one fake turn, transports pictures, trims, 
   assert.equal(render.input.timeline[0].startFrame, 6); assert.equal(render.input.timeline[0].durationFrames, 21);
   const turns = f.store.list('code_plan_review_request', id); assert.equal(turns.length, 1);
   assert.equal(f.store.get('message', turns[0].requestId).source, 'app');
+  assert.deepEqual(notices(f, id), []);
   assert.equal(reviews, 1);
   const saved = f.store.list('tool_invocation', id).find(call => call.tool === 'read_clip_frames');
   assert.equal(saved.state, 'succeeded'); assert.equal(saved.result.frames.length, 2);
@@ -113,19 +116,27 @@ test('already dispatched work keeps finishing while code after review stays stop
   assert.ok(!view.logs.includes('after review')); assert.equal(view.steps.filter(step => step.kind === 'render').length, 0);
 });
 
-for (const status of ['failed', 'unknown', 'interrupted', 'waiting_user']) test(`terminal review ${status} cannot leave the film stuck`, async t => {
+for (const status of ['failed', 'unknown', 'interrupted', 'waiting_user', 'timeout']) test(`terminal review ${status} cannot leave the film stuck`, async t => {
   const { f, id } = await fixture(t); let turns = 0;
+  const failed = ['failed', 'unknown', 'timeout'].includes(status);
   f.director.fake.runtime.start = async (input, options) => {
     turns++;
     if (status === 'waiting_user') await options.onEvent({ ...identity(input), kind: 'pending_input', nativeRequestId: 'review-question', questions: [] });
-    return { ...completed(input), status: status === 'waiting_user' ? 'completed' : status,
-      ...(status === 'failed' || status === 'unknown' ? { error: { code: 'TEST_FAILURE', message: 'offline failure' } } : {}) };
+    return { ...completed(input), status: status === 'waiting_user' ? 'completed' : status === 'timeout' ? 'interrupted' : status,
+      ...(failed ? { error: { code: status === 'timeout' ? 'RUNTIME_RUN_TIMEOUT' : 'TEST_FAILURE', message: 'offline failure' } } : {}) };
   };
   await submit(f, id, plan());
   const view = await f.until(id, view => view.state === 'done', status);
   assert.equal(turns, 1);
-  assert.equal(view.reviews[0].state, ['failed', 'unknown'].includes(status) ? 'failed' : 'done');
-  if (view.reviews[0].state === 'failed') assert.equal(view.logs.filter(line => line.includes('failed; continuing')).length, 1);
+  assert.equal(view.reviews[0].state, failed ? 'failed' : 'done');
+  if (failed) assert.equal(view.logs.filter(line => line.includes('failed; continuing')).length, 1);
+  await f.tick();
+  const threadNotices = notices(f, id);
+  assert.equal(threadNotices.length, failed ? 1 : 0);
+  if (failed) {
+    assert.equal(threadNotices[0].requestId, f.store.list('code_plan_review_request', id)[0].requestId);
+    assert.equal(threadNotices[0].role, 'assistant');
+  }
 });
 
 test('restart retains waiting and queued review identity and never starts a second turn', async t => {
@@ -151,6 +162,10 @@ test('an expired dispatched review becomes failed after restart without a replac
   const view = await f.until(id, view => view.state === 'done', 'expired review');
   assert.equal(view.reviews[0].state, 'failed'); assert.equal(f.store.list('code_plan_review_request', id).length, 1);
   assert.equal(purchases(f).length, 2);
+  assert.equal(notices(f, id).length, 1);
+  await f.restart();
+  await f.tick();
+  assert.equal(notices(f, id).length, 1);
 });
 
 test('a newer plan that removes a waiting checkpoint cannot start its obsolete review turn', async t => {

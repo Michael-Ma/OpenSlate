@@ -11,6 +11,7 @@ import { StudioSessions } from '../dist/studio-sessions.js';
 import { readCodeFilm, wireCodePlans } from '../dist/code-plan/director.js';
 import { resolveCodePlanProviderAdmission } from '../dist/code-plan/provider-authority.js';
 import { normalizeStepInput, stepKey } from '../dist/code-plan/identity.js';
+import { codePlanRenderSize } from '../dist/code-plan/render-size.js';
 import { installRecoveryQuarantine } from '../dist/application/installation-recovery.js';
 
 const resolutions = ['480p', '768p', '1080p', '2k'];
@@ -192,11 +193,57 @@ test('a non-Viggle code film refuses video settings', async t => {
   for (const method of ['GET', 'PUT']) assert.equal((await http(method, method === 'PUT' ? { resolution: '1080p' } : undefined)).statusCode, 409);
 });
 
+test('render sizing takes the plan shape, then the first measured timeline row, then the film aspect', () => {
+  const portrait = { kind: 'video', sha256: 'p' }, landscape = { kind: 'video', sha256: 'l' }, unknown = { kind: 'video', sha256: 'u' };
+  const sizes = new Map([['video:p', { width: 720, height: 1280 }], ['video:l', { width: 1920, height: 1080 }], ['video:u', { width: 1920 }]]);
+  const source = { timeline: [unknown, { artifact: portrait }, landscape] };
+  const verticalFilm = { filmKind: { format: { aspect: '9:16' } } };
+  assert.deepEqual(codePlanRenderSize({}, '1080p', { timeline: [landscape], width: 1080, height: 1920 }, sizes), { width: 1080, height: 1920 });
+  assert.deepEqual(codePlanRenderSize({}, '768p', { timeline: [landscape], width: 1080, height: 1920 }, sizes), { width: 720, height: 1280 });
+  assert.deepEqual(codePlanRenderSize({}, '768p', source, sizes), { width: 720, height: 1280 });
+  assert.deepEqual(codePlanRenderSize(verticalFilm, '1080p', { ...source, width: 1920, height: 1080 }, sizes), { width: 1920, height: 1080 });
+  assert.deepEqual(codePlanRenderSize({}, '1080p', { ...source, width: 800, height: 800 }, sizes), { width: 1080, height: 1080 });
+  assert.deepEqual(codePlanRenderSize(verticalFilm, '768p', { timeline: [unknown] }, sizes), { width: 720, height: 1280 });
+  assert.deepEqual(codePlanRenderSize({}, '768p', { timeline: [unknown] }, sizes), { width: 1280, height: 720 });
+});
+
+test('executor renders portrait at 1080p and 768p, with softness and fit advice using the captured sizes', async t => {
+  const f = await fixture(t, { videoSize: '720x960' }), id = f.project.id;
+  await f.submit(film(`await ctx.video({prompt:'Flowers in a vase',durationSeconds:6,aspectRatio:'9:16'});`)); await f.finish();
+  const clip = f.plans.steps(id).find(step => step.kind === 'video').result.artifact;
+  const timeline = [{ artifact: clip, durationFrames: 30, fit: 'cover', zoom: { scale: 1.1 } }];
+  const explicit = film(`await ctx.render(${JSON.stringify({ timeline, width: 1080, height: 1920 })});`);
+  const hasSoftness = diff => diff.findings.some(finding => finding.code === 'ZOOM_SOFT');
+  const checkRender = (width, height) => {
+    const view = f.plans.view(id).steps.find(step => step.kind === 'render' && step.reached);
+    assert.equal(view.state, 'succeeded');
+    const step = f.plans.steps(id).find(step => step.key === view.key);
+    const attempt = f.store.get('attempt', step.attemptId), output = f.store.get('artifact', step.result.artifact.artifactId);
+    assert.equal(attempt.request.execution.adapter, 'local-media');
+    assert.deepEqual([attempt.request.args.width, attempt.request.args.height], [width, height]);
+    assert.deepEqual([output.width, output.height], [width, height]);
+    assert.deepEqual(view.fitWarning, { clips: 1, keptPercent: 75 });
+    return attempt;
+  };
+  assert.equal(hasSoftness((await f.submit(explicit)).diff), true);
+  await f.finish();
+  const saved = checkRender(1080, 1920);
+  f.plans.setVideoSettings(id, '768p');
+  assert.equal(hasSoftness(await f.plans.dryRun(id, explicit)), true, 'replay uses the saved 1080p attempt');
+  const inferred = film(`await ctx.render(${JSON.stringify({ timeline })});`);
+  assert.equal(hasSoftness((await f.submit(inferred)).diff), false);
+  await f.finish();
+  checkRender(720, 1280);
+  assert.deepEqual(f.store.get('attempt', saved.id), saved);
+  assert.equal(f.calls.render, 2);
+  assert.equal(f.calls.video, 1);
+});
+
 test('export attempts capture resolution/aspect sizes without rekeying, and saved renders replay unchanged', async t => {
   const f = await fixture(t), id = f.project.id;
   await f.submit(film(`await ${clip()};`)); await f.finish();
   const artifact = f.plans.steps(id)[0].result.artifact;
-  // Exercise actual local capture/render once. Explicit Director dimensions cannot override the film policy.
+  // Exercise actual local capture/render once. The resolution sets the size of a widescreen plan.
   f.plans.setVideoSettings(id, '480p');
   const source = film(`await ctx.render({timeline:[${JSON.stringify(artifact)}],width:1280,height:720});`);
   await f.submit(source); await f.finish();
@@ -208,12 +255,11 @@ test('export attempts capture resolution/aspect sizes without rekeying, and save
   assert.deepEqual(rows(f), saved); assert.deepEqual(f.calls, calls);
   // Preparation is synchronous and captures all aspect/resolution combinations in the immutable request.
   for (const aspect of ['16:9','9:16','1:1']) for (const resolution of resolutions) {
-    const project = f.store.getProject(id);
-    f.store.saveProject({ ...project, filmKind: { version:'film-kind@1',kind:'social',format:{aspect} } }, project.headVersion);
+    const format = { filmKind: { format: { aspect } } };
     f.plans.setVideoSettings(id, resolution);
-    const input = normalizeStepInput('render', { timeline:[artifact],variant:`${aspect}-${resolution}` });
+    const input = normalizeStepInput('render', { timeline:[artifact], ...codePlanExportSize(format, '768p'), variant:`${aspect}-${resolution}` });
     const prepared = f.execution.prepare(id, stepKey('render',input), 'render', input);
-    assert.deepEqual({width:prepared.request.args.width,height:prepared.request.args.height}, codePlanExportSize(f.store.getProject(id),resolution));
+    assert.deepEqual({width:prepared.request.args.width,height:prepared.request.args.height}, codePlanExportSize(format,resolution));
   }
 });
 

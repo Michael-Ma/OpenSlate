@@ -16,7 +16,8 @@ for (const [name, scenes, shots, lengths, codes] of [
   ['absent', [{}], [{id:'a'}], [9], []],
   ['clean', [{cuts:[cut()]}], [{id:'a'}], [1], []],
   ['unused', [{cuts:[cut()]}], [{id:'a'}, ...['b','c','d','e','f','g'].map(id=>({id}))], [], ['CUTS_UNUSED_SHOT']],
-  ['unknown', [{cuts:[cut('x')]}], [], [], ['CUTS_UNKNOWN_CLIP']],
+  ['unknown', [{cuts:[cut(), cut('x')]}], [{id:'a'}], [], ['CUTS_UNKNOWN_CLIP']],
+  ['length still applies before any shots', [{cuts:[cut()]}], [], [2.01], ['CUTS_LENGTH']],
   ['a held picture of no shot', [{cuts:[cut(), cut('still')]}], [{id:'a'}], [2], []],
   ['length', [{cuts:[cut()]}], [{id:'a'}], [2.01], ['CUTS_LENGTH']],
   ['one second tolerance', [{cuts:[cut()]}], [{id:'a'}], [2], []],
@@ -60,6 +61,18 @@ async function fixture(t) { const f=await codePlanFixture();t.after(()=>f.close(
 const film = body => `export default async function(ctx){${body}}`;
 const waiting = v=>v.choices.some(c=>!c.stale && c.answer===undefined);
 const done = v=>v.state==='done';
+
+test('a cut list can precede shared pictures and shot declarations in a dry run', async t => {
+  const f = await fixture(t);
+  const source = film(`ctx.scene({id:'room',cuts:[{sees:'A chair',seconds:1,clip:'a'}]});
+    await ctx.image({prompt:'Shared room'});
+    ctx.shot({id:'a'});`);
+  const { diff } = await f.submit(source);
+  assert.equal(diff.dependsOnPending, true);
+  assert.deepEqual(diff.findings, []);
+  const view = await f.until(done);
+  assert.deepEqual(view.declarations.shots.map(shot => shot.id), ['a']);
+});
 
 test('suggestion-only edits preserve step, card, digest, price, answer and provider input across restart', async t=>{
   const f=await fixture(t), source=suggest=>film(`await ctx.shot({id:'a'});const k=await ctx.keyframe('a',{prompt:'Saved room',video:{durationSeconds:6}${suggest ? ',suggest:'+JSON.stringify(suggest):''}});if(k.ok)await ctx.video({...k.input,shot:'a',prompt:'A curtain moves',durationSeconds:6});`);

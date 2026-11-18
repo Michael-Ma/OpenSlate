@@ -4,7 +4,7 @@ import { lyriaFailureMessage } from "../execution/gemini-lyria-execution.js";
 import { videoI2vFailure } from "../execution/video-i2v-execution.js";
 import { modelPrice, modelDescriptions, codePlanPriceFrame } from "./models.js";
 import { createHash, randomInt } from "node:crypto";
-import { canonical, EXPORT_SIZE, projectAspect, digest, DomainError, invariant, moneyMicros } from "@openslate/core";
+import { canonical, digest, DomainError, invariant, moneyMicros } from "@openslate/core";
 import type { JsonObject, JsonValue } from "@openslate/core";
 import type { CodePlanDiff, CodePlanSourceView, CodePlanStepDetail, CodePlanView } from "@openslate/core/public";
 import type { Store } from "../persistence/store.js";
@@ -22,6 +22,7 @@ import { codePlanCeiling } from "./settings.js";
 import { codePlanStepDetail } from "./step-detail.js";
 import { codePlanProviderArgs } from "./provider-input.js";
 import { codePlanVideoSettings, currentVideoModel, isCodePlanVideoResolution } from "./video-settings.js";
+import { codePlanRenderAdviceSize } from "./render-size.js";
 export { normalizeStepInput, stepKey } from "./identity.js";
 export type * from "./records.js";
 
@@ -379,7 +380,7 @@ export class CodePlanRuntime implements CodePlanPort {
     const reachedChoices = new Set<string>();
     const lock = this.store.list<{ lock: { compatibility: { toolContract: string } } }>("director_skill_lock", projectId).at(-1)?.lock;
     const filmQualityEnabled = !lock || lock.compatibility.toolContract === "0.3.0";
-    const renderInputs: JsonObject[] = [];
+    const renderInputs: { input: JsonObject; key: string }[] = [];
     const confirmedKeyframes = new Map<string, { frame: JsonObject; choice: string }>();
     const journalKeys = new Set(journal.filter(step => step.attemptId || step.result).map(step => step.key));
     let budget = false, limited = false;
@@ -499,15 +500,15 @@ export class CodePlanRuntime implements CodePlanPort {
         && virtual.has(stepKey(kind, normalized));
       const input = kind === "video" && !journaledDefault
         ? this.options.execution.normalizeVideoInput(projectId, normalized, models[String(normalized.model)]!) : normalized;
+      const key = stepKey(kind, input), id = entityId(projectId, key);
       if (kind === "render") {
         const media = codePlanArtifacts(this.store, projectId);
         for (const value of Array.isArray(input.timeline) ? input.timeline : []) {
           const ref = object(object(value).artifact ?? value);
           if (ref.kind === "image") invariant(media.find(ref), "CODE_PLAN_ARTIFACT_INVALID", "Still requires an owned picture of this film");
         }
-        renderInputs.push(input);
+        renderInputs.push({ input, key });
       }
-      const key = stepKey(kind, input), id = entityId(projectId, key);
       reached.add(key);
       let step = dry ? virtual.get(key) : this.store.get<CodePlanStep>("code_plan_step", id);
       const shotId = kind !== "render" ? (args[0] as { shot?: string }).shot : undefined;
@@ -595,12 +596,12 @@ export class CodePlanRuntime implements CodePlanPort {
     } catch (error) { outcome = { state: "error", error: errorView(error) }; }
     const sources = codePlanRenderSources(this.store, projectId);
     const lengths: number[] = [];
-    for (const input of renderInputs) {
+    for (const { input, key } of renderInputs) {
       const frames = renderTimelineFrames(input, sources);
       if (frames !== undefined) lengths.push(frames / 30);
-      const dimensions = (() => { try { return codePlanVideoSettings(this.store, projectId).exportSize; }
-        catch { return { ...EXPORT_SIZE[projectAspect(this.store.getProject(projectId))], ...input }; } })();
-      diff.findings.push(...zoomSoftFindings({ ...input, width: dimensions.width, height: dimensions.height }, sources));
+      const step = dry ? virtual.get(key) : this.store.get<CodePlanStep>("code_plan_step", entityId(projectId, key));
+      const size = codePlanRenderAdviceSize(this.store, projectId, input, sources, step?.retryAt === undefined ? step?.attemptId : undefined);
+      diff.findings.push(...zoomSoftFindings({ ...input, ...size }, sources));
     }
     diff.findings.push(...cutListFindings(declarations.scenes, declarations.shots, lengths));
     diff.reusedSteps = reused.size;

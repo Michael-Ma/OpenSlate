@@ -20,11 +20,14 @@ export function cutListFindings(scenes: readonly Record<string, unknown>[], shot
     }
   }
   if (malformed) findings.push({ code: "CUTS_SHAPE", detail: "Use at most 64 cuts: an array of objects with string sees, positive number seconds and string clip." });
-  // "still" names a held picture that belongs to no shot (a shared picture or an upload).
-  const ids = new Set(shots.flatMap(shot => typeof shot.id === "string" ? [shot.id] : [])), used = new Set(cuts.map(cut => cut.clip).filter(clip => clip !== "still"));
-  const unused = [...ids].filter(id => !used.has(id)), unknown = [...used].filter(id => !ids.has(id));
-  if (unused.length) findings.push({ code: "CUTS_UNUSED_SHOT", detail: `No cut names these shots: ${unused.slice(0, 5).join(", ")}.` });
-  if (unknown.length) findings.push({ code: "CUTS_UNKNOWN_CLIP", detail: `Cuts name undeclared shots: ${unknown.slice(0, 5).join(", ")}.` });
+  // A pass can pause on shared pictures before it reaches any shots.
+  if (shots.length) {
+    // "still" names a held picture that belongs to no shot (a shared picture or an upload).
+    const ids = new Set(shots.flatMap(shot => typeof shot.id === "string" ? [shot.id] : [])), used = new Set(cuts.map(cut => cut.clip).filter(clip => clip !== "still"));
+    const unused = [...ids].filter(id => !used.has(id)), unknown = [...used].filter(id => !ids.has(id));
+    if (unused.length) findings.push({ code: "CUTS_UNUSED_SHOT", detail: `No cut names these shots: ${unused.slice(0, 5).join(", ")}.` });
+    if (unknown.length) findings.push({ code: "CUTS_UNKNOWN_CLIP", detail: `Cuts name undeclared shots: ${unknown.slice(0, 5).join(", ")}.` });
+  }
   const seconds = cuts.reduce((sum, cut) => sum + cut.seconds, 0);
   if (!malformed) for (const rendered of renderSeconds) if (Math.abs(seconds - rendered) > 1)
     findings.push({ code: "CUTS_LENGTH", detail: `The cuts total ${Number(seconds.toFixed(2))} seconds; the rendered timeline is ${Number(rendered.toFixed(2))} seconds.` });

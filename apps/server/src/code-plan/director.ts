@@ -5,7 +5,7 @@ import { activateSkills, readActivatedSkillFile, verifySkillLock } from "@opensl
 import { join } from "node:path";
 import type { CodePlanPort } from "./port.js";
 import type { ProductionService, RequestRecord } from "../application/service.js";
-import type { DirectorTurn, SupervisorOptions } from "../application/director-supervisor.js";
+import type { DirectorOutput, DirectorTurn, SupervisorOptions } from "../application/director-supervisor.js";
 import { CODE_PLAN_GUIDANCE_DIGEST, codePlanGuidanceDigest, createDirectorSkillLock, directorSkillEnvironment, type DirectorSkillConfiguration } from "../application/director-capabilities.js";
 import { projectRequest } from "../application/request-source.js";
 import { CODE_PLAN_REVIEW_TURNS, type CodePlanReview, type CodePlanRun } from "./records.js";
@@ -172,6 +172,11 @@ export function codeDirectorInput(service: ProductionService, options: DirectorS
       entrypoint: join(options.repositoryRoot, "packages/director/dist/tools/mcp.js") } };
 }
 
+function appendCodePlanNotice(store: ProductionService["store"], { projectId, requestId, id: turnId }: DirectorTurn, id: string, text: string): void {
+  store.insert<DirectorOutput>("director_output", id, projectId, { id, projectId, requestId, turnId, phase: "final", text });
+  store.appendEvent(projectId, "director.message", { outputId: id, requestId, turnId });
+}
+
 /** Queue application repair requests through the same durable request/turn path as frame reviews. */
 export function triggerCodePlanRepairs(service: ProductionService, enqueue: (projectId: string, actor: ActorContext) => unknown): void {
   if (service.recovery.isQuarantined() || !ports.has(service)) return;
@@ -182,7 +187,11 @@ export function triggerCodePlanRepairs(service: ProductionService, enqueue: (pro
     for (const review of store.list<CodePlanReview>("code_plan_review", project.id).filter(row => row.state === "watching")) {
       const turn = store.list<DirectorTurn>("director_turn", project.id).find(turn => turn.requestId === review.requestId);
       if (turn && !["queued", "running"].includes(turn.state)) {
-        store.put("code_plan_review", review.id, project.id, { ...review, state: turn.state === "failed" || turn.state === "unknown" ? "failed" : "done", updatedAt: new Date().toISOString() });
+        const failed = turn.state === "failed" || turn.state === "unknown"
+          || (turn.state !== "completed" && turn.errorCode === "RUNTIME_RUN_TIMEOUT");
+        store.put("code_plan_review", review.id, project.id, { ...review, state: failed ? "failed" : "done", updatedAt: new Date().toISOString() });
+        if (failed) appendCodePlanNotice(store, turn, digest({ reviewId: review.id, turnId: turn.id }),
+          "The review of the clips did not finish, so the film was cut from the planned ranges. Ask the Director to review the clips again.");
         port.wakeReviews?.(project.id);
       }
     }
@@ -239,9 +248,7 @@ export function triggerCodePlanRepairs(service: ProductionService, enqueue: (pro
         .find(row => row.version === failure.version)?.requestId;
       invariant(requestId, "CODE_PLAN_REPAIR", "Repair history is missing");
       const turn = store.list<DirectorTurn>("director_turn", project.id).find(turn => turn.requestId === requestId)!;
-      store.insert("director_output", id, project.id, { id, projectId: project.id, requestId, turnId: turn.id,
-        phase: "final", text: `The plan in version ${failure.version} still fails after two automatic repair attempts. Please send a message with how you want to continue.` });
-      store.appendEvent(project.id, "director.message", { outputId: id, requestId, turnId: turn.id });
+      appendCodePlanNotice(store, turn, id, `The plan in version ${failure.version} still fails after two automatic repair attempts. Please send a message with how you want to continue.`);
       store.put("code_plan_repair", id, project.id, { id, ...saved, asked: true });
       return;
     }
