@@ -160,7 +160,7 @@ function IdeaPanel({ idea }: { idea: FilmIdea }) {
           <p className="cp-idea-note">{t("codeplan.idea.cuts_note")}</p>
           <table className="cp-cuts">
             <thead><tr><th scope="col">#</th><th scope="col">{t("codeplan.idea.cut_sees")}</th><th scope="col">{t("codeplan.idea.cut_seconds")}</th><th scope="col">{t("codeplan.idea.cut_clip")}</th></tr></thead>
-            <tbody>{idea.cuts.map((cut, index) => <tr key={index} data-proof={cut.proof || undefined}><td>{index + 1}</td><td>{cut.sees}{cut.proof ? <span className="cp-cut-proof" title={t("codeplan.idea.cut_proof", { number: cut.proof })}>{cut.proof}</span> : null}</td><td>{cut.seconds || "–"}</td><td>{cut.clip}</td></tr>)}</tbody>
+            <tbody>{idea.cuts.map((cut, index) => <tr key={index} data-proof={cut.proof.join(" ") || undefined}><td>{index + 1}</td><td>{cut.sees}{cut.proof.map((mark) => <span key={mark} className="cp-cut-proof" title={t("codeplan.idea.cut_proof", { number: mark })}>{mark}</span>)}</td><td>{cut.seconds || "–"}</td><td>{cut.clip}</td></tr>)}</tbody>
           </table>
         </details>
       ) : null}

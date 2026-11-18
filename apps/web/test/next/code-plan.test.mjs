@@ -764,7 +764,7 @@ test('the idea is read from the scene that records it, bounded, and absent when 
     reading: ' The viewer first reads this as a theft. ', rule: 'Furniture towers over the pigeon.',
     obvious: ' A pigeon steals a croissant. ', proof: ['The chair, seen from the table top, fills the frame', '', 'A drum hit each time the chair appears', 'a fourth is ignored'],
     cuts: [{ sees: 'The croissant', seconds: 2, clip: 'shot-1' }, { sees: 'The chair', seconds: 0.8, clip: 'shot-2', proof: 1 }, { sees: 'No length', seconds: -1, clip: 'shot-2', proof: 3 }, { seconds: 3, clip: 'shot-3' },
-      { sees: 'The chair again, closer', seconds: 1.5, clip: 'shot-2', proof: 1 }, { sees: 'Marked with an empty proof', seconds: 1, clip: 'shot-1', proof: 2 }, { sees: 'Marked past the list', seconds: 1, clip: 'shot-1', proof: 4 },
+      { sees: 'The chair again, closer', seconds: 1.5, clip: 'shot-2', proof: [3, 1, 1, 9, 'x'] }, { sees: 'Marked with an empty proof', seconds: 1, clip: 'shot-1', proof: 2 }, { sees: 'Marked past the list', seconds: 1, clip: 'shot-1', proof: 4 },
       { sees: 'Marked with a word', seconds: 1, clip: 'shot-1', proof: 'one' }],
   }] } });
   assert.deepEqual([idea.format, idea.aim], ['Short film', 'Laugh, then Moved']);
@@ -775,15 +775,15 @@ test('the idea is read from the scene that records it, bounded, and absent when 
   assert.deepEqual(idea.cuts.map((cut) => cut.seconds), [2, 0.8, 0, 1.5, 1, 1, 1], 'a cut without what is seen is dropped; a bad length reads as zero');
   assert.equal(idea.cutSeconds, 7.3);
   assert.equal(idea.obvious, 'A pigeon steals a croissant.');
-  assert.deepEqual(idea.proof, [{ number: 1, text: 'The chair, seen from the table top, fills the frame', seconds: 2.3 }, { number: 3, text: 'A drum hit each time the chair appears', seconds: 0 }],
+  assert.deepEqual(idea.proof, [{ number: 1, text: 'The chair, seen from the table top, fills the frame', seconds: 2.3 }, { number: 3, text: 'A drum hit each time the chair appears', seconds: 1.5 }],
     'at most three, an empty one is left out and the others keep their numbers; each adds up the cuts that show it');
-  assert.deepEqual(idea.cuts.map((cut) => cut.proof), [0, 1, 3, 1, 0, 0, 0], 'a mark counts only when it names a proof in the list');
+  assert.deepEqual(idea.cuts.map((cut) => cut.proof), [[], [1], [3], [1, 3], [], [], []], 'a cut names one proof or a list; a mark counts only when it names a proof in the list');
   assert.equal(idea.proofSeconds, 2.3);
   const many = filmIdea({ declarations: { shots: [], scenes: [{ cuts: Array.from({ length: 90 }, (_, n) => ({ sees: `cut ${n}`, seconds: 1, clip: 'a' })) }] } });
   assert.equal(many.cuts.length, 64);
   assert.equal(many.chosen, null);
   assert.deepEqual([many.format, many.aim], ['', ''], 'a plan from 2.1.0 records neither');
-  assert.deepEqual([many.obvious, many.proof, many.proofSeconds, many.cuts[0].proof], ['', [], 0, 0], 'a plan from before 2.3.0 records no proof');
+  assert.deepEqual([many.obvious, many.proof, many.proofSeconds, many.cuts[0].proof], ['', [], 0, []], 'a plan from before 2.3.0 records no proof');
 });
 
 test('a keyframe card carries the Director\'s suggestion only when it names one of its own options', () => {

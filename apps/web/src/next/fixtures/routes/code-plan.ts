@@ -92,7 +92,7 @@ const IDEA = {
     { sees: "The harbour, blue and still, one lamp on the pier", seconds: 3, clip: "1.1" },
     { sees: "Warm light slides across the water toward the pier", seconds: 2, clip: "1.1", proof: 1 },
     { sees: "Mara on the pier; the light crosses her face", seconds: 3.5, clip: "1.2", proof: 2 },
-    { sees: "The pier alone as the light leaves it", seconds: 1.5, clip: "1.2", proof: 3 },
+    { sees: "The pier alone as the light leaves it", seconds: 1.5, clip: "1.2", proof: [3] },
   ],
 };
 const CLIP_OPEN = artifact("2.1", 301, "video"), CLIP_PIER = artifact("2.2-red", 302, "video"), RENDER = artifact("2.1", 401, "video");

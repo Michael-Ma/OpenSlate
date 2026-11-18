@@ -617,7 +617,7 @@ function clipsByShot(view: CodePlanView): Map<string, NonNullable<DeclaredShot["
 /** How a take relates to the skill's templates: taken as it is, bent, or the Director's own. */
 export type TakeBasis = "template" | "bent" | "own" | "unknown";
 export interface IdeaTake { title: string; basis: TakeBasis; /** The template's name, when one was used or bent. */ template: string; chosen: boolean }
-export interface IdeaCut { sees: string; seconds: number; clip: string; /** Which proof this cut shows, as its number in the list; 0 when it shows none. */ proof: number }
+export interface IdeaCut { sees: string; seconds: number; clip: string; /** Which of the proof this cut shows, as numbers in the list; empty when it shows none. */ proof: number[] }
 /** One thing the viewer will see or hear that the obvious film would not contain, with the seconds of the cuts that show it. */
 export interface IdeaProof { number: number; text: string; seconds: number }
 /** The idea behind the film, as the Director recorded it in `ctx.scene`: what it kept, what it considered, and what the viewer will see. */
@@ -658,14 +658,15 @@ export function filmIdea(view: Pick<CodePlanView, "declarations">): FilmIdea | n
   const takes = list(row.takes, 6).filter(isObject).map((take): IdeaTake => ({ title: pick(take, ["title", "name", "take"], 240), ...takeBasis(take.basis), chosen: take.chosen === true }))
     .filter((take) => take.title);
   const proofText = list(row.proof, 3).map((item) => text(item, 240));
-  const shown = (value: unknown): number => (typeof value === "number" && Number.isInteger(value) && proofText[value - 1] ? value : 0);
+  // A cut names one proof (`proof: 2`) or several (`proof: [2, 3]`); a mark counts only when it names a proof in the list.
+  const shown = (value: unknown): number[] => [...new Set((Array.isArray(value) ? value.slice(0, 3) : [value]).filter((mark): mark is number => typeof mark === "number" && Number.isInteger(mark) && !!proofText[mark - 1]))].sort();
   const cuts = list(row.cuts, 64).filter(isObject).map((cut): IdeaCut => ({ sees: text(cut.sees, 200),
     seconds: typeof cut.seconds === "number" && Number.isFinite(cut.seconds) && cut.seconds > 0 && cut.seconds <= 600 ? Math.round(cut.seconds * 10) / 10 : 0, clip: text(cut.clip, 120), proof: shown(cut.proof) }))
     .filter((cut) => cut.sees);
   const seconds = (rows: IdeaCut[]): number => Math.round(rows.reduce((sum, cut) => sum + cut.seconds, 0) * 10) / 10;
-  const proof = proofText.flatMap((line, index): IdeaProof[] => (line ? [{ number: index + 1, text: line, seconds: seconds(cuts.filter((cut) => cut.proof === index + 1)) }] : []));
+  const proof = proofText.flatMap((line, index): IdeaProof[] => (line ? [{ number: index + 1, text: line, seconds: seconds(cuts.filter((cut) => cut.proof.includes(index + 1))) }] : []));
   const idea: FilmIdea = { format: text(row.format, 80), aim: text(row.aim, 120), fixed, obvious: text(row.obvious, 300), takes, chosen: takes.find((take) => take.chosen) ?? null, reading: text(row.reading, 600),
-    proof, proofSeconds: seconds(cuts.filter((cut) => cut.proof)), rule: text(row.rule, 300), cuts, cutSeconds: seconds(cuts) };
+    proof, proofSeconds: seconds(cuts.filter((cut) => cut.proof.length)), rule: text(row.rule, 300), cuts, cutSeconds: seconds(cuts) };
   return idea.reading || idea.takes.length || idea.cuts.length ? idea : null;
 }
 
