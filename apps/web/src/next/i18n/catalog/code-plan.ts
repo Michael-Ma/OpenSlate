@@ -153,6 +153,8 @@ export const codePlanMessages = {
   "codeplan.plan.seconds": { en: "{seconds} s", zh: "{seconds} 秒" },
   "codeplan.idea.title": { en: "The idea", zh: "构思" },
   "codeplan.idea.note": { en: "What the Director chose before planning any shot", zh: "导演在规划镜头之前的选择" },
+  "codeplan.idea.format": { en: "Format", zh: "Format" },
+  "codeplan.idea.aim": { en: "Aim", zh: "Aim" },
   "codeplan.idea.take": { en: "Take", zh: "Take" },
   "codeplan.idea.reading": { en: "Reading", zh: "Reading" },
   "codeplan.idea.rule": { en: "Visual rule", zh: "视觉规则" },

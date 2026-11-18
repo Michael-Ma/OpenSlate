@@ -620,6 +620,10 @@ export interface IdeaTake { title: string; basis: TakeBasis; /** The template's 
 export interface IdeaCut { sees: string; seconds: number; clip: string }
 /** The idea behind the film, as the Director recorded it in `ctx.scene`: what it kept, what it considered, and what the viewer will see. */
 export interface FilmIdea {
+  /** What the film is and what it is for, in the Director's words ("Advert", "Short film"). */
+  format: string;
+  /** The response it aims at, with a second aim when there is one ("Laugh, then Moved"). */
+  aim: string;
   fixed: string[];
   takes: IdeaTake[];
   /** The chosen take; null when none is marked. */
@@ -648,7 +652,7 @@ export function filmIdea(view: Pick<CodePlanView, "declarations">): FilmIdea | n
   const cuts = list(row.cuts, 64).filter(isObject).map((cut): IdeaCut => ({ sees: text(cut.sees, 200),
     seconds: typeof cut.seconds === "number" && Number.isFinite(cut.seconds) && cut.seconds > 0 && cut.seconds <= 600 ? Math.round(cut.seconds * 10) / 10 : 0, clip: text(cut.clip, 120) }))
     .filter((cut) => cut.sees);
-  const idea: FilmIdea = { fixed, takes, chosen: takes.find((take) => take.chosen) ?? null, reading: text(row.reading, 600), rule: text(row.rule, 300), cuts,
+  const idea: FilmIdea = { format: text(row.format, 80), aim: text(row.aim, 120), fixed, takes, chosen: takes.find((take) => take.chosen) ?? null, reading: text(row.reading, 600), rule: text(row.rule, 300), cuts,
     cutSeconds: Math.round(cuts.reduce((sum, cut) => sum + cut.seconds, 0) * 10) / 10 };
   return idea.reading || idea.takes.length || idea.cuts.length ? idea : null;
 }

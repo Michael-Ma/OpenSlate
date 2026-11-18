@@ -382,7 +382,7 @@ test('Plan shows the idea above the shots: the chosen take, the reading and the 
     useI18n: () => i18n('en'), useCodePlan: () => ({ error: null, loading: false, reload() {}, ...codePlan }), declaredPlan, filmIdea, makingMsg, useDeveloperMode: () => false, useState: React.useState, useEffect: React.useEffect, MediaViewer: () => null,
     CodePlanMedia: ({ children }) => React.createElement('div', null, children), Thumb: ({ label, picture }) => React.createElement('span', { className: 'thumb', 'data-picture': picture?.artifactId ?? '' }, label), Picture: () => null, ...parts,
   })).CodePlanPlanView;
-  const scene = { id: 'terrace', title: 'The terrace', fixed: ['A pigeon', 'It ends smug on the lamp post'], reading: 'The viewer first reads this as a theft.', rule: 'Furniture towers over the pigeon.',
+  const scene = { id: 'terrace', title: 'The terrace', format: 'Short film', aim: 'Laugh', fixed: ['A pigeon', 'It ends smug on the lamp post'], reading: 'The viewer first reads this as a theft.', rule: 'Furniture towers over the pigeon.',
     takes: [{ title: 'The empty chair is the guard', basis: 'bent: Bomb under the table', chosen: true }, { title: 'A heist film', basis: 'template: Grand build, small payoff' }, { title: 'Its own', basis: 'own' }],
     cuts: [{ sees: 'The croissant', seconds: 2, clip: 's1' }, { sees: 'The chair', seconds: 0.8, clip: 's1' }] };
   const Idea = await plan({ view: view({ planVersion: 1, state: 'done', lastPassAt: '2026-10-29T22:45:40Z', declarations: { scenes: [scene], shots: [{ id: 's1', scene: 'terrace' }] } }) });
@@ -390,6 +390,7 @@ test('Plan shows the idea above the shots: the chosen take, the reading and the 
   assert.match(html, /data-scene="idea"/);
   assert.ok(html.indexOf('data-scene="idea"') < html.indexOf('data-scene="terrace"'), 'the idea comes before the scenes');
   assert.match(html, /<dd data-idea="take"><b>The empty chair is the guard<\/b><span class="cp-idea-basis">Bent from: Bomb under the table<\/span><\/dd>/);
+  assert.match(html, /<dd data-idea="format">Short film<\/dd>.*<dd data-idea="aim">Laugh<\/dd>.*<dd data-idea="take">/s);
   assert.match(html, /<dd data-idea="reading">The viewer first reads this as a theft\.<\/dd>/);
   assert.match(html, /<dd data-idea="rule">Furniture towers over the pigeon\.<\/dd>/);
   assert.match(html, /<summary>2 other takes it considered<\/summary>/);

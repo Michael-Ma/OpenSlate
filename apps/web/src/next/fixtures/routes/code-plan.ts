@@ -72,6 +72,8 @@ const FRAMES = {
 const VIDEO_INPUTS = [["keyframe_and_references", "250000"], ["references_only", "250000"], ["first_frame", "150000"]] as const;
 /** The idea a 2.1.0 Director records in its scene: what it kept, the takes it weighed, the reading, the rule and its cut list. */
 const IDEA = {
+  format: "Short film",
+  aim: "Calm, then Bittersweet",
   fixed: ["Mara, the harbour, the last ferry", "About ten seconds, quiet", "It ends with the ferry gone"],
   takes: [
     { title: "The ferry is the only warm light", basis: "bent: Mood first, object last", chosen: true },

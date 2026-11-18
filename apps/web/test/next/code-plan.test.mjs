@@ -757,12 +757,14 @@ test('the idea is read from the scene that records it, bounded, and absent when 
   assert.equal(filmIdea({ declarations: { scenes: [{ id: 's', title: 'A scene' }], shots: [] } }), null, 'older plans have no idea');
   assert.equal(filmIdea({ declarations: { scenes: [{ takes: [], cuts: [] }], shots: [] } }), null, 'empty fields are no idea');
   const idea = filmIdea({ declarations: { shots: [], scenes: [{ id: 'intro' }, {
+    format: ' Short film ', aim: 'Laugh, then Moved',
     fixed: ['A pigeon', 'A terrace', 7, ''],
     takes: [{ title: 'The empty chair is the guard', basis: 'bent: Bomb under the table', chosen: true }, { title: 'A heist film', basis: 'Template:  Grand build, small payoff' },
       { title: 'Its own', basis: 'own' }, { title: 'No basis' }, { basis: 'own' }, 'not a take'],
     reading: ' The viewer first reads this as a theft. ', rule: 'Furniture towers over the pigeon.',
     cuts: [{ sees: 'The croissant', seconds: 2, clip: 'shot-1' }, { sees: 'The chair', seconds: 0.8, clip: 'shot-2' }, { sees: 'No length', seconds: -1, clip: 'shot-2' }, { seconds: 3, clip: 'shot-3' }],
   }] } });
+  assert.deepEqual([idea.format, idea.aim], ['Short film', 'Laugh, then Moved']);
   assert.deepEqual(idea.fixed, ['A pigeon', 'A terrace']);
   assert.deepEqual(idea.takes.map((take) => [take.basis, take.template, take.chosen]), [['bent', 'Bomb under the table', true], ['template', 'Grand build, small payoff', false], ['own', '', false], ['unknown', '', false]]);
   assert.equal(idea.chosen.title, 'The empty chair is the guard');
@@ -772,6 +774,7 @@ test('the idea is read from the scene that records it, bounded, and absent when 
   const many = filmIdea({ declarations: { shots: [], scenes: [{ cuts: Array.from({ length: 90 }, (_, n) => ({ sees: `cut ${n}`, seconds: 1, clip: 'a' })) }] } });
   assert.equal(many.cuts.length, 64);
   assert.equal(many.chosen, null);
+  assert.deepEqual([many.format, many.aim], ['', ''], 'a plan from 2.1.0 records neither');
 });
 
 test('a keyframe card carries the Director\'s suggestion only when it names one of its own options', () => {
