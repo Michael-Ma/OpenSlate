@@ -236,7 +236,11 @@ for(const version of ['0.1.0','0.2.0','0.3.0']) test(`${version} films get attac
   const lock=createDirectorSkillLock(config,version).lock, catalog=toolCatalog(version);
   let saved=lock;
   if(version==='0.3.0') {
-    const previousCatalog=digest({version,tools:catalog.descriptors.map(row=>row.name==='read_clip_frames'?{...row,description:'Watch an owned clip or render as a labelled JPEG contact sheet, with source frame numbers at 30 fps and frame-difference motion. Free and read-only. At most 36 frames; increase everyFrames or narrow the range for more detail.'}:row)});
+    const previousCatalog=digest({version,tools:catalog.descriptors.map(row=>{
+      if(row.name!=='read_clip_frames')return row;
+      const {cuts,fromCut,...properties}=row.inputSchema.properties;
+      return {...row,inputSchema:{...row.inputSchema,properties},description:'Watch an owned clip or render as a labelled JPEG contact sheet, with source frame numbers at 30 fps and frame-difference motion. Free and read-only. At most 36 frames; increase everyFrames or narrow the range for more detail.'};
+    })});
     assert.equal(previousCatalog,'2e3e1c106143fd4316b4fbdfe3e946cea5bf9ab2a82e0893cbb3970b42e96d99');
     assert.notEqual(previousCatalog,catalog.digest);
     const {lockDigest,...body}=lock;
@@ -316,4 +320,23 @@ for(const mode of ['fake','native']) test(`${mode} supervisor sees an actual JPE
   assert.equal(context.attachedMaterial.attachments[0].readable,true);assert.equal(messageAttachmentViews(f.store,f.project.id,human.requestId)[0].readable,true);
   assert.deepEqual(context.film.uploads[0].artifact,imported.artifact);assert.equal(context.film.uploads[0].name,'Subject.jpg');
   assert.equal(f.store.list('request_attachment_projection',f.project.id).length,1);
+});
+
+
+test('a fresh 0.3.0 turn refreshes an old tool schema even with the current guidance package',async t=>{
+  const f=await fixture(t), config={repositoryRoot,snapshotRoot:join(f.root,'skill-snapshots')};
+  const lock=createDirectorSkillLock(config,'0.3.0').lock,catalog=toolCatalog('0.3.0');
+  const tools=catalog.descriptors.map(row=>{
+    if(row.name!=='read_clip_frames')return row;
+    const {cuts,fromCut,...properties}=row.inputSchema.properties;
+    return {...row,inputSchema:{...row.inputSchema,properties},description:'Look at an owned picture as a JPEG, or watch an owned clip or render as a labelled JPEG contact sheet, with source frame numbers at 30 fps and frame-difference motion. Free and read-only. At most 36 frames; increase everyFrames or narrow the range for more detail.'};
+  });
+  const previousDigest=digest({version:'0.3.0',tools}),{lockDigest,...body}=lock;
+  const oldBody={...body,id:newId(),bindings:lock.bindings.map(row=>row.kind==='handler'?{...row,digest:previousDigest}:row)};
+  const saved={...oldBody,lockDigest:digest(oldBody)};
+  f.store.insert('director_skill_lock',saved.id,f.project.id,{id:saved.id,projectId:f.project.id,lock:saved});
+  const {input,bridge}=await f.turn();const context=JSON.parse(input.context);
+  assert.notEqual(context.toolContract.lockId,saved.id);assert.equal(context.toolContract.digest,catalog.digest);
+  assert.equal(f.store.get('director_skill_lock',saved.id).lock.lockDigest,saved.lockDigest);
+  assert.equal((await new ToolInvocationService(f.service).invoke(f.project.id,bridge.actor,'film','read_film',{})).projectId,f.project.id);
 });

@@ -43,3 +43,20 @@ export function codePlanOutput(media: ReturnType<typeof codePlanArtifacts>, ref:
   return artifact ? { ...pictureSize(artifact.artifact.kind === "image" ? artifact : media.posters.get(artifact.id)),
     ...(positive(artifact.physicalDurationSeconds) ? { durationSeconds: artifact.physicalDurationSeconds } : {}) } : undefined;
 }
+
+/** Known measured source geometry/timing for render advice and cut boundaries. Never invent requested sizes. */
+export function codePlanRenderSources(store: Store, projectId: string) {
+  const media = codePlanArtifacts(store, projectId);
+  const steps = store.list<import("./records.js").CodePlanStep>("code_plan_step", projectId);
+  return new Map(media.records.map(record => {
+    const owned = store.get<{ projectId: string; source: import("../media/types.js").SuppliedMedia }>("media_source", record.id);
+    const video = owned?.projectId === projectId && owned.source.sha256 === record.artifact.sha256 ? owned.source.probe.video : undefined;
+    const size = pictureSize(record.artifact.kind === "image" ? record : media.posters.get(record.id) ?? record);
+    return [`${record.artifact.kind}:${record.artifact.sha256}`, {
+      ...size, ...(video ? { width: video.width, height: video.height } : {}),
+      ...(positive(record.physicalDurationSeconds) ? { durationFrames: Math.round(record.physicalDurationSeconds * 30) }
+        : video ? { durationFrames: Math.round(video.durationSeconds * 30) } : {}),
+      shotId: steps.find(step => step.result?.ok && step.result.artifacts.some(ref => ref.artifactId === record.id))?.shotId,
+    }];
+  }));
+}

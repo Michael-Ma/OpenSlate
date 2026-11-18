@@ -294,6 +294,37 @@ export class LocalMediaService {
     }));
   }
 
+  /** A verified owned picture held locally; this is part of rendering, never a provider step. */
+  async supplyStill(input: { artifactId: string; path: string; sha256: string; durationFrames: number }, options: { signal?: AbortSignal } = {}): Promise<SuppliedMedia> {
+    input = structuredClone(input);
+    const { signal } = options;
+    integer(input.durationFrames, 1, 300, "still durationFrames");
+    invariant(ID.test(input.artifactId) && HASH.test(input.sha256), "MEDIA_INVALID_INPUT", "Use an owned picture identity");
+    return this.exclusive(async () => this.temporary(async dir => {
+      const source = join(dir, "picture"), output = join(dir, "still.mp4");
+      await this.snapshot(input.path, source, signal);
+      const original = await this.hashFile(source, 32 * 1024 * 1024, signal);
+      invariant(original.sha256 === input.sha256, "MEDIA_INTEGRITY_ERROR", "Still source differs from the owned picture");
+      const inputArgs = imageInputArgs(imageFormat(await readFile(source)));
+      await this.run(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", "-filter_threads", "1", ...inputArgs, "-i", source,
+        "-map", "0:v:0", "-an", "-map_metadata", "-1", "-vf",
+        `trim=end_frame=1,setpts=PTS-STARTPTS,pad=ceil(iw/2)*2:ceil(ih/2)*2,setsar=1,tpad=stop_mode=clone:stop_duration=11,fps=30,trim=end_frame=${input.durationFrames},format=yuv420p`,
+        "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", "18", "-frames:v", String(input.durationFrames),
+        "-fs", String(this.limits.maxOutputBytes), output], signal);
+      const probe = await this.inspect(output, signal);
+      invariant(probe.video?.frames === input.durationFrames && probe.video.frameRate === "30/1" && !probe.audio,
+        "MEDIA_VALIDATION_FAILED", "Still must produce the requested held frames");
+      await this.decode(output, signal); aborted(signal);
+      await this.installFile(source, "source", this.limits.maxInputBytes);
+      const normalized = await this.installFile(output, "mp4", this.limits.maxOutputBytes);
+      const body = { artifactId: digest({ still: input.artifactId, frames: input.durationFrames }), kind: "video" as const,
+        originalSha256: original.sha256, originalByteLength: original.byteLength, sha256: normalized.sha256,
+        byteLength: normalized.byteLength, probe, toolchainDigest: await this.toolchainDigest(signal) };
+      const result = { id: digest(body), ...body };
+      await this.installJson("sources", result.id, result); return frozen(result);
+    }));
+  }
+
   async importMedia(input: { artifactId: string; path: string; kind: "video" | "audio" }, options: { signal?: AbortSignal; completedStreamBytes?: number } = {}): Promise<SuppliedMedia> {
     input = structuredClone(input);
     const { signal, completedStreamBytes } = options;
