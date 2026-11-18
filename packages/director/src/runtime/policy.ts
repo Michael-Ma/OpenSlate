@@ -69,14 +69,13 @@ export interface CodexRuntimeLimits {
   eventQueue: number;
   eventTimeoutMs: number;
 }
-export const CODEX_RUNTIME_LIMITS: Readonly<CodexRuntimeLimits> = Object.freeze({
-  startupTimeoutMs: 60_000, requestTimeoutMs: 15_000, runTimeoutMs: 180_000, interruptGraceMs: 3_000,
-  shutdownGraceMs: 1_000, outputBytes: 16 * 1024 * 1024, eventQueue: 256, eventTimeoutMs: 5_000,
-});
-/** Host-configured planning turns may take longer; the default stays three minutes.
- * This bounds the complete native run, never a retry or an idle-time extension. */
+/** Bounds the complete native run, including long review turns. */
 export const CODEX_MAX_RUN_TIMEOUT_MS = 600_000;
 export const CODEX_MAX_STARTUP_TIMEOUT_MS = 120_000;
+export const CODEX_RUNTIME_LIMITS: Readonly<CodexRuntimeLimits> = Object.freeze({
+  startupTimeoutMs: 60_000, requestTimeoutMs: 15_000, runTimeoutMs: CODEX_MAX_RUN_TIMEOUT_MS, interruptGraceMs: 3_000,
+  shutdownGraceMs: 1_000, outputBytes: 16 * 1024 * 1024, eventQueue: 256, eventTimeoutMs: 5_000,
+});
 export interface CodexDirectorOptions {
   /** An explicitly selected local binary; never resolved through PATH. */
   command: { file: string; args?: readonly string[] };
