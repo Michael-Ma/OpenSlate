@@ -23,7 +23,9 @@ export interface SkillCompatibility { toolContract: string; planLanguage: string
 export interface SkillManifest {
   id: string; version: string; entry: "SKILL.md"; files: string[];
   compatibility: SkillCompatibility; requiredToolIds: SkillToolId[];
-  /** Present only on schema 2 manifests; schema 1 manifests keep exactly the six fields above. */
+  /** Optional injection policy; all files still belong to the immutable package and lock. */
+  personTurnFiles?: string[];
+  /** Present only on schema 2 manifests. */
   schemaVersion?: 2; role?: SkillRole; routes?: SkillRoutes; requires?: string[]; optional?: SkillOptionalDependency[];
 }
 export interface SkillRoutes { kinds: string[]; subtypes: string[] }
@@ -196,14 +198,20 @@ function routes(value: unknown): SkillRoutes {
   return { kinds, subtypes };
 }
 function manifest(value: unknown): SkillManifest {
-  // Schema 1 manifests have no schemaVersion and keep exactly six fields, so their bytes and digests never change.
+  // The optional injection policy never adds defaults to historical manifests or changes their identity.
   const v2 = value !== null && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "schemaVersion");
-  const record = v2 ? object(value, ["schemaVersion", "id", "version", "entry", "files", "compatibility", "requiredToolIds", "role"], ["routes", "requires", "optional"])
-    : object(value, ["id", "version", "entry", "files", "compatibility", "requiredToolIds"]);
+  const record = v2 ? object(value, ["schemaVersion", "id", "version", "entry", "files", "compatibility", "requiredToolIds", "role"], ["routes", "requires", "optional", "personTurnFiles"])
+    : object(value, ["id", "version", "entry", "files", "compatibility", "requiredToolIds"], ["personTurnFiles"]);
   check(record.entry === "SKILL.md", "Skill entry must be SKILL.md");
   const files = array(record.files, SKILL_LIMITS.files).map(path); unique(files, "package file");
   check(files.includes("SKILL.md") && !files.includes(MANIFEST), "Declare SKILL.md and references; the manifest is included automatically");
-  const base = { id: identifier(record.id), version: version(record.version), entry: "SKILL.md" as const, files, compatibility: compatibility(record.compatibility), requiredToolIds: tools(record.requiredToolIds) };
+  const personTurnFiles = record.personTurnFiles === undefined ? undefined : array(record.personTurnFiles, SKILL_LIMITS.files).map(path);
+  if (personTurnFiles) {
+    unique(personTurnFiles, "person-turn file");
+    check(personTurnFiles.every(file => files.includes(file)), "Person-turn files must also be declared in files");
+  }
+  const base = { id: identifier(record.id), version: version(record.version), entry: "SKILL.md" as const, files,
+    ...(personTurnFiles === undefined ? {} : { personTurnFiles }), compatibility: compatibility(record.compatibility), requiredToolIds: tools(record.requiredToolIds) };
   if (!v2) return base;
   check(record.schemaVersion === 2, "Unsupported skill manifest schema version");
   check(typeof record.role === "string" && (SKILL_ROLES as readonly string[]).includes(record.role), "Unknown skill role");

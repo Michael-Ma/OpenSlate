@@ -32,6 +32,16 @@ const purchases = f => f.calls.submit.filter(call => call.kind === 'image' || ca
 
 test('review stops execution, starts one fake turn, transports pictures, trims, replays and renders without another purchase', async t => {
   const { f, id } = await fixture(t);
+  const start = f.director.fake.runtime.start.bind(f.director.fake.runtime);
+  let reviews = 0;
+  f.director.fake.runtime.start = async (input, options) => {
+    reviews++;
+    assert.deepEqual(JSON.parse(input.context).references.map(row => row.path),
+      ['SKILL.md', 'references/film-craft.md', 'references/studio.d.ts', 'references/example-plan.ts']);
+    assert.deepEqual(f.store.list('skill_read', id).filter(row => row.requestId === input.requestId).map(row => row.evidence.path),
+      ['SKILL.md', 'references/film-craft.md', 'references/studio.d.ts', 'references/example-plan.ts']);
+    return start(input, options);
+  };
   await submit(f, id, plan());
   const waiting = await review(f, id);
   assert.equal(waiting.reviews[0].state, 'waiting'); assert.equal(waiting.reviews[0].clipCount, 1);
@@ -44,6 +54,7 @@ test('review stops execution, starts one fake turn, transports pictures, trims, 
   assert.equal(render.input.timeline[0].startFrame, 6); assert.equal(render.input.timeline[0].durationFrames, 21);
   const turns = f.store.list('code_plan_review_request', id); assert.equal(turns.length, 1);
   assert.equal(f.store.get('message', turns[0].requestId).source, 'app');
+  assert.equal(reviews, 1);
   const saved = f.store.list('tool_invocation', id).find(call => call.tool === 'read_clip_frames');
   assert.equal(saved.state, 'succeeded'); assert.equal(saved.result.frames.length, 2);
   assert.match(saved.result.sheet.sha256, /^[a-f0-9]{64}$/); assert.ok(saved.result.sheet.byteLength > 0);

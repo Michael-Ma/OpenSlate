@@ -69,6 +69,33 @@ test("a lock never follows source edits; successive requests get explicit select
   assert.throws(() => activateSkills(lock, { ...f.environment, requestId: "unlocked", contextDigest: checksum("state"), selectedSkillIds: ["plan-authoring"] }), { code: "SKILL_NOT_LOCKED" });
 });
 
+test("person-turn policy is optional and snapshot locks still cover every declared file", t => {
+  const f = fixture(t), original = f.load().skills[0];
+  assert.equal(Object.hasOwn(original.manifest, 'personTurnFiles'), false);
+  f.setManifest({ personTurnFiles: ['references/guide.md'] });
+  const catalog = f.load(), lock = lockFor(f, catalog), skill = verifySkillLock(lock, f.environment)[0];
+  assert.deepEqual(skill.manifest.personTurnFiles, ['references/guide.md']);
+  assert.deepEqual(skill.files.map(file => file.path), original.files.map(file => file.path));
+  assert.notEqual(skill.packageDigest, original.packageDigest, 'policy bytes belong to package identity');
+  const pinned = skill.packageDigest;
+  writeFileSync(join(f.source, 'references/guide.md'), '# Changed person-turn reference\n');
+  assert.notEqual(f.load().skills[0].packageDigest, pinned, 'person-turn references are not excluded from hashing');
+  assert.equal(verifySkillLock(lock, f.environment)[0].packageDigest, pinned);
+  const ref = join(skill.immutableRoot, 'references/guide.md');
+  chmodSync(ref, 0o644); writeFileSync(ref, '# Tampered person-turn reference\n'); chmodSync(ref, 0o444);
+  assert.throws(() => verifySkillLock(lock, f.environment), { code: 'SKILL_SNAPSHOT_INVALID' });
+});
+
+test("person-turn policy accepts an empty list and survives schema 2 snapshot verification", t => {
+  const f = fixture(t);
+  f.setManifest({ personTurnFiles: [] });
+  assert.deepEqual(f.load().skills[0].manifest.personTurnFiles, []);
+  f.setManifest({ schemaVersion: 2, role: 'core', personTurnFiles: ['references/guide.md'] });
+  const skill = f.load().skills[0];
+  assert.equal(skill.manifest.schemaVersion, 2);
+  assert.deepEqual(verifySkillSnapshot(f.environment.snapshotRoot, skill.packageDigest).manifest.personTurnFiles, ['references/guide.md']);
+});
+
 test("compatibility locks reject changed runtime implementations, contracts, missing tools and tampered records", t => {
   const f = fixture(t); const bindings = [{ kind: "compiler", id: "typescript-plan-v1", digest: checksum("build-1") }];
   const lock = lockFor(f, f.load(), bindings); const environment = { ...f.environment, bindings };
@@ -154,6 +181,12 @@ for (const [label, patch] of [
   ["non-native entry", { entry: "references/guide.md" }],
   ["undeclared entry", { files: ["references/guide.md"] }],
   ["duplicate files", { files: ["SKILL.md", "SKILL.md"] }],
+  ["undeclared person-turn file", { personTurnFiles: ["references/missing.md"] }],
+  ["person-turn manifest", { personTurnFiles: ["openslate.skill.json"] }],
+  ["duplicate person-turn files", { personTurnFiles: ["references/guide.md", "references/guide.md"] }],
+  ["person-turn traversal", { personTurnFiles: ["../external.md"] }],
+  ["non-array person-turn files", { personTurnFiles: "references/guide.md" }],
+  ["null person-turn files", { personTurnFiles: null }],
   ["explicit manifest", { files: ["SKILL.md", "openslate.skill.json"] }],
   ["traversal", { files: ["SKILL.md", "../external.md"] }],
   ["absolute paths", { files: ["SKILL.md", "/external.md"] }],

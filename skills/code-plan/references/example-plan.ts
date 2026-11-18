@@ -1,5 +1,6 @@
 export default async function film(ctx: Studio): Promise<void> {
   await ctx.scene({ id: "scene-1", title: "A quiet morning",
+    format: "Short film", aim: "Calm",
     fixed: ["A kitchen at dawn", "Tea by the window", "A calm ending"],
     takes: [{ title: "A room wakes", basis: "bent: A day in one place", chosen: true },
       { title: "An absent guest", basis: "template: Trace of someone" },
