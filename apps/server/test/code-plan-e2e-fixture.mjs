@@ -209,7 +209,7 @@ export async function runCodePlanOfflineFlow(f) {
   assert.ok(newSteps.every(step => step.state === "succeeded"));
   const reusedSteps = view.steps.filter(step => initialKeys.has(step.key) && step.reached).length;
   assert.equal(reusedSteps, 4);
-  assert.deepEqual(newCalls[1].args.timeline.map(row => row.motion), [editedMotion, motions[1]]);
+  assert.deepEqual(newCalls[1].args.timeline.map(row => row.motion), [editedMotion, undefined, editedMotion, motions[1]]);
   assert.equal(view.spentMicros, "400000"); assert.equal(view.reservedMicros, "0");
   assert.ok(BigInt(view.spentMicros) <= BigInt(view.ceilingMicros));
   const render = newSteps.find(step => step.kind === "render").artifact;

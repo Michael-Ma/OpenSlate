@@ -105,14 +105,15 @@ test('code turn pins only code-plan instructions and source, skips fresh graph u
   assert.deepEqual(a.input.skills.map(skill => skill.name), ['code-plan']);
   assert.equal(a.input.bridge.toolContractVersion, CODE_PLAN_TOOL_CONTRACT);
   assert.equal(context.references.find(row=>row.path==='references/film-craft.md').content, readFileSync(join(repositoryRoot, 'skills/code-plan/references/film-craft.md'), 'utf8'));
+  assert.equal(context.references.find(row=>row.path==='references/templates.md').content, readFileSync(join(repositoryRoot, 'skills/code-plan/references/templates.md'), 'utf8'));
   assert.equal(context.film.source, null); assert.equal(context.snapshot, undefined);
-  assert.deepEqual(context.references.map(row=>row.path), ['SKILL.md','references/film-craft.md','references/studio.d.ts','references/example-plan.ts']);
+  assert.deepEqual(context.references.map(row=>row.path), ['SKILL.md','references/film-craft.md','references/templates.md','references/studio.d.ts','references/example-plan.ts']);
   assert.match(context.instructions, /read-only/); assert.doesNotMatch(a.input.context, /Confirm in this chat|prepare_change|filmPlanning/);
   const lock = f.store.list('director_skill_lock', f.project.id)[0].lock;
-  assert.equal(f.store.list('skill_read', f.project.id).length, 4);
+  assert.equal(f.store.list('skill_read', f.project.id).length, 5);
   assert.equal(f.store.list('director_context', f.project.id).length, 1);
   assert.equal(lock.schemaVersion, 1); assert.equal(lock.skills[0].packageDigest, CODE_PLAN_GUIDANCE_DIGEST);
-  assert.equal(lock.skills[0].version, '2.0.1');
+  assert.equal(lock.skills[0].version, '2.1.0');
   assert.equal(skillPackageDigest(readSkillPackageFiles(join(repositoryRoot, 'skills/code-plan'))), CODE_PLAN_GUIDANCE_DIGEST);
   assert.equal(f.prepare(a.turn, a.human, a.bridge).bridge.toolContractVersion, CODE_PLAN_TOOL_CONTRACT);
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 1);
@@ -154,10 +155,12 @@ test('fresh code guidance preserves an older package snapshot, lock and recorded
   const f = fixture(t), packageRoot = join(f.root, 'previous-code-plan');
   const files = readSkillPackageFiles(join(repositoryRoot, 'skills/code-plan'));
   const manifest = JSON.parse(files['openslate.skill.json']);
+  delete files['references/templates.md'];
+  files['SKILL.md'] = files['SKILL.md'].replace(' and [templates](references/templates.md)', '');
   const oldCraft = '# Film craft\n\nRequest a clip longer than the retained beat, then cut it down after watching.\n';
   mkdirSync(join(packageRoot, 'references'), { recursive: true });
   for (const [path, source] of Object.entries({ ...files,
-    'openslate.skill.json': JSON.stringify({ ...manifest, version: '2.0.0' }), 'references/film-craft.md': oldCraft })) {
+    'openslate.skill.json': JSON.stringify({ ...manifest, version: '2.0.1', files: manifest.files.filter(path => path !== 'references/templates.md') }), 'references/film-craft.md': oldCraft })) {
     writeFileSync(join(packageRoot, path), source);
   }
   const environment = { snapshotRoot: f.config.snapshotRoot, compatibility: manifest.compatibility,
@@ -170,16 +173,19 @@ test('fresh code guidance preserves an older package snapshot, lock and recorded
   const evidence = { id: newId(), projectId: f.project.id, requestId: human.requestId, epochId: bridge.actor.epochId,
     evidence: { lockId: previous.id, packageDigest: previous.skills[0].packageDigest } };
   f.store.insert('skill_read', evidence.id, f.project.id, evidence);
+  assert.equal(previous.skills[0].version, '2.0.1');
   const next = f.turn('Carry on'), context = JSON.parse(next.input.context);
   const current = f.store.get('director_skill_lock', context.toolContract.lockId).lock;
   assert.notEqual(current.id, previous.id);
-  assert.equal(current.skills[0].version, '2.0.1');
+  assert.equal(current.skills[0].version, '2.1.0');
   assert.equal(current.skills[0].packageDigest, CODE_PLAN_GUIDANCE_DIGEST);
   assert.match(context.references.find(row => row.path === 'references/film-craft.md').content, /ceil\(targetSeconds \+ 1\.5\)/);
   assert.deepEqual(f.store.get('director_skill_lock', previous.id), saved);
   assert.deepEqual(f.store.get('skill_read', evidence.id), evidence);
   const oldPackage = verifySkillLock(previous, environment)[0];
   assert.equal(readFileSync(join(oldPackage.immutableRoot, 'references/film-craft.md'), 'utf8'), oldCraft);
+  assert.ok(!oldPackage.manifest.files.includes('references/templates.md'));
+  assert.equal(context.references.find(row => row.path === 'references/templates.md').content, readFileSync(join(repositoryRoot, 'skills/code-plan/references/templates.md'), 'utf8'));
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2);
   assert.equal(f.port.calls.length, 0, 'refreshing guidance submits no plan or media');
 });
@@ -319,21 +325,21 @@ test('pinned example executes every ctx call through JSON, stable choices, varia
   assert.deepEqual(calls.filter(c=>c.method==='choose').map(c=>c.args[0]),['shot-1-retry','shot-2-retry']);
   assert.equal(calls.filter(c=>c.method==='music').length,1);
   assert.equal(calls.find(c=>c.method==='music').args[0].durationSeconds,30);
-  assert.deepEqual(calls.find(c=>c.method==='render').args[0].audio.map(row=>[row.startSample,row.durationSamples,row.fadeOutSamples]),[[12000,384000,96000],[undefined,undefined,undefined]]);
+  assert.deepEqual(calls.find(c=>c.method==='render').args[0].audio.map(row=>[row.startSample,row.durationSamples,row.fadeOutSamples]),[[12000,456000,96000],[undefined,undefined,undefined]]);
   assert.deepEqual(calls.filter(c=>c.method==='review').map(c=>c.args[0]),['first-cut']);
   const motions = [...example.matchAll(/motion: "([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(calls.filter(c=>c.method==='video').map(c=>c.args[0].prompt), [...motions, ...motions]);
   assert.ok(calls.filter(c=>c.method==='keyframe').every(c=>!motions.includes(c.args[1].prompt)));
   assert.equal(calls.filter(c=>c.method==='video').length,4);assert.equal(calls.filter(c=>c.method==='render').length,1);
   assert.deepEqual(calls.find(c=>c.method==='render').args[0].timeline.map(row=>row.motion),
-    [...example.matchAll(/motion: "([^"]+)"/g)].map(match => match[1]));
+    [motions[0], undefined, motions[0], motions[1]]);
   const targets = calls.filter(c=>c.method==='shot').map(c=>c.args[0].targetSeconds);
   assert.deepEqual(targets, [5, 3]);
   const quotedDurations = calls.filter(c=>c.method==='keyframe').map(c=>c.args[1].video.durationSeconds);
   assert.ok(new Set(quotedDurations).size > 1, 'the example must not request one length for every shot');
   assert.deepEqual(quotedDurations, [7, 5], 'round up target + 1.5 seconds within the model range');
   assert.deepEqual(calls.filter(c=>c.method==='video').map(c=>c.args[0].durationSeconds), [7, 5, 7, 5], 'quotes, clips and consent retries agree');
-  assert.deepEqual(calls.find(c=>c.method==='render').args[0].timeline.map(row=>row.durationFrames), [150, 90], 'cut to beat targets, not requested lengths');
+  assert.deepEqual(calls.find(c=>c.method==='render').args[0].timeline.map(row=>row.durationFrames), [90, 45, 60, 90], 'use two clip ranges, a held frame and unequal cuts');
 });
 
 test('example duration requests clamp to both model bounds before keyframe confirmation', async () => {
