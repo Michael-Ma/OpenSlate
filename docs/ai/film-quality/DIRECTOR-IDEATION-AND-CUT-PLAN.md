@@ -378,6 +378,44 @@ Two films were made with skill 2.2.0 through the whole flow, recorded, for a stu
 - **Three faults that only a real run could show** were found and fixed (cards [H6](cards/H6-still-row-roots.md) and [H7](cards/H7-vertical-render-and-review-time.md)): a still row could not read a picture the film owns; every vertical code film was rendered widescreen since G1; and the review turn ran out of time at 180 seconds without saying so.
 - **Still open:** the second film's idea was mild; the review loop is slow; the Director cannot use GPT 6.2 until the studio's pinned Codex version is raised.
 
+## 15. The take does not reach the screen, 2026-11-18
+
+The owner watched the two films and said the chosen take cannot be seen in them. That is right. The plans and prompts are in `data/test-runs/20261117-h-films/plans/`.
+
+**A blind read.** A fresh model was shown only what is on screen, cut by cut, with no plan, take or reading. It described the pigeon film as "a pigeon snatches a croissant from a café table, flies off with it, and perches on a street lamp", with the glances reading as "a thief checking whether anyone's watching". It described the birthday film as "a birthday card made of flowers". Both are what each plan itself recorded as the obvious film ("A hungry pigeon checks an empty chair, steals a croissant and flies away"; "花朵特写接生日祝福"). Neither take ("the pigeon gives an empty chair the respect due a formidable guard"; "let the light bring the greeting in place of a person") appears.
+
+**Where the pigeon's take went.**
+
+1. It lives in 4.5 of 25 seconds. The other 20.5 are the brief's moments, filmed as the obvious film would film them.
+2. The chair was never filmed as a guard. Its cut is the shared table picture, punched in 1.4× toward a corner, for half a second, the same picture three times. It is a bright, neutral chair, not seen from the pigeon's height, with nothing that makes it a presence.
+3. The pigeon never acts afraid. Its motion prompt asks for "one crisp sideways head turn", feet planted, body composed. The frame prompt asks for an "expression intensely suspicious", which a pigeon's face cannot show.
+4. The three glances are one second of footage used three times (`range(0, 57, 30)` thrice). Nothing grows.
+5. Nothing sets up danger. The reading says the viewer "first reads this as a dangerous theft", but the film opens on three seconds of a sunny croissant, the music is playful throughout, and no sound marks the chair.
+6. The ending has nothing to do with the take. The last eight seconds are the brief's smug pigeon; the chair never comes back.
+
+**Where the birthday film's take went.** No prompt asks the light to do anything. All three say "soft sunlight from upper left" and a breeze. The bud "leaning into the light" is a small nod that cannot be seen; the drop of water in the footage was an accident.
+
+**Why: what the skill lets through.**
+
+- The reading can be satisfied in words. "Through repeated cuts from a wary pigeon to a completely empty chair" counts as visible, and nothing asks what the viewer would see that the obvious film would not show.
+- Shots come from the cut list, and the cut list comes from the brief's moments. No shot exists because of the take.
+- The fixed moments take most of the film, and nothing says the take must run through them and through the last picture.
+- A repeat may be the identical range. A still may be a crop of a set plate, even for the thing the take is about.
+- Feelings are written as expressions, not as what a body does.
+- The review checks that the brief's moments are visible. It never asks what a stranger would say the film is.
+- The paper tests judged plans by their words. That is how this passed three rounds.
+
+**Proposed for the next skill version.**
+
+1. Act the take: after the reading, list three things the viewer sees in this film that they would not see in the obvious film (an action, a picture, a sound). If the list cannot be written, the take is a title; choose another.
+2. The take runs through every block, inside the fixed moments and in the last picture, without changing their outcome.
+3. The block that carries the take gets the most screen time and its own shots.
+4. Whatever the take turns into a character gets its own composed picture, from the eye level of whoever looks at it.
+5. A feeling is an action: write what the body does.
+6. A repeat must change: closer, shorter, or a different reaction. Never the same range twice.
+7. A cold read in review: one sentence a stranger would say after watching silently, compared with the obvious film. If they match, repair it in the edit or say that the take did not land.
+8. The paper test's gate becomes the blind read: a second model, shown only the cut list, must be able to state the take.
+
 ## Appendix A: the proposed skill text
 
 ### The idea, before any plan
