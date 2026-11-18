@@ -113,7 +113,7 @@ export function CodePlanChoiceCard({ card }: { card: ChoiceCard }) {
       ) : null}
       {card.keyframe && !card.answered ? <p className="cp-input-ask">{t("codeplan.keyframe.ask")}</p> : null}
       {card.suggest && !card.answered ? (
-        <p className="cp-suggest" data-act="code-plan-suggest" data-input={card.suggest.input}>
+        <p className="cp-suggest" data-act="code-plan-suggest" data-suggest={card.suggest.input}>
           {t(card.suggest.why ? "codeplan.keyframe.suggest_line" : "codeplan.keyframe.suggest_line_bare", { option: inputName(t, card.suggest.input, card.options.find((option) => option.keyframe?.input === card.suggest!.input)?.keyframe?.references ?? 0), why: card.suggest.why })}
         </p>
       ) : null}
